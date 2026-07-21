@@ -14,6 +14,7 @@ oracle-cloud-pw.txt
 # === local WSL build helpers (contain machine-specific paths) ===
 .build-env.sh
 .wsl-run.sh
+.validator.sh
 .probe-toolchain.sh
 onchain-build.sh
 onchain-pin.sh

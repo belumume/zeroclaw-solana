@@ -1,0 +1,21 @@
+[package]
+name = "e2e-localnet"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Localnet end-to-end correctness proof for oracle-publish: reuses the plugin's real compile_and_device_sign against a live validator (publish -> replay-reject -> stale-reject -> consumer reads)."
+
+[[bin]]
+name = "e2e"
+path = "src/main.rs"
+
+[dependencies]
+oracle-publish = { path = "../plugins/oracle-publish" }
+solana-core = { path = "../crates/solana-core" }
+solana-client = "2.1"
+solana-sdk = "2.1"
+borsh = "1"
+bincode = "1"
+serde_json = "1"
+
+[workspace]
