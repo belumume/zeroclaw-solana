@@ -1,0 +1,21 @@
+[package]
+name = "zeroclaw-oracle"
+version = "0.1.0"
+description = "On-chain device-oracle feed: device-signed, replay-proof, program-consumable sensor readings for self-hosted ZeroClaw agents."
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "zeroclaw_oracle"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = "0.31.0"

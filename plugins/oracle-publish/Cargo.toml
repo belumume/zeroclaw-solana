@@ -1,0 +1,28 @@
+[package]
+name = "oracle-publish"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ZeroClaw tool plugin: publish a device-signed, replay-proof sensor reading to an on-chain ZeroClaw device-oracle feed that downstream Solana programs consume. Holds no wallet; returns an unsigned/partial transaction the host completes with the agent's capped session key."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+solana-core = { path = "../../crates/solana-core" }
+wit-bindgen = "0.46"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+waki = { version = "0.5.1", features = ["json"] }
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1

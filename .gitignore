@@ -8,16 +8,28 @@
 *_key.json
 id.json
 oracle-cloud-pw.txt
+.program-keys/
+*-keypair.json
+
+# === local WSL build helpers (contain machine-specific paths) ===
+.build-env.sh
+.wsl-run.sh
+.probe-toolchain.sh
+onchain-build.sh
+onchain-pin.sh
 
 # === internal strategy / working docs — NEVER go to the public fork ===
 BUILD-STATE.md
 HANDOFF-POST-COMPACT.md
+CLAUDE.local.md
+goal.txt
 docs/dossier-raw.json
 docs/grounded-facts.json
 docs/BUILD-PATTERNS.md
 docs/SECURITY-PATTERNS.md
 docs/DEMO-SCRIPT.md
 solana-claw-superteambr-export-3.txt
+*export*.txt
 .compound-tmp/
 
 # === propagated hookify/behavioral config (not part of the deliverable) ===

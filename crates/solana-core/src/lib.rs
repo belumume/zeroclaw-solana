@@ -20,6 +20,7 @@
 //! - [`transport`] — the wasm-only `waki` transport (host builds never see it).
 #![forbid(unsafe_code)]
 
+pub mod anchor;
 pub mod instruction;
 pub mod message;
 pub mod mint;
@@ -32,6 +33,7 @@ pub mod signing;
 #[cfg(target_family = "wasm")]
 pub mod transport;
 
+pub use anchor::{account_sighash, instruction_sighash};
 pub use instruction::{AccountMeta, Instruction};
 pub use message::{compile, CompiledMessage, MessageError};
 pub use mint::{decode_mint, DecodedMint, MintError, RawExtension};

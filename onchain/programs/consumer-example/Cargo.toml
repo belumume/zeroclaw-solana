@@ -1,0 +1,22 @@
+[package]
+name = "consumer-example"
+version = "0.1.0"
+description = "A downstream program that reads a zeroclaw_oracle DeviceFeed on-chain and gates an action on it -- proof the feed is consumable, not a memo."
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "consumer_example"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "zeroclaw-oracle/idl-build"]
+
+[dependencies]
+anchor-lang = "0.31.0"
+zeroclaw-oracle = { path = "../zeroclaw-oracle", features = ["cpi"] }
