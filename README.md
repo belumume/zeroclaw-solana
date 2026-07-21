@@ -38,6 +38,11 @@ plugin carries a test that feeds it a hostile name or symbol and asserts the san
 This sits on top of the standard argument-side defenses (base58 validation before any RPC call,
 `serde(deny_unknown_fields)`, https-only overrides), not instead of them.
 
+A runnable demonstration lives in `crates/solana-core/examples/injection_demo.rs`
+(`cargo run --example injection_demo`): a 40 KB hostile token name carrying a bidi override, a
+zero-width space, and injection framing comes out stripped, length-capped, and labeled untrusted
+on both the data path and the error path.
+
 ## solana-core
 
 The plugins depend by path on `crates/solana-core`, a pure-Rust core with no wasm dependency.
