@@ -1,0 +1,26 @@
+[package]
+name = "solana-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "wasm32-wasip2 Solana core for ZeroClaw plugins: RPC spine, transaction construction, Token-2022 decoding, and untrusted on-chain output sanitization."
+publish = false
+
+# Pure-core / thin-shim: host builds carry zero wasm dependency and are fully
+# host-testable. The one wasm-target-only dep (waki, for the WakiTransport all
+# plugins share) never compiles on the host. Plugins depend on this crate by
+# path and compile the cdylib component themselves.
+
+[dependencies]
+bs58 = "0.5"
+curve25519-dalek = { version = "4", default-features = false }
+ed25519-dalek = { version = "2", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+waki = { version = "0.5.1", features = ["json"] }
+
+[dev-dependencies]

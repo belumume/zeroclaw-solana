@@ -1,0 +1,63 @@
+# lending-health
+
+A read-only ZeroClaw tool plugin that reports a wallet's liquidation health on Kamino Lend:
+Safe, Warning, Critical, or Liquidatable. It lets an agent watch a lending position and warn
+before it gets liquidated, without holding any authority over the account.
+
+## What it reports
+
+Given a wallet address, it reads the wallet's Kamino Lend obligations from
+`api.kamino.finance` and reduces them to one health verdict plus a compact summary of only
+the positions that are actually at risk. A healthy wallet returns Safe with nothing to act
+on; a wallet near its liquidation threshold returns Warning, Critical, or Liquidatable with
+the specific positions surfaced.
+
+## Custody tier: T0 (read-only)
+
+No keys, no signing, no transaction. The only outward action is an HTTPS read to Kamino.
+There is nothing here that can move funds, so the attack surface is the input and the data
+read back, not a signer.
+
+## Threat model
+
+The wallet address is validated before use. The response from Kamino includes token symbols,
+which are attacker-influenceable text: a malicious market could name a token to smuggle
+control characters or a fake instruction into whatever reads the summary. Every symbol is run
+through the response-path sanitizer before it enters the verdict text, so nothing from a
+market's metadata reaches the agent's context unsanitized.
+
+## Proven behavior (real transcript)
+
+Host tests, no wasm toolchain, no network. Run with `cargo test --lib`:
+
+```
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+The load-bearing cases:
+
+- `healthy_position_is_safe`: a wallet well above its threshold returns Safe.
+- `compact_text_surfaces_only_at_risk_positions`: the summary shows only positions that
+  matter, not every holding, so an agent is not flooded with noise.
+- `hostile_token_symbol_is_sanitized`: a malicious token symbol comes back sanitized before
+  it can enter the summary.
+
+## Tool interface
+
+```
+name: lending_health
+inputs:
+  wallet     the Solana wallet address to check (base58)
+```
+
+## Build
+
+```
+rustup target add wasm32-wasip2
+cargo build --target wasm32-wasip2 --release
+cargo test --lib
+```
+
+## License
+
+MIT. See `LICENSE`.

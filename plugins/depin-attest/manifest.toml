@@ -1,0 +1,14 @@
+name = "depin-attest"
+version = "0.1.0"
+description = "Sign and broadcast a replay-proof on-chain attestation of a physical DePIN sensor reading (motion/contact/tamper), fronted by a durable nonce so each attestation is single-use"
+author = "belumume"
+wasm_path = "depin_attest.wasm"
+capabilities = ["tool"]
+# http_client: outbound HTTPS to the Solana JSON-RPC endpoint (getAccountInfo +
+# sendTransaction). TLS is host-side.
+# config_read: the jailed operator config holding the scoped ed25519 session
+# seed (signer_seed_hex) + the owned durable-nonce account + optional https RPC.
+# Custody tier T2: signs with a SCOPED session key only — holds no user wallet,
+# can only ever emit one transaction shape (advance-nonce + attestation memo),
+# and replay is enforced by the chain via the durable nonce.
+permissions = ["http_client", "config_read"]

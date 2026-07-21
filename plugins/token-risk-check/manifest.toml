@@ -1,0 +1,11 @@
+name = "token-risk-check"
+version = "0.1.0"
+description = "Read-only SPL / Token-2022 mint risk check: RED/AMBER/GREEN from on-chain extensions (permanent delegate, transfer hook, frozen-by-default, transfer fee, authorities) with RugCheck corroboration"
+author = "belumume"
+wasm_path = "token_risk_check.wasm"
+capabilities = ["tool"]
+# http_client: outbound HTTPS to the Solana JSON-RPC endpoint + api.rugcheck.xyz
+# (both keyless). TLS is performed host-side.
+# config_read: optional jailed rpc_url override (https-only, validated
+# fail-closed with deny_unknown_fields). No keys anywhere: custody tier T0.
+permissions = ["http_client", "config_read"]

@@ -1,0 +1,7 @@
+# Normalize line endings to LF (matches upstream Rust convention; avoids CRLF pollution in PRs)
+* text=auto eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.wit text eol=lf
+*.md text eol=lf
+*.lock text eol=lf

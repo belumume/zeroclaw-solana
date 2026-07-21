@@ -1,0 +1,9 @@
+name = "lending-health"
+version = "0.1.0"
+description = "Read-only Kamino Lend liquidation health for a Solana wallet (Safe/Warning/Critical/Liquidatable)"
+author = "belumume"
+wasm_path = "lending_health.wasm"
+capabilities = ["tool"]
+# http_client: outbound HTTPS to api.kamino.finance (keyless). TLS is performed
+# host-side. No config_read, no keys: custody tier T0, read-only.
+permissions = ["http_client"]

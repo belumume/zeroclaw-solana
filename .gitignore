@@ -1,0 +1,33 @@
+# === secrets / keys — NEVER commit ===
+.secrets/
+.devnet-proof/
+.oci/
+*.pem
+*.key
+*.env
+*_key.json
+id.json
+oracle-cloud-pw.txt
+
+# === internal strategy / working docs — NEVER go to the public fork ===
+BUILD-STATE.md
+HANDOFF-POST-COMPACT.md
+docs/dossier-raw.json
+docs/grounded-facts.json
+docs/BUILD-PATTERNS.md
+solana-claw-superteambr-export-3.txt
+.compound-tmp/
+
+# === propagated hookify/behavioral config (not part of the deliverable) ===
+.claude/
+.ruff_cache/
+
+# === Rust build artifacts (reproducible; keep Cargo.lock for --locked builds) ===
+target/
+**/target/
+*.wasm
+
+# === editor / OS ===
+.DS_Store
+.vscode/
+.idea/
