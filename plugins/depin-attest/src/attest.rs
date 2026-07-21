@@ -128,8 +128,15 @@ impl std::fmt::Debug for ValidatedAttestation {
 pub const DEFAULT_RPC: &str = "https://api.devnet.solana.com";
 
 pub fn parse_and_validate(args_json: &str) -> Result<ValidatedAttestation, String> {
-    let args: ExecuteArgs =
-        serde_json::from_str(args_json).map_err(|e| format!("invalid arguments: {e}"))?;
+    let args: ExecuteArgs = serde_json::from_str(args_json).map_err(|e| {
+        // serde's invalid_type error embeds the offending value verbatim, so an
+        // attacker can smuggle an unbounded / injection-framed string in a
+        // type-mismatched field. Cap + strip it before it reaches the agent.
+        format!(
+            "invalid arguments: {}",
+            sanitize_onchain(&e.to_string(), 120).text
+        )
+    })?;
 
     let reading = Reading::parse(args.reading.trim()).ok_or_else(|| {
         // Echo the rejected value through the response-path sanitizer: a
@@ -167,7 +174,10 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedAttestation, Strin
     let rpc_url = match cfg.rpc_url {
         Some(u) => {
             if !u.starts_with("https://") {
-                return Err(format!("rpc_url must be https, got: {u}"));
+                return Err(format!(
+                    "rpc_url must be https, got: {}",
+                    sanitize_onchain(&u, 64).text
+                ));
             }
             u
         }

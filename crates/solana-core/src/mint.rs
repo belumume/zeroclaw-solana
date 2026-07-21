@@ -152,7 +152,13 @@ pub fn decode_mint(data: &[u8], token_2022: bool) -> Result<DecodedMint, MintErr
             return Err(MintError::NotAMint(account_type));
         }
         let mut i = TLV_START;
-        while i + 4 <= data.len() {
+        // Bound the number of TLV extensions parsed: a hostile ~10 MiB mint
+        // account could otherwise carry millions of tiny entries, forcing
+        // millions of heap allocations before any caller can cap them. A real
+        // Token-2022 mint has a handful; 64 is comfortably above any legitimate
+        // count and keeps per-call memory bounded regardless of account size.
+        const MAX_EXTENSIONS: usize = 64;
+        while i + 4 <= data.len() && extensions.len() < MAX_EXTENSIONS {
             let discriminant = u16::from_le_bytes([data[i], data[i + 1]]);
             if discriminant == 0 {
                 break; // Uninitialized entry: padding from here on.

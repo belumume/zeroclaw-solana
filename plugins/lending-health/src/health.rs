@@ -125,11 +125,17 @@ impl HealthReport {
     pub fn from_value(root: &Value) -> Self {
         let mut positions = Vec::new();
         let mut recognized = false;
+        // Cap total positions ingested: a hostile portfolio response with a huge
+        // array must not blow the compact-report budget or per-call memory.
+        const MAX_POSITIONS: usize = 64;
         // All three product arrays carry the same liquidation fields.
         for section in ["lending", "multiply", "leverage"] {
             if let Some(arr) = root.get(section).and_then(Value::as_array) {
                 recognized = true;
                 for item in arr {
+                    if positions.len() >= MAX_POSITIONS {
+                        break;
+                    }
                     positions.push(parse_position(item));
                 }
             }
@@ -159,11 +165,13 @@ impl HealthReport {
         if self.positions.is_empty() {
             return format!("Kamino: no lending positions for {wallet_short}.");
         }
-        let at_risk: Vec<&PositionHealth> = self
+        let mut at_risk: Vec<&PositionHealth> = self
             .positions
             .iter()
             .filter(|p| p.status.is_at_risk())
             .collect();
+        // Worst first, so the detail cap below keeps the most important positions.
+        at_risk.sort_by_key(|p| std::cmp::Reverse(p.status.rank()));
         let safe = self.positions.len() - at_risk.len();
 
         let mut out = format!(
@@ -172,7 +180,10 @@ impl HealthReport {
             self.positions.len(),
             at_risk.len(),
         );
-        for p in &at_risk {
+        // Cap detail lines so a hostile response with many at-risk positions
+        // cannot flood agent context; the remainder is summarized below.
+        const MAX_DETAIL: usize = 16;
+        for p in at_risk.iter().take(MAX_DETAIL) {
             if p.status == HealthStatus::Unknown {
                 // Never print a numeric headroom for an unassessable position —
                 // ltv/liq are placeholder zeros, which would read as 100% headroom.
@@ -197,6 +208,12 @@ impl HealthReport {
                 p.net_value,
             ));
         }
+        if at_risk.len() > MAX_DETAIL {
+            out.push_str(&format!(
+                "\n(+{} more at-risk position(s) not shown.)",
+                at_risk.len() - MAX_DETAIL
+            ));
+        }
         if safe > 0 {
             out.push_str(&format!(
                 "\n({safe} more position(s) with comfortable headroom.)"
@@ -210,15 +227,26 @@ fn parse_position(item: &Value) -> PositionHealth {
     // Borrow symbols are attacker-controlled metadata: strip invisible payloads
     // and hard-cap (tails 1+2). Short capped fields keep the marker off; the
     // visible-framing flag (tail 3) rides the free-text `netValue` below.
+    // Cap both per-symbol length (SYMBOL_MAX) AND the number of entries: a
+    // hostile `borrows` array with many symbols would otherwise still produce an
+    // arbitrarily long `join("+")` string in to_compact_text.
+    const MAX_BORROWS: usize = 8;
     let borrows: Vec<String> = item
         .get("borrows")
         .and_then(Value::as_array)
         .map(|arr| {
-            arr.iter()
+            let total = arr.len();
+            let mut v: Vec<String> = arr
+                .iter()
                 .filter_map(|b| b.get("symbol").and_then(Value::as_str))
                 .map(|s| sanitize_onchain(s, SYMBOL_MAX).text)
                 .filter(|s| !s.is_empty())
-                .collect()
+                .take(MAX_BORROWS)
+                .collect();
+            if total > MAX_BORROWS {
+                v.push(format!("+{} more", total - MAX_BORROWS));
+            }
+            v
         })
         .unwrap_or_default();
 
@@ -279,6 +307,9 @@ fn parse_position(item: &Value) -> PositionHealth {
 /// or hostile ratio can never slip through every comparison to a `Safe` verdict.
 fn decimal_str(v: Option<&Value>) -> Option<f64> {
     v.and_then(Value::as_str)
+        // A real ratio is short; reject an oversized string before parse, for
+        // consistency with the caps applied to the other untrusted fields.
+        .filter(|s| s.len() <= 32)
         .and_then(|s| s.parse::<f64>().ok())
         .filter(|f| f.is_finite())
 }

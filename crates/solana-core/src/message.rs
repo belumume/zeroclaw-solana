@@ -31,6 +31,13 @@ pub enum MessageError {
     /// More than 255 required signatures cannot be encoded in the u8 header
     /// (`num_required_signatures as u8` would wrap).
     TooManySignatures(usize),
+    /// A single instruction referencing more than 65535 accounts cannot have
+    /// its `account_indexes` shortvec length prefix encoded in u16: serializing
+    /// would truncate the prefix via `as u16` while still appending the full
+    /// index vector, signing a message whose header disagrees with its payload.
+    /// `account_keys` is deduped and bounded to 256, but a single instruction's
+    /// (un-deduped) AccountMeta list is not — so this is checked per-instruction.
+    TooManyAccountIndexes(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,14 +115,19 @@ pub fn compile(
     };
 
     // Fail closed on the length casts serialize_body performs, rather than
-    // silently truncating and signing a malformed message. (account/index counts
-    // are already bounded by the 256-account guard above; these two are not.)
+    // silently truncating and signing a malformed message. The 256-account guard
+    // above bounds only the DEDUPLICATED account_keys set; a single instruction's
+    // (un-deduped) AccountMeta list and its data can each still overflow the u16
+    // shortvec length prefix, so both are checked per-instruction below.
     if num_required_signatures > u8::MAX as usize {
         return Err(MessageError::TooManySignatures(num_required_signatures));
     }
     for ix in instructions {
         if ix.data.len() > u16::MAX as usize {
             return Err(MessageError::InstructionDataTooLarge(ix.data.len()));
+        }
+        if ix.accounts.len() > u16::MAX as usize {
+            return Err(MessageError::TooManyAccountIndexes(ix.accounts.len()));
         }
     }
 
@@ -276,6 +288,25 @@ mod tests {
         let e = compile(&pk(1), &[big], &[9u8; 32]).unwrap_err();
         assert!(
             matches!(e, MessageError::InstructionDataTooLarge(_)),
+            "got {e:?}"
+        );
+    }
+
+    #[test]
+    fn oversized_instruction_accounts_fails_closed() {
+        // >65535 AccountMeta entries in ONE instruction would truncate the u16
+        // account-index shortvec prefix. All reference the SAME key, so the
+        // deduplicated 256-account guard does not catch it; the per-instruction
+        // check must.
+        use crate::instruction::{AccountMeta, Instruction};
+        let ix = Instruction {
+            program_id: pk(200),
+            accounts: (0..65_536).map(|_| AccountMeta::readonly(pk(1), false)).collect(),
+            data: vec![],
+        };
+        let e = compile(&pk(1), &[ix], &[9u8; 32]).unwrap_err();
+        assert!(
+            matches!(e, MessageError::TooManyAccountIndexes(65_536)),
             "got {e:?}"
         );
     }

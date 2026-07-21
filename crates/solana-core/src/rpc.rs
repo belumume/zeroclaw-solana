@@ -148,11 +148,17 @@ impl<T: RpcTransport> SolanaRpc<T> {
                     .get("code")
                     .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0),
-                message: err
-                    .get("message")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
+                // The endpoint's own error text is untrusted response-path data
+                // (a compromised/hostile RPC can inject unbounded or hidden-framing
+                // text here). Strip control/zero-width/bidi and cap it, matching the
+                // discipline sanitize_onchain applies to on-chain metadata.
+                message: crate::sanitize::sanitize_onchain(
+                    err.get("message")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default(),
+                    200,
+                )
+                .text,
             });
         }
         v.get("result")
@@ -197,10 +203,17 @@ impl<T: RpcTransport> SolanaRpc<T> {
             { "encoding": "base64", "preflightCommitment": self.commitment.as_str() },
         ]);
         let result = self.call("sendTransaction", params)?;
-        result
+        let sig = result
             .as_str()
             .map(str::to_string)
-            .ok_or_else(|| RpcError::Parse("sendTransaction: non-string result".into()))
+            .ok_or_else(|| RpcError::Parse("sendTransaction: non-string result".into()))?;
+        // A real signature is base58 of 64 bytes (<=88 chars). Reject a
+        // maliciously oversized "signature" from a compromised RPC before it
+        // reaches the caller and, via the plugin, the agent's context.
+        if sig.len() > 96 {
+            return Err(RpcError::Parse("sendTransaction: oversized signature".into()));
+        }
+        Ok(sig)
     }
 
     pub fn get_latest_blockhash(&self) -> Result<LatestBlockhash, RpcError> {

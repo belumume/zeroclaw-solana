@@ -142,10 +142,16 @@ pub fn sanitize_onchain(input: &str, max_chars: usize) -> Sanitized {
 
     let truncated = out.chars().count() > max_chars;
     if truncated {
-        let keep = max_chars.saturating_sub(1);
-        let mut t: String = out.chars().take(keep).collect();
-        t.push('\u{2026}'); // …
-        out = t;
+        if max_chars == 0 {
+            // No room even for the ellipsis; the documented invariant is that
+            // `text` never exceeds max_chars, so emit nothing.
+            out.clear();
+        } else {
+            let keep = max_chars.saturating_sub(1);
+            let mut t: String = out.chars().take(keep).collect();
+            t.push('\u{2026}'); // …
+            out = t;
+        }
     }
 
     Sanitized {
@@ -337,5 +343,15 @@ mod tests {
         assert!(label_untrusted(&flagged).contains("untrusted on-chain data"));
         let clean = sanitize_onchain("USD Coin", DEFAULT_LABEL_MAX);
         assert_eq!(label_untrusted(&clean), "USD Coin");
+    }
+
+    #[test]
+    fn max_chars_zero_yields_empty_not_ellipsis() {
+        // The documented invariant is that text never exceeds max_chars. At 0
+        // there is no room even for the ellipsis, so the result must be empty.
+        let s = sanitize_onchain("nonempty input", 0);
+        assert!(s.truncated);
+        assert_eq!(s.text, "");
+        assert_eq!(s.text.chars().count(), 0);
     }
 }

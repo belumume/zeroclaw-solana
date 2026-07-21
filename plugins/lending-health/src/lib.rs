@@ -141,7 +141,7 @@ mod component {
             .map_err(|e| format!("request failed: {e}"))?;
         let status = resp.status_code();
         if !(200..300).contains(&status) {
-            let snippet: String = resp
+            let raw: String = resp
                 .body()
                 .ok()
                 .and_then(|b| String::from_utf8(b).ok())
@@ -149,6 +149,10 @@ mod component {
                 .chars()
                 .take(200)
                 .collect();
+            // An error-response body is untrusted (a WAF/gateway block page can
+            // carry control/bidi/zero-width injection framing); strip it before
+            // it reaches the agent, matching the on-chain-field treatment.
+            let snippet = solana_core::sanitize_onchain(&raw, 200).text;
             return Err(format!("HTTP {status}: {snippet}"));
         }
         resp.json::<serde_json::Value>()
