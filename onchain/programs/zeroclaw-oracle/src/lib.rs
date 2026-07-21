@@ -20,6 +20,19 @@
 
 use anchor_lang::prelude::*;
 
+// Machine-readable security contact, embedded in the deployed binary and shown
+// on explorers (neodyme security.txt standard). Gated on no-entrypoint so a CPI
+// consumer linking this crate does not get a duplicate symbol.
+#[cfg(not(feature = "no-entrypoint"))]
+solana_security_txt::security_txt! {
+    name: "ZeroClaw Device Oracle",
+    project_url: "https://github.com/zeroclaw-labs/zeroclaw-plugins",
+    contacts: "link:https://github.com/belumume",
+    policy: "Report vulnerabilities privately via the contact link; do not exploit deployments. Best-effort response.",
+    preferred_languages: "en",
+    source_code: "https://github.com/zeroclaw-labs/zeroclaw-plugins"
+}
+
 declare_id!("EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn");
 
 #[program]

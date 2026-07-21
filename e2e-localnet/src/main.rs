@@ -49,7 +49,19 @@ fn disc(name: &str) -> [u8; 8] {
 }
 
 fn main() {
-    let rpc = RpcClient::new_with_commitment(RPC_URL.to_string(), CommitmentConfig::confirmed());
+    // E2E_RPC overrides the cluster (e.g. https://api.devnet.solana.com);
+    // E2E_FUNDER=<keypair.json> funds test accounts by transfer (devnet airdrop
+    // is rate-limited), else falls back to airdrop (localnet).
+    let rpc_url = std::env::var("E2E_RPC").unwrap_or_else(|_| RPC_URL.to_string());
+    let cluster = if rpc_url.contains("devnet") { "devnet" } else { "localnet" };
+    let funder: Option<Keypair> = std::env::var("E2E_FUNDER")
+        .ok()
+        .map(|p| solana_sdk::signature::read_keypair_file(&p).expect("read funder keypair"));
+    println!(
+        "cluster={cluster}  rpc={rpc_url}  funding={}",
+        funder.as_ref().map(|f| f.pubkey().to_string()).unwrap_or_else(|| "airdrop".into())
+    );
+    let rpc = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
     let oracle = Pubkey::from_str(ORACLE_ID).unwrap();
     let consumer = Pubkey::from_str(CONSUMER_ID).unwrap();
 
@@ -65,8 +77,8 @@ fn main() {
     };
     let device = Pubkey::new_from_array(solana_core::pubkey_from_seed(&device_seed));
 
-    airdrop(&rpc, &admin.pubkey(), 5);
-    airdrop(&rpc, &session.pubkey(), 5);
+    fund(&rpc, &funder, &admin.pubkey(), 2);
+    fund(&rpc, &funder, &session.pubkey(), 2);
     println!("keys: admin={} session={} device={}", admin.pubkey(), session.pubkey(), device);
 
     // --- durable nonce account (authority = session) ---
@@ -172,6 +184,13 @@ fn main() {
     let sig = send(&rpc, &[act], &[&session], &session.pubkey());
     println!("consumer act_on_feed OK: {sig}");
 
+    if cluster == "devnet" {
+        println!("\nDEMO ARTIFACTS (Solana Explorer, devnet):");
+        println!("  feed PDA:      https://explorer.solana.com/address/{feed_pda}?cluster=devnet");
+        println!("  oracle prog:   https://explorer.solana.com/address/{ORACLE_ID}?cluster=devnet");
+        println!("  consumer prog: https://explorer.solana.com/address/{CONSUMER_ID}?cluster=devnet");
+        println!("  each tx above: https://explorer.solana.com/tx/<sig>?cluster=devnet");
+    }
     println!("\nE2E PASS: register -> publish -> stale-sequence rejected -> higher-seq lands -> consumer reads");
 }
 
@@ -179,13 +198,24 @@ fn short(s: &str) -> String {
     s.chars().take(140).collect()
 }
 
-fn airdrop(rpc: &RpcClient, who: &Pubkey, sol: u64) {
-    let sig = rpc.request_airdrop(who, sol * 1_000_000_000).unwrap();
-    loop {
-        if rpc.confirm_transaction(&sig).unwrap_or(false) {
-            break;
+fn fund(rpc: &RpcClient, funder: &Option<Keypair>, who: &Pubkey, sol: u64) {
+    let lamports = sol * 1_000_000_000;
+    match funder {
+        // devnet: transfer from the operator (reliable; airdrop is rate-limited)
+        Some(f) => {
+            let ix = system_instruction::transfer(&f.pubkey(), who, lamports);
+            send(rpc, &[ix], &[f], &f.pubkey());
         }
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        // localnet: airdrop
+        None => {
+            let sig = rpc.request_airdrop(who, lamports).unwrap();
+            loop {
+                if rpc.confirm_transaction(&sig).unwrap_or(false) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+        }
     }
 }
 

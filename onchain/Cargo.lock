@@ -471,6 +471,7 @@ name = "consumer-example"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "solana-security-txt",
  "zeroclaw-oracle",
 ]
 
@@ -1777,6 +1778,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-security-txt"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c94a02d486b28f219a4f8f5d7dd93cbfbb93c9f466cb7871c22e50cd5ae9a7a2"
+
+[[package]]
 name = "solana-serde-varint"
 version = "2.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2245,6 +2252,7 @@ name = "zeroclaw-oracle"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "solana-security-txt",
 ]
 
 [[package]]

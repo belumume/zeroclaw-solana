@@ -10,6 +10,18 @@
 use anchor_lang::prelude::*;
 use zeroclaw_oracle::DeviceFeed;
 
+// Machine-readable security contact, embedded in the deployed binary and shown
+// on explorers (neodyme security.txt standard).
+#[cfg(not(feature = "no-entrypoint"))]
+solana_security_txt::security_txt! {
+    name: "ZeroClaw Oracle Consumer Example",
+    project_url: "https://github.com/zeroclaw-labs/zeroclaw-plugins",
+    contacts: "link:https://github.com/belumume",
+    policy: "Report vulnerabilities privately via the contact link; do not exploit deployments. Best-effort response.",
+    preferred_languages: "en",
+    source_code: "https://github.com/zeroclaw-labs/zeroclaw-plugins"
+}
+
 declare_id!("B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt");
 
 #[program]

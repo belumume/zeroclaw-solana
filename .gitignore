@@ -15,6 +15,7 @@ oracle-cloud-pw.txt
 .build-env.sh
 .wsl-run.sh
 .validator.sh
+.deploy.sh
 .probe-toolchain.sh
 onchain-build.sh
 onchain-pin.sh
