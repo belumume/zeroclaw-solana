@@ -30,9 +30,12 @@ signing does:
 On-chain data is attacker-influenceable. A token name, a market symbol, a memo, or a
 RugCheck string can carry control characters, bidi overrides, or zero-width bytes designed to
 change how whatever reads it behaves. `solana-core`'s sanitizer runs every such value through
-a fixed cleanup and length cap before it enters a string an agent will read. Each plugin
-carries a test that feeds it a hostile name or symbol and asserts the sanitized result. This
-sits on top of the standard argument-side defenses (base58 validation before any RPC call,
+a fixed cleanup and length cap before it enters a string an agent will read, and that coverage
+extends past the obvious data fields to the response paths that are easy to miss: JSON-RPC
+error messages, HTTP error bodies, and serde parse errors are attacker-influenceable too, so
+each is capped and stripped on the way to the agent rather than reaching its context raw. Each
+plugin carries a test that feeds it a hostile name or symbol and asserts the sanitized result.
+This sits on top of the standard argument-side defenses (base58 validation before any RPC call,
 `serde(deny_unknown_fields)`, https-only overrides), not instead of them.
 
 ## solana-core
@@ -43,7 +46,7 @@ base58 codec and PDA/ATA derivation (validated differentially against `solana-pr
 JSON-RPC transport seam and client, SPL / Token-2022 mint decoding, the compact-u16 codec,
 instruction builders, legacy and v0 message compile and serialize (byte-validated against
 `solana-program` fixtures), durable-nonce decoding, deterministic ed25519 signing (RFC 8032
-anchored), and the response-path sanitizer. It ships **59 host tests**.
+anchored), and the response-path sanitizer. It ships **71 host tests**.
 
 ## Build and test
 
