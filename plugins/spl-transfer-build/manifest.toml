@@ -1,0 +1,19 @@
+name = "spl-transfer-build"
+version = "0.1.0"
+description = "Build an UNSIGNED versioned (v0) SPL-token or native-SOL transfer for a human approval gate: derives + idempotently creates the recipient ATA, attaches an on-chain memo for invoice reconciliation, appends reference keys for payment-watch, and (durable-nonce mode) fronts the transaction with an advance-nonce so it survives the approval queue indefinitely. Returns base64 + a human-readable summary; the plugin holds no wallet."
+author = "belumume"
+wasm_path = "spl_transfer_build.wasm"
+capabilities = ["tool"]
+# http_client: outbound HTTPS to the Solana JSON-RPC endpoint (getAccountInfo on
+# the mint for decimals+owner, getAccountInfo on the recipient ATA to decide
+# whether to create it, and either getLatestBlockhash or getAccountInfo on the
+# durable-nonce account). TLS is host-side.
+# config_read: the jailed operator config holding the fee-payer/authority pubkey
+# (payer_pubkey), an optional durable-nonce account + its authority, and an
+# optional https RPC override. NO private key is ever read.
+# Custody tier T1 (unsigned-transaction builder): the plugin holds no wallet and
+# no key material. It returns an UNSIGNED versioned transaction (every signature
+# slot left empty) for a human approval gate to render and the host to sign, so
+# the plugin output alone can never be broadcast and no funds are ever moved by
+# the plugin.
+permissions = ["http_client", "config_read"]
