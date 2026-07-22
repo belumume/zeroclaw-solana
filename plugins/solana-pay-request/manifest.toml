@@ -1,0 +1,12 @@
+name = "solana-pay-request"
+version = "0.1.0"
+description = "Build a Solana Pay transfer-request URL and QR-ready payload for a SOL or SPL-token payment (recipient, amount, SPL mint, references, label, message, memo); free text is sanitized and percent-encoded so it can never inject a different recipient"
+author = "belumume"
+wasm_path = "solana_pay_request.wasm"
+capabilities = ["tool"]
+# permissions = []: this plugin needs NOTHING. It holds no secrets, so it never
+# reads config (no config_read); it makes no network calls, so it never opens a
+# socket (no http_client). It is pure computation: validate the request, build
+# the `solana:` URL. Declaring only the permissions actually used (here, none) is
+# the honest minimum: a compromised copy of this plugin has zero I/O surface.
+permissions = []
