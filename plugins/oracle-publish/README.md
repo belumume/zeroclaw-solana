@@ -178,6 +178,17 @@ inputs:
 The device seed, the durable-nonce account, the oracle program id, and the agent
 session pubkey live in the operator's jailed config, not in the tool arguments.
 
+## Config keys (jailed `config_read` section)
+
+```
+signer_seed_hex       32-byte hex seed of the DEVICE identity key (signs readings only)
+nonce_account         base58 address of the durable-nonce account (replay guard)
+oracle_program_id     base58 address of the deployed zeroclaw_oracle program
+agent_session_pubkey  base58 pubkey of the agent's capped session key (fee payer;
+                      must be the nonce authority)
+rpc_url               optional https-only Solana RPC override (defaults to devnet)
+```
+
 ## Build
 
 ```

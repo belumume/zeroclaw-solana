@@ -30,6 +30,9 @@ docs/grounded-facts.json
 docs/BUILD-PATTERNS.md
 docs/SECURITY-PATTERNS.md
 docs/DEMO-SCRIPT.md
+docs/LISTING-VERBATIM.md
+docs/listing-verbatim.json
+docs/COMPLIANCE-AUDIT.md
 solana-claw-superteambr-export-3.txt
 *export*.txt
 .compound-tmp/

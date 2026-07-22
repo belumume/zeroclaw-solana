@@ -1,0 +1,15 @@
+name = "oracle-publish"
+version = "0.1.0"
+description = "Publish a device-signed sensor reading into a typed, program-owned on-chain DeviceFeed that downstream Solana programs consume; returns a base64 partial transaction the host completes and broadcasts (plugin holds no wallet)"
+author = "belumume"
+wasm_path = "oracle_publish.wasm"
+capabilities = ["tool"]
+# http_client: outbound HTTPS to the Solana JSON-RPC endpoint (getAccountInfo on
+# the durable-nonce account). TLS is host-side.
+# config_read: the jailed operator config holding the scoped DEVICE identity
+# seed (signer_seed_hex), the durable-nonce account, the oracle program id, the
+# agent session pubkey (fee payer), and an optional https RPC override.
+# Custody tier T1 (fund-less partial signing): the device key signs the reading
+# only; the fee-payer slot is left EMPTY for the host's capped session key, so
+# the plugin output alone can never be broadcast and no funds are ever held.
+permissions = ["http_client", "config_read"]
