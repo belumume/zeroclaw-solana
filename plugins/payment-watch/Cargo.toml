@@ -1,0 +1,34 @@
+[package]
+name = "payment-watch"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ZeroClaw tool plugin: read-only watch of an address for an expected inbound payment (SPL / Token-2022 / native SOL), with a signature cursor for cheap cron polling."
+publish = false
+
+# cdylib for the wasm component; rlib so the pure payment-detection core is
+# host-testable with a plain `cargo test`.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+solana-core = { path = "../../crates/solana-core" }
+wit-bindgen = "0.46"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# base58 codec: validate the since_signature cursor decodes to exactly 64 bytes
+# (a real Solana tx signature) before it is ever sent as an RPC `until` param.
+bs58 = "0.5"
+
+# wasi:http client: only compiled for the wasm component, never on the host.
+[target.'cfg(target_family = "wasm")'.dependencies]
+waki = { version = "0.5.1", features = ["json"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+
+# Standalone crate: built for wasm32-wasip2, depends on solana-core by path.
+[workspace]

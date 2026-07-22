@@ -1,0 +1,12 @@
+name = "payment-watch"
+version = "0.1.0"
+description = "Read-only watch of an address for an expected inbound payment (SPL / Token-2022 / native SOL). One execute() = one check: returns PAID (amount, from, tx, when) or NOT_YET with the newest signature as a cursor so a ZeroClaw cron SOP can poll cheaply"
+author = "belumume"
+wasm_path = "payment_watch.wasm"
+capabilities = ["tool"]
+# http_client: outbound HTTPS to the Solana JSON-RPC endpoint (keyless:
+# getSignaturesForAddress + getTransaction). TLS is performed host-side.
+# config_read: optional jailed rpc_url override (https-only, validated
+# fail-closed with deny_unknown_fields). No keys anywhere: custody tier T0,
+# read-only. There is no code path that signs or moves funds.
+permissions = ["http_client", "config_read"]
