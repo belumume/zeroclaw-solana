@@ -1,0 +1,22 @@
+name = "allowance-spend-build"
+version = "0.1.0"
+description = "Build an UNSIGNED versioned (v0) transaction that spends under a Solana Foundation Subscriptions & Allowances delegation. The agent is the delegatee; it reads the on-chain delegation (fixed or recurring), fails closed unless the agent is the delegatee, converts the amount exactly, derives the token accounts, and (durable-nonce mode) fronts the transaction with an advance-nonce so it survives an approval queue. The amount cap, period accounting, and expiry are enforced ON-CHAIN by the audited program. Returns base64 + a human-readable summary; the plugin holds no wallet."
+author = "belumume"
+wasm_path = "allowance_spend_build.wasm"
+capabilities = ["tool"]
+# http_client: outbound HTTPS to the Solana JSON-RPC endpoint (getAccountInfo on
+# the delegation account for its type, delegatee, subscription-authority, mint,
+# and cap; getAccountInfo on the mint for decimals + owning token program;
+# getAccountInfo on the receiver token account to decide whether to create it; and
+# either getLatestBlockhash or getAccountInfo on the durable-nonce account). TLS is
+# host-side.
+# config_read: the jailed operator config holding the agent's PUBLIC key
+# (agent_pubkey -- the delegatee and fee payer), an optional durable-nonce account
+# + its authority, and an optional https RPC override. NO private key is ever read.
+# Custody tier T1 (unsigned-transaction builder): the plugin holds no wallet and no
+# key material. It returns an UNSIGNED versioned transaction (every signature slot
+# left empty) for a human approval gate to render and the host to sign, so the
+# plugin output alone can never be broadcast. Beyond T1, the spend is bounded a
+# SECOND time by the audited on-chain Subscriptions & Allowances program: even a
+# fully prompt-injected agent cannot exceed the allowance's cap, period, or expiry.
+permissions = ["http_client", "config_read"]

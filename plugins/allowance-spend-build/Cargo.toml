@@ -1,0 +1,28 @@
+[package]
+name = "allowance-spend-build"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ZeroClaw tool plugin: build an UNSIGNED versioned (v0) transaction that spends under the Solana Foundation's audited Subscriptions & Allowances program (De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44). The agent is the delegatee; the amount cap, period accounting, and expiry are enforced ON-CHAIN by the audited program, so a fully prompt-injected agent cannot exceed the allowance. Holds no keys (custody tier T1): returns base64 + a human-readable summary the host completes and broadcasts."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+solana-core = { path = "../../crates/solana-core" }
+wit-bindgen = "0.46"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+waki = { version = "0.5.1", features = ["json"] }
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
