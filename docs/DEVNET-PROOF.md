@@ -27,7 +27,7 @@ The feed account stores only the LATEST reading, so the *sequence history* is th
 | 2026-07-23T06:30Z | 12 | 36.8C | [24iLczeW…](https://explorer.solana.com/tx/24iLczeWeaiN6LEpfgjZd4wLdneJ8Ym4UjJHHbop3f6YFzD3SaF6fJ1vg32nmnpD2tWs6Mk5DvJnBBn5945rD1XH?cluster=devnet) |
 | 2026-07-23T08:44Z | 13 | 41.1C | [2j9emSvs…](https://explorer.solana.com/tx/2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E?cluster=devnet) |
 | 2026-07-23T14:44Z | 14 | 39.4C | [5qTeyv2u…](https://explorer.solana.com/tx/5qTeyv2uFpvTPgxGj9WNoSsMhEq2HSPpPo3ydjoT1adrM93fAZo23zNJisRyoC1x4e52h3PjjkBPpFzQmF8WSNeY?cluster=devnet) |
-| 2026-07-23T20:32Z | 15 | 31.3C | [4F3Ywdhu…](https://explorer.solana.com/tx/4F3YwdhuDF2Zj1Lh5aX7LUWekLbEV7rQiBmN23kUcC9k3K4cYifrePnN7AcQ9oY7LvQ9ZgmvuuL8CJYX912UjNd6?cluster=devnet) (first publish on free gemini-flash-latest) |
+| 2026-07-23T20:32Z | 15 | 31.3C | [4F3Ywdhu…](https://explorer.solana.com/tx/4F3YwdhuDF2Zj1Lh5aX7LUWekLbEV7rQiBmN23kUcC9k3K4cYifrePnN7AcQ9oY7LvQ9ZgmvuuL8CJYX912UjNd6?cluster=devnet) |
 
 (The device signs each reading inside the wasm sandbox; the host completes the fee-payer slot
 and broadcasts. Replay of a signed publish is refused on-chain by the strictly-increasing
@@ -60,6 +60,23 @@ NOT_YET, so a payment is confirmed only from the on-chain match, never the custo
   https://explorer.solana.com/address/6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11?cluster=devnet
 - Reproduce: `E2E_RPC=https://api.devnet.solana.com E2E_FUNDER=<operator.json> cargo run --release`
   in `e2e-track-a/` reruns the whole flow against live devnet.
+
+## The on-chain allowance cap rejects an over-cap agent spend (custody)
+The audited Solana Foundation Allowances program (`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`)
+bounds a COMPLYING agent, not just a refusing model. On devnet the agent's session key (the
+delegatee `GAMDhBVB1LgQpcQpTUMEuS8Jg1czQAeaPHfCN8CDz7Qq`) was given a fixed delegation capped at 5 tokens, then it SIGNED two transfers.
+The program, not the plugin and not the LLM, enforced the cap: the within-cap transfer settled and
+the over-cap transfer was rejected on-chain.
+
+- Fixed delegation created, cap 5 tokens, delegation PDA `4bJBr62YFrnQLxVW9m4Qv5GuUv9hv8LzbiGebyBhnEfu`:
+  https://explorer.solana.com/tx/3eeM43DgvcJqrkUAk1xtwbVygkd4YDbCgmqmVyvoM6QoiRREB2TAq1yDzJKmxoLJedwbrsSgT6fpTqB8h3HYmMXW?cluster=devnet
+- WITHIN cap (5 tokens) SUCCEEDED:
+  https://explorer.solana.com/tx/5qyr7jJi8zb6SjZjnA2QT5C9nuZYgSw6raAefjmWnDDMf3JRgkQX19zssE57EpFSHVCCPfbj5qyxcYSQcfEq9W3Z?cluster=devnet
+- OVER cap (10 tokens) REJECTED by the SF Allowances program, landed as a failed tx with
+  `custom program error 0x12c` (InstructionError Custom 300):
+  https://explorer.solana.com/tx/3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps?cluster=devnet
+- Reproduce: `E2E_FUNDER=<operator.json> node e2e-allowance/demo.js` (devnet) reruns the whole
+  create-delegation then within-cap-then-over-cap flow.
 
 ## How to re-verify
 Open any link above with the explorer cluster set to devnet. The programs are executable

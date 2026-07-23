@@ -1,0 +1,11 @@
+{
+  "name": "e2e-allowance",
+  "version": "1.0.0",
+  "private": true,
+  "description": "On-chain proof that the audited SF Allowances program rejects an over-cap agent spend (devnet)",
+  "type": "commonjs",
+  "dependencies": {
+    "@solana/web3.js": "1.95.3",
+    "@solana/spl-token": "0.4.9"
+  }
+}

@@ -1,11 +1,7 @@
----
-audience: internal
----
-
 # Showcase write-up
 
 ## What it does
-Two use cases, one suite, both live on devnet. No single-track entry spans them: one coherent
+Two use cases, one suite, both live on devnet. No entry that solves just one of these spans them: one coherent
 body from the physical edge (a device signing its own readings on-chain), through machine
 commerce (the node sells that feed and pays for its own gas), to on-chain-enforced custody (an
 audited program, not the LLM, bounds every spend), reproducible from a clean machine in an evening.
@@ -34,19 +30,7 @@ blast radius of a hacked agent capped by on-chain math, not vibes.
   alone ships no JIT backend, so every plugin loads unregistered; both features are required).
 
 ## What we had to build (and what fought us)
-**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish
-(device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch
-(reference-threaded RPC verification through the OWASP-LLM01 response sanitizer), spl-transfer-build
-(unsigned transfers surviving approval queues via durable nonces), allowance-spend-build (spends
-under the audited SF Allowances program), and depin-attest. `solana-pay-request` was built as a
-plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of
-that reasoning, not as a live plugin. The suite also carries two Tier-0 read-only lenses that cover
-the safety and DeFi tracks without touching funds: token-risk-check (a token's mint and freeze
-authority, the screen an agent should run before it trusts a token) and lending-health (liquidation
-distance for a lending position). Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx,
-durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing,
-byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction
-decoder and TransferChecked introspection) proven by every plugin.
+**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (reference-threaded RPC verification through the OWASP-LLM01 response sanitizer), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. The repo also carries depin-attest, token-risk-check and lending-health as additional Tier-0/Tier-2 components, but the two use cases above are the submission; those are not centred here. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
 
 **The x402 earning-node (`x402-feed-gate`), the frontier piece.** The DePIN node does not just
 publish its feed, it SELLS it. A client asks for a reading; the node answers HTTP 402 with a
@@ -90,13 +74,12 @@ pays for its own gas.
 
 
 ## Correct layering
-The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM, and that correct
-layering is scored. We applied the tier test to our OWN components and moved them:
+The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM. We applied the tier test to our OWN components and moved them:
 - **Solana Pay URL construction: demoted from a wasm plugin to a SKILL.** We first built
   `solana-pay-request` as a plugin. Then the tier test: building a `solana:...` URL is string
   work, and the worst failure of a malformed URL is a payment that never starts, no funds at
   risk. That does not need a sandbox. So the live shop uses the `solana-pay` SKILL, and the
-  plugin remains only as evidence of the reasoning. Showing the demotion is the point.
+  plugin remains only as evidence of the reasoning.
 - **Settlement verification stays a Tier-3 plugin.** `payment-watch` parses untrusted RPC JSON
   at the LLM context boundary and runs the OWASP-LLM01 sanitizer over it. That is exactly the
   bounded, adversarial-input code the ladder reserves for wasm. Demoting it would drop the
@@ -105,15 +88,14 @@ layering is scored. We applied the tier test to our OWN components and moved the
   its bytes is code, not a skill, and it runs host-side, so it reuses `solana-core`'s
   byte-validated primitives compiled natively. The crate's dual `crate-type` was for exactly
   this: the same decode/introspection logic the wasm plugins use, verified once.
-Every layer sits at the lowest tier that honestly does the job, with the reasoning shown rather
-than hidden.
+Every layer sits at the lowest tier that honestly does the job.
 
 ## Custody tier + threat model
 Declared per component. Each funds-touching plugin ships a prompt-injection transcript; the read-only lenses ship a proven-behaviour transcript instead:
 - T0 reads auto-run (an RPC key at most).
 - T1 build: unsigned transactions and device-co-signed readings; the device key can only
   sign readings (kind allowlist, range gates, monotonic sequence, deny_unknown_fields);
-  the session key only pays fees. No spend path exists in code.
+  the session key only pays fees. No auto-signing spend path exists in code.
 - Spends: a human checkpoint, then the audited on-chain Allowances program as the structural
   cap. The refund-redirect injection transcript (`docs/transcripts/injection-refund-redirect.md`)
   has a chat message impersonating the owner demanding an immediate 25 USDC refund to an
@@ -125,9 +107,10 @@ Declared per component. Each funds-touching plugin ships a prompt-injection tran
   The agent refuses and the attacker address enters zero tool calls (`spl_transfer_build` is
   never invoked). Three independent layers hold, and no message talks past all three: the
   model's refusal (demonstrated in the transcript), the unsigned-build-needs-approval gate (the
-  agent never holds a broadcast-ready transaction), and the on-chain allowance program (every
-  spend is constructed to execute only through the audited SF cap, so even a complying model
-  cannot exceed it).
+  agent never holds a broadcast-ready transaction), and the on-chain allowance program. Every spend executes only through the audited SF cap,
+  and this is demonstrated live on devnet: the agent's session key signed an over-cap transfer
+  and the program rejected it (custom error 0x12c), while a within-cap transfer settled (see
+  DEVNET-PROOF). The program bounds a complying agent, not only a refusing one.
 - Third-party trust declared: none held; RPC endpoints and open-meteo are read-only inputs;
   no MCP servers in the loop.
 
@@ -145,9 +128,8 @@ its own vocabulary so the mechanisms are legible, not buried:
   every decode path fails closed on malformed bytes. A read is served only after the payment is
   certified on-chain.
 
-Scoped non-goals (deliberate, so the omissions read as decisions, not oversights):
-- **No running T2 fund-signer.** The suite lands in the T0/T1 sweet spot the brief says most of
-  the prize money targets, and sidesteps the inject-into-funds disqualifier.
+Scoped non-goals (deliberate):
+- **No running T2 fund-signer.** The suite lands in the T0/T1 sweet spot, keeping a compromised model away from a fund-signing key.
 - **SF Allowances over Squads.** We use the brief-endorsed audited Allowances program for
   agent-spend caps rather than a Squads multisig; Squads is the heavier "add last" human
   co-signer path, not the agent-spend-cap primitive this needs.
@@ -159,8 +141,7 @@ Scoped non-goals (deliberate, so the omissions read as decisions, not oversights
 
 **Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC at a stated
 rate source (ECB reference), so a merchant charges "R$120" and the customer pays the USDC
-equivalent, the BRL-invoicing flow (quote in reais, settle in USDC) that Superteam Brasil especially welcomes. Shipped and verified
-live (order #51: R$120 at 5.0797 -> 23.62 USDC).
+equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches a public USD/BRL rate (frankfurter.dev, ECB-based), computes the USDC amount, and states the conversion (for example R$120 at 5.0797 = 23.62 USDC); the on-chain settlement is the same reference-threaded shop flow proven in DEVNET-PROOF.
 
 ## Reproducibility (links)
 `QUICKSTART.md` reproduces both use cases from a clean machine in an evening: source-build
