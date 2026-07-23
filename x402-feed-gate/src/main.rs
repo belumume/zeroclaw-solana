@@ -117,6 +117,27 @@ fn feed_reading_json<T: RpcTransport>(rpc: &SolanaRpc<T>, feed: &Pubkey) -> Stri
     }
 }
 
+/// Append a settled sale to the earnings ledger (JSON-lines). The ZeroClaw
+/// agent reads this file in an SOP and reports the node's daily x402 revenue to
+/// the owner's channel ("the node announces what it sold"). Best-effort: any IO
+/// failure is swallowed so it can never withhold a paid response.
+fn record_earning(v: &VerifiedPayment, signature: &str, day: i64) {
+    use std::io::Write;
+    let path = std::env::var("X402_EARNINGS_LOG")
+        .unwrap_or_else(|_| "x402-earnings.jsonl".to_string());
+    let line = serde_json::json!({
+        "day": day,
+        "payer": v.payer.to_base58(),
+        "amount": v.amount,
+        "is_day_pass": v.is_day_pass,
+        "settlement": signature,
+    })
+    .to_string();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
 fn json_response(status: u16, body: String) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut resp = Response::from_string(body).with_status_code(status);
     if let Ok(h) = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]) {
@@ -230,6 +251,10 @@ fn handle_reading<T: RpcTransport>(
     // Simulate, then broadcast, then confirm.
     match settle(rpc, &verified) {
         Ok(signature) => {
+            // Append to the earnings ledger (JSON-lines) so the ZeroClaw agent can
+            // report "sold N readings, earned X" to the owner's channel. Best-effort:
+            // a log-write failure never withholds a paid response.
+            record_earning(&verified, &signature, day);
             let body = serde_json::json!({
                 "paid": true,
                 "amount": verified.amount,

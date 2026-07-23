@@ -1,0 +1,11 @@
+[sop]
+name = "node-earnings-report"
+description = "Report the DePIN node's x402 feed-sale earnings to the owner's channel: how many readings it sold and how much it earned. The node announces what it sold."
+version = "1.0.0"
+priority = "normal"
+execution_mode = "supervised"
+agent = "demo"
+
+[[triggers]]
+type = "cron"
+expression = "0 20 * * *"
