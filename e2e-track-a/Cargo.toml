@@ -1,0 +1,22 @@
+[package]
+name = "e2e-track-a"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Track A closed-loop devnet end-to-end proof for the payments trio (solana-pay-request + spl-transfer-build + payment-watch): reuses the plugins' REAL cores to prove request -> unsigned build -> host sign+broadcast -> payment DETECTED, with the Solana Pay reference threaded end to end."
+
+[[bin]]
+name = "e2e-track-a"
+path = "src/main.rs"
+
+[dependencies]
+solana-pay-request = { path = "../plugins/solana-pay-request" }
+spl-transfer-build = { path = "../plugins/spl-transfer-build" }
+payment-watch = { path = "../plugins/payment-watch" }
+solana-core = { path = "../crates/solana-core" }
+solana-client = "2.1"
+solana-sdk = "2.1"
+bincode = "1"
+serde_json = "1"
+
+[workspace]
