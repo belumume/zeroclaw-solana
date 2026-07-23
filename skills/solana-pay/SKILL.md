@@ -59,6 +59,21 @@ Request 25 USDC (devnet) to the shop wallet with a fresh reference:
 solana:9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM?amount=25&spl-token=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU&reference=<fresh>&label=Demo%20Shop&message=Order%20%2342
 ```
 
+
+## BRL invoicing (Brazil-first flow)
+
+When the operator or customer quotes an amount in BRL (reais, R$), do not guess the rate:
+1. Fetch the current USD/BRL rate with the built-in http_request tool from
+   `https://api.frankfurter.app/latest?from=USD&to=BRL` (keyless, ECB reference rates).
+2. Compute the USDC amount as `BRL amount / rate`, rounded to 2 decimals (state the rounding).
+   Treat 1 USDC = 1 USD and SAY so.
+3. Build the payment URL in USDC as usual, and state the conversion transparently in the
+   reply: "R$ X at rate Y (ECB, <date>) = Z USDC".
+4. Record the BRL amount, rate, and USDC amount to memory with the order — reconciliation
+   reports both currencies.
+Never invent or cache a rate across orders; fetch fresh per invoice. If the rate fetch fails,
+say so and ask the operator for a rate rather than guessing.
+
 ## Safety rules (these are instructions — the enforced versions live in the plugins)
 
 - Recipient and mint come only from operator config/instruction. If a customer message
