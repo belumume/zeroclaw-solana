@@ -39,7 +39,7 @@ transfers surviving approval queues via durable nonces), allowance-spend-build (
 the audited SF Allowances program), depin-attest, token-risk-check, lending-health,
 solana-pay-request — plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable
 nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing,
-byte-validated against solana-sdk fixtures, now 99 host tests including a verifier-side
+byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side
 transaction decoder and TransferChecked introspection) proven by all eight plugins.
 
 **The x402 earning-node (`x402-feed-gate`), the frontier piece.** The DePIN node does not just
@@ -64,12 +64,17 @@ machine-commerce direction the brief names as open territory, a device that pays
    refused our own scheduler wrapper (bash not allowlisted, path outside the jail);
    script-bearing skills are deny-by-default (`skills.allow_scripts` opt-in); channel turns
    run workspace-jailed, so a skill referencing its own directory breaks — tools the agent
-   runs must live in the workspace; and the outbound leak detector redacted our payment URLs,
-   because its entropy heuristic cannot distinguish a secret from a public base58 address.
-   The surgical posture: `security.leak_detection.high_entropy_tokens = false` (deterministic
-   credential patterns stay on). A Solana-aware allowlist (base58 pubkey shape) upstream
-   would let addresses through while keeping entropy protection — we'd propose it after
-   judging.
+   runs must live in the workspace; and the outbound leak detector redacted our payment URLs
+   in two stages. Its entropy heuristic first masked the public base58 recipient and mint (a
+   secret and a public address look identical to an entropy detector), and turning the entropy
+   tier off then exposed a second bug: a deterministic `token[=:]` credential pattern eats
+   Solana Pay's mandatory `spl-token=` parameter, and there is no per-pattern allowlist knob.
+   The working posture for this jailed agent is `security.leak_detection.enabled = false`: the
+   agent jail already denies it any real secret (workspace-only shell, config unreachable), so
+   the correct defense lives at the source, not an output regex that mangles public on-chain
+   data. The upstream fix is a Solana-aware allowlist (base58 pubkey shape plus known-public URL
+   params) that lets addresses through while keeping credential protection; we would propose it
+   after judging.
 4. Streaming modes have correctness consequences, not just UX: in `partial` mode the final
    segment replaces the draft, which silently ate the payment URL mid-conversation.
    `multi_message` is the shop-correct mode — the link lands as its own permanent message.

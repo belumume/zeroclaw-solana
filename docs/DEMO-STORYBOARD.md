@@ -54,7 +54,7 @@ explorer tab; VO = voiceover (user's voice, tight, no filler). Total budget 175s
 - Lower-third: "x402 machine-commerce · verified on-chain · replay refused"
 
 ## Beat 5 — run it yourself (2:20–2:55, 35s) REPRODUCIBILITY (15%) + close
-- [TERM] fast scroll of QUICKSTART; show `cargo test` (99 core + gate) green, `zeroclaw sop
+- [TERM] fast scroll of QUICKSTART; show `cargo test` (89 core + 10 gate) green, `zeroclaw sop
   validate` green.
 - VO: "Eight plugins, a shared wasm-native Solana core, two on-chain programs, all reproducible
   from the repo in an evening. Correct layering: the payment link is a skill, not a plugin,
@@ -68,9 +68,9 @@ explorer tab; VO = voiceover (user's voice, tight, no filler). Total budget 175s
 | injection refusal | docs/transcripts/injection-refund-redirect.md | verbatim; attacker addr 0 tool calls |
 | feed sequence | explorer of CfWaZAQ9… | the seq shown in the same run's read |
 | DePIN settle tx err | getTransaction | None |
-| x402 settlement sig | .devnet-proof/x402-demo.txt | 5ss8wKQo… (or the run's own sig) |
+| x402 settlement sig | docs/DEVNET-PROOF.md (committed, public) | 5ss8wKQo… (or the run's own sig) |
 | replay result | live gate | NonceReused |
-| test counts | cargo test output | 99 core + 10 gate |
+| test counts | cargo test output | 89 core + 10 gate |
 
 ## Craft notes (per legibility rules)
 - Lead with the outcome (beat 1), demote metrics to lower-thirds. Let the wow breathe 1-2s

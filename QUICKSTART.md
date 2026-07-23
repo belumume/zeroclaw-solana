@@ -6,14 +6,22 @@ talking node** (device-signed on-chain sensor feed + consumer) and the **shop te
 a Linux box or WSL2 Ubuntu. No step needs a secret of ours; everywhere a key appears you
 create your own.
 
+**Fastest path to "seeing it work" (5 min, after the one-time build in step 1):** run
+`cargo test` across `crates/solana-core` and `x402-feed-gate` (all green, no network), then
+`zeroclaw sop validate`. To see the live chain instead of rebuilding, open any explorer link
+in `docs/DEVNET-PROOF.md` — the programs, the feed sequence history, and the x402 settlement
+are all public devnet. The full evening path (host + plugins + a wired bot + a live turn) is
+steps 1-7 below.
+
 ## 0. Prerequisites (10 min)
 - Rust stable ≥ 1.96 (`rustup update stable`), plus `rustup target add wasm32-wasip2`
 - A Telegram bot token (@BotFather → `/newbot`, 2 minutes)
 - A funded **devnet** keypair for the operator (`solana-keygen new`, `solana airdrop 2 --url devnet`)
 
 ## 1. Build the host with plugin support (15–20 min, one-time)
-Plugins are not in release binaries. From ZeroClaw source (v0.8.3):
+Plugins are not in release binaries, so build the host from source at the pinned release:
 ```
+git clone https://github.com/zeroclaw-labs/zeroclaw && cd zeroclaw && git checkout v0.8.3
 cargo build --release --features plugins-wasm,plugins-wasm-cranelift
 ```
 The umbrella feature alone integrates the runtime **without a JIT backend** — every plugin
@@ -39,10 +47,12 @@ zeroclaw config set agents.demo.model_provider "anthropic.default"
 zeroclaw config set --no-interactive providers.models.anthropic.default.api_key <YOUR_KEY>
 zeroclaw config set providers.models.anthropic.default.model claude-sonnet-5
 ```
-Auto-approve reads and the publish tool; keep every spend builder human-gated:
+Auto-approve reads and the publish tool; keep every spend builder human-gated. The shop's
+payment link comes from the `solana-pay` **skill**, not a plugin (the tier demotion in the
+write-up), so `solana_pay_request` is deliberately absent here:
 ```
 zeroclaw config set --no-interactive risk_profiles.demo.auto_approve \
-  '["solana_pay_request","token_risk_check","kamino_lending_health","payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_add","cron_list","glob_search","file_read","http_request","web_fetch","calculator"]'
+  '["token_risk_check","kamino_lending_health","payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_add","cron_list","glob_search","file_read","http_request","web_fetch","calculator"]'
 ```
 `zeroclaw security status --agent demo` shows the whole posture.
 

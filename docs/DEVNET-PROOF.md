@@ -1,0 +1,51 @@
+# Live devnet proof (clickable on-chain evidence)
+
+Every claim below is a public Solana **devnet** transaction or account. Click any link; no
+account of ours needs to be trusted, and nothing here is a secret (operator keypairs stay
+local). Set the explorer cluster to **devnet**.
+
+## On-chain programs (DePIN oracle)
+| Program | Address | Explorer |
+|---|---|---|
+| `zeroclaw_oracle` | `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn` | https://explorer.solana.com/address/EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn?cluster=devnet |
+| `consumer_example` | `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt` | https://explorer.solana.com/address/B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt?cluster=devnet |
+| Device feed PDA (`["feed", device]`) | `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` | https://explorer.solana.com/address/CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU?cluster=devnet |
+
+Both programs carry an on-chain **Anchor IDL** (so the explorer decodes the instructions, not
+"Unknown") and an embedded **security.txt**:
+- oracle IDL account `DRaviitdm5rojHS7YGTQxG8Ho26g8PdAdqodWoLaaKtJ`
+- consumer IDL account `GHrkqYsBWp55eJCZg3vgYzGvoQELDUfu2kRQqpBn7tr8`
+
+## The DePIN feed has been publishing on a schedule (the "yours, running" proof)
+Each is a device-signed `publish_reading` landing a new monotonic sequence on the feed PDA.
+The feed account stores only the LATEST reading, so the *sequence history* is the ledger:
+
+| UTC | seq | value | Settlement tx |
+|---|---|---|---|
+| 2026-07-23T02:42Z | 10 | 29.0C | [2pgdXYAS…](https://explorer.solana.com/tx/2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH?cluster=devnet) |
+| 2026-07-23T06:28Z | 11 | 36.2C | [29iMd5HU…](https://explorer.solana.com/tx/29iMd5HUCDqizFNsSiAXKRquoZoTwGyHvoyh5iamAJZqPh6oWKfyUvZFbNxXk4cYJsnPnrjBRYfrdsjSnACrWh6D?cluster=devnet) |
+| 2026-07-23T06:30Z | 12 | 36.8C | [24iLczeW…](https://explorer.solana.com/tx/24iLczeWeaiN6LEpfgjZd4wLdneJ8Ym4UjJHHbop3f6YFzD3SaF6fJ1vg32nmnpD2tWs6Mk5DvJnBBn5945rD1XH?cluster=devnet) |
+| 2026-07-23T08:44Z | 13 | 41.1C | [2j9emSvs…](https://explorer.solana.com/tx/2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E?cluster=devnet) |
+| 2026-07-23T14:44Z | 14 | 39.4C | [5qTeyv2u…](https://explorer.solana.com/tx/5qTeyv2uFpvTPgxGj9WNoSsMhEq2HSPpPo3ydjoT1adrM93fAZo23zNJisRyoC1x4e52h3PjjkBPpFzQmF8WSNeY?cluster=devnet) |
+
+(The device signs each reading inside the wasm sandbox; the host completes the fee-payer slot
+and broadcasts. Replay of a signed publish is refused on-chain by the strictly-increasing
+sequence guard, error `0x1771 = StaleSequence`.)
+
+## The x402 earning-node settled a real paid read (machine commerce)
+The node sold one reading over x402: a 402 challenge, a client-signed stablecoin payment, and
+on-chain settlement before the reading was served.
+
+- Settlement tx `5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc`
+  (slot 478350917, `err: None`):
+  https://explorer.solana.com/tx/5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc?cluster=devnet
+- A replayed payment was refused `NonceReused` (the payment's memo nonce is single-use).
+- Public parties: buyer `EDPAQadqVyf3MVgwuqxtDfxg6Fq1f3mECfUumYZJjhwS`, seller receiving wallet
+  `C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ`, demo mint
+  `6Anrqvy3BvG2QvK9k6sGvRYndFwiSudw2JMnDMhbdAK` (a purpose-created 6-decimal devnet mint so the
+  full settlement path runs without needing a specific USDC balance; the code is mint-agnostic).
+
+## How to re-verify
+Open any link above with the explorer cluster set to devnet. The programs are executable
+(owner `BPFLoaderUpgradeable`), the feed PDA decodes via the on-chain IDL, and the settlement
+tx shows the TransferChecked to the seller's associated token account.
