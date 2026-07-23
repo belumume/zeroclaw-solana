@@ -1,0 +1,21 @@
+[package]
+name = "x402-feed-gate"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "An x402 machine-paywall that lets a ZeroClaw DePIN node SELL its device-signed on-chain feed per request: HTTP 402 + a price menu, payment verified purely over Solana JSON-RPC (no facilitator, no key custody), a per-payer daily cap enforced in code."
+publish = false
+
+[[bin]]
+name = "x402-feed-gate"
+path = "src/main.rs"
+
+[dependencies]
+solana-core = { path = "../crates/solana-core" }
+tiny_http = "0.12"
+ureq = { version = "2.10", features = ["tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+[dev-dependencies]

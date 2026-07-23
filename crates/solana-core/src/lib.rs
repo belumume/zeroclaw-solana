@@ -30,6 +30,8 @@ pub mod rpc;
 pub mod sanitize;
 pub mod shortvec;
 pub mod signing;
+pub mod token;
+pub mod tx_decode;
 #[cfg(target_family = "wasm")]
 pub mod transport;
 
@@ -39,11 +41,15 @@ pub use message::{compile, CompiledMessage, MessageError};
 pub use mint::{decode_mint, DecodedMint, MintError, RawExtension};
 pub use nonce::{decode_nonce_account, NonceError, NonceState};
 pub use pubkey::{Pubkey, PubkeyError};
-pub use rpc::{AccountInfo, Commitment, MockTransport, RpcError, RpcTransport, SolanaRpc};
+pub use rpc::{
+    AccountInfo, Commitment, MockTransport, RpcError, RpcTransport, SignatureStatus, SolanaRpc,
+};
 pub use sanitize::{label_untrusted, sanitize_onchain, Sanitized, DEFAULT_LABEL_MAX};
 pub use signing::{
     pubkey_from_seed, serialize_transaction, sign_message, verify_signature, SigningError,
 };
+pub use token::{find_payment, has_memo, FoundPayment, PaymentError};
+pub use tx_decode::{decode_transaction, DecodeError, DecodedTransaction};
 #[cfg(target_family = "wasm")]
 pub use transport::WakiTransport;
 

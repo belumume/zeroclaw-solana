@@ -234,6 +234,83 @@ impl<T: RpcTransport> SolanaRpc<T> {
                 .unwrap_or(0),
         })
     }
+
+    /// Simulate a transaction without broadcasting. Returns `Ok(None)` when the
+    /// simulation succeeded (no `err`), or `Ok(Some(err_string))` when the
+    /// runtime rejected it. Transport/parse failures surface as `Err`.
+    ///
+    /// The verifier runs this before `send_transaction` so a payment that would
+    /// fail on-chain is rejected up front rather than broadcast and lost.
+    pub fn simulate_transaction(&self, tx_bytes: &[u8]) -> Result<Option<String>, RpcError> {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(tx_bytes);
+        let params = serde_json::json!([
+            encoded,
+            {
+                "encoding": "base64",
+                "commitment": self.commitment.as_str(),
+                "replaceRecentBlockhash": false,
+                "sigVerify": true,
+            },
+        ]);
+        let result = self.call("simulateTransaction", params)?;
+        let value = result
+            .get("value")
+            .ok_or_else(|| RpcError::Parse("simulateTransaction: no value".into()))?;
+        match value.get("err") {
+            None | Some(serde_json::Value::Null) => Ok(None),
+            Some(err) => Ok(Some(err.to_string())),
+        }
+    }
+
+    /// Fetch the confirmation status of one signature. Returns `Ok(None)` when
+    /// the signature is not yet known to the cluster, or `Ok(Some(status))`
+    /// with the confirmation level (`processed` / `confirmed` / `finalized`)
+    /// and any execution error.
+    pub fn get_signature_status(&self, signature: &str) -> Result<Option<SignatureStatus>, RpcError> {
+        if signature.len() > 96 {
+            return Err(RpcError::Parse("get_signature_status: oversized signature".into()));
+        }
+        let params = serde_json::json!([[signature], { "searchTransactionHistory": true }]);
+        let result = self.call("getSignatureStatuses", params)?;
+        let first = result
+            .get("value")
+            .and_then(|v| v.get(0))
+            .ok_or_else(|| RpcError::Parse("getSignatureStatuses: no value[0]".into()))?;
+        if first.is_null() {
+            return Ok(None);
+        }
+        let confirmation = first
+            .get("confirmationStatus")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("processed")
+            .to_string();
+        let err = first.get("err").and_then(|e| {
+            if e.is_null() {
+                None
+            } else {
+                Some(e.to_string())
+            }
+        });
+        Ok(Some(SignatureStatus { confirmation, err }))
+    }
+}
+
+/// Confirmation status of a transaction signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignatureStatus {
+    /// `processed` | `confirmed` | `finalized`.
+    pub confirmation: String,
+    /// Execution error string when the transaction failed, else `None`.
+    pub err: Option<String>,
+}
+
+impl SignatureStatus {
+    /// Whether the signature has reached at least `confirmed` (i.e. not merely
+    /// `processed`) and carried no execution error.
+    pub fn is_settled(&self) -> bool {
+        self.err.is_none()
+            && matches!(self.confirmation.as_str(), "confirmed" | "finalized")
+    }
 }
 
 fn parse_account(value: &serde_json::Value) -> Result<AccountInfo, RpcError> {
