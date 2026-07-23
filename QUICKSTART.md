@@ -113,4 +113,5 @@ program (`act_on_feed`) proves the feed is consumable, not a memo.
 | payment link arrives as `[REDACTED_…]` | leak detector (step 4) |
 | link appeared while streaming, gone in final message | `stream_mode partial` replacement — use `multi_message` |
 | `sop list` says none exist, files are right there | SOP.toml needs a `[sop]` table + **root-level** `[[triggers]]`; SOP.md needs a `## Steps` heading with `1. **Title** — body` items |
+| agent loops retrying an http fetch | `http_request` does not follow redirects — a 301 host move returns Cloudflare HTML; point skills at the exact current host |
 | bot replays an old/broken link | it memorized its own earlier output; `zeroclaw memory clear --key <id> --yes` |

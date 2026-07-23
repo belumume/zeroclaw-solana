@@ -64,7 +64,7 @@ solana:9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM?amount=25&spl-token=4zMMC9sr
 
 When the operator or customer quotes an amount in BRL (reais, R$), do not guess the rate:
 1. Fetch the current USD/BRL rate with the built-in http_request tool from
-   `https://api.frankfurter.app/latest?from=USD&to=BRL` (keyless, ECB reference rates).
+   `https://api.frankfurter.dev/v1/latest?base=USD&symbols=BRL` (the old api.frankfurter.app host 301-redirects and the http tool does not follow redirects — use the .dev host exactly) (keyless, ECB reference rates).
 2. Compute the USDC amount as `BRL amount / rate`, rounded to 2 decimals (state the rounding).
    Treat 1 USDC = 1 USD and SAY so.
 3. Build the payment URL in USDC as usual, and state the conversion transparently in the
