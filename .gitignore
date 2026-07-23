@@ -1,57 +1,59 @@
-# === secrets / keys — NEVER commit ===
-.secrets/
-.devnet-proof/
-.oci/
-*.pem
-*.key
-*.env
-*_key.json
-id.json
-oracle-cloud-pw.txt
-.program-keys/
-*-keypair.json
-
-# === local WSL build helpers (contain machine-specific paths) ===
-.build-env.sh
-.wsl-run.sh
-.validator.sh
-.deploy.sh
-.probe-toolchain.sh
-onchain-build.sh
-onchain-pin.sh
-
-# === internal strategy / working docs — NEVER go to the public fork ===
-BUILD-STATE.md
-HANDOFF-POST-COMPACT.md
-CLAUDE.local.md
-goal.txt
-docs/dossier-raw.json
-docs/grounded-facts.json
-docs/BUILD-PATTERNS.md
-docs/SECURITY-PATTERNS.md
-docs/DEMO-SCRIPT.md
-docs/LISTING-VERBATIM.md
-docs/listing-verbatim.json
-docs/COMPLIANCE-AUDIT.md
-docs/BUILD-JOURNAL.md
-docs/TRACK-E-MATRIX.md
-docs/LISTING-DELTA-2026-07-22.md
-.tools/
-solana-claw-superteambr-export-3.txt
-*export*.txt
-.compound-tmp/
-
-# === propagated hookify/behavioral config (not part of the deliverable) ===
-.claude/
-.ruff_cache/
-
-# === Rust build artifacts (reproducible; keep Cargo.lock for --locked builds) ===
-target/
-**/target/
-*.wasm
 
 # === editor / OS ===
+# === internal strategy / working docs — NEVER go to the public fork ===
+# === local WSL build helpers (contain machine-specific paths) ===
+# === propagated hookify/behavioral config (not part of the deliverable) ===
+# === Rust build artifacts (reproducible; keep Cargo.lock for --locked builds) ===
+# === secrets / keys — NEVER commit ===
+**/target/
+*.env
+*.key
+*.pem
+*.wasm
+*_key.json
+*export*.txt
+*-keypair.json
+.build-env.sh
+.claude/
+.compound-tmp/
+.deploy.sh
+.devnet-proof/
 .DS_Store
-.vscode/
 .idea/
+.oci/
+.probe-toolchain.sh
+.program-keys/
+.ruff_cache/
+.secrets/
+.tools/
+.validator.sh
+.vscode/
 .wsl-*.sh
+.wsl-qr.py
+.wsl-run.sh
+BUILD-STATE.md
+CLAUDE.local.md
+docs/BUILD-JOURNAL.md
+docs/BUILD-JOURNAL.md
+docs/BUILD-PATTERNS.md
+docs/COMPLIANCE-AUDIT.md
+docs/COMPLIANCE-AUDIT.md
+docs/DEMO-SCRIPT.md
+docs/dossier-raw.json
+docs/grounded-facts.json
+docs/LISTING-DELTA-2026-07-22.md
+docs/LISTING-DELTA-2026-07-22.md
+docs/listing-verbatim.json
+docs/LISTING-VERBATIM.md
+docs/SECURITY-PATTERNS.md
+docs/TRACK-E-MATRIX.md
+docs/TRACK-E-MATRIX.md
+docs/USE-CASES.md
+goal.txt
+HANDOFF-POST-COMPACT.md
+id.json
+onchain-build.sh
+onchain-pin.sh
+oracle-cloud-pw.txt
+solana-claw-superteambr-export-3.txt
+target/
