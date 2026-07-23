@@ -39,7 +39,10 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
 1. Operator or SOP states: who pays, how much, which token.
 2. Generate a fresh reference: `python3 scripts/gen_reference.py` → one base58 line.
 3. Assemble the URL exactly per the format above.
-4. Send the URL (and its QR if the channel supports images) to the customer.
+4. Send the URL (and its QR if the channel supports images) to the customer. Your FINAL
+   reply message must contain the complete `solana:` URL verbatim — never only a summary
+   like "link's ready"; on streaming channels intermediate drafts are replaced, so a URL
+   that appears only mid-draft is lost.
 5. Hand the reference to `payment_watch` to verify settlement on-chain. Never tell the
    customer "paid" from their say-so — only from the watch result.
 6. Record `{reference, amount, mint, customer, timestamp}` to memory for the evening
