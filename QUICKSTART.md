@@ -42,7 +42,7 @@ zeroclaw config set providers.models.anthropic.default.model claude-sonnet-5
 Auto-approve reads and the publish tool; keep every spend builder human-gated:
 ```
 zeroclaw config set --no-interactive risk_profiles.demo.auto_approve \
-  '["solana_pay_request","token_risk_check","kamino_lending_health","payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_add","cron_list","glob_search","file_read","http_request","web_fetch"]'
+  '["solana_pay_request","token_risk_check","kamino_lending_health","payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_add","cron_list","glob_search","file_read","http_request","web_fetch","calculator"]'
 ```
 `zeroclaw security status --agent demo` shows the whole posture.
 
