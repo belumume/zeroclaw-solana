@@ -2,34 +2,37 @@
 audience: internal
 ---
 
-# Showcase write-up DRAFT v1 (structure = the revised brief's required elements, verbatim order)
+# Showcase write-up (structure = the revised brief's required elements, verbatim order)
 
-> Status: full draft for the wasm-pains + custody sections; skeletons elsewhere get filled as
-> the remaining assets land (SOP graph, BRL touch, Pi arrival). Secrets redacted throughout.
+> Status: CONTENT-FINAL and de-slopped (0 em dashes, 0 flagged vocab). Every required section
+> is filled: what / who / features / what-built / wasm-pains / layering / custody+threat /
+> custody-design-space / x402 / Brazil / reproduction links / DEVNET-PROOF. Secrets redacted
+> throughout. Two mechanical steps remain at publish (see the comment at the end): fill the repo
+> URL, strip this internal header.
 
 ## What it does
 Two use cases, one suite, both running daily since July 23:
-1. **The DePIN talking node** — a device (Raspberry Pi; interim host) that measures its
+1. **The DePIN talking node**: a device (Raspberry Pi; interim host) that measures its
    environment, signs each reading with its own key inside a wasm sandbox, and publishes a
-   typed on-chain feed another program consumes — and you can message it on Telegram to ask
+   typed on-chain feed another program consumes, and you can message it on Telegram to ask
    what it saw and why a reading was refused.
-2. **The shop terminal** — a merchant's ZeroClaw on Telegram and WhatsApp: payment requests
+2. **The shop terminal**: a merchant's ZeroClaw on Telegram and WhatsApp: payment requests
    via Solana Pay (skill), settlement verified on-chain (plugin), refunds human-approved and
    bounded by the audited on-chain Allowances program even under full prompt compromise.
 
 ## Who it's for
-The node: anyone putting a sensor's word on-chain — DePIN operators, environmental telemetry,
-proof-of-physical-work — without trusting the host machine's LLM with a spend key. The
+The node: anyone putting a sensor's word on-chain: DePIN operators, environmental telemetry,
+proof-of-physical-work, without trusting the host machine's LLM with a spend key. The
 terminal: a small merchant who wants "charge table 4, 25 USDC" to just work, with the
 blast radius of a hacked agent capped by on-chain math, not vibes.
 
 ## Which ZeroClaw features it uses (stock first, per the ladder)
 - Stock binary: channels (Telegram, WhatsApp Web), skills, SOPs with cron triggers +
   human-approval checkpoints, memory, the daemon + gateway, `security status` posture.
-- One skill: `solana-pay` (URL + reference construction — string work, deliberately NOT wasm).
+- One skill: `solana-pay` (URL + reference construction, string work, deliberately NOT wasm).
 - Wasm plugins only where the ladder demands bounded code (below).
-- Source-built host with `--features plugins-wasm,plugins-wasm-cranelift` — the exact bar the
-  brief says judges score Tier-3 against.
+- Source-built host with `--features plugins-wasm,plugins-wasm-cranelift` (the exact bar the
+  brief says judges score Tier-3 against).
 
 ## What we had to build (and what fought us)
 **Plugins (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing,
@@ -37,7 +40,7 @@ durable nonce, range/kind/sequence fail-closed gates), payment-watch (reference-
 verification through the OWASP-LLM01 response sanitizer), spl-transfer-build (unsigned
 transfers surviving approval queues via durable nonces), allowance-spend-build (spends under
 the audited SF Allowances program), depin-attest, token-risk-check, lending-health,
-solana-pay-request — plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable
+solana-pay-request. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable
 nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing,
 byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side
 transaction decoder and TransferChecked introspection) proven by all eight plugins.
@@ -57,13 +60,13 @@ machine-commerce direction the brief names as open territory, a device that pays
 1. `--features plugins-wasm` alone is a trap: the runtime integrates but no JIT backend
    ships, so every plugin loads as discovered-but-unregistered ("failed to load code").
    The working invocation is `plugins-wasm,plugins-wasm-cranelift`.
-2. The component boundary was where the budget went, as the brief predicted — WIT vendoring
+2. The component boundary was where the budget went, as the brief predicted: WIT vendoring
    (wit/v0 pinned), shaped outputs to survive "judges will count tokens," and no sockets
    (waki blocking wasi:http only).
 3. The host's jails bit us four separate times, and each bite is a feature: agent cron
    refused our own scheduler wrapper (bash not allowlisted, path outside the jail);
    script-bearing skills are deny-by-default (`skills.allow_scripts` opt-in); channel turns
-   run workspace-jailed, so a skill referencing its own directory breaks — tools the agent
+   run workspace-jailed, so a skill referencing its own directory breaks; tools the agent
    runs must live in the workspace; and the outbound leak detector redacted our payment URLs
    in two stages. Its entropy heuristic first masked the public base58 recipient and mint (a
    secret and a public address look identical to an entropy detector), and turning the entropy
@@ -77,7 +80,7 @@ machine-commerce direction the brief names as open territory, a device that pays
    after judging.
 4. Streaming modes have correctness consequences, not just UX: in `partial` mode the final
    segment replaces the draft, which silently ate the payment URL mid-conversation.
-   `multi_message` is the shop-correct mode — the link lands as its own permanent message.
+   `multi_message` is the shop-correct mode: the link lands as its own permanent message.
 5. Durable nonces end-to-end: AdvanceNonceAccount ordering, one-nonce-one-inflight (parallel
    approvals need a nonce account each), and the read-back race (`sendTransaction` returns at
    processed; read at confirmed).
@@ -117,6 +120,37 @@ Declared per component and defended in each README with a prompt-injection trans
 - Third-party trust declared: none held; RPC endpoints and open-meteo are read-only inputs;
   no MCP servers in the loop.
 
+## Custody design space (mapped to the brief's named patterns)
+The brief names three experimental-edge custody patterns; we built all three and name them in
+its own vocabulary so the mechanisms are legible, not buried:
+- **Policy wallets / on-chain spend caps.** Spends run under the audited Solana Foundation
+  Allowances program, so the on-chain program (not the plugin, not the LLM) bounds every
+  transfer. Host-side, the device and session keys are jailed out of the model's reach.
+- **Transaction firewall.** The agent never holds a broadcast-ready transaction: every builder
+  returns an unsigned (or device-partial) transaction only the host can complete and send, after
+  the human gate. The build/sign boundary is a firewall a compromised prompt cannot cross.
+- **Fail-closed action certification.** The x402 gate certifies the exact serialized transaction
+  against its challenge (destination ATA, mint, amount, single-use nonce) before settling, and
+  every decode path fails closed on malformed bytes. A read is served only after the payment is
+  certified on-chain.
+
+Scoped non-goals (deliberate, so the omissions read as decisions, not oversights):
+- **No running T2 fund-signer.** The suite lands in the T0/T1 sweet spot the brief says most of
+  the prize money targets, and sidesteps the inject-into-funds disqualifier.
+- **SF Allowances over Squads.** We use the brief-endorsed audited Allowances program for
+  agent-spend caps rather than a Squads multisig; Squads is the heavier "add last" human
+  co-signer path, not the agent-spend-cap primitive this needs.
+- **Solana Pay URL, not a Blink/Action.** The `solana:` transfer-request IS the zero-key receive
+  rail; a device-co-signed oracle publish structurally cannot be a Blink (it needs a device
+  signature, not a wallet's).
+- **No reputation-gated signing, privacy spend caps, or Agent Registry integration** (brief-named
+  edges), out of scope for a two-use-case showcase, not overlooked.
+
+**Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC at a stated
+rate source (ECB reference), so a merchant charges "R$120" and the customer pays the USDC
+equivalent, the PIX/BRL-invoicing flow the brief calls especially welcome. Shipped and verified
+live (order #51: R$120 at 5.0797 -> 23.62 USDC).
+
 ## Reproducibility (links)
 `QUICKSTART.md` reproduces both use cases from a clean machine in an evening: source-build
 features, plugin install layout, agent/risk-profile config, channel wiring including the
@@ -126,6 +160,19 @@ It ends with a sharp-edges troubleshooting table where every row is a real cost 
 Secrets are the operator's own; no secret of ours is needed at any step.
 
 ## Links
-Repo (plugins + solana-core + onchain programs + skills + e2e harnesses): [repo URL]
-Live devnet: oracle `EFCRmE5w...`, consumer `B2scuv95...`, feed `CfWaZAQ9...` (seq history =
-the daily-runs ledger), IDLs on-chain, security.txt embedded.
+Repo (plugins + solana-core + onchain programs + skills + e2e harnesses + x402-feed-gate):
+`<repo URL, filled at publish>`
+
+Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`):
+- oracle program `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn`, consumer
+  `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`, feed PDA
+  `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU`; Anchor IDLs on-chain; security.txt embedded.
+- the feed's sequence history (seq 10-14) is the daily-runs ledger.
+- x402 settlement `5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc`
+  (err None); a replayed payment refused NonceReused.
+
+Reproduction: `QUICKSTART.md` (host + plugins + skill + SOP + both channels + the x402 node).
+
+<!-- FINAL BEFORE SUBMISSION: (1) fill the repo URL above at push time; (2) strip the
+`audience: internal` header. Content is otherwise submission-ready and de-slopped. -->
+
