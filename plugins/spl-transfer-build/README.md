@@ -67,6 +67,22 @@ The instruction list, in order:
 and, in nonce mode, the nonce authority), or 2 if a distinct nonce authority is configured.
 Every slot is empty; the host fills them.
 
+## Concurrency posture (durable-nonce, deliberate non-goals)
+
+A durable nonce serializes: one nonce account backs exactly ONE in-flight transaction, because
+the first one to land advances the stored nonce and invalidates every other transaction built
+against it. This suite's shipped posture is a serial approval queue: one pending transfer at a
+time per nonce account, which is correct for a single merchant terminal. Two deliberate non-goals
+follow, stated so they read as decisions:
+
+- **Parallel approvals need a nonce POOL, not one nonce.** Building several transfers against a
+  single configured nonce and approving them in parallel means all but the first fail once the
+  nonce advances. Scaling to concurrent approvals is a nonce-pool feature (one nonce account per
+  in-flight transaction); it is out of scope for this showcase.
+- **Nonce-account rent is the operator's, once.** A durable nonce account is rent-exempt funded
+  once by the operator; this plugin never creates or closes it, it only references a configured,
+  already-funded nonce account (its authority is verified on-chain before building).
+
 Both instruction encodings this plugin hand-rolls (`transfer_checked` tag 12 with
 `[amount u64 LE][decimals u8]`, and `CreateIdempotent` discriminant 1 with its six-account
 order) are known-answer-validated against the canonical `spl_token_interface` and
