@@ -84,8 +84,11 @@ cp -r skills/solana-pay ~/.zeroclaw/shared/skills/default/solana-pay
 mkdir -p ~/.zeroclaw/agents/demo/workspace/tools
 cp skills/solana-pay/scripts/gen_reference.py ~/.zeroclaw/agents/demo/workspace/tools/
 cp skills/solana-pay/scripts/pay_link.py ~/.zeroclaw/agents/demo/workspace/tools/  # wraps solana: -> tappable pay-page link
-cp -r sops/evening-reconciliation ~/.zeroclaw/agents/demo/workspace/sops/
-cp -r sops/evening-reconciliation ~/.zeroclaw/data/sops/        # CLI tooling reads here
+cp x402-feed-gate/scripts/summarize_earnings.py ~/.zeroclaw/agents/demo/workspace/tools/  # x402 earnings report (SOP reads it)
+for s in evening-reconciliation node-earnings-report; do
+  cp -r sops/$s ~/.zeroclaw/agents/demo/workspace/sops/
+  cp -r sops/$s ~/.zeroclaw/data/sops/                          # CLI tooling reads here
+done
 zeroclaw skills test solana-pay      # 3/3
 zeroclaw sop validate                # ✅
 ```
@@ -134,9 +137,13 @@ program (`act_on_feed`) proves the feed is consumable, not a memo.
 Turn the feed into a per-request revenue stream. Build and run the gate:
 ```
 cd x402-feed-gate && cargo build --release --example pay_client
-X402_SELLER_WALLET=<your wallet> X402_MINT=<usdc mint>   X402_FEED_PDA=<your feed> cargo run --release
+X402_SELLER_WALLET=<your wallet> X402_MINT=<usdc mint> X402_FEED_PDA=<your feed> \
+  X402_EARNINGS_LOG=~/.zeroclaw/agents/demo/workspace/x402-earnings.jsonl cargo run --release
 ```
 `GET /price` returns the 402 menu; a client pays with `pay_client` (builds + signs a
 TransferChecked + Memo) and retries `GET /reading` with the `X-PAYMENT` header. The gate
 verifies the bytes, settles on-chain, and serves the reading. No facilitator, no key custody.
 See `x402-feed-gate/README.md` for the threat model and the live devnet proof.
+`X402_EARNINGS_LOG` points the gate's per-sale ledger at the agent workspace, so the
+`node-earnings-report` SOP (installed in step 5) can read it and announce the node's daily
+x402 revenue to the owner's channel ("the node that pays for itself"). Runs on a 20:00 cron.
