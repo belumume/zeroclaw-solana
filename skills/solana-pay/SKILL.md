@@ -31,13 +31,16 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
   the paying customer.
 - `reference` — REQUIRED for this shop: a unique base58 key generated fresh per payment.
   It is how settlement is found on-chain later. Generate it with:
-  `python3 scripts/gen_reference.py`
+  `python3 tools/gen_reference.py`
+  (the generator lives in your workspace `tools/` directory; channel turns run jailed to the
+  workspace, so use exactly this relative path — do not go looking for it elsewhere, and do
+  not substitute openssl or inline python, which the security policy blocks)
 - `label` / `message` — URL-encode them; keep under 100 chars each.
 
 ## The merchant flow
 
 1. Operator or SOP states: who pays, how much, which token.
-2. Generate a fresh reference: `python3 scripts/gen_reference.py` → one base58 line.
+2. Generate a fresh reference: `python3 tools/gen_reference.py` → one base58 line.
 3. Assemble the URL exactly per the format above.
 4. Send the URL (and its QR if the channel supports images) to the customer. Your FINAL
    reply message must contain the complete `solana:` URL verbatim — never only a summary
