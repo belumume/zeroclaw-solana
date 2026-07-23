@@ -46,6 +46,21 @@ on-chain settlement before the reading was served.
   `6Anrqvy3BvG2QvK9k6sGvRYndFwiSudw2JMnDMhbdAK` (a purpose-created 6-decimal devnet mint so the
   full settlement path runs without needing a specific USDC balance; the code is mint-agnostic).
 
+## The shop terminal took a real payment (Track A, reference-threaded)
+The full shop flow ran end to end on devnet with the real plugin logic (no reimplementation): a
+Solana Pay request with a fresh reference, an UNSIGNED transfer the agent builds (T1, it never
+holds a broadcast-ready transaction), the host signs and broadcasts, and payment_watch detects
+settlement by matching the reference. A second check with a different reference correctly returns
+NOT_YET, so a payment is confirmed only from the on-chain match, never the customer's say-so.
+
+- Transfer tx `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`
+  (payment_watch verdict PAID, reference matched, memo invoice-e2e-1):
+  https://explorer.solana.com/tx/4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS?cluster=devnet
+- Reference key (threaded through all three steps) `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`:
+  https://explorer.solana.com/address/6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11?cluster=devnet
+- Reproduce: `E2E_RPC=https://api.devnet.solana.com E2E_FUNDER=<operator.json> cargo run --release`
+  in `e2e-track-a/` reruns the whole flow against live devnet.
+
 ## How to re-verify
 Open any link above with the explorer cluster set to devnet. The programs are executable
 (owner `BPFLoaderUpgradeable`), the feed PDA decodes via the on-chain IDL, and the settlement
