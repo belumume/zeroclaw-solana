@@ -1,0 +1,11 @@
+[sop]
+name = "evening-reconciliation"
+description = "Daily merchant reconciliation: recall the day's open payment references, verify each on-chain, and report paid-vs-open to the owner's channel. Ends at a human checkpoint before any refund could ever be built."
+version = "1.0.0"
+priority = "normal"
+execution_mode = "supervised"
+agent = "demo"
+
+[[triggers]]
+type = "cron"
+expression = "0 21 * * *"
