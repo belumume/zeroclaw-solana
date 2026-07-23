@@ -34,6 +34,8 @@ docs/LISTING-VERBATIM.md
 docs/listing-verbatim.json
 docs/COMPLIANCE-AUDIT.md
 docs/BUILD-JOURNAL.md
+docs/TRACK-E-MATRIX.md
+docs/LISTING-DELTA-2026-07-22.md
 .tools/
 solana-claw-superteambr-export-3.txt
 *export*.txt
@@ -52,3 +54,4 @@ target/
 .DS_Store
 .vscode/
 .idea/
+.wsl-*.sh
