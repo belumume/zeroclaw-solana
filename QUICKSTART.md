@@ -83,9 +83,7 @@ zeroclaw config set agents.demo.skill_bundles '["default"]'
 cp -r skills/solana-pay ~/.zeroclaw/shared/skills/default/solana-pay
 mkdir -p ~/.zeroclaw/agents/demo/workspace/tools
 cp skills/solana-pay/scripts/gen_reference.py ~/.zeroclaw/agents/demo/workspace/tools/
-pip3 install qrcode pillow                      # QR rendering for payment links
-cp skills/solana-pay/scripts/gen_qr.py ~/.zeroclaw/agents/demo/workspace/tools/
-mkdir -p ~/.zeroclaw/agents/demo/workspace/qr
+cp skills/solana-pay/scripts/pay_link.py ~/.zeroclaw/agents/demo/workspace/tools/  # wraps solana: -> tappable pay-page link
 cp -r sops/evening-reconciliation ~/.zeroclaw/agents/demo/workspace/sops/
 cp -r sops/evening-reconciliation ~/.zeroclaw/data/sops/        # CLI tooling reads here
 zeroclaw skills test solana-pay      # 3/3
@@ -127,8 +125,10 @@ program (`act_on_feed`) proves the feed is consumable, not a memo.
 | link appeared while streaming, gone in final message | `stream_mode partial` replacement — use `multi_message` |
 | `sop list` says none exist, files are right there | SOP.toml needs a `[sop]` table + **root-level** `[[triggers]]`; SOP.md needs a `## Steps` heading with `1. **Title** — body` items |
 | agent loops retrying an http fetch | `http_request` does not follow redirects — a 301 host move returns Cloudflare HTML; point skills at the exact current host |
-| customer asks how to actually pay | `solana:` URIs are not clickable in chat apps — the QR image + copy-into-wallet ARE the UX; the skill sends both |
+| customer asks how to actually pay | the chat channels are TEXT-ONLY (no image send) and a `solana:` URI is not clickable in chat, so the shop sends a tappable **https pay-page** link (`tools/pay_link.py` wraps the `solana:` URL). The page renders a scannable QR (phone wallets) + a Connect-wallet-and-pay button (desktop extensions). Deploy your own page from `webshop-pay/` (Cloudflare Pages) and set the URL in `pay_link.py`, or reuse the reference deployment |
 | bot replays an old/broken link | it memorized its own earlier output; `zeroclaw memory clear --key <id> --yes` |
+| wallet shows a red "This dApp could be malicious" / "Failed to simulate the results" | NOT a domain verdict — it is a transaction-**simulation** failure. The paying wallet is unfunded or on the wrong network, so the wallet can't preview the tx and shows the red warning. Fix: switch the wallet to **Devnet** and airdrop a little devnet SOL (`solana airdrop 1 <addr> --url devnet`); it clears once the tx simulates. The separate yellow "this domain is new" notice is reputation-based and self-clears in a few days (submit the domain to the wallet's review form to speed it up) |
+| the pay page auto-picks one wallet | it does not anymore — the page enumerates every installed wallet via the **Wallet Standard** (`@wallet-standard/app`) and presents a picker (same mechanism as Jupiter's Unified Wallet Kit), persisting your last choice in `localStorage` |
 
 ## 8. The earning node (x402, optional deepening)
 Turn the feed into a per-request revenue stream. Build and run the gate:

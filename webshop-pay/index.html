@@ -1,24 +1,29 @@
 <!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Pay with Solana</title><style>
 :root{color-scheme:light dark}
 body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f1115;color:#e8eaed;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:20px}
-.card{max-width:390px;width:100%;background:#171a21;border:1px solid #262b36;border-radius:18px;padding:26px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.4)}
+.card{max-width:400px;width:100%;background:#171a21;border:1px solid #262b36;border-radius:18px;padding:26px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.4)}
 h1{font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:#8a93a6;margin:0 0 4px;font-weight:600}
 #label{font-size:22px;font-weight:700;margin:2px 0}
 #amt{font-size:30px;font-weight:800;color:#14f195;margin:6px 0 2px}
 #msg{color:#b6bdca;margin:0 0 14px}
 .paid{font-size:34px;font-weight:800;color:#14f195;margin:18px 0}
+.picklabel{font-size:13px;color:#8a93a6;margin:14px 0 6px;text-align:left}
+.wallet-list{display:flex;flex-direction:column;gap:8px;margin:2px 0 4px}
+button.wallet-btn{display:flex;align-items:center;gap:10px;width:100%;background:#20242e;color:#e8eaed;border:1px solid #333a47;padding:12px 14px;border-radius:12px;font-size:15px;cursor:pointer;text-align:left}
+button.wallet-btn:hover{border-color:#ab9ff2}
+button.wallet-btn:disabled{opacity:.5;cursor:default}
+button.wallet-btn img{width:24px;height:24px;border-radius:6px;flex:0 0 auto}
+.wallet-btn .lastused{margin-left:auto;font-size:11px;color:#8a93a6;font-style:normal}
 #qr{background:#fff;border-radius:12px;padding:10px;display:inline-block;margin:8px 0}
 #qr img{display:block;width:190px;height:190px;image-rendering:pixelated}
 .scan{font-size:13px;color:#8a93a6;margin:4px 0 12px}
 .recip{font-size:13px;color:#8a93a6;margin:4px 0 16px;font-family:ui-monospace,monospace}
-button#pay{width:100%;background:#ab9ff2;color:#1a1035;font-weight:700;border:0;padding:15px;border-radius:12px;font-size:17px;cursor:pointer;margin:4px 0}
-button#pay:disabled{opacity:.55}
 button#copy{width:100%;background:#20242e;color:#e8eaed;border:1px solid #333a47;padding:11px;border-radius:12px;font-size:14px;cursor:pointer;margin:8px 0}
 .or{color:#5c6473;font-size:12px;letter-spacing:.08em;margin:14px 0 8px}
 .status{font-size:13px;color:#b6bdca;min-height:18px;margin:10px 0 0}
 .status.err{color:#ff8a8a}
 .link{color:#14f195;display:inline-block;margin-top:8px}
-.hint{font-size:12.5px;color:#8a93a6;margin:14px 0 0;line-height:1.5}
+.hint{font-size:12.5px;color:#8a93a6;margin:10px 0 0;line-height:1.5;text-align:left}
 .err{color:#ff6b6b}
 .net{display:inline-block;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#f0a35e;border:1px solid #4a3826;border-radius:20px;padding:3px 10px;margin-top:14px}
 </style></head><body>
@@ -27,14 +32,15 @@ button#copy{width:100%;background:#20242e;color:#e8eaed;border:1px solid #333a47
 <div id=label>Payment</div>
 <div id=amt></div>
 <div id=msg></div>
-<button id=pay>Connect wallet &amp; pay</button>
+<div class=picklabel>Pick your wallet</div>
+<div id=wallets class=wallet-list></div>
 <div class=or>OR SCAN WITH A PHONE WALLET</div>
 <div id=qr></div>
-<div class=scan>Open Phantom or Solflare on your phone, scan this.</div>
+<div class=scan>Open your Solana wallet app on your phone, scan this.</div>
 <div class=recip>to <span id=recip></span></div>
 <button id=copy>Copy Solana Pay link</button>
 <div id=status class=status></div>
-<p class=hint>Desktop: click <b>Connect wallet &amp; pay</b> (Phantom/Solflare extension). Phone: scan the QR with your wallet app. Devnet, so your wallet must be on devnet with a little devnet SOL.</p>
+<p class=hint>Every installed Solana wallet is listed above (detected via the Wallet Standard, not hardcoded) &mdash; pick the one you want. Devnet demo: your wallet must be switched to <b>Devnet</b> with a little devnet SOL, or the payment cannot simulate and your wallet will warn it "could be malicious" (that is an unfunded/wrong-network artifact, not a real threat).</p>
 <span class=net>Devnet</span>
 </div>
 <script>//---------------------------------------------------------------------
@@ -2335,12 +2341,18 @@ var qrcode = function() {
     return qrcode;
 }));
 </script><script>
+var WEB3='https://esm.sh/@solana/web3.js@1.95.3';
+var SPL='https://esm.sh/@solana/spl-token@0.4.9';
+var BS58='https://esm.sh/bs58@6.0.0';
+var WSAPP='https://esm.sh/@wallet-standard/app@1.1.0';
 function b64urlDecode(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';try{return decodeURIComponent(escape(atob(s)))}catch(e){return atob(s)}}
 var el=function(id){return document.getElementById(id)};
 var p=new URLSearchParams(location.search);
 var url=p.get('u')?b64urlDecode(p.get('u')):(p.get('url')||'');
 var recip='',amount='',label='Payment',message='',token='',reference='';
 function status(m,cls){el('status').textContent=m;el('status').className='status '+(cls||'')}
+function isSig(s){return typeof s==='string'&&/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(s)}
+function iconOK(u){return typeof u==='string'&&/^data:image\/(png|svg\+xml|webp|gif|jpeg);/.test(u)}
 if(!url||url.indexOf('solana:')!==0){el('card').textContent='No valid Solana Pay request in this link.';el('card').className='card err';}
 else{
   var m=url.match(/^solana:([^?]+)\??(.*)$/);recip=m?m[1]:'';var q=new URLSearchParams(m?m[2]:'');
@@ -2351,9 +2363,46 @@ else{
   el('recip').textContent=recip.slice(0,4)+'\u2026'+recip.slice(-4);
   try{var qr=qrcode(0,'M');qr.addData(url);qr.make();el('qr').innerHTML=qr.createImgTag(5,8);}catch(e){el('qr').textContent='(QR too large)';}
   el('copy').onclick=function(){navigator.clipboard.writeText(url).then(function(){el('copy').textContent='Copied \u2713';setTimeout(function(){el('copy').textContent='Copy Solana Pay link'},1500)})};
-  el('pay').onclick=connectAndPay;
+  loadWallets();
 }
-function isSig(s){return typeof s==='string'&&/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(s)}
+var walletsCache=[];
+async function loadWallets(){
+  try{
+    var mod=await import(WSAPP);var reg=mod.getWallets();
+    function sol(){return reg.get().filter(function(w){return w.features&&('solana:signAndSendTransaction' in w.features)&&('standard:connect' in w.features)})}
+    walletsCache=sol();
+    reg.on('register',function(){walletsCache=sol();renderWallets()});
+    reg.on('unregister',function(){walletsCache=sol();renderWallets()});
+  }catch(e){walletsCache=[];}
+  if(!walletsCache.length){
+    var legacy=[];
+    if(window.phantom&&window.phantom.solana)legacy.push({name:'Phantom',_legacy:window.phantom.solana});
+    if(window.solflare&&window.solflare.isSolflare)legacy.push({name:'Solflare',_legacy:window.solflare});
+    if(window.backpack)legacy.push({name:'Backpack',_legacy:window.backpack});
+    if(window.glowSolana)legacy.push({name:'Glow',_legacy:window.glowSolana});
+    if(window.solana&&!(window.phantom&&window.phantom.solana))legacy.push({name:'Injected wallet',_legacy:window.solana});
+    walletsCache=legacy;
+  }
+  renderWallets();
+}
+function renderWallets(){
+  var c=el('wallets');c.textContent='';
+  if(!walletsCache.length){
+    var none=document.createElement('div');none.className='hint';
+    none.textContent='No Solana wallet extension detected in this browser. Scan the QR below with a phone wallet, or install Phantom / Solflare / Backpack.';
+    c.appendChild(none);return;
+  }
+  var last=null;try{last=localStorage.getItem('zeroclaw_last_wallet')}catch(e){}
+  walletsCache.forEach(function(w){
+    var b=document.createElement('button');b.className='wallet-btn';
+    if(w.icon&&iconOK(w.icon)){var img=document.createElement('img');img.src=w.icon;img.alt='';b.appendChild(img);}
+    var span=document.createElement('span');span.textContent=w.name;b.appendChild(span);
+    if(w.name===last){var tag=document.createElement('em');tag.className='lastused';tag.textContent='last used';b.appendChild(tag);}
+    b.onclick=function(){payWith(w)};
+    c.appendChild(b);
+  });
+}
+function disableWallets(d){var bs=document.querySelectorAll('.wallet-btn');for(var i=0;i<bs.length;i++)bs[i].disabled=d;}
 function showPaid(sig){
   var card=el('card');card.textContent='';
   var h=document.createElement('h1');h.textContent='Solana Pay';card.appendChild(h);
@@ -2361,23 +2410,22 @@ function showPaid(sig){
   var pl=document.createElement('p');pl.className='msg';pl.textContent=label;card.appendChild(pl);
   if(isSig(sig)){var a=document.createElement('a');a.className='link';a.target='_blank';a.rel='noopener noreferrer';a.href='https://explorer.solana.com/tx/'+encodeURIComponent(sig)+'?cluster=devnet';a.textContent='View on explorer';card.appendChild(a);}
 }
-async function connectAndPay(){
-  var provider=(window.phantom&&window.phantom.solana)||window.solflare||window.solana;
-  if(!provider){status('No Solana wallet extension detected in this browser. Install Phantom or Solflare (desktop), or scan the QR above with a phone wallet.','err');return;}
-  el('pay').disabled=true;status('Loading Solana libraries\u2026');
+async function payWith(w){
+  try{localStorage.setItem('zeroclaw_last_wallet',w.name)}catch(e){}
+  disableWallets(true);status('Loading Solana libraries\u2026');
   try{
-    var web3=await import('https://esm.sh/@solana/web3.js@1.95.3');
+    var web3=await import(WEB3);
     var conn=new web3.Connection('https://api.devnet.solana.com','confirmed');
-    status('Connecting wallet\u2026');
-    var resp=await provider.connect();
-    var payer=resp.publicKey||provider.publicKey;
+    var payer,account=null;
+    status('Connecting '+w.name+'\u2026');
+    if(w._legacy){var resp=await w._legacy.connect();payer=resp.publicKey||w._legacy.publicKey;}
+    else{var out=await w.features['standard:connect'].connect();account=out.accounts[0];payer=new web3.PublicKey(account.address);}
     var recipientPk=new web3.PublicKey(recip);
     var refPk=reference?new web3.PublicKey(reference):null;
     var tx=new web3.Transaction();
     if(token){
       status('Building token transfer\u2026');
-      var spl=await import('https://esm.sh/@solana/spl-token@0.4.9');
-      var mint=new web3.PublicKey(token);
+      var spl=await import(SPL);var mint=new web3.PublicKey(token);
       var mintInfo=await spl.getMint(conn,mint);
       var fromAta=await spl.getAssociatedTokenAddress(mint,payer);
       var toAta=await spl.getAssociatedTokenAddress(mint,recipientPk);
@@ -2390,14 +2438,19 @@ async function connectAndPay(){
       if(refPk)ix2.keys.push({pubkey:refPk,isSigner:false,isWritable:false});
       tx.add(ix2);
     }
-    tx.feePayer=payer;
-    tx.recentBlockhash=(await conn.getLatestBlockhash()).blockhash;
+    tx.feePayer=payer;tx.recentBlockhash=(await conn.getLatestBlockhash()).blockhash;
     status('Approve the payment in your wallet\u2026');
-    var sig=await provider.signAndSendTransaction(tx);
-    var s=(sig&&sig.signature)?sig.signature:sig;
+    var sig;
+    if(w._legacy){var r=await w._legacy.signAndSendTransaction(tx);sig=(r&&r.signature)?r.signature:r;}
+    else{
+      var ser=tx.serialize({requireAllSignatures:false,verifySignatures:false});
+      var bs58=(await import(BS58)).default;
+      var res=await w.features['solana:signAndSendTransaction'].signAndSendTransaction({account:account,transaction:new Uint8Array(ser),chain:'solana:devnet'});
+      sig=bs58.encode(res[0].signature);
+    }
     status('Paid. Confirming on-chain\u2026');
-    await conn.confirmTransaction(s,'confirmed');
-    showPaid(s);
-  }catch(e){status('Payment did not complete: '+(e&&e.message?String(e.message):String(e)),'err');el('pay').disabled=false;}
+    await conn.confirmTransaction(sig,'confirmed');
+    showPaid(sig);
+  }catch(e){status('Payment did not complete: '+(e&&e.message?String(e.message):String(e)),'err');disableWallets(false);}
 }
 </script></body></html>
