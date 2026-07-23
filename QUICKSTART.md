@@ -119,3 +119,14 @@ program (`act_on_feed`) proves the feed is consumable, not a memo.
 | agent loops retrying an http fetch | `http_request` does not follow redirects — a 301 host move returns Cloudflare HTML; point skills at the exact current host |
 | customer asks how to actually pay | `solana:` URIs are not clickable in chat apps — the QR image + copy-into-wallet ARE the UX; the skill sends both |
 | bot replays an old/broken link | it memorized its own earlier output; `zeroclaw memory clear --key <id> --yes` |
+
+## 8. The earning node (x402, optional deepening)
+Turn the feed into a per-request revenue stream. Build and run the gate:
+```
+cd x402-feed-gate && cargo build --release --example pay_client
+X402_SELLER_WALLET=<your wallet> X402_MINT=<usdc mint>   X402_FEED_PDA=<your feed> cargo run --release
+```
+`GET /price` returns the 402 menu; a client pays with `pay_client` (builds + signs a
+TransferChecked + Memo) and retries `GET /reading` with the `X-PAYMENT` header. The gate
+verifies the bytes, settles on-chain, and serves the reading. No facilitator, no key custody.
+See `x402-feed-gate/README.md` for the threat model and the live devnet proof.
