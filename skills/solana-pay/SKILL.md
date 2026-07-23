@@ -42,10 +42,16 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
 1. Operator or SOP states: who pays, how much, which token.
 2. Generate a fresh reference: `python3 tools/gen_reference.py` → one base58 line.
 3. Assemble the URL exactly per the format above.
-4. Send the URL (and its QR if the channel supports images) to the customer. Your FINAL
-   reply message must contain the complete `solana:` URL verbatim — never only a summary
-   like "link's ready"; on streaming channels intermediate drafts are replaced, so a URL
-   that appears only mid-draft is lost.
+4. Render the QR: `python3 tools/gen_qr.py '<the full URL>' 'qr/order-<N>.png'` (quote the
+   URL — it contains `&`). Then send THREE message segments to the customer, in this order:
+   a. the QR image — a segment containing ONLY the file path `qr/order-<N>.png` (the channel
+      turns a bare-path message into the image);
+   b. the complete `solana:` URL verbatim in a code block — never only a summary like
+      "link's ready" (streaming drafts are replaced; a URL only in a draft is lost);
+   c. one how-to-pay line: "Scan the QR with any Solana wallet (Phantom, Solflare), or copy
+      the link and paste it into your wallet's Pay/Send screen. This shop runs on devnet."
+   The `solana:` scheme is not clickable in chat apps — the QR and the copy-paste path ARE
+   the payment UX; never imply the link can be tapped open.
 5. Hand the reference to `payment_watch` to verify settlement on-chain. Never tell the
    customer "paid" from their say-so — only from the watch result.
 6. Record `{reference, amount, mint, customer, timestamp}` to memory for the evening

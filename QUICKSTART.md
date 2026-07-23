@@ -73,6 +73,9 @@ zeroclaw config set agents.demo.skill_bundles '["default"]'
 cp -r skills/solana-pay ~/.zeroclaw/shared/skills/default/solana-pay
 mkdir -p ~/.zeroclaw/agents/demo/workspace/tools
 cp skills/solana-pay/scripts/gen_reference.py ~/.zeroclaw/agents/demo/workspace/tools/
+pip3 install qrcode pillow                      # QR rendering for payment links
+cp skills/solana-pay/scripts/gen_qr.py ~/.zeroclaw/agents/demo/workspace/tools/
+mkdir -p ~/.zeroclaw/agents/demo/workspace/qr
 cp -r sops/evening-reconciliation ~/.zeroclaw/agents/demo/workspace/sops/
 cp -r sops/evening-reconciliation ~/.zeroclaw/data/sops/        # CLI tooling reads here
 zeroclaw skills test solana-pay      # 3/3
@@ -114,4 +117,5 @@ program (`act_on_feed`) proves the feed is consumable, not a memo.
 | link appeared while streaming, gone in final message | `stream_mode partial` replacement — use `multi_message` |
 | `sop list` says none exist, files are right there | SOP.toml needs a `[sop]` table + **root-level** `[[triggers]]`; SOP.md needs a `## Steps` heading with `1. **Title** — body` items |
 | agent loops retrying an http fetch | `http_request` does not follow redirects — a 301 host move returns Cloudflare HTML; point skills at the exact current host |
+| customer asks how to actually pay | `solana:` URIs are not clickable in chat apps — the QR image + copy-into-wallet ARE the UX; the skill sends both |
 | bot replays an old/broken link | it memorized its own earlier output; `zeroclaw memory clear --key <id> --yes` |
