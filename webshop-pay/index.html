@@ -2364,6 +2364,24 @@ else{
   try{var qr=qrcode(0,'M');qr.addData(url);qr.make();el('qr').innerHTML=qr.createImgTag(5,8);}catch(e){el('qr').textContent='(QR too large)';}
   el('copy').onclick=function(){navigator.clipboard.writeText(url).then(function(){el('copy').textContent='Copied \u2713';setTimeout(function(){el('copy').textContent='Copy Solana Pay link'},1500)})};
   loadWallets();
+  if(reference)checkAlreadyPaid();
+}
+async function checkAlreadyPaid(){
+  try{
+    var web3=await import(WEB3);
+    var conn=new web3.Connection('https://api.devnet.solana.com','confirmed');
+    var refPk=new web3.PublicKey(reference);
+    var sigs=await conn.getSignaturesForAddress(refPk,{limit:1});
+    if(sigs&&sigs.length&&!sigs[0].err){status('This order was already paid.');showPaid(sigs[0].signature);}
+  }catch(e){}
+}
+async function pollConfirm(conn,sig){
+  for(var i=0;i<30;i++){
+    try{var st=await conn.getSignatureStatus(sig,{searchTransactionHistory:true});var v=st&&st.value;
+      if(v){if(v.err)return false;if(v.confirmationStatus==='confirmed'||v.confirmationStatus==='finalized')return true;}}catch(e){}
+    await new Promise(function(r){setTimeout(r,2000)});
+  }
+  return false;
 }
 var walletsCache=[];
 async function loadWallets(){
@@ -2448,9 +2466,10 @@ async function payWith(w){
       var res=await w.features['solana:signAndSendTransaction'].signAndSendTransaction({account:account,transaction:new Uint8Array(ser),chain:'solana:devnet'});
       sig=bs58.encode(res[0].signature);
     }
-    status('Paid. Confirming on-chain\u2026');
-    await conn.confirmTransaction(sig,'confirmed');
-    showPaid(sig);
+    status('Sent. Confirming on-chain\u2026');
+    var confirmed=await pollConfirm(conn,sig);
+    if(confirmed){showPaid(sig);}
+    else{status('Sent, but not confirmed within 60s. It may still settle; check the signature on the explorer: '+sig,'err');disableWallets(false);}
   }catch(e){status('Payment did not complete: '+(e&&e.message?String(e.message):String(e)),'err');disableWallets(false);}
 }
 </script></body></html>
