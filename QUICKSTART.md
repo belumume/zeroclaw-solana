@@ -108,11 +108,22 @@ enables Web mode — no Meta account). Scan it from WhatsApp → Linked devices.
 font distorts the QR, render it to an image first; expired refs rotate every ~20s.
 
 ## 7. The DePIN node (15 min)
-Deploy or reuse the devnet programs (`onchain/`; ours are live — addresses in the write-up),
-register a device feed, then schedule the publisher:
-- the agent turn calls `oracle_publish_reading` (device key signs inside the sandbox,
-  durable nonce, range/kind/sequence gates)
-- the host completes the fee-payer slot and broadcasts (`.tools` pattern in the write-up)
+The devnet programs live in `onchain/` (an isolated Anchor 0.31 workspace). Deploy your own copy:
+```
+cd onchain
+anchor keys sync                              # generate program keypairs, sync declare_id! + Anchor.toml
+anchor build
+anchor deploy --provider.cluster devnet       # deploys zeroclaw_oracle + consumer_example
+anchor idl init --provider.cluster devnet \
+  -f target/idl/zeroclaw_oracle.json $(solana address -k target/deploy/zeroclaw_oracle-keypair.json)
+```
+`anchor idl init` publishes the IDL on-chain so the explorer decodes instruction names instead of
+"Unknown"; it ignores the ANCHOR_* env vars, so pass `--provider.cluster devnet` and keep the payer
+at the default `~/.config/solana/id.json`. Ours are already live (addresses in the write-up's Links).
+Then register a device feed and schedule the publisher:
+- the agent turn calls `oracle_publish_reading` (device key signs inside the sandbox, durable nonce,
+  range/kind/sequence gates)
+- the host completes the fee-payer slot and broadcasts (the `.tools` completion pattern)
 - schedule it 6-hourly with your OS scheduler or `zeroclaw cron`
 
 Verify on explorer: the feed account's sequence increments with each run; the consumer
