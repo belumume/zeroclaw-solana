@@ -83,18 +83,22 @@ Declared per component and defended in each README with a prompt-injection trans
 - T1 build: unsigned transactions and device-co-signed readings; the device key can only
   sign readings (kind allowlist, range gates, monotonic sequence, deny_unknown_fields);
   the session key only pays fees. No spend path exists in code.
-- Spends: human checkpoint + the on-chain Allowances cap — "the on-chain audited allowance,
-  not the plugin, not the LLM, bounds the agent." Use-case-level injection transcript
-  (customer tries to redirect a refund; the checkpoint catches it): captured during demo
-  recording. [PENDING — S6]
+- Spends: human checkpoint + the on-chain Allowances cap: "the on-chain audited allowance,
+  not the plugin, not the LLM, bounds the agent." Use-case-level prompt-injection transcript
+  (a message impersonating the owner tries to redirect a 25 USDC refund to an attacker wallet
+  with "no approval needed"; the agent refuses and the attacker address enters zero tool
+  calls): `docs/transcripts/injection-refund-redirect.md`. Three layers hold, none talk-past-
+  able by a message: the refusal, the unsigned-build-needs-approval gate, the on-chain cap.
 - Third-party trust declared: none held; RPC endpoints and open-meteo are read-only inputs;
   no MCP servers in the loop.
 
 ## Reproducibility (links)
-[QUICKSTART — PENDING: source-build features, plugin install layout, agent/risk-profile
-config, channel wiring incl. the pairing gates, the config posture (auto-approve set,
-multi_message, leak-detection knob, workspace tools/), SOP install, cron. Bar: an operator
-replicates in an evening. Config gist ships secrets-redacted.]
+`QUICKSTART.md` reproduces both use cases from a clean machine in an evening: source-build
+features, plugin install layout, agent/risk-profile config, channel wiring including the
+pairing gates, the config posture (auto-approve set, multi_message, the leak-detection knob and
+why, workspace tools/, source-build features), skill + SOP install, cron, and the x402 node.
+It ends with a sharp-edges troubleshooting table where every row is a real cost we paid.
+Secrets are the operator's own; no secret of ours is needed at any step.
 
 ## Links
 Repo (plugins + solana-core + onchain programs + skills + e2e harnesses): [repo URL]
