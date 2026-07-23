@@ -39,7 +39,19 @@ transfers surviving approval queues via durable nonces), allowance-spend-build (
 the audited SF Allowances program), depin-attest, token-risk-check, lending-health,
 solana-pay-request — plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable
 nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing,
-byte-validated against solana-sdk fixtures) proven by all eight.
+byte-validated against solana-sdk fixtures, now 99 host tests including a verifier-side
+transaction decoder and TransferChecked introspection) proven by all eight plugins.
+
+**The x402 earning-node (`x402-feed-gate`), the frontier piece.** The DePIN node does not just
+publish its feed, it SELLS it. A client asks for a reading; the node answers HTTP 402 with a
+price menu; the client pays a stablecoin transfer on Solana and signs it themselves; the node
+verifies the payment from the transaction bytes, settles it, and serves the reading. Custody
+is T0/T1: the node holds no key but its public receiving address and cannot move funds, only
+recognise a payment made to it, so there is nothing to prompt-inject into paying out. Because
+the client is the fee payer, no facilitator is required and verification is pure Solana RPC. An
+in-code per-payer daily cap bounds it. Proven end to end on devnet: a 402 challenge, a signed
+payment, on-chain settlement, the reading served, and a replayed payment refused. This is the
+machine-commerce direction the brief names as open territory, a device that pays for its own gas.
 
 **What fought us on wasm32-wasip2 (the honest list):**
 1. `--features plugins-wasm` alone is a trap: the runtime integrates but no JIT backend
