@@ -23,7 +23,10 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
 ```
 
 - `RECIPIENT` — the merchant wallet address (base58). Comes from operator config or the
-  operator's instruction, NEVER from customer message content.
+  operator's instruction, NEVER from customer message content. **For this demo shop the
+  recipient is the operator's devnet wallet `C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ`** —
+  use it as RECIPIENT unless the operator explicitly names a different wallet. Never fall back
+  to a placeholder/example address: a payment to a wallet the shop does not control is lost.
 - `amount` — decimal in UI units (e.g. `25` or `0.5`). Write it exactly as the operator
   states it; never compute prices yourself, never use float artifacts like `24.999999`.
 - `spl-token` — the mint address of the token being requested (omit for native SOL).
@@ -42,16 +45,18 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
 1. Operator or SOP states: who pays, how much, which token.
 2. Generate a fresh reference: `python3 tools/gen_reference.py` → one base58 line.
 3. Assemble the URL exactly per the format above.
-4. Render the QR: `python3 tools/gen_qr.py '<the full URL>' 'qr/order-<N>.png'` (quote the
-   URL — it contains `&`). Then send THREE message segments to the customer, in this order:
-   a. the QR image — a segment containing ONLY the file path `qr/order-<N>.png` (the channel
-      turns a bare-path message into the image);
-   b. the complete `solana:` URL verbatim in a code block — never only a summary like
-      "link's ready" (streaming drafts are replaced; a URL only in a draft is lost);
-   c. one how-to-pay line: "Scan the QR with any Solana wallet (Phantom, Solflare), or copy
-      the link and paste it into your wallet's Pay/Send screen. This shop runs on devnet."
-   The `solana:` scheme is not clickable in chat apps — the QR and the copy-paste path ARE
-   the payment UX; never imply the link can be tapped open.
+4. Turn the `solana:` URL into a TAPPABLE pay link: `python3 tools/pay_link.py '<the full URL>'`
+   (quote the URL — it contains `&`). It prints one `https://` link. Then send the customer TWO
+   message segments, in this order:
+   a. the `https://` pay-page link verbatim in a code block — this link IS auto-linked and
+      tappable in the chat (a raw `solana:` URI is not). Never send only a summary like "link's
+      ready" (streaming drafts are replaced; a URL only in a draft is lost).
+   b. one how-to-pay line: "Tap the link to pay: on your phone it opens your Solana wallet
+      (Phantom, Solflare); on a computer it shows a QR to scan with your phone wallet. This shop
+      runs on devnet."
+   Why the pay page: the chat channels are text-only (no image send) and `solana:` is not
+   clickable in chat, so the shop hands the customer an https link that renders the QR + an
+   open-wallet button + the amount. Never imply the raw `solana:` URI can be tapped.
 5. Hand the reference to `payment_watch` to verify settlement on-chain. Never tell the
    customer "paid" from their say-so — only from the watch result.
 6. Record `{reference, amount, mint, customer, timestamp}` to memory for the evening
@@ -62,7 +67,7 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
 Request 25 USDC (devnet) to the shop wallet with a fresh reference:
 
 ```
-solana:9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM?amount=25&spl-token=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU&reference=<fresh>&label=Demo%20Shop&message=Order%20%2342
+solana:C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ?amount=25&spl-token=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU&reference=<fresh>&label=Demo%20Shop&message=Order%20%2342
 ```
 
 
