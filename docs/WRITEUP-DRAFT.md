@@ -77,6 +77,26 @@ machine-commerce direction the brief names as open territory, a device that pays
    approvals need a nonce account each), and the read-back race (`sendTransaction` returns at
    processed; read at confirmed).
 
+
+## Correct layering (the craft axis, applied to our own work)
+The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM, and that correct
+layering is scored. We applied the tier test to our OWN components and moved them:
+- **Solana Pay URL construction: demoted from a wasm plugin to a SKILL.** We first built
+  `solana-pay-request` as a plugin. Then the tier test: building a `solana:...` URL is string
+  work, and the worst failure of a malformed URL is a payment that never starts, no funds at
+  risk. That does not need a sandbox. So the live shop uses the `solana-pay` SKILL, and the
+  plugin remains only as evidence of the reasoning. Showing the demotion is the point.
+- **Settlement verification stays a Tier-3 plugin.** `payment-watch` parses untrusted RPC JSON
+  at the LLM context boundary and runs the OWASP-LLM01 sanitizer over it. That is exactly the
+  bounded, adversarial-input code the ladder reserves for wasm. Demoting it would drop the
+  sandbox and the sanitizer; it stays a plugin, defended.
+- **The x402 earning-node reuses the core as a native rlib.** Verifying a signed payment from
+  its bytes is code, not a skill, and it runs host-side, so it reuses `solana-core`'s
+  byte-validated primitives compiled natively. The crate's dual `crate-type` was for exactly
+  this: the same decode/introspection logic the wasm plugins use, verified once.
+Every layer sits at the lowest tier that honestly does the job, and the write-up argues each
+placement rather than hiding it.
+
 ## Custody tier + threat model
 Declared per component and defended in each README with a prompt-injection transcript:
 - T0 reads auto-run (an RPC key at most).
