@@ -1,4 +1,4 @@
-# Quickstart — run both use cases in an evening
+# Quickstart: run both use cases in an evening
 
 Everything below reproduces the two running use cases from a clean machine: the **DePIN
 talking node** (device-signed on-chain sensor feed + consumer) and the **shop terminal**
@@ -6,10 +6,16 @@ talking node** (device-signed on-chain sensor feed + consumer) and the **shop te
 a Linux box or WSL2 Ubuntu. No step needs a secret of ours; everywhere a key appears you
 create your own.
 
+**Repo map (two repos):** the ZeroClaw **host** is upstream, `github.com/zeroclaw-labs/zeroclaw`
+(cloned in step 1). Everything this submission adds is in **THIS repo**
+(`<repo URL, filled at publish>`): the plugins, the `solana-pay` skill, the on-chain
+`zeroclaw_oracle` + `consumer_example` programs (`onchain/`), the `e2e-*` reproducibility harnesses,
+the `x402-feed-gate` node, and the `webshop-pay` pay page. Steps 2-7 run from a clone of this repo.
+
 **Fastest path to "seeing it work" (5 min, after the one-time build in step 1):** run
 `cargo test` across `crates/solana-core` and `x402-feed-gate` (all green, no network), then
 `zeroclaw sop validate`. To see the live chain instead of rebuilding, open any explorer link
-in `docs/DEVNET-PROOF.md` — the programs, the feed sequence history, and the x402 settlement
+in `docs/DEVNET-PROOF.md`; the programs, the feed sequence history, and the x402 settlement
 are all public devnet. The full evening path (host + plugins + a wired bot + a live turn) is
 steps 1-7 below.
 
@@ -24,7 +30,7 @@ Plugins are not in release binaries, so build the host from source at the pinned
 git clone https://github.com/zeroclaw-labs/zeroclaw && cd zeroclaw && git checkout v0.8.3
 cargo build --release --features plugins-wasm,plugins-wasm-cranelift
 ```
-The umbrella feature alone integrates the runtime **without a JIT backend** — every plugin
+The umbrella feature alone integrates the runtime **without a JIT backend**, so every plugin
 will report "failed to load code." You need both features. (Judges score Tier-3 against
 exactly this build, per the brief.)
 
@@ -56,7 +62,7 @@ zeroclaw config set --no-interactive risk_profiles.demo.auto_approve \
 ```
 `zeroclaw security status --agent demo` shows the whole posture.
 
-## 4. The config posture that makes the shop work (5 min — each line has a reason)
+## 4. The config posture that makes the shop work (5 min; each line has a reason)
 ```
 zeroclaw config set channels.telegram.shop.bot_token <YOUR_BOT_TOKEN>
 zeroclaw config set channels.telegram.shop.enabled true
@@ -71,7 +77,7 @@ zeroclaw config set agents.demo.skill_bundles '["default"]'
   permanent, tap-to-copy message.
 - `leak_detection.enabled false`: the outbound leak detector's entropy tier redacts public
   base58 addresses, and its deterministic `token=` pattern eats Solana Pay's mandatory
-  `spl-token=` parameter — every payment link left the shop as `[REDACTED_…]` garbage. This
+  `spl-token=` parameter, so every payment link left the shop as `[REDACTED_…]` garbage. This
   agent's jail (workspace-only shell, config unreachable) already denies it access to any
   real secret, so the defense lives at the source. If you hold secrets elsewhere, keep the
   detector on and expect broken links until upstream grows an allowlist.
@@ -100,11 +106,15 @@ works from the CLI.
 ```
 zeroclaw daemon        # gateway + channels + cron scheduler
 ```
+Config is read at STARTUP. If you change any `zeroclaw config set` value after the daemon is
+already running (for example the leak-detection line above), restart it (Ctrl-C, then
+`zeroclaw daemon`) or the change silently will not take effect.
+
 Send `/bind <code>` (printed at startup) to your bot, then talk to it:
-> a customer wants to pay 25 USDC for order #1 — make me the payment link
+> a customer wants to pay 25 USDC for order #1, make me the payment link
 
 WhatsApp (optional): the daemon prints a pairing QR (`channels.whatsapp.shop.session_path`
-enables Web mode — no Meta account). Scan it from WhatsApp → Linked devices. If your terminal
+enables Web mode, no Meta account). Scan it from WhatsApp → Linked devices. If your terminal
 font distorts the QR, render it to an image first; expired refs rotate every ~20s.
 
 ## 7. The DePIN node (15 min)
@@ -133,16 +143,16 @@ program (`act_on_feed`) proves the feed is consumable, not a memo.
 | Symptom | Cause → fix |
 |---|---|
 | plugins `discovered: N, registered: 0` | missing `plugins-wasm-cranelift` feature |
-| headless turn hangs forever | a tool waits on the `[Y]es/[N]o` approval prompt — auto-approve it or run attended |
+| headless turn hangs forever | a tool waits on the `[Y]es/[N]o` approval prompt; auto-approve it or run attended |
 | skill works in CLI, "blocked by security policy" in channels | workspace jail: put runnable files in `workspace/tools/` |
 | payment link arrives as `[REDACTED_…]` | leak detector (step 4) |
-| link appeared while streaming, gone in final message | `stream_mode partial` replacement — use `multi_message` |
+| link appeared while streaming, gone in final message | `stream_mode partial` replacement; use `multi_message` |
 | `sop list` says none exist, files are right there | SOP.toml needs a `[sop]` table + **root-level** `[[triggers]]`; SOP.md needs a `## Steps` heading with `1. **Title** — body` items |
-| agent loops retrying an http fetch | `http_request` does not follow redirects — a 301 host move returns Cloudflare HTML; point skills at the exact current host |
-| customer asks how to actually pay | the chat channels are TEXT-ONLY (no image send) and a `solana:` URI is not clickable in chat, so the shop sends a tappable **https pay-page** link (`tools/pay_link.py` wraps the `solana:` URL). The page renders a scannable QR (phone wallets) + a Connect-wallet-and-pay button (desktop extensions). Deploy your own page from `webshop-pay/` (Cloudflare Pages) and set the URL in `pay_link.py`, or reuse the reference deployment |
+| agent loops retrying an http fetch | `http_request` does not follow redirects; a 301 host move returns Cloudflare HTML; point skills at the exact current host |
+| customer asks how to actually pay | the chat channels are TEXT-ONLY (no image send) and a `solana:` URI is not clickable in chat, so the shop sends a tappable **https pay-page** link (`tools/pay_link.py` wraps the `solana:` URL). The page renders a scannable QR (phone wallets) + a Connect-wallet-and-pay button (desktop extensions). Deploy your own page from `webshop-pay/` (`npx wrangler pages deploy webshop-pay`) and set its URL in `pay_link.py`, or reuse the reference deployment `pay_link.py` already defaults to: `https://zeroclaw-shop-pay.pages.dev/` (the page is static and stateless, safe to share) |
 | bot replays an old/broken link | it memorized its own earlier output; `zeroclaw memory clear --key <id> --yes` |
 | wallet shows "This dApp could be malicious" / "Failed to simulate" | Phantom-specific wording (each wallet's engine differs: Phantom uses Blowfish, Solflare/Backpack/Jupiter use Blockaid, Glow its own; severity ranges from an overridable warn to Solflare hard-blocking). Two independent causes stack, both overridable, neither a permanent block: (a) the paying wallet is unfunded or on the wrong network so the tx can't simulate, cleared by funding it on **Devnet** (`solana airdrop 1 <addr> --url devnet`); (b) the domain is brand-new, so reputation shows a soft "new domain" notice that self-clears in days. Our reference domain is verified NOT on Phantom's static blocklist, so it is never a hard block. Warning-free demo path: a phone **QR-scan** (a transfer-request skips the dApp-connect reputation flow), or a custom apex domain |
-| the pay page auto-picks one wallet | it does not — the page enumerates every installed wallet via the **Wallet Standard** (`@wallet-standard/app` `getWallets()`) and presents a picker (the mechanism Jupiter's Unified Wallet Kit uses), persisting your last choice in `localStorage`. The only hardcoded wallet list is a legacy fallback that fires solely when no Wallet-Standard wallet is present |
+| the pay page auto-picks one wallet | it does not; the page enumerates every installed wallet via the **Wallet Standard** (`@wallet-standard/app` `getWallets()`) and presents a picker (the mechanism Jupiter's Unified Wallet Kit uses), persisting your last choice in `localStorage`. The only hardcoded wallet list is a legacy fallback that fires solely when no Wallet-Standard wallet is present |
 
 ## 8. The earning node (x402, optional deepening)
 Turn the feed into a per-request revenue stream. Build and run the gate:

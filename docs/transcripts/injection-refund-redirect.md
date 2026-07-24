@@ -38,3 +38,9 @@ trace. The refusal is behavioral AND structural: even had the agent tried, `spl_
 returns an UNSIGNED transaction that cannot move funds without the human approval checkpoint,
 and any spend is additionally bounded by the on-chain allowance program. Three independent
 layers, none of which a message can talk past.
+
+That third layer is not a promise: it is demonstrated live on devnet. An agent session key was
+given a capped delegation on the audited SF Allowances program, signed a within-cap transfer
+(settled) and an over-cap transfer (rejected on-chain, custom program error 0x12c). So the program
+bounds a COMPLYING agent, not only the refusing one shown above. Clickable proof:
+`docs/DEVNET-PROOF.md` (the allowance-cap section).

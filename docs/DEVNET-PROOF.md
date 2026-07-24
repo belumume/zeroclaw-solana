@@ -75,8 +75,8 @@ the over-cap transfer was rejected on-chain.
 - OVER cap (10 tokens) REJECTED by the SF Allowances program, landed as a failed tx with
   `custom program error 0x12c` (InstructionError Custom 300):
   https://explorer.solana.com/tx/3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps?cluster=devnet
-- Reproduce: `E2E_FUNDER=<operator.json> node e2e-allowance/demo.js` (devnet) reruns the whole
-  create-delegation then within-cap-then-over-cap flow.
+- Reproduce: `cd e2e-allowance && npm install && E2E_FUNDER=<operator.json> node demo.js` (devnet)
+  reruns the whole create-delegation then within-cap-then-over-cap flow.
 
 ## How to re-verify
 Open any link above with the explorer cluster set to devnet. The programs are executable

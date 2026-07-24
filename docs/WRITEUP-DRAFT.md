@@ -5,10 +5,12 @@ Two use cases, one suite, both live on devnet. No entry that solves just one of 
 body from the physical edge (a device signing its own readings on-chain), through machine
 commerce (the node sells that feed and pays for its own gas), to on-chain-enforced custody (an
 audited program, not the LLM, bounds every spend), reproducible from a clean machine in an evening.
-1. **The DePIN talking node**: a device (Raspberry Pi; interim host) that measures its
-   environment, signs each reading with its own key inside a wasm sandbox, and publishes a
-   typed on-chain feed another program consumes, and you can message it on Telegram to ask
-   what it saw and why a reading was refused.
+1. **The DePIN talking node**: a device that reads REAL ambient temperature (Madinah, from the
+   keyless open-meteo API on an interim host now; a physical Raspberry Pi + DHT11 sensor takes
+   over the same feed when the kit lands, so the day/night swing in the values is real weather,
+   not synthetic), signs each reading with its own key inside a wasm sandbox, and publishes a
+   typed on-chain feed another program consumes; you can message it on Telegram to ask what it
+   saw and why a reading was refused.
 2. **The shop terminal**: a merchant's ZeroClaw on Telegram and WhatsApp. It builds a Solana Pay
    request (skill) and hands the customer a tappable pay page (the channels are text-only, so a
    hosted page renders the QR and a wallet picker), then confirms settlement on-chain by matching
@@ -30,7 +32,7 @@ blast radius of a hacked agent capped by on-chain math, not vibes.
   alone ships no JIT backend, so every plugin loads unregistered; both features are required).
 
 ## What we had to build (and what fought us)
-**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (reference-threaded RPC verification through the OWASP-LLM01 response sanitizer), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. The repo also carries depin-attest, token-risk-check and lending-health as additional Tier-0/Tier-2 components, but the two use cases above are the submission; those are not centred here. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
+**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (reference-threaded RPC verification through the OWASP-LLM01 response sanitizer), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
 
 **The x402 earning-node (`x402-feed-gate`), the frontier piece.** The DePIN node does not just
 publish its feed, it SELLS it. A client asks for a reading; the node answers HTTP 402 with a
@@ -59,12 +61,12 @@ pays for its own gas.
    secret and a public address look identical to an entropy detector), and turning the entropy
    tier off then exposed a second bug: a deterministic `token[=:]` credential pattern eats
    Solana Pay's mandatory `spl-token=` parameter, and there is no per-pattern allowlist knob.
-   The working posture for this jailed agent is `security.leak_detection.enabled = false`: the
-   agent jail already denies it any real secret (workspace-only shell, config unreachable), so
-   the correct defense lives at the source, not an output regex that mangles public on-chain
-   data. The upstream fix is a Solana-aware allowlist (base58 pubkey shape plus known-public URL
-   params) that lets addresses through while keeping credential protection; we would propose it
-   after judging.
+   Because the agent jail already denies this agent any real secret (workspace-only shell, config
+   unreachable), the correct defense belongs at the source, not an output regex that mangles
+   public on-chain data, so the working posture for this jailed agent is
+   `security.leak_detection.enabled = false`. The upstream fix we would contribute after judging
+   is a Solana-aware allowlist (base58 pubkey shape plus known-public URL params) that lets
+   addresses through while keeping credential protection.
 4. Streaming modes have correctness consequences, not just UX: in `partial` mode the final
    segment replaces the draft, which silently ate the payment URL mid-conversation.
    `multi_message` is the shop-correct mode: the link lands as its own permanent message.
@@ -91,7 +93,18 @@ The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM. We
 Every layer sits at the lowest tier that honestly does the job.
 
 ## Custody tier + threat model
-Declared per component. Each funds-touching plugin ships a prompt-injection transcript; the read-only lenses ship a proven-behaviour transcript instead:
+Declared per component. Each funds-touching plugin ships a prompt-injection transcript; the read-only lenses ship a proven-behaviour transcript instead.
+
+| Component (the two use cases run on these) | Tier | Why it sits there |
+|---|---|---|
+| `solana-pay` (skill) | T0 | builds a `solana:` URL; no key, worst case a payment that never starts |
+| `payment-watch` (plugin) | T0 | read-only RPC verification of settlement by reference |
+| `x402-feed-gate` (native) | T0/T1 | holds only its public receiving address; verifies inbound payment, no spend path |
+| `oracle-publish` (plugin) | T1 | device-co-signed reading; returns an unsigned partial tx, host completes the fee-payer slot |
+| `spl-transfer-build` (plugin) | T1 | unsigned transfer only; a human approves before any broadcast |
+| `allowance-spend-build` (plugin) | T1 + on-chain cap | unsigned delegated transfer, additionally bounded by the audited SF Allowances program (over-cap rejected on-chain, DEVNET-PROOF) |
+
+The tiers in words:
 - T0 reads auto-run (an RPC key at most).
 - T1 build: unsigned transactions and device-co-signed readings; the device key can only
   sign readings (kind allowlist, range gates, monotonic sequence, deny_unknown_fields);
