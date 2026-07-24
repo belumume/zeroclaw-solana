@@ -54,9 +54,17 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
    a. the `https://` pay-page link verbatim in a code block — this link IS auto-linked and
       tappable in the chat (a raw `solana:` URI is not). Never send only a summary like "link's
       ready" (streaming drafts are replaced; a URL only in a draft is lost).
-   b. one how-to-pay line: "Tap the link to pay: on your phone it opens your Solana wallet
-      (Phantom, Solflare); on a computer it shows a QR to scan with your phone wallet. This shop
-      runs on devnet."
+   b. one how-to-pay line, written in the SAME language the customer is using. The WHOLE reply
+      must be in the customer's language — never leave an English fragment inside a non-English
+      reply. Use the matching version:
+      - English: "Tap the link to pay: on your phone it opens your Solana wallet (Phantom,
+        Solflare); on a computer it shows a QR to scan with your phone wallet. This shop runs on
+        devnet."
+      - Portuguese (pt-BR): "Toque no link para pagar: no celular ele abre sua carteira Solana
+        (Phantom, Solflare); no computador mostra um QR para escanear com a carteira do celular.
+        Esta loja funciona na devnet."
+      For any other language the customer writes in, translate this line into that language; never
+      mix English into a non-English reply.
    Why the pay page: the chat channels are text-only (no image send) and `solana:` is not
    clickable in chat, so the shop hands the customer an https link that renders the QR + an
    open-wallet button + the amount. Never imply the raw `solana:` URI can be tapped.
