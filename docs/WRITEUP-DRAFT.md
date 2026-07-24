@@ -49,9 +49,16 @@ pays for its own gas.
 1. `--features plugins-wasm` alone is a trap: the runtime integrates but no JIT backend
    ships, so every plugin loads as discovered-but-unregistered ("failed to load code").
    The working invocation is `plugins-wasm,plugins-wasm-cranelift`.
-2. The component boundary was where the budget went: WIT vendoring
-   (wit/v0 pinned), outputs shaped and hard-bounded so a caller can never be flooded (measured worst-case ceilings per plugin), and no sockets
-   (waki blocking wasi:http only).
+2. The component boundary was where the budget went: WIT vendoring (wit/v0 pinned), outputs
+   shaped and hard-bounded so a caller can never be flooded (measured worst-case ceilings per
+   plugin), and HTTP done the wasm-native way. Our tool plugins are not pure-compute:
+   token-risk-check reaches api.rugcheck.xyz, payment-watch and the transaction builders read the
+   Solana RPC, lending-health reaches api.kamino.finance. Each declares
+   `permissions = ["http_client"]` and makes its outbound HTTPS through `wasi:http` via `waki` in a
+   `#[cfg(target_family = "wasm")]` shim (the host performs TLS; the plugin holds no key and opens
+   no raw socket). Getting HTTP-needing tool components, not only channels, working over the
+   capability interface, then byte-validating and hostile-flood-testing the response path, is the
+   non-trivial part of shipping real tool plugins on this runtime.
 3. The host's jails bit us four separate times, and each bite is a feature: agent cron
    refused our own scheduler wrapper (bash not allowlisted, path outside the jail);
    script-bearing skills are deny-by-default (`skills.allow_scripts` opt-in); channel turns
