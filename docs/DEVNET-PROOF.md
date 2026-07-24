@@ -79,6 +79,10 @@ the over-cap transfer was rejected on-chain.
   reruns the whole create-delegation then within-cap-then-over-cap flow.
 
 ## How to re-verify
-Open any link above with the explorer cluster set to devnet. The programs are executable
-(owner `BPFLoaderUpgradeable`), the feed PDA decodes via the on-chain IDL, and the settlement
-tx shows the TransferChecked to the seller's associated token account.
+Two ways, no account of ours needed:
+- **One command, no install:** `python3 scripts/verify-proof.py` (stdlib only) queries devnet and
+  prints PASS/FAIL for every claim above (programs executable, feed PDA owner, and each tx's exact
+  success or rejection), exiting non-zero if any fails. A clean run prints `8/8 claims verified`.
+- **By hand:** open any link above with the explorer cluster set to devnet. The programs are
+  executable (owner `BPFLoaderUpgradeable`), the feed PDA decodes via the on-chain IDL, and the
+  settlement tx shows the TransferChecked to the seller's associated token account.
