@@ -64,3 +64,6 @@ docs/DEMO-STORYBOARD.md
 
 # Cloudflare Pages deploy cache
 .wrangler/
+
+# stale/leaky dev build script (index.html is the self-contained artifact)
+webshop-pay/build.py
