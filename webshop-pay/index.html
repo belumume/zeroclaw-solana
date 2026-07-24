@@ -2373,6 +2373,23 @@ var BS58='https://esm.sh/bs58@6.0.0';
 var WSAPP='https://esm.sh/@wallet-standard/app@1.1.0';
 function b64urlDecode(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';try{return decodeURIComponent(escape(atob(s)))}catch(e){return atob(s)}}
 var el=function(id){return document.getElementById(id)};
+var LANG=((new URLSearchParams(location.search).get('lang')||navigator.language||'en').toLowerCase().indexOf('pt')===0)?'pt':'en';
+var T={
+en:{pay:'Payment',to:'to',openapp:'Open in your wallet app',openappSub:'Opens your installed Solana wallet app',walletLabel:'Pay with a browser wallet',scanLabel:'Or scan with your phone',scanHint:'Open your Solana wallet app and scan.',copy:'Copy Solana Pay link',copied:'Copied ✓',inWallet:'(amount set in your wallet)',paid:'✓ Paid',hintHtml:'Wallets are detected via the Wallet Standard, not hardcoded, so pick any one. This is a <b>Devnet</b> demo: switch your wallet to Devnet (with a little devnet SOL), or it cannot simulate and your wallet may warn it “could be malicious” (an unfunded or wrong-network artifact, not a real threat).',stLoad:'Loading Solana libraries…',stConnect:'Connecting ',stBuild:'Building token transfer…',stApprove:'Approve the payment in your wallet…',stSending:'Sent. Confirming on-chain…',stNoConfirm:'Sent, but not confirmed within 60s. It may still settle; check the signature on the explorer: ',stFail:'Payment did not complete: ',alreadyPaid:'This order was already paid.',noWallet:'No Solana wallet extension detected in this browser. Scan the QR below with a phone wallet, or install Phantom / Solflare / Backpack.',explorer:'View on explorer'},
+pt:{pay:'Pagamento',to:'para',openapp:'Abrir no app da carteira',openappSub:'Abre o app de carteira Solana instalado no celular',walletLabel:'Pague com uma carteira do navegador',scanLabel:'Ou escaneie com o celular',scanHint:'Abra o app da carteira Solana e escaneie.',copy:'Copiar link Solana Pay',copied:'Copiado ✓',inWallet:'(valor definido na carteira)',paid:'✓ Pago',hintHtml:'As carteiras são detectadas pelo Wallet Standard, não fixadas no código, então escolha qualquer uma. Esta é uma demonstração em <b>Devnet</b>: mude sua carteira para Devnet (com um pouco de SOL de devnet), ou ela não consegue simular e pode avisar que “pode ser malicioso” (um artefato de rede incorreta ou sem fundos, não uma ameaça real).',stLoad:'Carregando bibliotecas Solana…',stConnect:'Conectando ',stBuild:'Montando a transferência do token…',stApprove:'Aprove o pagamento na sua carteira…',stSending:'Enviado. Confirmando on-chain…',stNoConfirm:'Enviado, mas não confirmado em 60s. Ainda pode liquidar; verifique a assinatura no explorer: ',stFail:'O pagamento não foi concluído: ',alreadyPaid:'Este pedido já foi pago.',noWallet:'Nenhuma extensão de carteira Solana detectada neste navegador. Escaneie o QR abaixo com uma carteira no celular, ou instale Phantom / Solflare / Backpack.',explorer:'Ver no explorer'}
+};
+var L=T[LANG];
+function applyI18n(){
+  try{document.documentElement.lang=(LANG==='pt')?'pt-BR':'en';
+  var o=el('openapp');if(o){o.textContent=L.openapp;var s=document.createElement('small');s.textContent=L.openappSub;o.appendChild(s);}
+  var pls=document.querySelectorAll('.picklabel');if(pls[0])pls[0].textContent=L.walletLabel;if(pls[1])pls[1].textContent=L.scanLabel;
+  var sc=document.querySelector('.scan');if(sc)sc.textContent=L.scanHint;
+  var cp=el('copy');if(cp)cp.textContent=L.copy;
+  var h=document.querySelector('.hint');if(h)h.innerHTML=L.hintHtml;
+  var rc=document.querySelector('.recip');if(rc){var rs=el('recip');rc.textContent=L.to+' ';if(rs)rc.appendChild(rs);}
+  }catch(e){}
+}
+applyI18n();
 var p=new URLSearchParams(location.search);
 var url=p.get('u')?b64urlDecode(p.get('u')):(p.get('url')||'');
 var recip='',amount='',label='Payment',message='',token='',reference='';
@@ -2382,13 +2399,13 @@ function iconOK(u){return typeof u==='string'&&/^data:image\/(png|svg\+xml|webp|
 if(!url||url.indexOf('solana:')!==0){el('card').textContent='No valid Solana Pay request in this link.';el('card').className='card err';}
 else{
   var m=url.match(/^solana:([^?]+)\??(.*)$/);recip=m?m[1]:'';var q=new URLSearchParams(m?m[2]:'');
-  amount=q.get('amount')||'';label=q.get('label')||'Payment';message=q.get('message')||'';token=q.get('spl-token')||'';reference=q.get('reference')||'';
+  amount=q.get('amount')||'';label=q.get('label')||L.pay;message=q.get('message')||'';token=q.get('spl-token')||'';reference=q.get('reference')||'';
   el('label').textContent=label;
-  el('amt').textContent=amount?(amount+(token?' token':' SOL')):'(amount set in your wallet)';
+  el('amt').textContent=amount?(amount+(token?' token':' SOL')):L.inWallet;
   el('msg').textContent=message;if(!message)el('msg').style.display='none';
   el('recip').textContent=recip.slice(0,4)+'\u2026'+recip.slice(-4);
   try{var qr=qrcode(0,'M');qr.addData(url);qr.make();el('qr').innerHTML=qr.createImgTag(5,8);}catch(e){el('qr').textContent='(QR too large)';}
-  el('copy').onclick=function(){navigator.clipboard.writeText(url).then(function(){el('copy').textContent='Copied \u2713';setTimeout(function(){el('copy').textContent='Copy Solana Pay link'},1500)})};
+  el('copy').onclick=function(){navigator.clipboard.writeText(url).then(function(){el('copy').textContent=L.copied;setTimeout(function(){el('copy').textContent=L.copy},1500)})};
   el('openapp').href=url;
   loadWallets();
   if(reference)checkAlreadyPaid();
@@ -2399,7 +2416,7 @@ async function checkAlreadyPaid(){
     var conn=new web3.Connection('https://api.devnet.solana.com','confirmed');
     var refPk=new web3.PublicKey(reference);
     var sigs=await conn.getSignaturesForAddress(refPk,{limit:1});
-    if(sigs&&sigs.length&&!sigs[0].err){status('This order was already paid.');showPaid(sigs[0].signature);}
+    if(sigs&&sigs.length&&!sigs[0].err){status(L.alreadyPaid);showPaid(sigs[0].signature);}
   }catch(e){}
 }
 async function pollConfirm(conn,sig){
@@ -2434,7 +2451,7 @@ function renderWallets(){
   var c=el('wallets');c.textContent='';
   if(!walletsCache.length){
     var none=document.createElement('div');none.className='hint';
-    none.textContent='No Solana wallet extension detected in this browser. Scan the QR below with a phone wallet, or install Phantom / Solflare / Backpack.';
+    none.textContent=L.noWallet;
     c.appendChild(none);return;
   }
   var last=null;try{last=localStorage.getItem('zeroclaw_last_wallet')}catch(e){}
@@ -2451,25 +2468,25 @@ function disableWallets(d){var bs=document.querySelectorAll('.wallet-btn');for(v
 function showPaid(sig){
   var card=el('card');card.textContent='';
   var h=document.createElement('h1');h.textContent='Solana Pay';card.appendChild(h);
-  var d=document.createElement('div');d.className='paid';d.textContent='\u2713 Paid';card.appendChild(d);
+  var d=document.createElement('div');d.className='paid';d.textContent=L.paid;card.appendChild(d);
   var pl=document.createElement('p');pl.className='msg';pl.textContent=label;card.appendChild(pl);
-  if(isSig(sig)){var a=document.createElement('a');a.className='link';a.target='_blank';a.rel='noopener noreferrer';a.href='https://explorer.solana.com/tx/'+encodeURIComponent(sig)+'?cluster=devnet';a.textContent='View on explorer';card.appendChild(a);}
+  if(isSig(sig)){var a=document.createElement('a');a.className='link';a.target='_blank';a.rel='noopener noreferrer';a.href='https://explorer.solana.com/tx/'+encodeURIComponent(sig)+'?cluster=devnet';a.textContent=L.explorer;card.appendChild(a);}
 }
 async function payWith(w){
   try{localStorage.setItem('zeroclaw_last_wallet',w.name)}catch(e){}
-  disableWallets(true);status('Loading Solana libraries\u2026');
+  disableWallets(true);status(L.stLoad);
   try{
     var web3=await import(WEB3);
     var conn=new web3.Connection('https://api.devnet.solana.com','confirmed');
     var payer,account=null;
-    status('Connecting '+w.name+'\u2026');
+    status(L.stConnect+w.name+'\u2026');
     if(w._legacy){var resp=await w._legacy.connect();payer=resp.publicKey||w._legacy.publicKey;}
     else{var out=await w.features['standard:connect'].connect();account=out.accounts[0];payer=new web3.PublicKey(account.address);}
     var recipientPk=new web3.PublicKey(recip);
     var refPk=reference?new web3.PublicKey(reference):null;
     var tx=new web3.Transaction();
     if(token){
-      status('Building token transfer\u2026');
+      status(L.stBuild);
       var spl=await import(SPL);var mint=new web3.PublicKey(token);
       var mintInfo=await spl.getMint(conn,mint);
       var fromAta=await spl.getAssociatedTokenAddress(mint,payer);
@@ -2484,7 +2501,7 @@ async function payWith(w){
       tx.add(ix2);
     }
     tx.feePayer=payer;tx.recentBlockhash=(await conn.getLatestBlockhash()).blockhash;
-    status('Approve the payment in your wallet\u2026');
+    status(L.stApprove);
     var sig;
     if(w._legacy){var r=await w._legacy.signAndSendTransaction(tx);sig=(r&&r.signature)?r.signature:r;}
     else{
@@ -2493,10 +2510,10 @@ async function payWith(w){
       var res=await w.features['solana:signAndSendTransaction'].signAndSendTransaction({account:account,transaction:new Uint8Array(ser),chain:'solana:devnet'});
       sig=bs58.encode(res[0].signature);
     }
-    status('Sent. Confirming on-chain\u2026');
+    status(L.stSending);
     var confirmed=await pollConfirm(conn,sig);
     if(confirmed){showPaid(sig);}
-    else{status('Sent, but not confirmed within 60s. It may still settle; check the signature on the explorer: '+sig,'err');disableWallets(false);}
-  }catch(e){status('Payment did not complete: '+(e&&e.message?String(e.message):String(e)),'err');disableWallets(false);}
+    else{status(L.stNoConfirm+sig,'err');disableWallets(false);}
+  }catch(e){status(L.stFail+(e&&e.message?String(e.message):String(e)),'err');disableWallets(false);}
 }
 </script></body></html>
