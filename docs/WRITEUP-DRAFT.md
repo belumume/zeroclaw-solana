@@ -149,6 +149,13 @@ Scoped non-goals (deliberate):
 - **Solana Pay URL, not a Blink/Action.** The `solana:` transfer-request IS the zero-key receive
   rail; a device-co-signed oracle publish structurally cannot be a Blink (it needs a device
   signature, not a wallet's).
+- **BRL invoicing and USDC reconciliation, but not PIX.** The brief names three Brazil-first flows:
+  "PIX and USDC reconciliation, BRL invoicing." We deliver the two on-chain ones: the shop invoices
+  in BRL (a public USD/BRL rate, the amount stated in reais) and settles + reconciles in USDC
+  on-chain (the reference match IS the reconciliation). PIX is the fiat one, and it is a deliberate
+  non-goal, not an oversight: PIX is a Brazilian Central-Bank fiat rail that requires a licensed PSP
+  and a custodial party to hold the BRL, which is the opposite of a self-custodial agent that never
+  holds a key or a balance. Bridging fiat would reintroduce exactly the custodian this design removes.
 - **No reputation-gated signing, privacy spend caps, or Agent Registry integration** (brief-named
   edges), out of scope for a two-use-case showcase, not overlooked.
 
