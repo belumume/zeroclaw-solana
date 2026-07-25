@@ -349,7 +349,7 @@ Scoped non-goals (deliberate):
 - **BRL invoicing and USDC reconciliation, but not PIX.** The brief names three Brazil-first flows:
   "PIX and USDC reconciliation, BRL invoicing." We deliver the two on-chain ones: the shop invoices
   in BRL (a public USD/BRL rate, the amount stated in reais) and settles + reconciles in USDC
-  on-chain (the reference match IS the reconciliation). PIX is the fiat one, and it is a deliberate
+  on-chain (the amount, mint and destination match IS the reconciliation). PIX is the fiat one, and it is a deliberate
   non-goal, not an oversight: PIX is a Brazilian Central-Bank fiat rail that requires a licensed PSP
   and a custodial party to hold the BRL, which is the opposite of a self-custodial agent that never
   holds a key or a balance. Bridging fiat would reintroduce exactly the custodian this design removes.
@@ -358,7 +358,7 @@ Scoped non-goals (deliberate):
 
 **Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC at a stated
 rate source (ECB reference), so a merchant charges "R$120" and the customer pays the USDC
-equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches a public USD/BRL rate (frankfurter.dev, ECB-based), computes the USDC amount, and states the conversion (for example R$120 at 5.0797 = 23.62 USDC); the on-chain settlement is the same reference-threaded shop flow proven in DEVNET-PROOF.
+equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches a public USD/BRL rate (frankfurter.dev, ECB-based), computes the USDC amount, and states the conversion (for example R$120 at 5.0797 = 23.62 USDC); the on-chain settlement is the same shop flow proven in DEVNET-PROOF, confirmed on an exact amount, mint and destination match rather than on the reference alone.
 
 ## What we turned down, and why
 
@@ -429,7 +429,8 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
 - x402 settlement `5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc`
   (err None); a replayed payment refused NonceReused.
 - shop terminal Track-A settlement `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`
-  (payment_watch verdict PAID, reference matched; a wrong reference returns NOT_YET), reference
+  (payment_watch verdict PAID on an exact amount + mint + destination match, with the reference
+  also matching; a wrong amount, a foreign mint, or a wrong reference each return NOT_YET), reference
   `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`.
 
 Reproduction: `QUICKSTART.md` (host + plugins + skill + SOP + both channels + the x402 node).

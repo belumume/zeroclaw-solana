@@ -10,9 +10,12 @@ laptop involved. The same node also sells that reading per request over x402, so
 earns the gas it spends.
 
 **A shop terminal that takes payments.** A merchant agent on WhatsApp and Telegram quotes an
-order, hands the customer a tappable payment link, and confirms settlement only from an
-on-chain reference match, never from the customer saying so. Brazilian orders are quoted in
-BRL at a stated rate and settled in USDC.
+order, hands the customer a tappable payment link, and confirms settlement only from the
+chain, never from the customer saying so. Confirmation requires the exact amount in base
+units, the exact mint, and the watched destination, all read from `pre`/`postTokenBalances`;
+the reference is an additional optional condition, not the check itself. A payment of the
+wrong amount, or of a token the payer minted themselves, does not settle an order. Brazilian
+orders are quoted in BRL at a stated rate and settled in USDC.
 
 Both are running. Live on-chain evidence, all clickable, is in
 [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md), and `python3 scripts/verify-proof.py`
