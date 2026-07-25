@@ -175,6 +175,57 @@ The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM. We
   this: the same decode/introspection logic the wasm plugins use, verified once.
 Every layer sits at the lowest tier that honestly does the job.
 
+## How the bytes are checked, since the custody claims rest on them
+
+Everything below about custody assumes the transaction our code builds is the transaction the
+chain will see. That assumption is the one worth attacking, so it is checked four ways, and
+the layers are deliberately different in kind rather than more of the same.
+
+**Known answers.** Message serialization is byte-identical to `solana-sdk`'s for legacy and v0
+fixtures. The reference implementation is the oracle, so these are graded against something we
+did not write.
+
+**Properties.** 19 proptest properties, 1024 cases each, over the sanitizer, the length codec
+and message invariants. Sanitizer idempotence is in there because it is the property
+sanitizers most often fail.
+
+**A proof, where sampling was the wrong tool.** The length-prefix decoder carries a Kani
+harness that is exhaustive over every byte string up to three bytes, all 16,777,216 of them,
+establishing that anything it ACCEPTS is the unique canonical encoding of the value it returns.
+That matters here specifically: if two distinct byte strings decoded to the same length, a
+length prefix would be malleable, and a message could be re-encoded into different bytes that
+still parse the same, which breaks any signature taken over those bytes. Proptest was sampling
+1024 of those 16.7 million. The same reasoning found a second space worth walking rather than
+sampling, the Token-2022 extension discriminant, where the risk verdict a human acts on is
+keyed on six values out of 65,535, and every one of the rest is now checked to be incapable of
+reaching a flag it should not.
+
+**A search for what we did not think to check.** The three layers above all verify properties
+we chose, which makes them strong where we anticipated the failure and silent elsewhere. So
+`differential-fuzz/` mutates real transactions and grades both decoders against `solana-sdk`'s
+deserializer, classifying disagreement instead of asserting an invariant. 220,000 iterations
+across five seeds, no unexplained divergence. Its self-test plants a divergence in every field
+it compares and requires a complaint for each, because zero findings is also what a broken
+detector reports, and the binary refuses to print a result if that control fails.
+
+The same reasoning applies to the test suite itself. Two mutation harnesses ship runnable rather
+than described: one re-injects a real defect this build actually had, a nonce decoder reading the
+wrong byte range, and confirms the properties catch it; the other plants two defects in the
+Token-2022 path, a risk flag that answers to a neighbouring discriminant and a parser that
+silently drops unknown extensions. Each refuses to interpret a mutation unless the baseline was
+green first, and restores the source on every exit path. A passing suite is then evidence that it
+would catch a regression, rather than an assumption that it would.
+
+Supply chain is gated at 9 of 9 on advisories, licences and sources, with the licence allow
+list derived from the dependency graph rather than guessed. Three CI workflows keep this
+honest on a machine that is not ours, deliberately separate so a red badge says which thing
+broke.
+
+The honest limit, stated in `TESTING.md` rather than left for a reviewer to find: of the three
+real failures that document records, CI would have caught none of them on its own. One is now
+covered by a drift workflow; the other two live outside this repository. `TESTING.md` carries
+the full picture, including what each layer cannot catch.
+
 ## Custody tier + threat model
 Declared per component. Each funds-touching plugin ships a prompt-injection transcript; the read-only lenses ship a proven-behaviour transcript instead.
 
