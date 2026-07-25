@@ -1,0 +1,19 @@
+[package]
+name = "differential-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Feedback-guided differential fuzzer for the transaction decoder. Seeds from real serialized transactions, mutates with correlated (stateful) perturbations rather than uniform byte flips, and scores every candidate against solana-sdk's own deserializer as an external oracle. Exists because every other correctness pillar in this repo tests a property we thought to write down; this one searches for disagreement we did not predict."
+
+[[bin]]
+name = "differential-fuzz"
+path = "src/main.rs"
+
+[dependencies]
+solana-core = { path = "../crates/solana-core" }
+solana-sdk = "2.1"
+bincode = "1"
+
+# Isolated from the plugin workspace on purpose: solana-sdk does not build for
+# wasm32-wasip2, so the oracle must never be reachable from the shipped crates.
+[workspace]
