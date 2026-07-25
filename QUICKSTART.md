@@ -36,6 +36,21 @@ The umbrella feature alone integrates the runtime **without a JIT backend**, so 
 will report "failed to load code." You need both features. (Judges score Tier-3 against
 exactly this build, per the brief.)
 
+**Verified against host commit `f0b92f1` (v0.8.3 line).** `wit/v0` is explicitly experimental
+and unfrozen, so it moves under you — and the failure is silent until load time. Before
+building the plugins, confirm your host's plugin-action enum matches this repo's vendored copy:
+```
+diff <(sed -n '/enum plugin-action/,/}/p' <path-to-host>/wit/v0/logging.wit) \
+     <(sed -n '/enum plugin-action/,/}/p' wit/v0/logging.wit)
+```
+Empty diff means you are in sync. If the host has a variant this repo lacks (upstream added
+`memory-audit` on 2026-07-23), add it to `wit/v0/logging.wit` here and rebuild all plugins —
+component-model interfaces match **nominally**, so one missing enum variant makes the whole
+interface a different type and every plugin fails to REGISTER (`registered: 0`, plus a linker
+error on `zeroclaw:plugin/logging`) even though `cargo build` and every test pass. Confirm a
+rebuilt component actually carries the variant with `strings <plugin>.wasm | grep -c memory-audit`
+(expect `1`; a stale build gives `0`).
+
 ## 2. Build + install the plugins (10 min)
 From this repo:
 ```
