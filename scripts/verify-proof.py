@@ -77,6 +77,14 @@ SECONDARY_FEED = (
 # and the live check goes red with exit 1 while every static claim stays green. A liveness
 # check nobody has watched fail is indistinguishable from one that cannot fail.
 MAX_FEED_AGE_MIN = int(os.environ.get("MAX_FEED_AGE_MIN", "90"))
+
+# The shop half of "Both are running". Checked because the node and the shop fail
+# independently: the node is Oracle Cloud systemd, the shop is a laptop daemon plus a CDN
+# page, so the node can publish happily through a completely dead shop.
+SHOP_PAY_URL = os.environ.get("SHOP_PAY_URL", "https://zeroclaw-shop-pay.pages.dev/")
+# Asserted inside the page body: HTTP 200 only proves a CDN answered, while the pinned
+# merchant address is what makes it this shop's page rather than any page.
+MERCHANT_PIN = "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
 # DeviceFeed: disc8 + authority32 + device32 + feed_kind1 + value_i64 + scale_i8
 #           + unit[12] + sequence_u64 + observed_at_i64 + published_at_i64 + bump1
 FEED_LEN = 8 + 32 + 32 + 1 + 8 + 1 + 12 + 8 + 8 + 8 + 1
@@ -227,13 +235,41 @@ def main():
     except Exception as e:
         print(f"INFO  {label}: unreadable ({e}, not gating)")
 
+    # The shop is the other headline use case, and until now nothing in this script touched
+    # it. An audit put the hole precisely: the ARM node runs on Oracle Cloud systemd,
+    # independent of the shop, so a dead shop plus a publishing node printed a clean bill of
+    # health. A liveness proof that can only see one of the two live things is a liveness
+    # proof for that one thing, mislabelled.
+    try:
+        req = urllib.request.Request(
+            SHOP_PAY_URL, headers={"User-Agent": "Mozilla/5.0 (verify-proof)"}
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            body = r.read(65536).decode("utf-8", "replace")
+        # 200 alone only proves a CDN answered. The pinned merchant address is what makes
+        # the page the shop's page rather than any page, so that is what is asserted.
+        if r.status == 200 and MERCHANT_PIN in body:
+            print(f"PASS  shop pay page reachable and pinned to the shop ({r.status})")
+        else:
+            print(
+                f"FAIL  shop pay page: HTTP {r.status}, merchant pin "
+                f"{'present' if MERCHANT_PIN in body else 'MISSING'}"
+            )
+            fails += 1
+    except Exception as e:
+        print(f"FAIL  shop pay page unreachable: {e}")
+        fails += 1
+
     # Report the two kinds separately, because collapsing them into one number is exactly
     # how a dead system prints a clean bill of health. An audit put it plainly: of the
     # eleven claims this script used to total, ten were deployed-program state or immutable
     # transaction history, and one could actually go red. "11/11 verified" therefore read
     # as a liveness proof while being almost entirely a record of the past.
     static_total = len(ACCOUNTS) + len(TXS)
-    live_total = 1  # the ARM feed; the laptop feed is reported but never gates
+    # The ARM feed and the shop pay page. The laptop feed is reported but never gates.
+    # Two, not one, because "Both are running" is a claim about two independent systems and
+    # a check that can only see one of them cannot falsify it.
+    live_total = 2
     live_fails = fails - static_fails
     print(
         f"\n{static_total - static_fails}/{static_total} static claims verified "

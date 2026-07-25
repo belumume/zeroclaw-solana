@@ -91,10 +91,19 @@ else choosing to pay for the data.
    secret and a public address look identical to an entropy detector), and turning the entropy
    tier off then exposed a second bug: a deterministic `token[=:]` credential pattern eats
    Solana Pay's mandatory `spl-token=` parameter, and there is no per-pattern allowlist knob.
-   Because the agent jail already denies this agent any real secret (workspace-only shell, config
-   unreachable), the correct defense belongs at the source, not an output regex that mangles
-   public on-chain data, so the working posture for this jailed agent is
-   `security.leak_detection.enabled = false`. The upstream fix worth contributing is a
+   The reason we can run without it is narrower than "the jail denies this agent any secret,"
+   which is the claim we used to make and which an audit correctly refused. That sentence
+   answers the wrong question: the assets actually at risk here are not secrets. They are
+   customer funds, shop business data, and durable agent memory. It also rested on one verified
+   axis, `unrestricted_filesystem = false`, while the shell's network isolation is asserted
+   nowhere and tested nowhere.
+
+   The defensible claim is the one that does not depend on that: **this agent holds no key that
+   can move funds.** Signing lives outside it, the recipient is pinned in the page that
+   transfers, and the spend ceiling is enforced by an audited on-chain program rather than by
+   the jail. An outbound regex is the wrong layer for any of that, and it demonstrably mangles
+   public on-chain data, so the working posture is `security.leak_detection.enabled = false`.
+   The upstream fix worth contributing is a
    Solana-aware allowlist (base58 pubkey shape plus known-public URL params) that lets
    addresses through while keeping credential protection.
 

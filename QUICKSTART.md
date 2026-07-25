@@ -174,9 +174,12 @@ zeroclaw config set agents.demo.skill_bundles '["default"]'
 - `leak_detection.enabled false`: the outbound leak detector's entropy tier redacts public
   base58 addresses, and its deterministic `token=` pattern eats Solana Pay's mandatory
   `spl-token=` parameter, so every payment link left the shop as `[REDACTED_…]` garbage. This
-  agent's jail (workspace-only shell, config unreachable) already denies it access to any
-  real secret, so the defense lives at the source. If you hold secrets elsewhere, keep the
-  detector on and expect broken links until upstream grows an allowlist.
+  agent holds no key that can move funds, so an outbound regex is not what is protecting you
+  here: signing lives outside the agent, the recipient is pinned in the page that transfers,
+  and the spend ceiling is enforced on-chain. We deliberately do not claim the jail "denies it
+  any real secret" — that is broader than what we verified (a filesystem flag), and the assets
+  at risk are not secrets anyway. If you hold secrets elsewhere, keep the detector on and
+  expect broken links until upstream grows an allowlist.
 - `allow_scripts`: script-bearing skills are deny-by-default; our skill ships a 20-line
   stdlib reference generator you can audit at a glance.
 
