@@ -84,10 +84,16 @@ to be right.
 The common shape: a green suite tells you the code you compiled behaves as
 expected on the inputs you generated. It says nothing about which code got
 compiled, which interface the other side expects, or whether the process is
-running. Those need artifact-level and runtime-level checks, which is why
-`.tools/demo-preflight.sh` reads the daemon's own startup banner rather than the
-config file, and why the QUICKSTART build step ends with a command that inspects
-the binary.
+running. Those need artifact-level and runtime-level checks, which is why our
+pre-flight script reads the daemon's own startup banner rather than the config
+file, and why the QUICKSTART build step ends with a command that inspects the
+binary.
+
+That pre-flight script is a local operator tool and is deliberately not in the
+tree: it is hardcoded to one machine's daemon socket, log path and home directory,
+and publishing it would ship a username rather than a capability. It is named here
+for its reasoning, not as evidence you can re-run. The checks a reader *can* run
+are the ones in this document with commands next to them.
 
 ## Running them
 
@@ -155,7 +161,10 @@ A property suite that has never failed is indistinguishable from one that cannot
 fail. Ours is checked by mutation: injecting the exact defect the nonce module
 warns about, returning the authority bytes where the stored nonce belongs, makes
 `nonce_decode_returns_stored_fields_verbatim` fail and the suite exit non-zero;
-reverting restores 19 passing. The harness is `.tools/mutation_check.sh`.
+reverting restores 19 passing. The harness is `scripts/mutation-check.sh`, and it is
+tracked rather than left in the ignored tools directory, because an argument that a
+suite discriminates is worth exactly nothing if the reader cannot run the thing that
+shows it. It restores the source on every exit path, including a failed run.
 
 The regression file `crates/solana-core/tests/properties.proptest-regressions` is
 committed, so any case that ever fails becomes a permanent seeded regression rather
@@ -199,4 +208,6 @@ and says more plainly what canonical means. The roundtrip harness still needs th
 fixed allocation instead of the growth path, which took it from not converging to 3
 seconds. Neither change weakened a property; both changed how it was expressed.
 
-Run them with `cargo kani --harness <name>`, or `.tools/run-kani.sh` for both.
+Run them with `cargo kani --harness <name>`. Kani needs its own toolchain, so unlike
+the mutation check this one is not something every reader will execute; the harnesses
+themselves are in the tree either way, under `#[cfg(kani)]`, so nothing dead ships.
