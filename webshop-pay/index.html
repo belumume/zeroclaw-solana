@@ -2339,19 +2339,38 @@ function b64urlDecode(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%
 var el=function(id){return document.getElementById(id)};
 var p=new URLSearchParams(location.search);
 var url=p.get('u')?b64urlDecode(p.get('u')):(p.get('url')||'');
+// The one address this page will ever pay. Pinned here, in the page the customer
+// actually loads, because every layer above it is advisory: the agent composes the
+// link, and an agent that has been talked into a different recipient composes a
+// perfectly well-formed link to it. Truncated display ("C331…iLHJ") is exactly what
+// makes a swapped address survive a glance, so a mismatch is refused rather than
+// shown, and the full address is rendered on the happy path.
+var MERCHANT='C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ';
 var recip='',amount='',label='Payment',message='',token='',reference='';
 function status(m,cls){el('status').textContent=m;el('status').className='status '+(cls||'')}
 if(!url||url.indexOf('solana:')!==0){el('card').textContent='No valid Solana Pay request in this link.';el('card').className='card err';}
 else{
   var m=url.match(/^solana:([^?]+)\??(.*)$/);recip=m?m[1]:'';var q=new URLSearchParams(m?m[2]:'');
   amount=q.get('amount')||'';label=q.get('label')||'Payment';message=q.get('message')||'';token=q.get('spl-token')||'';reference=q.get('reference')||'';
+  if(recip!==MERCHANT){
+    el('card').textContent='';
+    var eh=document.createElement('h1');eh.textContent='Refused';el('card').appendChild(eh);
+    var ep=document.createElement('p');ep.className='msg';
+    ep.textContent='This link pays an address that is not this shop. Nothing has been sent. Ask the shop for a new link.';
+    el('card').appendChild(ep);
+    var ed=document.createElement('div');ed.className='recip';
+    ed.textContent='link wanted: '+recip+' / shop is: '+MERCHANT;
+    el('card').appendChild(ed);
+    el('card').className='card err';
+  }else{
   el('label').textContent=label;
   el('amt').textContent=amount?(amount+(token?' token':' SOL')):'(amount set in your wallet)';
   el('msg').textContent=message;if(!message)el('msg').style.display='none';
-  el('recip').textContent=recip.slice(0,4)+'…'+recip.slice(-4);
+  el('recip').textContent=recip;
   try{var qr=qrcode(0,'M');qr.addData(url);qr.make();el('qr').innerHTML=qr.createImgTag(5,8);}catch(e){el('qr').textContent='(QR too large)';}
   el('copy').onclick=function(){navigator.clipboard.writeText(url).then(function(){el('copy').textContent='Copied ✓';setTimeout(function(){el('copy').textContent='Copy Solana Pay link'},1500)})};
   el('pay').onclick=connectAndPay;
+  }
 }
 function isSig(s){return typeof s==='string'&&/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(s)}
 function showPaid(sig){
