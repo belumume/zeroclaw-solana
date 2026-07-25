@@ -74,6 +74,18 @@ pub struct DecodedMint {
 }
 
 impl DecodedMint {
+    /// First match wins, which is what the Token-2022 program itself does.
+    ///
+    /// Worth stating because the alternative reading is a vulnerability: if a mint could
+    /// carry two entries of one type, an attacker could place a benign PermanentDelegate
+    /// first and a live one second, and a first-match lookup would report the token safe.
+    /// Checked against the program rather than assumed. `get_extension_indices` in
+    /// token-2022's `interface/src/extension/mod.rs` returns on the first type match
+    /// ("found an instance of the extension that we're initializing, return!"), and `alloc`
+    /// refuses to write over an existing entry with `TokenError::ExtensionAlreadyInitialized`
+    /// unless an explicit overwrite is requested, which replaces that entry in place rather
+    /// than appending a second. So duplicates are not constructible through the program, and
+    /// where they cannot occur, first-match is the same answer the chain would give.
     pub fn extension(&self, discriminant: u16) -> Option<&RawExtension> {
         self.extensions
             .iter()
@@ -161,7 +173,12 @@ pub fn decode_mint(data: &[u8], token_2022: bool) -> Result<DecodedMint, MintErr
         while i + 4 <= data.len() && extensions.len() < MAX_EXTENSIONS {
             let discriminant = u16::from_le_bytes([data[i], data[i + 1]]);
             if discriminant == 0 {
-                break; // Uninitialized entry: padding from here on.
+                // Uninitialized entry: padding from here on. This matches the program,
+                // not just our own convention: token-2022's `get_extension_indices`
+                // stops the moment it sees `ExtensionType::Uninitialized` rather than
+                // scanning past it, so an entry hidden behind a zero would be invisible
+                // to the chain as well and must be invisible here.
+                break;
             }
             let len = u16::from_le_bytes([data[i + 2], data[i + 3]]) as usize;
             let end = i + 4 + len;
