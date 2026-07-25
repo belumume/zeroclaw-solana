@@ -16,7 +16,7 @@ the `x402-feed-gate` node, and the `webshop-pay` pay page. Steps 2-7 run from a 
 `cargo test` across `crates/solana-core` and `x402-feed-gate` (all green, no network), then
 `zeroclaw sop validate`. To confirm the live chain instead of rebuilding, run
 `python3 scripts/verify-proof.py` (stdlib only, no install): it queries devnet and prints
-PASS/FAIL for every on-chain claim, ending in `9/9 claims verified`. Or open any explorer link
+PASS/FAIL for every on-chain claim, ending in `11/11 claims verified`. Or open any explorer link
 in `docs/DEVNET-PROOF.md`; the programs, the feed sequence history, and the x402 settlement
 are all public devnet. The full evening path (host + plugins + a wired bot + a live turn) is
 steps 1-7 below.
@@ -30,11 +30,29 @@ steps 1-7 below.
 Plugins are not in release binaries, so build the host from source at the pinned release:
 ```
 git clone https://github.com/zeroclaw-labs/zeroclaw && cd zeroclaw && git checkout v0.8.3
-cargo build --release --features plugins-wasm,plugins-wasm-cranelift
+cargo build --release --features plugins-wasm,plugins-wasm-cranelift,whatsapp-web
 ```
 The umbrella feature alone integrates the runtime **without a JIT backend**, so every plugin
-will report "failed to load code." You need both features. (Judges score Tier-3 against
-exactly this build, per the brief.)
+will report "failed to load code." You need both. (Judges score Tier-3 against exactly this
+build, per the brief.)
+
+`whatsapp-web` is the third flag and it is easy to lose. It is **not** in `default-channels`,
+and `WhatsAppWebChannel::new` is `#[cfg(feature = "whatsapp-web")]`, so omitting it removes
+the channel with no error anywhere: `[channels.whatsapp.<alias>]` still parses, `channel
+doctor` simply does not list it, and every inbound message is dropped in silence. We lost the
+channel to exactly this on 2026-07-25 during an unrelated rebuild. Telegram alone needs only
+the first two flags.
+
+The reliable confirmation is the daemon's own startup banner, which is the only place the host
+states what it actually constructed:
+```
+zeroclaw daemon 2>&1 | grep 'Channels:'      # must list whatsapp.<alias>
+```
+If you want a static check before running anything, grep the binary for `wacore` (the WhatsApp
+storage layer, which links only under this feature). Do **not** grep for `whatsapp`: the
+cloud-API channel and the config schema compile unconditionally, so that matches on a host with
+no web channel at all. And do not grep for `whatsapp_rust`, which we tried first: it is absent
+even from a correct build, so it reports failure on a working host.
 
 **Verified against host commit `f0b92f1` (v0.8.3 line).** `wit/v0` is explicitly experimental
 and unfrozen, so it moves under you — and the failure is silent until load time. Before
@@ -133,6 +151,18 @@ Send `/bind <code>` (printed at startup) to your bot, then talk to it:
 WhatsApp (optional): the daemon prints a pairing QR (`channels.whatsapp.shop.session_path`
 enables Web mode, no Meta account). Scan it from WhatsApp → Linked devices. If your terminal
 font distorts the QR, render it to an image first; expired refs rotate every ~20s.
+
+**Fund the paying wallet before you open the link.** The shop quotes in **devnet USDC**
+(mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, Circle's devnet USDC), so devnet SOL
+alone cannot settle a payment: SOL covers the transaction fee, the transfer itself is the
+SPL token. Get free devnet USDC at `faucet.circle.com` (choose Solana Devnet) for whichever
+wallet you will pay from, and fund it for at least the order amount. Without it the wallet
+returns an opaque internal error; the pay page pre-checks the balance and tells you the
+shortfall instead, but the fix is still the faucet.
+
+If you paired WhatsApp, sanity-check that the channel is actually live before trusting it:
+the daemon's startup banner must list `whatsapp.<alias>`. If it lists only Telegram, you
+built the host without `whatsapp-web` (step 1).
 
 ## 7. The DePIN node (15 min)
 The devnet programs live in `onchain/` (an isolated Anchor 0.31 workspace). Deploy your own copy:

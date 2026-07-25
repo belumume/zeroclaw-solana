@@ -30,8 +30,10 @@ blast radius of a hacked agent capped by on-chain math, not vibes.
   human-approval checkpoints, memory, the daemon + gateway, `security status` posture.
 - One skill: `solana-pay` (URL + reference construction, string work, deliberately NOT wasm).
 - Wasm plugins only where the ladder demands bounded code (below).
-- Source-built host with `--features plugins-wasm,plugins-wasm-cranelift` (the umbrella feature
-  alone ships no JIT backend, so every plugin loads unregistered; both features are required).
+- Source-built host with `--features plugins-wasm,plugins-wasm-cranelift,whatsapp-web` (the
+  umbrella feature alone ships no JIT backend, so every plugin loads unregistered; and
+  `whatsapp-web` is not in `default-channels`, so omitting it deletes the WhatsApp channel
+  with no error at all - see QUICKSTART for the one-line check that it actually linked).
 
 ## What we had to build (and what fought us)
 **Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (reference-threaded RPC verification through the OWASP-LLM01 response sanitizer), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
@@ -186,12 +188,19 @@ Repo (plugins + solana-core + onchain programs + skills + e2e harnesses + x402-f
 
 Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`):
 - oracle program `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn`, consumer
-  `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`; two device feed PDAs, both owned by the
-  oracle: `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` (agent-driven, our first proof) and
-  `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (deterministic LLM-free, climbing every 20 min);
-  Anchor IDLs on-chain; security.txt embedded.
+  `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`; three device feed PDAs, all owned by the
+  oracle: `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (the ARM node, publishing 24/7 on its
+  own hardware), `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (deterministic LLM-free,
+  climbing every 20 min) and `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` (agent-driven, our
+  first proof, kept as history); Anchor IDLs on-chain; security.txt embedded.
+- the node feed is the one that makes the DePIN claim literal. Its device key was generated on
+  the node itself and has never existed on the machine this was built from, so that feed is
+  signed by hardware we cannot forge from here, and a `systemd --user` timer with lingering
+  keeps it publishing whether or not any laptop is awake.
 - the feed account stores only the latest reading, so the monotonic sequence is the on-chain
-  publish ledger, the proof the node keeps running (`scripts/verify-proof.py` checks both feeds).
+  publish ledger, the proof the node keeps running. `scripts/verify-proof.py` checks all three
+  feeds and additionally asserts the node feed is FRESH, since an owned-but-dead feed would
+  otherwise pass an ownership check forever.
 - x402 settlement `5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc`
   (err None); a replayed payment refused NonceReused.
 - shop terminal Track-A settlement `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`

@@ -28,6 +28,9 @@ rustup target add wasm32-wasip2
 # host
 git clone https://github.com/zeroclaw-labs/zeroclaw.git
 cd zeroclaw && cargo build --release --features plugins-wasm,plugins-wasm-cranelift
+# Node-only build: this box runs the publisher headless, with no chat channel.
+# Building the SHOP host? Add `,whatsapp-web` — it is absent from `default-channels`
+# and omitting it drops the WhatsApp channel silently. See QUICKSTART step 1.
 
 # plugin
 cd /path/to/depin-attest

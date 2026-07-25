@@ -12,9 +12,12 @@ landed with the exact success/rejection this submission claims.
 Exit 0 = every claim verified; exit 1 = at least one FAIL (or the RPC was unreachable).
 """
 
+import base64
 import json
 import os
+import struct
 import sys
+import time
 import urllib.request
 
 RPC = os.environ.get("RPC_URL", "https://api.devnet.solana.com")
@@ -38,8 +41,13 @@ ACCOUNTS = [
         False,
     ),
     (
-        "device feed PDA (deterministic LLM-free, live)",
+        "device feed PDA (deterministic LLM-free, laptop)",
         "3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K",
+        False,
+    ),
+    (
+        "device feed PDA (ARM node, node-born key)",
+        "JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg",
         False,
     ),
 ]
@@ -47,7 +55,21 @@ FEED_OWNER = "EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn"  # feed PDA must be 
 FEED_PDAS = {
     "CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU",
     "3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K",
+    "JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg",
 }
+
+# Ownership alone cannot distinguish a live feed from one that stopped months ago, so the
+# always-on claim gets its own check. Only the ARM node is asserted fresh: it is the feed
+# that backs "yours, running". The laptop publisher is secondary by design and is allowed
+# to go quiet when that machine sleeps.
+LIVE_FEED = ("ARM node feed", "JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg")
+# Cadence is 20 minutes. The threshold is deliberately loose so one skipped reading (a
+# transient upstream weather-API failure, which the publisher refuses to paper over with a
+# fabricated value) does not read as a dead node.
+MAX_FEED_AGE_MIN = 90
+# DeviceFeed: disc8 + authority32 + device32 + feed_kind1 + value_i64 + scale_i8
+#           + unit[12] + sequence_u64 + observed_at_i64 + published_at_i64 + bump1
+FEED_LEN = 8 + 32 + 32 + 1 + 8 + 1 + 12 + 8 + 8 + 8 + 1
 
 # (label, signature, want_err)  want_err=None means success (err:null)
 TXS = [
@@ -110,6 +132,43 @@ def main():
             print(f"FAIL  {label}: RPC error {e}")
             fails += 1
 
+    # Freshness: decode the live feed and prove it is still being written to.
+    label, addr = LIVE_FEED
+    try:
+        v = rpc("getAccountInfo", [addr, {"encoding": "base64"}])
+        val = v.get("value") if v else None
+        raw = base64.b64decode(val["data"][0]) if val else b""
+        if len(raw) != FEED_LEN:
+            print(f"FAIL  {label} freshness: unexpected account length {len(raw)}")
+            fails += 1
+        else:
+            o = 8 + 32 + 32 + 1
+            value = struct.unpack_from("<q", raw, o)[0]
+            o += 8
+            scale = struct.unpack_from("<b", raw, o)[0]
+            o += 1
+            unit = raw[o : o + 12].rstrip(b"\x00").decode("ascii", "ignore")
+            o += 12
+            seq = struct.unpack_from("<Q", raw, o)[0]
+            o += 8 + 8
+            published = struct.unpack_from("<q", raw, o)[0]
+            age_min = (time.time() - published) / 60
+            reading = f"{value * (10**scale):.2f} {unit}"
+            if age_min > MAX_FEED_AGE_MIN:
+                print(
+                    f"FAIL  {label} freshness: last reading {age_min:.0f} min ago "
+                    f"(> {MAX_FEED_AGE_MIN}); the node is not publishing"
+                )
+                fails += 1
+            else:
+                print(
+                    f"PASS  {label} freshness ({reading}, seq={seq}, "
+                    f"{age_min:.0f} min ago)"
+                )
+    except Exception as e:
+        print(f"FAIL  {label} freshness: RPC error {e}")
+        fails += 1
+
     for label, sig, want_err in TXS:
         try:
             t = rpc("getTransaction", [sig, {"maxSupportedTransactionVersion": 0}])
@@ -129,7 +188,8 @@ def main():
             print(f"FAIL  {label}: RPC error {e}")
             fails += 1
 
-    total = len(ACCOUNTS) + len(TXS)
+    # +1 for the liveness check, which can fail and so must be in the denominator.
+    total = len(ACCOUNTS) + len(TXS) + 1
     print(f"\n{total - fails}/{total} claims verified")
     sys.exit(0 if fails == 0 else 1)
 

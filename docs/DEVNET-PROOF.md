@@ -9,8 +9,19 @@ local). Set the explorer cluster to **devnet**.
 |---|---|---|
 | `zeroclaw_oracle` | `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn` | https://explorer.solana.com/address/EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn?cluster=devnet |
 | `consumer_example` | `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt` | https://explorer.solana.com/address/B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt?cluster=devnet |
-| Device feed PDA (agent-driven, historical) | `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` | https://explorer.solana.com/address/CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU?cluster=devnet |
+| Device feed PDA (**ARM node, node-born key, 24/7**) | `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` | https://explorer.solana.com/address/JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg?cluster=devnet |
 | Device feed PDA (deterministic, LLM-free, live) | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` | https://explorer.solana.com/address/3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K?cluster=devnet |
+| Device feed PDA (agent-driven, historical) | `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` | https://explorer.solana.com/address/CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU?cluster=devnet |
+
+The first of those three is the one that matters for "yours, running." Its device keypair was
+generated **on the ARM node itself** (`openssl rand -hex 32`, never copied from here; the seed
+this workstation briefly held was shredded), and a `systemd --user` timer with lingering
+enabled publishes it on a schedule with no laptop in the loop. So "the device signs its own
+readings" is literal rather than a figure of speech: this workstation cannot produce a
+signature for that feed. The second feed is the deterministic publisher that runs here and
+predates the node; the third is the original agent-driven proof, kept because its sequence
+history is the earliest evidence and deliberately marked historical rather than quietly
+dropped.
 
 Both programs carry an on-chain **Anchor IDL** (so the explorer decodes the instructions, not
 "Unknown") and an embedded **security.txt**:
@@ -85,7 +96,7 @@ the over-cap transfer was rejected on-chain.
 Two ways, no account of ours needed:
 - **One command, no install:** `python3 scripts/verify-proof.py` (stdlib only) queries devnet and
   prints PASS/FAIL for every claim above (programs executable, feed PDA owner, and each tx's exact
-  success or rejection), exiting non-zero if any fails. A clean run prints `8/8 claims verified`.
+  success or rejection), exiting non-zero if any fails. A clean run prints `11/11 claims verified`.
 - **By hand:** open any link above with the explorer cluster set to devnet. The programs are
   executable (owner `BPFLoaderUpgradeable`), the feed PDA decodes via the on-chain IDL, and the
   settlement tx shows the TransferChecked to the seller's associated token account.
