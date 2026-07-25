@@ -67,3 +67,4 @@ docs/DEMO-STORYBOARD.md
 
 # stale/leaky dev build script (index.html is the self-contained artifact)
 webshop-pay/build.py
+__pycache__/
