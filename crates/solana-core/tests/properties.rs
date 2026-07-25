@@ -14,6 +14,10 @@
 use proptest::prelude::*;
 use solana_core::sanitize::{sanitize_onchain, Sanitized, DEFAULT_LABEL_MAX};
 use solana_core::shortvec::{decode_len, encode_len};
+use solana_core::instruction::{AccountMeta, Instruction};
+use solana_core::message::compile;
+use solana_core::nonce::{decode_nonce_account, NonceError, NONCE_ACCOUNT_LEN};
+use solana_core::pubkey::Pubkey;
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -174,5 +178,212 @@ proptest! {
     #[test]
     fn shortvec_decode_is_total(bytes in prop::collection::vec(any::<u8>(), 0..8)) {
         let _ = decode_len(&bytes);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Message structural invariants
+//
+// `compile` builds the exact bytes we sign. A wrong index here is not a crash,
+// it is a VALID message that authorises the wrong account, so these invariants
+// deserve quantifying over every input rather than a few fixtures. Pubkeys are
+// drawn from a deliberately tiny seed space so collisions are common and the
+// dedup / flag-merge path is actually exercised.
+// ---------------------------------------------------------------------------
+
+fn arb_pubkey() -> impl Strategy<Value = Pubkey> {
+    any::<[u8; 3]>().prop_map(|seed| {
+        let mut b = [0u8; 32];
+        b[..3].copy_from_slice(&seed);
+        Pubkey::new(b)
+    })
+}
+
+fn arb_meta() -> impl Strategy<Value = AccountMeta> {
+    (arb_pubkey(), any::<bool>(), any::<bool>()).prop_map(|(pubkey, is_signer, is_writable)| {
+        AccountMeta { pubkey, is_signer, is_writable }
+    })
+}
+
+fn arb_instruction() -> impl Strategy<Value = Instruction> {
+    (
+        arb_pubkey(),
+        prop::collection::vec(arb_meta(), 0..6),
+        prop::collection::vec(any::<u8>(), 0..16),
+    )
+        .prop_map(|(program_id, accounts, data)| Instruction { program_id, accounts, data })
+}
+
+/// A syntactically valid 80-byte Current/Initialized nonce account.
+fn nonce_bytes(authority: [u8; 32], durable: [u8; 32], lamports: u64) -> Vec<u8> {
+    let mut v = Vec::with_capacity(NONCE_ACCOUNT_LEN);
+    v.extend_from_slice(&1u32.to_le_bytes()); // version: Current
+    v.extend_from_slice(&1u32.to_le_bytes()); // state: Initialized
+    v.extend_from_slice(&authority);
+    v.extend_from_slice(&durable);
+    v.extend_from_slice(&lamports.to_le_bytes());
+    v
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+
+    /// Every index in every compiled instruction addresses a real account key.
+    /// An out-of-bounds index would be rejected by a validator; an in-bounds but
+    /// WRONG index silently signs for the wrong account, which is the reason
+    /// this is worth quantifying universally.
+    #[test]
+    fn compiled_indexes_are_always_in_bounds(
+        payer in arb_pubkey(),
+        ixs in prop::collection::vec(arb_instruction(), 1..6),
+        blockhash in any::<[u8; 32]>(),
+    ) {
+        let Ok(msg) = compile(&payer, &ixs, &blockhash) else { return Ok(()); };
+        let n = msg.account_keys.len();
+        for ci in &msg.instructions {
+            prop_assert!((ci.program_id_index as usize) < n);
+            for idx in &ci.account_indexes {
+                prop_assert!((*idx as usize) < n);
+            }
+        }
+    }
+
+    /// Each program_id_index resolves back to the program the caller asked for.
+    /// Staying in bounds is not enough: it must point at the RIGHT key.
+    #[test]
+    fn program_id_index_resolves_to_the_requested_program(
+        payer in arb_pubkey(),
+        ixs in prop::collection::vec(arb_instruction(), 1..6),
+        blockhash in any::<[u8; 32]>(),
+    ) {
+        let Ok(msg) = compile(&payer, &ixs, &blockhash) else { return Ok(()); };
+        prop_assert_eq!(msg.instructions.len(), ixs.len());
+        for (ci, ix) in msg.instructions.iter().zip(ixs.iter()) {
+            prop_assert_eq!(msg.account_keys[ci.program_id_index as usize], ix.program_id);
+        }
+    }
+
+    /// The fee payer is account 0 and always a WRITABLE SIGNER, however the
+    /// caller happened to flag it in the instruction metas.
+    #[test]
+    fn payer_is_account_zero_and_a_writable_signer(
+        payer in arb_pubkey(),
+        ixs in prop::collection::vec(arb_instruction(), 1..6),
+        blockhash in any::<[u8; 32]>(),
+    ) {
+        let Ok(msg) = compile(&payer, &ixs, &blockhash) else { return Ok(()); };
+        prop_assert_eq!(msg.account_keys[0], payer);
+        prop_assert!(msg.num_required_signatures >= 1);
+        // Writable signers occupy [0, num_required_signatures - num_readonly_signed),
+        // so index 0 is writable exactly when that range is non-empty.
+        prop_assert!(msg.num_readonly_signed < msg.num_required_signatures);
+    }
+
+    /// account_keys carries no duplicates, and the header counts never claim
+    /// more signer or readonly slots than there are keys.
+    #[test]
+    fn account_keys_are_deduped_and_header_counts_fit(
+        payer in arb_pubkey(),
+        ixs in prop::collection::vec(arb_instruction(), 1..6),
+        blockhash in any::<[u8; 32]>(),
+    ) {
+        let Ok(msg) = compile(&payer, &ixs, &blockhash) else { return Ok(()); };
+        let mut seen = msg.account_keys.clone();
+        seen.sort();
+        seen.dedup();
+        prop_assert_eq!(seen.len(), msg.account_keys.len());
+
+        let n = msg.account_keys.len();
+        prop_assert!((msg.num_required_signatures as usize) <= n);
+        prop_assert!(
+            (msg.num_readonly_signed as usize) + (msg.num_readonly_unsigned as usize) <= n
+        );
+    }
+
+    /// The recent_blockhash handed in is the one signed, byte for byte. In a
+    /// durable transaction that field carries the STORED nonce, so any
+    /// rewriting here would silently break replay protection.
+    #[test]
+    fn recent_blockhash_is_carried_verbatim(
+        payer in arb_pubkey(),
+        ixs in prop::collection::vec(arb_instruction(), 1..4),
+        blockhash in any::<[u8; 32]>(),
+    ) {
+        let Ok(msg) = compile(&payer, &ixs, &blockhash) else { return Ok(()); };
+        prop_assert_eq!(msg.recent_blockhash, blockhash);
+    }
+
+    // -----------------------------------------------------------------------
+    // Durable-nonce account decoding
+    // -----------------------------------------------------------------------
+
+    /// Decoding arbitrary account bytes never panics. These bytes arrive from an
+    /// RPC endpoint, so totality here is a security property, not tidiness.
+    #[test]
+    fn nonce_decode_is_total(data in prop::collection::vec(any::<u8>(), 0..200)) {
+        let _ = decode_nonce_account(&data);
+    }
+
+    /// Anything shorter than the account length is rejected as short, and never
+    /// read past its end.
+    #[test]
+    fn nonce_short_input_is_always_rejected(
+        data in prop::collection::vec(any::<u8>(), 0..NONCE_ACCOUNT_LEN)
+    ) {
+        let n = data.len();
+        prop_assert_eq!(decode_nonce_account(&data), Err(NonceError::TooShort(n)));
+    }
+
+    /// THE footgun this module documents: the runtime domain-hashes the nonce,
+    /// so the stored 32 bytes are NOT the blockhash they came from and must be
+    /// used verbatim. This asserts the decoder hands them back untouched rather
+    /// than deriving anything.
+    #[test]
+    fn nonce_decode_returns_stored_fields_verbatim(
+        authority in any::<[u8; 32]>(),
+        durable in any::<[u8; 32]>(),
+        lamports in any::<u64>(),
+    ) {
+        let decoded = decode_nonce_account(&nonce_bytes(authority, durable, lamports))
+            .expect("a well-formed Current/Initialized account decodes");
+        prop_assert_eq!(decoded.authority, Pubkey::new(authority));
+        prop_assert_eq!(decoded.durable_nonce, durable);
+        prop_assert_eq!(decoded.lamports_per_signature, lamports);
+    }
+
+    /// Unknown version and state discriminants fail closed with the specific
+    /// variant, rather than being coerced into a usable NonceState.
+    #[test]
+    fn nonce_unknown_discriminants_fail_closed(
+        version in 2u32..u32::MAX,
+        state in 2u32..u32::MAX,
+        tail in prop::collection::vec(any::<u8>(), 72..=72),
+    ) {
+        let mut bad_version = version.to_le_bytes().to_vec();
+        bad_version.extend_from_slice(&1u32.to_le_bytes());
+        bad_version.extend_from_slice(&tail);
+        prop_assert_eq!(
+            decode_nonce_account(&bad_version),
+            Err(NonceError::UnknownVersion(version))
+        );
+
+        let mut bad_state = 1u32.to_le_bytes().to_vec();
+        bad_state.extend_from_slice(&state.to_le_bytes());
+        bad_state.extend_from_slice(&tail);
+        prop_assert_eq!(
+            decode_nonce_account(&bad_state),
+            Err(NonceError::UnknownState(state))
+        );
+    }
+
+    /// An uninitialized nonce account is never mistaken for a usable one.
+    #[test]
+    fn nonce_uninitialized_is_never_usable(
+        tail in prop::collection::vec(any::<u8>(), 72..=72)
+    ) {
+        let mut data = 1u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&tail);
+        prop_assert_eq!(decode_nonce_account(&data), Err(NonceError::Uninitialized));
     }
 }
