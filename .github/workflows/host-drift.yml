@@ -58,7 +58,73 @@ jobs:
       # Skips only the three host-binary feature checks, which would need a full host
       # build. WIT parity and the per-component variant check are the ones that catch
       # drift, and they run in full. The skip is printed, not silent.
-      - name: Interface parity against upstream
+      - name: Interface parity against upstream HEAD
         env:
           ZC_SKIP_HOST_BINARY: "1"
         run: ./scripts/check-host-compat.sh /tmp/zeroclaw-host
+
+      # The HEAD check above answers "did upstream move." It does NOT answer "does the
+      # reproduction we published still work," and those come apart precisely here: the
+      # pinned commit is known to be out of parity, which is why QUICKSTART instructs two
+      # manual edits. So HEAD could stay green indefinitely while every stranger following
+      # our own instructions builds a host that registers nothing. That is the failure this
+      # workflow exists to prevent, pointed at the one path we actually tell people to walk.
+      #
+      # The pin is read OUT of QUICKSTART rather than repeated here. A second copy is a
+      # second thing to drift, and drift in the instructions is the exact defect being
+      # guarded: this same interface mismatch has now arrived three times, most recently
+      # through prose that no automation was watching.
+      - name: Does our own documented reproduction still register plugins
+        if: always()
+        env:
+          ZC_SKIP_HOST_BINARY: "1"
+        run: |
+          set -euo pipefail
+          PIN=$(grep -oP 'git checkout \K[0-9a-f]{7,40}' QUICKSTART.md | head -1)
+          if [ -z "$PIN" ]; then
+            echo "::error::could not read the pinned host commit out of QUICKSTART.md."
+            echo "If the pin moved or the wording changed, this guard went blind. Fix the"
+            echo "parser rather than deleting the step."
+            exit 1
+          fi
+          echo "QUICKSTART pins: $PIN"
+
+          git clone https://github.com/zeroclaw-labs/zeroclaw.git /tmp/pinned-host
+          git -C /tmp/pinned-host checkout --quiet "$PIN"
+
+          # Apply exactly the two edits QUICKSTART calls REQUIRED, and fail loudly if either
+          # no longer applies. If upstream changes shape so the documented patch stops
+          # working, the instructions are wrong and a reader is stranded.
+          W=/tmp/pinned-host/wit/v0/logging.wit
+          C=/tmp/pinned-host/crates/zeroclaw-plugins/src/component_logging.rs
+
+          if grep -q 'memory-audit' "$W"; then
+            echo "::notice::pinned commit already carries memory-audit; QUICKSTART's REQUIRED"
+            echo "patch step is now stale and should be simplified."
+          else
+            perl -0pi -e 's/(\n(\s*))note,/\n$2note,\n$2memory-audit,/' "$W"
+            grep -q 'memory-audit' "$W" || {
+              echo "::error::the documented wit edit no longer applies at $PIN."; exit 1; }
+          fi
+
+          if ! grep -q 'PluginAction::MemoryAudit' "$C"; then
+            perl -0pi -e 's/(\n(\s*))(PluginAction::Note => Action::Note,)/\n$2$3\n$2PluginAction::MemoryAudit => Action::Note,/' "$C"
+            grep -q 'PluginAction::MemoryAudit' "$C" || {
+              echo "::error::the documented component_logging edit no longer applies at $PIN."
+              echo "QUICKSTART tells readers to add this arm; it did not land."; exit 1; }
+          fi
+
+          # The sharpest assertion available, and it needs no host build: after following
+          # our own instructions the host's interface file should be byte-identical to the
+          # copy our components were compiled against. Nominal matching means anything less
+          # than identical is a different type and nothing registers.
+          if diff <(sed 's/[[:space:]]*$//' "$W") <(sed 's/[[:space:]]*$//' wit/v0/logging.wit); then
+            echo "patched host wit is byte-identical to our vendored wit/v0/logging.wit"
+          else
+            echo "::error::after applying QUICKSTART's REQUIRED patch, the host's wit still"
+            echo "differs from ours (diff above). A reader following the instructions exactly"
+            echo "would get discovered: N, registered: 0."
+            exit 1
+          fi
+
+          ./scripts/check-host-compat.sh /tmp/pinned-host

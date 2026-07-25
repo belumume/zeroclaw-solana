@@ -36,6 +36,15 @@ blast radius of a hacked agent capped by on-chain math, not vibes.
   umbrella feature alone ships no JIT backend, so every plugin loads unregistered; and
   `whatsapp-web` is not in `default-channels`, so omitting it deletes the WhatsApp channel
   with no error at all - see QUICKSTART for the one-line check that it actually linked).
+- **Plus two one-line edits to the host at the pinned commit, and they are not optional.**
+  `wit/v0` is experimental and unfrozen upstream, the pinned commit predates upstream
+  restoring the `memory-audit` variant, and component-model interfaces match nominally, so
+  one missing enum variant makes the whole interface a different type and nothing registers
+  while `cargo build` and every test stay green. QUICKSTART step 1 gives both lines. Saying
+  "flags only" here, as this section did, is how a reader ends up with a host that builds
+  clean and loads nothing. A CI job now clones the pinned commit, applies exactly those two
+  documented edits, and fails if the result is not byte-identical to our vendored interface,
+  so the instructions are checked rather than asserted.
 
 ## What we had to build (and what fought us)
 **Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (RPC settlement verification conjoining amount, mint, destination and reference, through the OWASP-LLM01 response sanitizer), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
