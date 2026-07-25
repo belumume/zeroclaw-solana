@@ -227,9 +227,17 @@ The suite was mutation-checked rather than trusted, because green proves the loo
 that its assertions can fail. Two defects were planted: a permanent-delegate flag that also
 answers to a neighbouring discriminant, and a parser that silently drops unknown extensions
 instead of keeping them raw, which is exactly what would make a hostile discriminant invisible
-to a caller. Both were caught by the specific assertion aimed at them. `.tools/` carries the
-runner; it restores the source on every exit path and refuses to interpret a mutation unless
-the baseline was green first.
+to a caller. Both were caught by the specific assertion aimed at them. The runner is
+`scripts/mutation-check-tlv.sh`, tracked so you can run it rather than take our word for it;
+it restores the source on every exit path and refuses to interpret a mutation unless the
+baseline was green first, and run from outside a checkout it fails loudly with exit 2 rather
+than passing silently.
+
+This sentence used to point at `.tools/`, which is git-ignored. That was accurate when written
+and became false when the runner was ported, which is the same defect one level up: a claim
+about evidence that a reader cannot reach. `scripts/check-shadowed-scripts.py` now fails if an
+ignored copy shadows a tracked script, since remembering this rule did not prevent committing
+it twice in one day.
 
 ## One layer you can operate rather than read
 
