@@ -24,3 +24,7 @@ base64 = "0.22"
 waki = { version = "0.5.1", features = ["json"] }
 
 [dev-dependencies]
+# Property-based testing. Host-only (dev-dependency), so it never enters the
+# wasm component. Failing cases are minimized and recorded under
+# proptest-regressions/, which is committed so each becomes a regression test.
+proptest = "1"
