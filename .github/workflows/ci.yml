@@ -50,6 +50,22 @@ jobs:
       - name: Fail-closed action certification self-test
         run: python3 scripts/certify_publish_tx.py
 
+  proofs:
+    name: kani proofs on shortvec
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both harnesses take seconds to solve; the setup is the slow part, which is
+      # why this is its own job rather than a step that delays the main gate.
+      - uses: model-checking/kani-github-action@v1.1
+        with:
+          working-directory: crates/solana-core
+          args: >-
+            --harness accepted_encodings_are_uniquely_canonical
+            --harness every_u16_roundtrips
+
   supply-chain:
     name: advisories, licenses, sources
     runs-on: ubuntu-latest

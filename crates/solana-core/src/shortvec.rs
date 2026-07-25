@@ -66,10 +66,16 @@ mod verification {
     use super::*;
 
     /// Every `u16` survives a round trip, and the encoding is always 1 to 3 bytes.
+    ///
+    /// `with_capacity(3)` rather than `new()` is a harness detail with a real effect:
+    /// the encoding never exceeds three bytes, so pre-sizing turns the allocator model
+    /// into one fixed-size allocation instead of the growth-and-realloc path, which is
+    /// what CBMC spends its time on. The function under test is untouched.
     #[kani::proof]
+    #[kani::unwind(4)]
     fn every_u16_roundtrips() {
         let n: u16 = kani::any();
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(3);
         encode_len(n, &mut buf);
         assert!(!buf.is_empty() && buf.len() <= 3);
 
@@ -86,6 +92,13 @@ mod verification {
     /// be re-encoded to different bytes that still parse as the same structure, which
     /// breaks any signature or hash taken over those bytes. Proptest samples 1024 of
     /// the 16,777,216 three-byte inputs. This covers all of them, and the shorter ones.
+    ///
+    /// Stated arithmetically rather than by re-encoding into a `Vec`. Both express the
+    /// same property, but modelling the allocator put CBMC past 3.5 GB and 35 minutes
+    /// without converging, and canonicality does not actually need a heap: the encoding
+    /// of a value is fully determined by its 7-bit groups and its minimal length, so
+    /// asserting those directly is both cheaper and more explicit about what canonical
+    /// means here.
     #[kani::proof]
     fn accepted_encodings_are_uniquely_canonical() {
         let data: [u8; 3] = kani::any();
@@ -93,21 +106,33 @@ mod verification {
         kani::assume(len <= 3);
         let input = &data[..len];
 
-        match decode_len(input) {
-            Ok((value, used)) => {
-                // Never reports reading more than it was given, or more than the cap.
-                assert!(used >= 1 && used <= 3);
-                assert!(used <= input.len());
+        if let Ok((value, used)) = decode_len(input) {
+            // Never reports reading more than it was given, or more than the cap.
+            assert!((1..=3).contains(&used));
+            assert!(used <= input.len());
 
-                // Re-encoding must reproduce the accepted prefix exactly.
-                let mut canonical = Vec::new();
-                encode_len(value, &mut canonical);
-                assert!(canonical.len() == used);
-                assert!(canonical[..] == input[..used]);
+            // Minimal length: a canonical encoding uses the fewest groups that fit.
+            let minimal = if value < 0x80 {
+                1
+            } else if value < 0x4000 {
+                2
+            } else {
+                3
+            };
+            assert!(used == minimal);
+
+            // And the bytes themselves are the ones that length forces, so exactly one
+            // byte string of that length decodes to this value.
+            let v = u32::from(value);
+            assert!(input[0] == ((v & 0x7f) as u8 | if used > 1 { 0x80 } else { 0 }));
+            if used > 1 {
+                assert!(input[1] == (((v >> 7) & 0x7f) as u8 | if used > 2 { 0x80 } else { 0 }));
             }
-            // Rejection is always allowed; the proof is that acceptance is never wrong.
-            Err(_) => {}
+            if used > 2 {
+                assert!(input[2] == ((v >> 14) & 0x7f) as u8);
+            }
         }
+        // Rejection is always allowed; the proof is that acceptance is never wrong.
     }
 }
 

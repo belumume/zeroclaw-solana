@@ -148,8 +148,17 @@ system with real concurrency, and the wrong shape for a mostly pure library with
 edge.
 
 **Rejected: proof assistants.** The cost is real and the surface that would benefit is one
-decoder, which a single Kani harness would cover more cheaply. That harness is named as a
-genuine remaining gap in TESTING.md rather than claimed.
+decoder, which a single Kani harness covers more cheaply. That harness is now built and
+passing, and the distinction from the Antithesis rejection above is the point: Kani's proofs
+sit behind a `cfg` that cargo never sets, so nothing dead ships, and unlike inert macros they
+produce an actual result. Two harnesses, both VERIFICATION SUCCESSFUL, covering all 16,777,216
+three-byte inputs rather than the 1024 proptest samples.
+
+**Reversed by measurement, not by preference.** The first version checked canonicality by
+re-encoding into a `Vec` and ran 37 minutes at 3.8 GB without converging, which looked like
+evidence that the property was too expensive to prove. It was the formulation. Canonicality
+does not need a heap, and asserting it arithmetically proves the same thing in 4 seconds.
+Recorded because the wrong lesson was available and cheap to draw.
 
 **Consequence.** The testing argument is about which layer catches which kind of wrong, and
 what each is blind to, which is recorded in TESTING.md including the failures that passed

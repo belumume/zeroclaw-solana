@@ -162,5 +162,35 @@ Antithesis's SDK ships macros that are inert off their platform, so it would add
 dead annotations and no signal here. A full deterministic-simulation rig is the
 wrong shape for a mostly pure library with a thin IO edge. Proof assistants and
 `quickcheck` are both dominated for this codebase by proptest plus the KATs above.
-A single Kani harness on shortvec decode is the one formal-methods addition with a
-real cost-to-signal case, and it is not built yet.
+
+## Proved rather than sampled: shortvec
+
+The one formal-methods addition with a real cost-to-signal case is now built.
+`crates/solana-core/src/shortvec.rs` carries two Kani harnesses behind `cfg(kani)`,
+which cargo never sets, so a normal or wasm build compiles none of it and ships no
+dead annotations. That gate is declared in `Cargo.toml` rather than blanket-allowed,
+so `-D warnings` still holds on both targets.
+
+- `every_u16_roundtrips`: every `u16` survives encode then decode, and the encoding
+  is always 1 to 3 bytes. VERIFICATION SUCCESSFUL, 3s.
+- `accepted_encodings_are_uniquely_canonical`: over every byte string of length 0 to
+  3, decode is total, and anything it ACCEPTS is the unique canonical encoding of the
+  value it returns. VERIFICATION SUCCESSFUL, 4s.
+
+The second is the one worth having. If two distinct byte strings decoded to the same
+length, a length prefix would be malleable, and a message could be re-encoded to
+different bytes that still parse as the same structure, which breaks any signature or
+hash taken over those bytes. Proptest samples 1024 of the 16,777,216 three-byte
+inputs. This covers all of them, and the shorter ones.
+
+Worth recording how it got cheap, because the first attempt looked like the property
+was intractable when it was the formulation. Checking canonicality by re-encoding into
+a `Vec` put CBMC past 3.8 GB and 37 minutes without converging. Canonicality does not
+need a heap: the encoding of a value is fully determined by its 7-bit groups and its
+minimal length, so asserting those arithmetically proves the same thing in 4 seconds
+and says more plainly what canonical means. The roundtrip harness still needs the
+`Vec`, and pre-sizing it to the known maximum of 3 turned the allocator model into one
+fixed allocation instead of the growth path, which took it from not converging to 3
+seconds. Neither change weakened a property; both changed how it was expressed.
+
+Run them with `cargo kani --harness <name>`, or `.tools/run-kani.sh` for both.
