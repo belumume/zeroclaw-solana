@@ -1,0 +1,22 @@
+[package]
+name = "sanitizer-microworld"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Compiles the SHIPPED sanitizer to wasm32-unknown-unknown so a reader can drive the real thing in a browser. Not a demo reimplementation: the bytes running behind the page are the same solana-core code the plugins call, which is the only version of this worth having."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+solana-core = { path = "../crates/solana-core" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = true
+
+# Own workspace: this targets wasm32-unknown-unknown, which is a different target
+# from the plugins' wasm32-wasip2, and neither should perturb the other.
+[workspace]
