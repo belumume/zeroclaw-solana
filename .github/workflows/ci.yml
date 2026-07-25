@@ -1,0 +1,85 @@
+name: ci
+
+# Runs on a clean machine what the write-up asks a judge to run on theirs.
+# Everything here is offline and deterministic: no RPC, no devnet, no secrets.
+# The live on-chain claims are re-checked separately by proof-check.yml, so a
+# devnet outage can never turn this red and make working code look broken.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  core:
+    name: solana-core (tests, properties, lints, wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the wasm target the components ship as
+        run: rustup target add wasm32-wasip2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/solana-core
+
+      # --locked so a green run proves the committed lockfile is the one that works.
+      - name: Host tests and property tests
+        working-directory: crates/solana-core
+        run: cargo test --locked
+
+      - name: Clippy, host, warnings are errors
+        working-directory: crates/solana-core
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Clippy, wasm32-wasip2, warnings are errors
+        working-directory: crates/solana-core
+        run: cargo clippy --target wasm32-wasip2 --locked -- -D warnings
+
+      - name: Build the shipped wasm target
+        working-directory: crates/solana-core
+        run: cargo build --target wasm32-wasip2 --release --locked
+
+      # The custody claim, checked rather than asserted: a good publish tx is
+      # certified and four injection shapes are refused.
+      - name: Fail-closed action certification self-test
+        run: python3 scripts/certify_publish_tx.py
+
+  plugins:
+    name: plugin ${{ matrix.plugin }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - allowance-spend-build
+          - depin-attest
+          - lending-health
+          - oracle-publish
+          - payment-watch
+          - solana-pay-request
+          - spl-transfer-build
+          - token-risk-check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the wasm target
+        run: rustup target add wasm32-wasip2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: plugins/${{ matrix.plugin }}
+
+      # Plugin tests are offline by design: RPC is mocked, nothing reaches the network.
+      - name: Host tests
+        working-directory: plugins/${{ matrix.plugin }}
+        run: cargo test --lib --locked
+
+      - name: Build the wasm component
+        working-directory: plugins/${{ matrix.plugin }}
+        run: cargo build --target wasm32-wasip2 --release --locked

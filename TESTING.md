@@ -100,6 +100,39 @@ python3 scripts/verify-proof.py              # live on-chain claims, exits non-z
 The devnet harnesses need a funded operator keypair and are documented in
 `QUICKSTART.md`.
 
+## Continuously, on a machine that is not ours
+
+Three workflows, deliberately separate, because they answer different questions and a
+red badge should tell you which one broke.
+
+`ci.yml` runs every layer above on a clean Ubuntu runner on each push: the 89 host
+tests and 19 properties, clippy with warnings as errors on both the host and
+`wasm32-wasip2`, the release build of the shipped wasm target, the fail-closed
+certification self-test, then all eight plugin components in a matrix. Everything is
+offline and deterministic, and `--locked` throughout, so a green run also proves the
+committed lockfiles are the ones that work. That is the claim a reproducibility promise
+actually rests on, and until now it rested on one laptop.
+
+`proof-check.yml` re-verifies every published on-chain claim twice a day, so "yours,
+running" is continuously auditable rather than a screenshot taken once on a good day. It
+is separate because it depends on public devnet RPC, and a third-party outage must never
+turn the build badge red. Transient unreachability is retried three times; a claim that
+stopped holding is not retried, because that is the alarm.
+
+`host-drift.yml` clones upstream HEAD daily and re-checks interface parity. This one
+exists because of the worst near-miss in this build: `wit/v0` is unfrozen upstream, one
+restored enum variant made our vendored copy a different type, and every plugin would
+have failed to register on a judge's from-source host while every test stayed green. It
+was caught by reading a chat channel, which is not a control. This is the control.
+
+What CI buys is narrower than a green badge suggests, and worth stating: it catches the
+failure where something builds here and nowhere else, and it catches a lockfile drifting
+from the code. Of the three failures in the section above, it would have caught none of
+them on its own. The drift one is now covered by `host-drift.yml`; the dropped cargo
+feature and the wrong-direction pre-flight assertion both live in the host and the live
+config, outside this repo's reach, which is why `.tools/demo-preflight.sh` reads the
+running daemon's own banner instead.
+
 ## Keeping the properties honest
 
 A property suite that has never failed is indistinguishable from one that cannot

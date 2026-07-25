@@ -54,6 +54,63 @@ pub fn decode_len(data: &[u8]) -> Result<(u16, usize), ShortVecError> {
     }
 }
 
+/// Formal proofs of the two shortvec properties that matter, for every input rather
+/// than for sampled ones.
+///
+/// Gated behind `cfg(kani)`, which is set only by the Kani verifier, so a normal or
+/// wasm build compiles none of this and ships no dead annotations.
+///
+/// Run: `cargo kani --harness <name>` (see TESTING.md).
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    /// Every `u16` survives a round trip, and the encoding is always 1 to 3 bytes.
+    #[kani::proof]
+    fn every_u16_roundtrips() {
+        let n: u16 = kani::any();
+        let mut buf = Vec::new();
+        encode_len(n, &mut buf);
+        assert!(!buf.is_empty() && buf.len() <= 3);
+
+        let (value, used) = decode_len(&buf).expect("a self-produced encoding must decode");
+        assert!(value == n);
+        assert!(used == buf.len());
+    }
+
+    /// Decode is total on every byte string of length 0 to 3, and anything it ACCEPTS
+    /// is the unique canonical encoding of the value it returns.
+    ///
+    /// This is the security property, not a tidiness one. If two distinct byte strings
+    /// decoded to the same length, a length prefix would be malleable: a message could
+    /// be re-encoded to different bytes that still parse as the same structure, which
+    /// breaks any signature or hash taken over those bytes. Proptest samples 1024 of
+    /// the 16,777,216 three-byte inputs. This covers all of them, and the shorter ones.
+    #[kani::proof]
+    fn accepted_encodings_are_uniquely_canonical() {
+        let data: [u8; 3] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 3);
+        let input = &data[..len];
+
+        match decode_len(input) {
+            Ok((value, used)) => {
+                // Never reports reading more than it was given, or more than the cap.
+                assert!(used >= 1 && used <= 3);
+                assert!(used <= input.len());
+
+                // Re-encoding must reproduce the accepted prefix exactly.
+                let mut canonical = Vec::new();
+                encode_len(value, &mut canonical);
+                assert!(canonical.len() == used);
+                assert!(canonical[..] == input[..used]);
+            }
+            // Rejection is always allowed; the proof is that acceptance is never wrong.
+            Err(_) => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

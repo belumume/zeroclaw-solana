@@ -183,7 +183,7 @@ impl DecodedTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::instruction::{system_transfer, Instruction};
+    use crate::instruction::system_transfer;
     use crate::message::compile;
     use crate::pubkey::Pubkey;
     use crate::signing::{pubkey_from_seed, serialize_transaction, sign_message};

@@ -106,7 +106,14 @@ fi
 echo ""
 echo "host binary features"
 BIN="$HOST/target/release/zeroclaw"
-if [ ! -f "$BIN" ]; then
+if [ -n "${ZC_SKIP_HOST_BINARY:-}" ]; then
+  # CI drift-watching clones the host for its `wit/` only, because building the host
+  # to check three feature flags costs more than it buys on every scheduled run. The
+  # skip is announced rather than silently passed: a check you cannot see is skipped
+  # is worse than one that failed, and the verdict below is downgraded to match.
+  skipped=1
+  printf '  SKIP  host binary checks (ZC_SKIP_HOST_BINARY set; WIT parity above is unaffected)\n'
+elif [ ! -f "$BIN" ]; then
   bad "no release binary at $BIN"
   fix "cargo build --release --features plugins-wasm,plugins-wasm-cranelift,whatsapp-web"
 else
@@ -129,7 +136,9 @@ else
 fi
 
 echo ""
-if [ "$fail" -eq 0 ]; then
+if [ "$fail" -eq 0 ] && [ -n "${skipped:-}" ]; then
+  echo "WIT-COMPATIBLE: the interfaces match. Host binary features were NOT checked."
+elif [ "$fail" -eq 0 ]; then
   echo "COMPATIBLE: this host will load and register these plugins."
 else
   echo "NOT COMPATIBLE: $fail check(s) failed. Fix them before demoing."

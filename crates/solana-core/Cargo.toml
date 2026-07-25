@@ -28,3 +28,10 @@ waki = { version = "0.5.1", features = ["json"] }
 # wasm component. Failing cases are minimized and recorded under
 # proptest-regressions/, which is committed so each becomes a regression test.
 proptest = "1"
+
+[lints.rust]
+# `kani` is set only by the Kani verifier, never by cargo, so rustc would
+# otherwise flag the gated proof module in src/shortvec.rs as an unknown cfg.
+# Declaring it keeps the crate clean under -D warnings on host AND wasm without
+# blanket-allowing unexpected cfgs.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

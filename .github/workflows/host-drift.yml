@@ -1,0 +1,64 @@
+name: host-drift
+
+# The most expensive near-miss in this build was invisible to every test.
+#
+# `wit/v0` is marked experimental and unfrozen upstream. Component-model interfaces
+# match NOMINALLY, so when upstream restored one enum variant to `plugin-action`, our
+# vendored copy became a different type and every plugin would have failed to register
+# on a judge's from-source host, while `cargo build` and all tests stayed green. Two
+# other entrants hit the same wall independently. It was caught by reading a chat
+# channel, which is not a control.
+#
+# This is the control. It clones upstream HEAD and re-checks interface parity, so the
+# next drift shows up as a notification instead of a dead demo.
+#
+# Separate from ci.yml on purpose: a red here means the OUTSIDE WORLD moved, not that
+# our code broke, and those two signals should never share a badge.
+
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "wit/**"
+      - "scripts/check-host-compat.sh"
+      - ".github/workflows/host-drift.yml"
+
+jobs:
+  wit-parity:
+    name: do our components still match upstream's interface
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # HEAD, not the pinned commit. Pinning is what QUICKSTART documents for
+      # reproduction; the point here is to notice the day upstream moves.
+      - name: Clone upstream host (HEAD)
+        run: |
+          git clone --depth 1 https://github.com/zeroclaw-labs/zeroclaw.git /tmp/zeroclaw-host
+          echo "upstream HEAD: $(git -C /tmp/zeroclaw-host rev-parse --short HEAD)"
+
+      - name: Install the wasm target
+        run: rustup target add wasm32-wasip2
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The check refuses a COMPATIBLE verdict while any plugin is unbuilt, so all
+      # eight must exist before it can say anything meaningful.
+      - name: Build all eight components
+        run: |
+          for p in allowance-spend-build depin-attest lending-health oracle-publish \
+                   payment-watch solana-pay-request spl-transfer-build token-risk-check; do
+            (cd "plugins/$p" && cargo build --target wasm32-wasip2 --release --locked)
+          done
+
+      # Skips only the three host-binary feature checks, which would need a full host
+      # build. WIT parity and the per-component variant check are the ones that catch
+      # drift, and they run in full. The skip is printed, not silent.
+      - name: Interface parity against upstream
+        env:
+          ZC_SKIP_HOST_BINARY: "1"
+        run: ./scripts/check-host-compat.sh /tmp/zeroclaw-host
