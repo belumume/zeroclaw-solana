@@ -63,10 +63,20 @@ FEED_PDAS = {
 # that backs "yours, running". The laptop publisher is secondary by design and is allowed
 # to go quiet when that machine sleeps.
 LIVE_FEED = ("ARM node feed", "JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg")
+# Reported but NOT gating, for exactly the reason above: this one runs on a laptop that is
+# allowed to sleep, so failing the run on it would train a reader to ignore a red result.
+SECONDARY_FEED = (
+    "laptop deterministic feed",
+    "3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K",
+)
 # Cadence is 20 minutes. The threshold is deliberately loose so one skipped reading (a
 # transient upstream weather-API failure, which the publisher refuses to paper over with a
 # fabricated value) does not read as a dead node.
-MAX_FEED_AGE_MIN = 90
+# Overridable so the gate can be demonstrated rather than trusted: run
+#   MAX_FEED_AGE_MIN=0 python3 scripts/verify-proof.py
+# and the live check goes red with exit 1 while every static claim stays green. A liveness
+# check nobody has watched fail is indistinguishable from one that cannot fail.
+MAX_FEED_AGE_MIN = int(os.environ.get("MAX_FEED_AGE_MIN", "90"))
 # DeviceFeed: disc8 + authority32 + device32 + feed_kind1 + value_i64 + scale_i8
 #           + unit[12] + sequence_u64 + observed_at_i64 + published_at_i64 + bump1
 FEED_LEN = 8 + 32 + 32 + 1 + 8 + 1 + 12 + 8 + 8 + 8 + 1
@@ -107,9 +117,37 @@ def rpc(method, params):
         return json.load(r).get("result")
 
 
+def read_feed(addr):
+    """Decode a DeviceFeed account. Returns (reading, seq, age_min) or raises."""
+    v = rpc("getAccountInfo", [addr, {"encoding": "base64"}])
+    val = v.get("value") if v else None
+    raw = base64.b64decode(val["data"][0]) if val else b""
+    if len(raw) != FEED_LEN:
+        raise ValueError(f"unexpected account length {len(raw)}")
+    o = 8 + 32 + 32 + 1
+    value = struct.unpack_from("<q", raw, o)[0]
+    o += 8
+    scale = struct.unpack_from("<b", raw, o)[0]
+    o += 1
+    unit = raw[o : o + 12].rstrip(b"\x00").decode("ascii", "ignore")
+    o += 12
+    seq = struct.unpack_from("<Q", raw, o)[0]
+    o += 8 + 8
+    published = struct.unpack_from("<q", raw, o)[0]
+    return f"{value * (10**scale):.2f} {unit}", seq, (time.time() - published) / 60
+
+
 def main():
     fails = 0
+    static_fails = 0
     print(f"verifying docs/DEVNET-PROOF.md against {RPC}\n")
+    print(
+        "STATIC claims -- the record. These are immutable devnet history and deployed"
+    )
+    print(
+        "program state; once true they stay true, so they prove the work happened, NOT"
+    )
+    print("that anything is running right now.\n")
     for label, addr, want_exec in ACCOUNTS:
         try:
             v = rpc("getAccountInfo", [addr, {"encoding": "base64"}])
@@ -132,43 +170,6 @@ def main():
             print(f"FAIL  {label}: RPC error {e}")
             fails += 1
 
-    # Freshness: decode the live feed and prove it is still being written to.
-    label, addr = LIVE_FEED
-    try:
-        v = rpc("getAccountInfo", [addr, {"encoding": "base64"}])
-        val = v.get("value") if v else None
-        raw = base64.b64decode(val["data"][0]) if val else b""
-        if len(raw) != FEED_LEN:
-            print(f"FAIL  {label} freshness: unexpected account length {len(raw)}")
-            fails += 1
-        else:
-            o = 8 + 32 + 32 + 1
-            value = struct.unpack_from("<q", raw, o)[0]
-            o += 8
-            scale = struct.unpack_from("<b", raw, o)[0]
-            o += 1
-            unit = raw[o : o + 12].rstrip(b"\x00").decode("ascii", "ignore")
-            o += 12
-            seq = struct.unpack_from("<Q", raw, o)[0]
-            o += 8 + 8
-            published = struct.unpack_from("<q", raw, o)[0]
-            age_min = (time.time() - published) / 60
-            reading = f"{value * (10**scale):.2f} {unit}"
-            if age_min > MAX_FEED_AGE_MIN:
-                print(
-                    f"FAIL  {label} freshness: last reading {age_min:.0f} min ago "
-                    f"(> {MAX_FEED_AGE_MIN}); the node is not publishing"
-                )
-                fails += 1
-            else:
-                print(
-                    f"PASS  {label} freshness ({reading}, seq={seq}, "
-                    f"{age_min:.0f} min ago)"
-                )
-    except Exception as e:
-        print(f"FAIL  {label} freshness: RPC error {e}")
-        fails += 1
-
     for label, sig, want_err in TXS:
         try:
             t = rpc("getTransaction", [sig, {"maxSupportedTransactionVersion": 0}])
@@ -188,9 +189,62 @@ def main():
             print(f"FAIL  {label}: RPC error {e}")
             fails += 1
 
-    # +1 for the liveness check, which can fail and so must be in the denominator.
-    total = len(ACCOUNTS) + len(TXS) + 1
-    print(f"\n{total - fails}/{total} claims verified")
+    static_fails = fails
+
+    print(
+        "\nLIVE claims -- the only checks here that can go red. Everything above stays"
+    )
+    print("green whether or not a single machine of ours is switched on.\n")
+
+    label, addr = LIVE_FEED
+    try:
+        reading, seq, age_min = read_feed(addr)
+        if age_min > MAX_FEED_AGE_MIN:
+            print(
+                f"FAIL  {label} freshness: last reading {age_min:.0f} min ago "
+                f"(> {MAX_FEED_AGE_MIN}); the node is not publishing"
+            )
+            fails += 1
+        else:
+            print(
+                f"PASS  {label} freshness ({reading}, seq={seq}, {age_min:.0f} min ago)"
+            )
+    except Exception as e:
+        print(f"FAIL  {label} freshness: {e}")
+        fails += 1
+
+    # Reported, never gating. This publisher runs on a laptop that is allowed to sleep, so
+    # failing the whole run on it would teach a reader that a red line here means nothing,
+    # which is how a liveness check stops being one.
+    label, addr = SECONDARY_FEED
+    try:
+        reading, seq, age_min = read_feed(addr)
+        state = "fresh" if age_min <= MAX_FEED_AGE_MIN else "quiet (allowed)"
+        print(
+            f"INFO  {label}: {state} ({reading}, seq={seq}, {age_min:.0f} min ago, "
+            f"not gating)"
+        )
+    except Exception as e:
+        print(f"INFO  {label}: unreadable ({e}, not gating)")
+
+    # Report the two kinds separately, because collapsing them into one number is exactly
+    # how a dead system prints a clean bill of health. An audit put it plainly: of the
+    # eleven claims this script used to total, ten were deployed-program state or immutable
+    # transaction history, and one could actually go red. "11/11 verified" therefore read
+    # as a liveness proof while being almost entirely a record of the past.
+    static_total = len(ACCOUNTS) + len(TXS)
+    live_total = 1  # the ARM feed; the laptop feed is reported but never gates
+    live_fails = fails - static_fails
+    print(
+        f"\n{static_total - static_fails}/{static_total} static claims verified "
+        f"(deployed state and immutable devnet history; these cannot go red)"
+    )
+    print(
+        f"{live_total - live_fails}/{live_total} live claims verified "
+        f"(is the node publishing right now)"
+    )
+    if fails == 0:
+        print("\nThe record holds and the node is live.")
     sys.exit(0 if fails == 0 else 1)
 
 

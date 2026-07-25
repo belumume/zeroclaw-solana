@@ -16,7 +16,8 @@ the `x402-feed-gate` node, and the `webshop-pay` pay page. Steps 2-7 run from a 
 `cargo test` across `crates/solana-core` and `x402-feed-gate` (all green, no network), then
 `zeroclaw sop validate`. To confirm the live chain instead of rebuilding, run
 `python3 scripts/verify-proof.py` (stdlib only, no install): it queries devnet and prints
-PASS/FAIL for every on-chain claim, ending in `11/11 claims verified`. Or open any explorer link
+PASS/FAIL for every on-chain claim, ending in `10/10 static claims` plus `1/1 live claims`
+(the split matters: only the live one can go red). Or open any explorer link
 in `docs/DEVNET-PROOF.md`; the programs, the feed sequence history, and the x402 settlement
 are all public devnet. The full evening path (host + plugins + a wired bot + a live turn) is
 steps 1-7 below.

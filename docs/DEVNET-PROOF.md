@@ -51,9 +51,16 @@ feed account stores only the LATEST reading, so the *sequence history* is the le
 | 2026-07-25T15:48Z | 20.5 min | ok | [5kBkui9R…](https://explorer.solana.com/tx/5kBkui9Rwmwm5hJhHo3g1pFJtott3Ci21T3HxAYjNS596grchtndWLWBNT5hV5FqNkKQTyEPwthhdrLyuxJd14kw?cluster=devnet) |
 
 The interval column is the point. Every gap is 20.5 minutes to the tenth of a minute, which is
-a timer running unattended on a box in Jeddah, not a person remembering to publish. Head of the
-feed at the time of writing: **sequence 35, 40.70C**. Read the live head yourself with
-`python3 scripts/verify-proof.py`, which fails if the feed has gone stale.
+a timer running unattended on a box in Jeddah, not a person remembering to publish.
+
+Do not take the head of the feed from this file, because any sequence number written here is
+stale within twenty minutes of being written. Read it live:
+
+```
+python3 scripts/verify-proof.py
+```
+
+It prints the current reading, sequence and age, and exits non-zero if the feed has gone quiet.
 
 Two honesty notes about this table, because both were wrong here until an audit caught them:
 
@@ -129,7 +136,12 @@ the over-cap transfer was rejected on-chain.
 Two ways, no account of ours needed:
 - **One command, no install:** `python3 scripts/verify-proof.py` (stdlib only) queries devnet and
   prints PASS/FAIL for every claim above (programs executable, feed PDA owner, and each tx's exact
-  success or rejection), exiting non-zero if any fails. A clean run prints `11/11 claims verified`.
+  success or rejection), exiting non-zero if any fails. A clean run prints `10/10 static claims`
+and `1/1 live claims`, split deliberately: the static ten are deployed program state and
+immutable devnet history, so they stay green whether or not anything of ours is switched on.
+Only the live one answers "is the node publishing right now". Prove that gate works rather
+than trusting it: `MAX_FEED_AGE_MIN=0 python3 scripts/verify-proof.py` turns the live check red
+and exits 1 while all ten static claims stay green.
 - **By hand:** open any link above with the explorer cluster set to devnet. The programs are
   executable (owner `BPFLoaderUpgradeable`), the feed PDA decodes via the on-chain IDL, and the
   settlement tx shows the TransferChecked to the seller's associated token account.
