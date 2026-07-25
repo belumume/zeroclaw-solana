@@ -29,7 +29,11 @@ steps 1-7 below.
 ## 1. Build the host with plugin support (15–20 min, one-time)
 Plugins are not in release binaries, so build the host from source at the pinned release:
 ```
-git clone https://github.com/zeroclaw-labs/zeroclaw && cd zeroclaw && git checkout v0.8.3
+git clone https://github.com/zeroclaw-labs/zeroclaw && cd zeroclaw
+git checkout f0b92f1        # the exact commit this was verified against
+# `git checkout v0.8.3` gets you the tag, which is the same release line but may have
+# moved past the commit above. If you take the tag, run scripts/check-host-compat.sh
+# afterwards, since wit/v0 is unfrozen upstream and drift is silent until load time.
 cargo build --release --features plugins-wasm,plugins-wasm-cranelift,whatsapp-web
 ```
 The umbrella feature alone integrates the runtime **without a JIT backend**, so every plugin
@@ -77,7 +81,10 @@ zeroclaw plugin install ./plugins/<name>/               # per plugin; repeat as 
 zeroclaw config set plugins.enabled true
 ```
 Each plugin dir carries `manifest.toml` (minimal permissions) and a README with its config
-keys, custody tier, threat model, and a prompt-injection transcript.
+keys, custody tier and threat model. The plugins that build a transaction or sign one also
+carry a captured prompt-injection transcript; the two read-only ones (`token-risk-check`,
+`lending-health`) carry the threat model without a captured attack, because there is no
+action for an injection to redirect.
 
 ## 3. Configure the agent (10 min)
 ```

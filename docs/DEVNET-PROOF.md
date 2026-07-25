@@ -14,11 +14,18 @@ local). Set the explorer cluster to **devnet**.
 | Device feed PDA (agent-driven, historical) | `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` | https://explorer.solana.com/address/CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU?cluster=devnet |
 
 The first of those three is the one that matters for "yours, running." Its device keypair was
-generated **on the ARM node itself** (`openssl rand -hex 32`, never copied from here; the seed
-this workstation briefly held was shredded), and a `systemd --user` timer with lingering
-enabled publishes it on a schedule with no laptop in the loop. So "the device signs its own
-readings" is literal rather than a figure of speech: this workstation cannot produce a
-signature for that feed. The second feed is the deterministic publisher that runs here and
+generated **on the ARM node itself** with `openssl rand -hex 32` and has never left that box,
+so this workstation cannot produce a signature for that feed. A `systemd --user` timer with
+lingering enabled publishes on a schedule with no laptop in the loop.
+
+That was a deliberate reversal, and it is worth stating because the easier path was
+available. The first plan was to copy this workstation's existing device seed to the node so
+the new feed would inherit the old one's sequence history. That would have made "the device
+signs its own readings" architecturally true and literally false, and anyone reading the
+deploy path could see the seed had travelled. The arithmetic also did not support the excuse:
+at one reading every twenty minutes a fresh feed accrues roughly 936 readings by the
+submission date. So the node generated its own seed instead, the transported copy was
+shredded unused, and that copy was never the key behind this feed. The second feed is the deterministic publisher that runs here and
 predates the node; the third is the original agent-driven proof, kept because its sequence
 history is the earliest evidence and deliberately marked historical rather than quietly
 dropped.

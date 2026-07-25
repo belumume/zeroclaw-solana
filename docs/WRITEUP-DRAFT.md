@@ -1,7 +1,9 @@
 # Showcase write-up
 
 ## What it does
-Two use cases, one suite, both live on devnet. No entry that solves just one of these spans them: one coherent
+Two use cases, one suite, both live on devnet. Either one is a submission on its own; what is
+claimed here is that they share a single custody spine rather than being two projects in a
+folder. One coherent
 body from the physical edge (a device signing its own readings on-chain), through machine
 commerce (the node sells that feed and pays for its own gas), to on-chain-enforced custody (an
 audited program, not the LLM, bounds every spend), reproducible from a clean machine in an evening.
@@ -194,9 +196,12 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   climbing every 20 min) and `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` (agent-driven, our
   first proof, kept as history); Anchor IDLs on-chain; security.txt embedded.
 - the node feed is the one that makes the DePIN claim literal. Its device key was generated on
-  the node itself and has never existed on the machine this was built from, so that feed is
-  signed by hardware we cannot forge from here, and a `systemd --user` timer with lingering
-  keeps it publishing whether or not any laptop is awake.
+  the node with `openssl rand -hex 32` and has never left that box, so that feed is signed by
+  hardware we cannot forge from here, and a `systemd --user` timer with lingering keeps it
+  publishing whether or not any laptop is awake. The earlier plan was to transport this
+  machine's existing seed so the new feed would inherit the old sequence history; that would
+  have made the claim architecturally true and literally false, so the copy was shredded
+  unused and the node made its own. `docs/DEVNET-PROOF.md` carries the full reasoning.
 - the feed account stores only the latest reading, so the monotonic sequence is the on-chain
   publish ledger, the proof the node keeps running. `scripts/verify-proof.py` checks all three
   feeds and additionally asserts the node feed is FRESH, since an owned-but-dead feed would
