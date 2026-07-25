@@ -34,19 +34,15 @@
 BUILD-STATE.md
 CLAUDE.local.md
 docs/BUILD-JOURNAL.md
-docs/BUILD-JOURNAL.md
 docs/BUILD-PATTERNS.md
-docs/COMPLIANCE-AUDIT.md
 docs/COMPLIANCE-AUDIT.md
 docs/DEMO-SCRIPT.md
 docs/dossier-raw.json
 docs/grounded-facts.json
 docs/LISTING-DELTA-2026-07-22.md
-docs/LISTING-DELTA-2026-07-22.md
 docs/listing-verbatim.json
 docs/LISTING-VERBATIM.md
 docs/SECURITY-PATTERNS.md
-docs/TRACK-E-MATRIX.md
 docs/TRACK-E-MATRIX.md
 docs/USE-CASES.md
 goal.txt
@@ -68,3 +64,4 @@ docs/DEMO-STORYBOARD.md
 # stale/leaky dev build script (index.html is the self-contained artifact)
 webshop-pay/build.py
 __pycache__/
+docs/X-BUILDLOG-DRAFTS.md

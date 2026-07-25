@@ -5,12 +5,14 @@ Two use cases, one suite, both live on devnet. No entry that solves just one of 
 body from the physical edge (a device signing its own readings on-chain), through machine
 commerce (the node sells that feed and pays for its own gas), to on-chain-enforced custody (an
 audited program, not the LLM, bounds every spend), reproducible from a clean machine in an evening.
-1. **The DePIN talking node**: a device that reads REAL ambient temperature (Madinah, from the
-   keyless open-meteo API on an interim host now; a physical Raspberry Pi + DHT11 sensor takes
-   over the same feed when the kit lands, so the day/night swing in the values is real weather,
-   not synthetic), signs each reading with its own key inside a wasm sandbox, and publishes a
-   typed on-chain feed another program consumes; you can message it on Telegram to ask what it
-   saw and why a reading was refused.
+1. **The DePIN talking node**: a node that reads REAL ambient temperature (Madinah, from the
+   keyless open-meteo API on the interim host now; a physical Raspberry Pi + DHT11 sensor
+   replaces that source when the kit lands, so the day/night swing in the values is real weather,
+   not synthetic), signs each reading with a device key the host never exposes, and publishes a
+   typed on-chain feed another program consumes. Two publish paths share the same device
+   signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
+   publisher runs the durable feed on a schedule so the on-chain sequence never gaps. You can
+   message the node on Telegram to ask what it saw and why a reading was refused.
 2. **The shop terminal**: a merchant's ZeroClaw on Telegram and WhatsApp. It builds a Solana Pay
    request (skill) and hands the customer a tappable pay page (the channels are text-only, so a
    hosted page renders the QR and a wallet picker), then confirms settlement on-chain by matching
@@ -19,7 +21,7 @@ audited program, not the LLM, bounds every spend), reproducible from a clean mac
 
 ## Who it's for
 The node: anyone putting a sensor's word on-chain: DePIN operators, environmental telemetry,
-proof-of-physical-work, without trusting the host machine's LLM with a spend key. The
+device-attested readings, without trusting the host machine's LLM with a spend key. The
 terminal: a small merchant who wants "charge table 4, 25 USDC" to just work, with the
 blast radius of a hacked agent capped by on-chain math, not vibes.
 
@@ -184,9 +186,12 @@ Repo (plugins + solana-core + onchain programs + skills + e2e harnesses + x402-f
 
 Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`):
 - oracle program `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn`, consumer
-  `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`, feed PDA
-  `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU`; Anchor IDLs on-chain; security.txt embedded.
-- the feed's sequence history (seq 10-15, most recent seq 15) is its publish ledger.
+  `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`; two device feed PDAs, both owned by the
+  oracle: `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` (agent-driven, our first proof) and
+  `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (deterministic LLM-free, climbing every 20 min);
+  Anchor IDLs on-chain; security.txt embedded.
+- the feed account stores only the latest reading, so the monotonic sequence is the on-chain
+  publish ledger, the proof the node keeps running (`scripts/verify-proof.py` checks both feeds).
 - x402 settlement `5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc`
   (err None); a replayed payment refused NonceReused.
 - shop terminal Track-A settlement `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`

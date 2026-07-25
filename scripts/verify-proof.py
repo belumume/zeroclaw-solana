@@ -32,9 +32,22 @@ ACCOUNTS = [
         True,
     ),
     ("SF Allowances (audited)", "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44", True),
-    ("device feed PDA", "CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU", False),
+    (
+        "device feed PDA (agent-driven, historical)",
+        "CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU",
+        False,
+    ),
+    (
+        "device feed PDA (deterministic LLM-free, live)",
+        "3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K",
+        False,
+    ),
 ]
 FEED_OWNER = "EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn"  # feed PDA must be owned by the oracle
+FEED_PDAS = {
+    "CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU",
+    "3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K",
+}
 
 # (label, signature, want_err)  want_err=None means success (err:null)
 TXS = [
@@ -87,10 +100,7 @@ def main():
                 print(f"FAIL  {label}: not executable")
                 fails += 1
                 continue
-            if (
-                addr == "CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU"
-                and val.get("owner") != FEED_OWNER
-            ):
+            if addr in FEED_PDAS and val.get("owner") != FEED_OWNER:
                 print(f"FAIL  {label}: wrong owner {val.get('owner')}")
                 fails += 1
                 continue

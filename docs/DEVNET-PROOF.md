@@ -9,7 +9,8 @@ local). Set the explorer cluster to **devnet**.
 |---|---|---|
 | `zeroclaw_oracle` | `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn` | https://explorer.solana.com/address/EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn?cluster=devnet |
 | `consumer_example` | `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt` | https://explorer.solana.com/address/B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt?cluster=devnet |
-| Device feed PDA (`["feed", device]`) | `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` | https://explorer.solana.com/address/CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU?cluster=devnet |
+| Device feed PDA (agent-driven, historical) | `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` | https://explorer.solana.com/address/CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU?cluster=devnet |
+| Device feed PDA (deterministic, LLM-free, live) | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` | https://explorer.solana.com/address/3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K?cluster=devnet |
 
 Both programs carry an on-chain **Anchor IDL** (so the explorer decodes the instructions, not
 "Unknown") and an embedded **security.txt**:
