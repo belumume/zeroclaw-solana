@@ -230,6 +230,26 @@ to a caller. Both were caught by the specific assertion aimed at them. `.tools/`
 runner; it restores the source on every exit path and refuses to interpret a mutation unless
 the baseline was green first.
 
+## One layer you can operate rather than read
+
+`sanitizer-microworld/index.html` opens straight out of a clone, no server and no build step,
+and runs `solana_core::sanitize` compiled to WebAssembly. It is the shipped function, not a
+demonstration reimplementation, which is the only version of this worth having: a JavaScript
+lookalike would be a claim about the sanitizer rather than the sanitizer. The module is pure
+with no imports, which is why compiling it for the browser is possible at all.
+
+Six presets, because a blank box does not tell a reader which inputs matter: bidirectional
+override, zero-width split, injection framing with nothing to strip, newline smuggling, an
+overlong field, and all of them at once. The raw panel names every invisible character inline.
+The override preset is the one that teaches, since the browser renders it convincingly inside
+the input box while the panel below shows the true character order.
+
+Verified as a running artifact rather than as source that looks correct: two host tests cover
+the raw ABI and the JSON encoder, a structural check confirms the script parses with the wasm
+embedded and no HTML-injection sink present, and it was then driven in a browser. The override
+preset strips two invisible characters; the combined preset strips five, collapses a newline,
+caps 174 characters to 96, and appends the untrusted-data label.
+
 ## Searching for disagreement, rather than asserting a property
 
 Every layer above shares one shape. Known-answer vectors, properties and proofs all

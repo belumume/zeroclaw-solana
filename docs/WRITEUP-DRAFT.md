@@ -226,6 +226,17 @@ real failures that document records, CI would have caught none of them on its ow
 covered by a drift workflow; the other two live outside this repository. `TESTING.md` carries
 the full picture, including what each layer cannot catch.
 
+**And one of these you can just operate.** Open `sanitizer-microworld/index.html` from the
+clone, no server and no build, and paste whatever a hostile token could put in its name field.
+The page is running `solana_core::sanitize` compiled to WebAssembly, so it is the shipped
+defense rather than a demonstration reimplementation of it. Presets cover a bidirectional
+override, a zero-width split, injection framing with nothing to strip, newline smuggling, an
+overlong field, and all of them together. The raw panel names each invisible character inline,
+which is the part worth seeing: the browser renders the override attack convincingly in the
+input box while the panel underneath shows the real character order. The page also states what
+the sanitizer refuses to do, since framing is labelled rather than deleted and the decision
+stays with the approval gate and the on-chain cap.
+
 ## Custody tier + threat model
 Declared per component. Each funds-touching plugin ships a prompt-injection transcript; the read-only lenses ship a proven-behaviour transcript instead.
 
