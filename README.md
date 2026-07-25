@@ -38,6 +38,14 @@ Foundation Allowances program. That bound is demonstrated rather than asserted: 
 own session key signs an over-cap transfer and the program rejects it, custom error `0x12c`,
 with the failed transaction on devnet for anyone to open.
 
+Human approval is a weak boundary on its own, because the sentence the human reads is one the
+model wrote. So the paths with a fixed intent never ask: `scripts/broadcast_certified.py`
+re-derives the intent from the exact serialized bytes and refuses an appended transfer, a
+swapped program or a spoofed feed before anything leaves the machine. Run that check as a
+self-test with `python3 scripts/certify_publish_tx.py`, which puts four injection shapes
+through it. Where intent is variable, a spend, the on-chain cap above is what holds, and it
+holds whether or not the operator was fooled.
+
 The two use cases run **no T2 fund-signer**. Everything they touch sits at T0 (read-only) or
 T1 (builds an unsigned transaction, holds no key), which the brief calls the sweet spot and
 which is the honest place for an LLM-driven system to stop.

@@ -145,6 +145,37 @@ The tiers in words:
   and this is demonstrated live on devnet: the agent's session key signed an over-cap transfer
   and the program rejected it (custom error 0x12c), while a within-cap transfer settled (see
   DEVNET-PROOF). The program bounds a complying agent, not only a refusing one.
+- **The approval prompt is not, on its own, a security boundary.** When an agent asks a human to
+  approve a transaction, the sentence that human reads was written by the model. Influence the
+  model and you influence the description, so an attacker does not need the signing key, only an
+  operator who reads one plausible sentence and says yes. Two properties of this build answer
+  that, and neither of them depends on the operator reading correctly.
+
+  *Where the intent is fixed, nothing asks a human.* The DePIN publish path may express exactly
+  one intent, so `scripts/broadcast_certified.py` re-derives that intent from the exact
+  serialized bytes before anything leaves the machine, and refuses everything else. It trusts
+  neither the model, nor the plugin, nor the wire. Its self-test is the attack, run four ways
+  (`python3 scripts/certify_publish_tx.py`):
+
+  ```
+  [OK ] good publish tx: PASS(certified)
+  [OK ] injected 3rd-instruction SOL transfer: REFUSED(expected exactly 2 instructions, got 3)
+  [OK ] token-program instruction instead of publish: REFUSED(ix1 must be our oracle program (publish_reading))
+  [OK ] ix0 System-Transfer instead of AdvanceNonce: REFUSED(ix0 is a System instruction but NOT AdvanceNonceAccount)
+  [OK ] publish to a spoofed feed PDA: REFUSED(ix1 does not touch our feed PDA (wrong/spoofed feed?))
+  ```
+
+  The x402 gate applies the same discipline against its own challenge before settling.
+
+  *Where the intent is variable, the outcome is capped on chain.* A spend cannot be certified
+  this way, because a free choice of destination and amount is the point of it. So the bound sits
+  neither in the prompt nor in our code: the audited Allowances program is the spending
+  authority, and it rejects an over-cap transfer signed by the agent's own session key (0x12c, on
+  devnet). An operator who is deceived into approving still cannot exceed a limit the chain
+  enforces.
+
+  The residual, stated plainly: a spend that is within cap, to a destination the operator
+  accepts, still rests on the operator. That surface is narrowed here, not closed.
 - Third-party trust declared: none held; RPC endpoints and open-meteo are read-only inputs;
   no MCP servers in the loop.
 
