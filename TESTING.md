@@ -108,8 +108,10 @@ warns about, returning the authority bytes where the stored nonce belongs, makes
 `nonce_decode_returns_stored_fields_verbatim` fail and the suite exit non-zero;
 reverting restores 19 passing. The harness is `.tools/mutation_check.sh`.
 
-`proptest-regressions/` is committed, so any case that ever fails becomes a
-permanent seeded regression rather than a shrinking run somebody remembers.
+The regression file `crates/solana-core/tests/properties.proptest-regressions` is
+committed, so any case that ever fails becomes a permanent seeded regression rather
+than a shrinking run somebody remembers. It currently holds one seed, annotated with
+its provenance: the minimal input from the mutation above, not a field failure.
 
 ## Deliberate non-goals
 

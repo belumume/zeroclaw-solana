@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+#
+# Provenance: this seed came from the mutation check in .tools/mutation_check.sh,
+# not from a field failure. It is the minimal input proptest shrank to that
+# distinguishes reading the stored-nonce range from reading the authority range,
+# so it is the sharpest possible guard if that defect is ever reintroduced.
+cc 81b698b369a921818ee7f4eb50d23b1406025dde965ff20116033023e46e97f2 # shrinks to authority = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], durable = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], lamports = 0
