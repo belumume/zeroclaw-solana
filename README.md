@@ -102,6 +102,14 @@ cargo test --lib                                      # host tests, mocked RPC, 
 cargo build --target wasm32-wasip2 --release          # the shipped component
 ```
 
+All of that runs on a clean runner on every push, plus the fail-closed certification
+self-test and all eight components in a matrix, with `--locked` throughout so a green run
+also proves the committed lockfiles are the ones that work. Two more workflows re-verify the
+published on-chain claims twice a day and re-check interface parity against upstream HEAD,
+because the interface is unfrozen and drifting away from it once already came close to
+making every plugin fail to register. See [`TESTING.md`](TESTING.md) for what each of those
+can and cannot catch.
+
 Building the ZeroClaw host needs three feature flags, and one of them removes a channel in
 silence if omitted. That is step 1 of [`QUICKSTART.md`](QUICKSTART.md), worth reading before
 you build.
