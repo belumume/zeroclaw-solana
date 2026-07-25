@@ -109,9 +109,24 @@ else choosing to pay for the data.
 The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM. We applied the tier test to our OWN components and moved them:
 - **Solana Pay URL construction: demoted from a wasm plugin to a SKILL.** We first built
   `solana-pay-request` as a plugin. Then the tier test: building a `solana:...` URL is string
-  work, and the worst failure of a malformed URL is a payment that never starts, no funds at
-  risk. That does not need a sandbox. So the live shop uses the `solana-pay` SKILL, and the
-  plugin remains only as evidence of the reasoning.
+  work, and string work does not need a sandbox. So the live shop uses the `solana-pay` SKILL,
+  and the plugin remains only as evidence of the reasoning.
+
+  **The original justification for that demotion was wrong, and the correction is worth more
+  than the decision.** We wrote that the worst failure of a malformed URL is a payment that
+  never starts, so no funds are at risk. An audit pointed out the real failure is a
+  *well-formed* URL carrying somebody else's recipient. That routes around every custody
+  control rather than defeating one: no key is touched, nothing is signed, no approval fires,
+  and the money that moves is the customer's, so the on-chain allowance cap and the approval
+  gate are not even on the path.
+
+  It is not hypothetical. It fired here once with no attacker present, when stale rows in the
+  agent's memory store caused it to recall a different wallet and emit a link paying that
+  address. The demotion is still correct, because a sandbox would not have stopped that either
+  (the URL was well-formed; the recipient was wrong). What was missing was an invariant, so
+  `pay_link.py` now hardcodes the merchant address and refuses any link that does not match,
+  with the wallet from that incident as a test case. The tier was right; the threat model
+  underneath it was not.
 - **Settlement verification stays a Tier-3 plugin.** `payment-watch` parses untrusted RPC JSON
   at the LLM context boundary and runs the OWASP-LLM01 sanitizer over it. That is exactly the
   bounded, adversarial-input code the ladder reserves for wasm. Demoting it would drop the
@@ -125,9 +140,30 @@ Every layer sits at the lowest tier that honestly does the job.
 ## Custody tier + threat model
 Declared per component. Each funds-touching plugin ships a prompt-injection transcript; the read-only lenses ship a proven-behaviour transcript instead.
 
+**What a PAID verdict does and does not prove.** `payment-watch` matches on amount, mint,
+destination and reference together, so a dust payment or an attacker-minted token cannot
+satisfy it. But the expected amount is a tool-call argument, which means it is authored by the
+model. An agent that has been successfully injected can call the tool with an expected amount
+of 0.01 and receive a *truthful* PAID for a 0.01 payment. The check is honest; the question it
+was asked was not.
+
+This is the same attack a rival entrant built their submission around, pointed at the
+verification path rather than the signing path, and it is worth stating plainly because our
+own write-up names that attack for signing and did not name it here. It is not fixable inside
+a read-only plugin: any T0 lens answers the question it is handed. Closing it needs the
+expected amount to come from an order ledger the agent cannot write, which is a design we have
+not built, so it is a stated boundary rather than a solved one.
+
+Second, narrower: the sender is displayed, never asserted. `from` is a heuristic (the owner
+whose balance decreased most) and is not part of the match condition. So a PAID proves *the
+merchant received exactly the expected amount of the expected asset in a transaction carrying
+the reference*, not *this particular customer paid*. For a terminal that is arguably the right
+behaviour, since a third party settling an invoice is still settlement, but "confirms a
+payment" reads stronger than what is proven, so here is what is proven.
+
 | Component (the two use cases run on these) | Tier | Why it sits there |
 |---|---|---|
-| `solana-pay` (skill) | T0 | builds a `solana:` URL; no key, worst case a payment that never starts |
+| `solana-pay` (skill) | T0 | builds a `solana:` URL; no key. The recipient is a hardcoded invariant checked before the link is emitted, not a value the agent supplies |
 | `payment-watch` (plugin) | T0 | read-only RPC settlement check: amount, mint, destination and reference must all match |
 | `x402-feed-gate` (native) | T0/T1 | holds only its public receiving address; verifies inbound payment, no spend path |
 | `oracle-publish` (plugin) | T1 | device-co-signed reading; returns an unsigned partial tx, host completes the fee-payer slot |
