@@ -360,6 +360,42 @@ Scoped non-goals (deliberate):
 rate source (ECB reference), so a merchant charges "R$120" and the customer pays the USDC
 equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches a public USD/BRL rate (frankfurter.dev, ECB-based), computes the USDC amount, and states the conversion (for example R$120 at 5.0797 = 23.62 USDC); the on-chain settlement is the same reference-threaded shop flow proven in DEVNET-PROOF.
 
+## What we turned down, and why
+
+The decisions that shaped this are mostly decisions not to build something, and those are the
+ones a reviewer cannot see from the tree. The full set with its reasoning is in
+`docs/DECISIONS.md`, including the consequence each one carries. Four are worth stating here
+because they are the questions this submission most obviously invites.
+
+**A novel on-chain custody program.** This was the plan, and it was killed by evidence rather
+than by effort. A source-level check found that Swig wallet already ships on-chain program
+allowlisting for session authorities, with spend caps and per-window recurring limits, and that
+MagicBlock session tokens already scope a session key to a single target program. The genuine
+remaining gap was thin: one vault combining a period cap, a payee allowlist and a program
+allowlist. Competing with audited wallet infrastructure on its own ground for a thin difference
+fails the obvious question, which is why not just use Swig. So the custody story rests on the
+audited Allowances program instead, and an over-cap transfer signed by the agent's own session
+key is rejected on chain with custom error 0x12c. That is demonstrated rather than asserted.
+
+**A Blink for the shop payment.** Sponsor-endorsed and a cheap extra bullet. The brief
+recommends routing through a Blink specifically where building the transaction yourself is the
+hard part, and that is not the situation here, since constructing the transaction correctly is
+the thing this build validates byte for byte against the reference implementation. Delete the
+Blink and the shop behaves identically, which makes it decoration rather than a solution to a
+problem we have.
+
+**PIX.** Named in the brief and genuinely wanted, and still a non-goal, because a fiat rail
+needs a licensed custodial payment provider and that contradicts the self-custody thesis the
+rest of this rests on. What is delivered instead is the honest half: BRL invoicing with USDC
+settlement at a stated rate source, which is the part that does not require handing custody to
+anyone.
+
+**A plugin we had already built.** `solana-pay-request` was written as a Tier 3 plugin, and the
+tier test says a URL built from known inputs is a skill. It was demoted. It stays in the tree
+as evidence of the reasoning rather than deleted, because the brief scores correct layering and
+the honest way to show that discipline is to apply it to our own work when it costs us a
+component.
+
 ## Reproducibility (links)
 `QUICKSTART.md` reproduces both use cases from a clean machine in an evening: source-build
 features, plugin install layout, agent/risk-profile config, channel wiring including the

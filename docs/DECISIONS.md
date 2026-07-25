@@ -132,20 +132,43 @@ been a cheap extra bullet. The pay page already delivers the outcome a Blink wou
 link that opens the customer's wallet, and the shop's channels are WhatsApp and Telegram,
 which do not render Blink cards. It would add surface without changing what a customer can do.
 
+**Re-examined against the brief's own reasoning, and refused again on stronger grounds.** The
+brief recommends routing through a Blink specifically "where building a transaction yourself is
+the hard part," listing the protocols that hand back a ready transaction over REST as the
+Tier 1 friends of anyone who does not want to construct one. That motivation does not apply
+here: building the transaction is the part this submission does byte-correctly, validated
+against the reference implementation, so a Blink would replace a verified path with an
+outsourced one. The test that settled it is the one worth stating, because it applies to any
+feature added because a rubric mentions it. Delete the feature and see what changes. Delete
+Blinks and the shop behaves identically, which makes it decoration rather than a solution to a
+problem this build has.
+
 **Consequence.** Originality budget stays on the device-co-signed feed and the x402 earning
 node, where it buys something a single-track entrant cannot copy quickly.
 
-## 8. Deterministic simulation and proof assistants were skipped
+## 8. The Antithesis SDK was rejected, its technique was not
+
+The heading here used to say proof assistants were skipped, which stopped being true the moment
+the Kani harnesses landed and stayed on the page for a while afterwards. A heading that
+contradicts its own body is worse than a stale note, because the heading is what gets read.
 
 **Chosen.** Known-answer tests against the reference implementation, then property tests, then
-live devnet.
+a proof where the domain is small enough to walk, then a search for the disagreements none of
+those were written to find, then live devnet.
 
 **Rejected: the Antithesis SDK.** Its macros are inert off their platform, so it would ship
 dead annotations and produce no signal here.
 
 **Rejected: a full deterministic-simulation rig.** It is the right tool for a distributed
 system with real concurrency, and the wrong shape for a mostly pure library with a thin IO
-edge.
+edge. That rejection stands. The conclusion drawn alongside it did not, and correcting it is
+worth more than the original call. Rejecting the rig had quietly become "this whole approach is
+out of reach here," which is a different and wrong claim. The search underneath it needs no
+hypervisor when the target is already deterministic, and a decode path with no clock, no
+threads and no IO is exactly that. So `differential-fuzz/` now mutates real transactions and
+grades both decoders against the reference deserializer, which is the layer that looks for
+disagreements nobody wrote a property for. The tool was correctly refused; the idea was not
+theirs to keep.
 
 **Rejected: proof assistants.** The cost is real and the surface that would benefit is one
 decoder, which a single Kani harness covers more cheaply. That harness is now built and
