@@ -64,10 +64,18 @@ root, a network where nodes compute the value is the wrong shape: the device phy
 cannot push its own signed reading through node consensus, and routing it that way moves the
 trust root off the device and adds infrastructure we would then depend on.
 
+**Rejected: transporting this machine's device seed to the node.** That was the first plan,
+so the new feed would inherit the old one's sequence history. It would have made "the device
+signs its own readings" architecturally true and literally false, and anyone reading the
+deploy path could see the seed had travelled. The excuse did not survive arithmetic either: at
+one reading every twenty minutes a fresh feed accrues roughly 936 readings by the submission
+date, which is not a thin history. The node generated its own seed instead and the copy was
+shredded unused.
+
 **Consequence.** Replay is refused by the chain rather than by our code, and a consumer
-program proves the feed is consumable. The device key was generated on the node itself and
-has never existed on the build machine, so the claim that the device signs its own readings
-is literal.
+program proves the feed is consumable. The device key was generated on the node with
+`openssl rand -hex 32` and has never left that box, so the claim that the device signs its own
+readings is literal rather than a figure of speech.
 
 ## 4. The response path is sanitized, not just the request path
 
@@ -81,6 +89,10 @@ only the request path leaves the model reading whatever an attacker minted.
 
 **Consequence.** The sanitizer became the piece worth quantifying over all inputs rather than
 a few cases, including idempotence, which is the property sanitizers most often fail.
+
+You can operate it: `microworld/sanitizer.html` runs the real function, compiled to wasm,
+with no server. It deliberately includes a case the advisory flag does not catch, because a
+demonstration that only shows wins teaches the wrong model of what the defense is.
 
 ## 5. The leak detector is disabled for this agent, deliberately
 

@@ -1,0 +1,17 @@
+[package]
+name = "sanitizer-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Thin browser-wasm shim over solana-core's real sanitizer, for the microworld page"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+solana-core = { path = "../../crates/solana-core" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
