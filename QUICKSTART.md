@@ -30,10 +30,15 @@ steps 1-7 below.
 Plugins are not in release binaries, so build the host from source at the pinned release:
 ```
 git clone https://github.com/zeroclaw-labs/zeroclaw && cd zeroclaw
-git checkout f0b92f1        # the exact commit this was verified against
-# `git checkout v0.8.3` gets you the tag, which is the same release line but may have
-# moved past the commit above. If you take the tag, run scripts/check-host-compat.sh
-# afterwards, since wit/v0 is unfrozen upstream and drift is silent until load time.
+git checkout bcf1f25        # the exact commit this was verified against
+
+# REQUIRED on this commit, two lines, or no plugin will register. See the wit section
+# below for why. This commit predates upstream restoring the `memory-audit` variant,
+# and this repo's vendored wit/v0 carries it, so the interfaces differ until you add it.
+#   wit/v0/logging.wit                              -> add `memory-audit,` after `note,`
+#   crates/zeroclaw-plugins/src/component_logging.rs -> add the matching arm:
+#       PluginAction::MemoryAudit => Action::Note,
+
 cargo build --release --features plugins-wasm,plugins-wasm-cranelift,whatsapp-web
 ```
 The umbrella feature alone integrates the runtime **without a JIT backend**, so every plugin
@@ -58,20 +63,37 @@ cloud-API channel and the config schema compile unconditionally, so that matches
 no web channel at all. And do not grep for `whatsapp_rust`, which we tried first: it is absent
 even from a correct build, so it reports failure on a working host.
 
-**Verified against host commit `f0b92f1` (v0.8.3 line).** `wit/v0` is explicitly experimental
-and unfrozen, so it moves under you — and the failure is silent until load time. Before
-building the plugins, confirm your host's plugin-action enum matches this repo's vendored copy:
+**Verified against host commit `bcf1f25` (v0.8.3 line) plus the two-line patch in step 1.**
+`wit/v0` is explicitly experimental and unfrozen, so it moves under you, and the failure is
+silent until load time. Before building the plugins, compare your host's plugin-action enum
+against this repo's vendored copy:
 ```
 diff <(sed -n '/enum plugin-action/,/}/p' <path-to-host>/wit/v0/logging.wit) \
      <(sed -n '/enum plugin-action/,/}/p' wit/v0/logging.wit)
 ```
-Empty diff means you are in sync. If the host has a variant this repo lacks (upstream added
-`memory-audit` on 2026-07-23), add it to `wit/v0/logging.wit` here and rebuild all plugins —
-component-model interfaces match **nominally**, so one missing enum variant makes the whole
-interface a different type and every plugin fails to REGISTER (`registered: 0`, plus a linker
-error on `zeroclaw:plugin/logging`) even though `cargo build` and every test pass. Confirm a
-rebuilt component actually carries the variant with `strings <plugin>.wasm | grep -c memory-audit`
-(expect `1`; a stale build gives `0`).
+Empty diff means you are in sync. The diff can be non-empty in **either** direction and they
+need opposite fixes, which is worth stating plainly because getting it backwards costs a day:
+
+- **Host has a variant this repo lacks.** Add it to `wit/v0/logging.wit` here and rebuild all
+  plugins.
+- **This repo has a variant the host lacks.** This is what happens on the pinned commit, which
+  predates upstream restoring `memory-audit` on 2026-07-23. Patch the **host**: add the variant
+  to its `wit/v0/logging.wit`, and add the one arm the compiler will then demand,
+  `PluginAction::MemoryAudit => Action::Note,` in
+  `crates/zeroclaw-plugins/src/component_logging.rs`. Do not delete the variant from this repo
+  instead; the shipped components carry it and would all need rebuilding.
+
+Component-model interfaces match **nominally**, so one enum variant of difference makes the
+whole interface a different type and every plugin fails to REGISTER (`registered: 0`, plus a
+linker error on `zeroclaw:plugin/logging`) even though `cargo build` and every test pass.
+
+Two commands settle it rather than trusting either side:
+```
+strings <plugin>.wasm | grep -c memory-audit    # expect 1; a stale build gives 0
+./scripts/check-host-compat.sh <path-to-host>   # compares all four wit files + all 8 components
+```
+`check-host-compat.sh` is the one to run if you only run one. It refuses a COMPATIBLE verdict
+while any plugin is unbuilt, so it cannot pass you on partial evidence.
 
 ## 2. Build + install the plugins (10 min)
 From this repo:
