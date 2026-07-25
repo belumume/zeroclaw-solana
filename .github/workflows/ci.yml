@@ -69,26 +69,37 @@ jobs:
   supply-chain:
     name: advisories, licenses, sources
     runs-on: ubuntu-latest
+    # Every shipped graph, not a sample of three.
+    #
+    # Each plugin is its own workspace with its own dependency graph, so checking
+    # some and claiming all is a real gap rather than a wording problem: the ones
+    # left out were not redundant with the ones included. token-risk-check and
+    # lending-health pull HTTP and JSON dependencies the other three never touch,
+    # which is precisely where an advisory would land first.
+    #
+    # All nine were verified locally before this matrix was written, so turning
+    # them on converts a one-time measurement into a standing gate rather than
+    # gambling a red badge.
+    strategy:
+      fail-fast: false
+      matrix:
+        manifest:
+          - crates/solana-core
+          - plugins/allowance-spend-build
+          - plugins/depin-attest
+          - plugins/lending-health
+          - plugins/oracle-publish
+          - plugins/payment-watch
+          - plugins/solana-pay-request
+          - plugins/spl-transfer-build
+          - plugins/token-risk-check
     steps:
       - uses: actions/checkout@v4
 
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories licenses sources
-          manifest-path: crates/solana-core/Cargo.toml
-          arguments: --config deny.toml
-
-      # Each plugin is its own workspace, so each has its own graph to check.
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check advisories licenses sources
-          manifest-path: plugins/oracle-publish/Cargo.toml
-          arguments: --config deny.toml
-
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check advisories licenses sources
-          manifest-path: plugins/allowance-spend-build/Cargo.toml
+          manifest-path: ${{ matrix.manifest }}/Cargo.toml
           arguments: --config deny.toml
 
   plugins:

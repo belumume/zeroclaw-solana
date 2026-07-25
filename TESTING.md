@@ -116,7 +116,13 @@ actually rests on, and until now it rested on one laptop.
 `ci.yml` also gates the supply chain with `cargo deny`, and the allow-list in `deny.toml`
 is derived rather than guessed: it is the exact set of distinct licenses in the graph, all
 nine of them permissive, with no GPL, LGPL, AGPL, MPL or SSPL anywhere. Advisories, licenses
-and sources come back clean across solana-core and all eight components. That is unusual for
+and sources come back clean across solana-core and all eight components, and the CI matrix
+now runs all nine graphs rather than a sample. That distinction was worth fixing rather than
+rewording: each plugin is its own workspace with its own dependency graph, and the six that
+were previously ungated are not redundant with the three that were. `token-risk-check` and
+`lending-health` pull HTTP and JSON dependencies the others never touch, which is exactly
+where an advisory lands first. A sentence claiming nine while the gate covered three is the
+kind of gap that only shows up the day it matters. That is unusual for
 a Solana project and it is a side effect rather than a virtue: these crates do not depend on
 `solana-sdk`, because it does not compile for `wasm32-wasip2` inside a WIT component, so the
 wire format is decoded by hand. Decoding it by hand was a constraint, and not inheriting the

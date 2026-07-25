@@ -123,9 +123,40 @@ payment link comes from the `solana-pay` **skill**, not a plugin (the tier demot
 write-up), so `solana_pay_request` is deliberately absent here:
 ```
 zeroclaw config set --no-interactive risk_profiles.demo.auto_approve \
-  '["payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_add","cron_list","glob_search","file_read","http_request","web_fetch","calculator"]'
+  '["token_risk_check","kamino_lending_health","payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_list","glob_search","file_read","http_request","web_fetch","calculator"]'
 ```
-`zeroclaw security status --agent demo` shows the whole posture.
+This is the list the running shop actually uses, regenerated from the live config rather
+than written from memory. An audit found the two drifting: the documented list was missing
+the two read-only risk tools that were live, which meant a reviewer auditing the documented
+posture was auditing a posture nobody ran.
+
+`cron_add` is deliberately **not** here, though it used to be. A shop agent has no reason to
+create a scheduled job while taking an order, and a cron entry is persistence that outlives
+the turn it was planted in. `cron_list` is a read and stays. The DePIN publisher uses an OS
+scheduler rather than `zeroclaw cron`, so nothing loses a capability.
+
+The second profile the node uses, documented here because an undocumented security profile
+is not a reviewable one:
+```
+zeroclaw config set --no-interactive risk_profiles.depin.auto_approve \
+  '["oracle_publish_reading","http_request","web_fetch","shell","memory_recall","memory_store","file_read","glob_search","calculator"]'
+```
+Egress for both is allowlisted rather than left open, because an unset allowlist defaults to
+`["*"]` and these are the only four hosts anything here contacts:
+```
+zeroclaw config set --no-interactive http_request.allowed_domains \
+  '["api.frankfurter.dev","api.devnet.solana.com","api.rugcheck.xyz","api.kamino.finance"]'
+zeroclaw config set --no-interactive web_fetch.allowed_domains \
+  '["api.frankfurter.dev","api.devnet.solana.com","api.rugcheck.xyz","api.kamino.finance"]'
+```
+`zeroclaw security status --agent demo` shows the whole posture. To confirm the posture above
+is the one you are actually running, rather than the one this page claims:
+```
+python3 scripts/check-config-drift.py
+```
+It compares your live config against this document and exits non-zero on any difference,
+naming anything running-but-undocumented. Written because the two had silently drifted here:
+a reviewer auditing a document is auditing the document.
 
 ## 4. The config posture that makes the shop work (5 min; each line has a reason)
 ```
