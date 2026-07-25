@@ -104,6 +104,7 @@ cargo test -p solana-core --test properties  # 19 properties, 1024 cases each
 python3 scripts/verify-proof.py              # live on-chain claims, exits non-zero on failure
 python3 scripts/check-doc-links.py           # every link in these docs points at something real
 python3 scripts/check-config-drift.py        # the documented posture is the running one
+python3 scripts/check-shadowed-scripts.py    # no ignored copy shadows a tracked script
 ```
 
 The last two are pre-publish gates rather than tests. `check-doc-links.py` deliberately does
