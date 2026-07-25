@@ -51,6 +51,14 @@ in-code per-payer daily cap bounds it. Proven end to end on devnet: a 402 challe
 payment, on-chain settlement, the reading served, and a replayed payment refused. A device that
 pays for its own gas.
 
+The honest limit, stated here rather than left for a reviewer to derive from the addresses:
+buyer and seller are distinct wallets but both are ours, and the mint is one we created so the
+settlement path could run without depending on a particular token balance. So what is proven is
+the mechanism, not demand. Every step a stranger would exercise is real, the payment is a
+genuine on-chain transfer the client signs, the verification reads the transaction bytes, and
+the replay refusal is enforced by a single-use memo nonce. What has not been shown is somebody
+else choosing to pay for the data.
+
 **What fought us on wasm32-wasip2 (the honest list):**
 1. `--features plugins-wasm` alone is a trap: the runtime integrates but no JIT backend
    ships, so every plugin loads as discovered-but-unregistered ("failed to load code").
