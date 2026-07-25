@@ -94,9 +94,47 @@ else choosing to pay for the data.
    Because the agent jail already denies this agent any real secret (workspace-only shell, config
    unreachable), the correct defense belongs at the source, not an output regex that mangles
    public on-chain data, so the working posture for this jailed agent is
-   `security.leak_detection.enabled = false`. The upstream fix we would contribute after judging
-   is a Solana-aware allowlist (base58 pubkey shape plus known-public URL params) that lets
+   `security.leak_detection.enabled = false`. The upstream fix worth contributing is a
+   Solana-aware allowlist (base58 pubkey shape plus known-public URL params) that lets
    addresses through while keeping credential protection.
+
+## What building against the host turned up in the host
+
+This is the part we did not plan and would rather have as evidence than as an argument. The
+submission's whole posture is that a security control which is not configured should deny
+rather than permit. Building on ZeroClaw surfaced three places where the platform does the
+opposite, all in one file, all reported with source citations rather than described.
+
+States are as of 2026-07-25 and every row links to the live thread, so click through rather
+than trusting this table. If #9354 has merged by the time you read it, that is the outcome we
+were after and this snapshot simply aged.
+
+| Upstream | What it is | State |
+|---|---|---|
+| [#9348](https://github.com/zeroclaw-labs/zeroclaw/issues/9348) | Under `mode = "business"` the WhatsApp Web transport never consults `dm_policy` or `group_policy`, and an empty `allowed_groups` permits every group rather than none. The shop answered a real group because of it. | Maintainer-triaged `priority:p1`, `status:accepted`, `risk:high` |
+| [#9354](https://github.com/zeroclaw-labs/zeroclaw/pull/9354) | A warning when those policies cannot take effect. Deliberately the least opinionated of three shapes offered: no runtime change, so it cannot break a deployment. | Open. The maintainer calls it "the right compatibility-safe v0.8.4 slice" |
+| [#9366](https://github.com/zeroclaw-labs/zeroclaw/issues/9366) | `approval_timeout_secs` validates on both WhatsApp transports and is read by only one. Filed separately at the maintainer's request. | Open |
+
+They are independent bugs with one shape: the config layer accepts a key without checking that
+a consumer exists for it on the selected backend. The setting validates, appears in `config
+get`, and governs nothing.
+
+Two things follow, and the second is the one that matters.
+
+The obvious one is that our own configuration had to be hardened against the first of these
+before the shop was safe, and that fix is in the reproduction rather than described in prose.
+
+The less obvious one is that a competing entrant independently found the same shape in a
+different subsystem, in ZeroClaw's x402 verifiable-intent checker, where an empty `{}` also
+satisfies a payee allowlist. Two people building different things on the same platform hit the
+same anti-pattern in the same week. That is the argument for deny-by-default made by the
+platform rather than by us, and it is why the discipline runs through every component here
+instead of being a sentence in a threat model.
+
+We also found the third instance in our own repo, in the same week, pointed the other way: a
+merchant address that lived in prose with nothing enforcing it. Same failure, our code. It is
+recorded in Correct layering above rather than quietly fixed, because a submission arguing for
+enforced invariants should show where it was not yet enforcing one.
 4. Streaming modes have correctness consequences, not just UX: in `partial` mode the final
    segment replaces the draft, which silently ate the payment URL mid-conversation.
    `multi_message` is the shop-correct mode: the link lands as its own permanent message.
