@@ -50,6 +50,31 @@ jobs:
       - name: Fail-closed action certification self-test
         run: python3 scripts/certify_publish_tx.py
 
+  supply-chain:
+    name: advisories, licenses, sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses sources
+          manifest-path: crates/solana-core/Cargo.toml
+          arguments: --config deny.toml
+
+      # Each plugin is its own workspace, so each has its own graph to check.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses sources
+          manifest-path: plugins/oracle-publish/Cargo.toml
+          arguments: --config deny.toml
+
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses sources
+          manifest-path: plugins/allowance-spend-build/Cargo.toml
+          arguments: --config deny.toml
+
   plugins:
     name: plugin ${{ matrix.plugin }}
     runs-on: ubuntu-latest

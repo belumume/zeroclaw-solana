@@ -113,6 +113,16 @@ offline and deterministic, and `--locked` throughout, so a green run also proves
 committed lockfiles are the ones that work. That is the claim a reproducibility promise
 actually rests on, and until now it rested on one laptop.
 
+`ci.yml` also gates the supply chain with `cargo deny`, and the allow-list in `deny.toml`
+is derived rather than guessed: it is the exact set of distinct licenses in the graph, all
+nine of them permissive, with no GPL, LGPL, AGPL, MPL or SSPL anywhere. Advisories, licenses
+and sources come back clean across solana-core and all eight components. That is unusual for
+a Solana project and it is a side effect rather than a virtue: these crates do not depend on
+`solana-sdk`, because it does not compile for `wasm32-wasip2` inside a WIT component, so the
+wire format is decoded by hand. Decoding it by hand was a constraint, and not inheriting the
+toolchain's unfixable transitive advisories is what fell out of it. The Anchor workspace
+under `onchain/` is a separate graph and is not part of the shipped plugin surface.
+
 `proof-check.yml` re-verifies every published on-chain claim twice a day, so "yours,
 running" is continuously auditable rather than a screenshot taken once on a good day. It
 is separate because it depends on public devnet RPC, and a third-party outage must never
