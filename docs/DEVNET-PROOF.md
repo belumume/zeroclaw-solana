@@ -110,8 +110,26 @@ NOT_YET, so a payment is confirmed only from the on-chain match, never the custo
 - Transfer tx `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`
   (payment_watch verdict PAID, reference matched, memo invoice-e2e-1):
   https://explorer.solana.com/tx/4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS?cluster=devnet
-- Reference key (threaded through all three steps) `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`:
-  https://explorer.solana.com/address/6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11?cluster=devnet
+- Reference key (threaded through all three steps) `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`.
+
+  **Opening this in the explorer shows "account not found", and that is the correct result.**
+  A Solana Pay reference is a fresh keypair used only as a read-only marker in the account
+  list; it is never funded, so it never becomes an account. Anyone checking it with
+  `getAccountInfo` gets null, which looks like a broken link and is actually the mechanism
+  working.
+
+  What resolves it is the signature index, which is also exactly what `payment-watch` polls:
+
+  ```
+  curl -s https://api.devnet.solana.com -X POST -H 'content-type: application/json' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"getSignaturesForAddress",
+         "params":["6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11",{"limit":10}]}'
+  ```
+
+  That returns exactly one transaction, `4kDo6NCc...` above, which is the point: a reference
+  generated for one order appears in one settlement and nowhere else, so matching on it ties
+  a specific payment to a specific invoice without the merchant address having to be unique
+  per order.
 - Reproduce: `E2E_RPC=https://api.devnet.solana.com E2E_FUNDER=<operator.json> cargo run --release`
   in `e2e-track-a/` reruns the whole flow against live devnet.
 

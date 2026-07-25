@@ -100,8 +100,22 @@ are the ones in this document with commands next to them.
 ```
 cargo test -p solana-core                    # units + KATs
 cargo test -p solana-core --test properties  # 19 properties, 1024 cases each
+./scripts/mutation-check.sh                  # proves the property suite can fail
 python3 scripts/verify-proof.py              # live on-chain claims, exits non-zero on failure
+python3 scripts/check-doc-links.py           # every link in these docs points at something real
+python3 scripts/check-config-drift.py        # the documented posture is the running one
 ```
+
+The last two are pre-publish gates rather than tests. `check-doc-links.py` deliberately does
+not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
+signature that does not exist, so a status-code checker would report a confident pass on a dead
+link. It extracts the signature or address and resolves it against devnet instead. It also
+knows that a Solana Pay reference is never a funded account and checks the signature index for
+those, since calling that a dead link would be a false alarm on the mechanism working.
+
+It currently exits non-zero on two unfilled `<repo URL>` placeholders, which is the intended
+behaviour: those are the one thing that cannot be filled before the repository is public, and a
+gate that goes green before the submission is complete would be worse than no gate.
 
 The devnet harnesses need a funded operator keypair and are documented in
 `QUICKSTART.md`.
