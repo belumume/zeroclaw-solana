@@ -210,7 +210,9 @@ Then register a device feed and schedule the publisher:
 - the agent turn calls `oracle_publish_reading` (device key signs inside the sandbox, durable nonce,
   range/kind/sequence gates)
 - the host completes the fee-payer slot and broadcasts (the `.tools` completion pattern)
-- schedule it 6-hourly with your OS scheduler or `zeroclaw cron`
+- schedule it every 20 minutes with your OS scheduler or `zeroclaw cron`
+  (`scripts/verify-proof.py` treats a feed older than 90 minutes as stale, so a slower
+  cadence will report your own node as dead)
 
 Verify on explorer: the feed account's sequence increments with each run; the consumer
 program (`act_on_feed`) proves the feed is consumable, not a memo.

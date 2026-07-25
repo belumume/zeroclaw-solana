@@ -38,7 +38,7 @@ blast radius of a hacked agent capped by on-chain math, not vibes.
   with no error at all - see QUICKSTART for the one-line check that it actually linked).
 
 ## What we had to build (and what fought us)
-**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (reference-threaded RPC verification through the OWASP-LLM01 response sanitizer), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
+**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (RPC settlement verification conjoining amount, mint, destination and reference, through the OWASP-LLM01 response sanitizer), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
 
 **The x402 earning-node (`x402-feed-gate`), the frontier piece.** The DePIN node does not just
 publish its feed, it SELLS it. A client asks for a reading; the node answers HTTP 402 with a
@@ -119,7 +119,7 @@ Declared per component. Each funds-touching plugin ships a prompt-injection tran
 | Component (the two use cases run on these) | Tier | Why it sits there |
 |---|---|---|
 | `solana-pay` (skill) | T0 | builds a `solana:` URL; no key, worst case a payment that never starts |
-| `payment-watch` (plugin) | T0 | read-only RPC verification of settlement by reference |
+| `payment-watch` (plugin) | T0 | read-only RPC settlement check: amount, mint, destination and reference must all match |
 | `x402-feed-gate` (native) | T0/T1 | holds only its public receiving address; verifies inbound payment, no spend path |
 | `oracle-publish` (plugin) | T1 | device-co-signed reading; returns an unsigned partial tx, host completes the fee-payer slot |
 | `spl-transfer-build` (plugin) | T1 | unsigned transfer only; a human approves before any broadcast |

@@ -55,7 +55,7 @@ which is the honest place for an LLM-driven system to stop.
 | Component | Job | Tier |
 |---|---|---|
 | [`oracle-publish`](plugins/oracle-publish) | Device-signed reading into a typed on-chain feed, behind a durable nonce | T1 build, device co-signs |
-| [`payment-watch`](plugins/payment-watch) | Confirms a payment by matching its on-chain reference | T0 read-only |
+| [`payment-watch`](plugins/payment-watch) | Confirms a payment only when amount, mint, destination and (when supplied) the Solana Pay reference all match on-chain | T0 read-only |
 | [`spl-transfer-build`](plugins/spl-transfer-build) | Unsigned SPL transfers that survive an approval queue via durable nonces | T1 build |
 | [`allowance-spend-build`](plugins/allowance-spend-build) | Spends bounded by the audited SF Allowances program | T1 build |
 | [`solana-core`](crates/solana-core) | Shared wasm32-wasip2 core: transactions, PDAs, Token-2022, response-path sanitizer | library |

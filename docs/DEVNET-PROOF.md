@@ -35,24 +35,50 @@ Both programs carry an on-chain **Anchor IDL** (so the explorer decodes the inst
 - oracle IDL account `DRaviitdm5rojHS7YGTQxG8Ho26g8PdAdqodWoLaaKtJ`
 - consumer IDL account `GHrkqYsBWp55eJCZg3vgYzGvoQELDUfu2kRQqpBn7tr8`
 
-## The DePIN feed has been publishing on a schedule (the "yours, running" proof)
-Each is a device-signed `publish_reading` landing a new monotonic sequence on the feed PDA.
-The feed account stores only the LATEST reading, so the *sequence history* is the ledger:
+## The DePIN feed is publishing on a schedule (the "yours, running" proof)
 
-| UTC | seq | value | Settlement tx |
+These are consecutive device-signed `publish_reading` transactions on the **ARM node-born
+feed** `JEtuZk…` — the feed whose key was generated on the node and has never left it. The
+feed account stores only the LATEST reading, so the *sequence history* is the ledger.
+
+| UTC | Interval | Result | Settlement tx |
 |---|---|---|---|
-| 2026-07-23T02:42Z | 10 | 29.0C | [2pgdXYAS…](https://explorer.solana.com/tx/2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH?cluster=devnet) |
-| 2026-07-23T06:28Z | 11 | 36.2C | [29iMd5HU…](https://explorer.solana.com/tx/29iMd5HUCDqizFNsSiAXKRquoZoTwGyHvoyh5iamAJZqPh6oWKfyUvZFbNxXk4cYJsnPnrjBRYfrdsjSnACrWh6D?cluster=devnet) |
-| 2026-07-23T06:30Z | 12 | 36.8C | [24iLczeW…](https://explorer.solana.com/tx/24iLczeWeaiN6LEpfgjZd4wLdneJ8Ym4UjJHHbop3f6YFzD3SaF6fJ1vg32nmnpD2tWs6Mk5DvJnBBn5945rD1XH?cluster=devnet) |
-| 2026-07-23T08:44Z | 13 | 41.1C | [2j9emSvs…](https://explorer.solana.com/tx/2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E?cluster=devnet) |
-| 2026-07-23T14:44Z | 14 | 39.4C | [5qTeyv2u…](https://explorer.solana.com/tx/5qTeyv2uFpvTPgxGj9WNoSsMhEq2HSPpPo3ydjoT1adrM93fAZo23zNJisRyoC1x4e52h3PjjkBPpFzQmF8WSNeY?cluster=devnet) |
-| 2026-07-23T20:32Z | 15 | 31.3C | [4F3Ywdhu…](https://explorer.solana.com/tx/4F3YwdhuDF2Zj1Lh5aX7LUWekLbEV7rQiBmN23kUcC9k3K4cYifrePnN7AcQ9oY7LvQ9ZgmvuuL8CJYX912UjNd6?cluster=devnet) |
-| 2026-07-24T05:54Z | 16 | 33.0C | [5en2Zott…](https://explorer.solana.com/tx/5en2ZottTbPEgcpywBp4qxxPtEgcT75Eh3Ej79L1cL7P3CcbWKXqtQJ5GtDw9QPwmWyH8pc1E4yBzC2a9FV5XjKR?cluster=devnet) |
-| 2026-07-24T05:56Z | 17 | 33.0C | [agHTsrz1…](https://explorer.solana.com/tx/agHTsrz1Z6XhFjKN2g9DxFjJP363He2rHByvDN7r6KUDurzxxxcdj4LcfTA6AQpNsFk4cYqjk9k4kHfwgxWRFQd?cluster=devnet) |
+| 2026-07-25T14:06Z | — | ok | [3MhyEGJo…](https://explorer.solana.com/tx/3MhyEGJo4AgCMoRtsM5nGspF5wXnDVQjRyzzmffKvztHg2Adu5fLnfpF4cP9ZmQumkWnA4xxxFGEnPZTATXZY3KD?cluster=devnet) |
+| 2026-07-25T14:26Z | 20.5 min | ok | [5UEd5BnQ…](https://explorer.solana.com/tx/5UEd5BnQUxb42LWJYmEgdvJb2Sk6dJeuJAx7HVcFiS9T2sSEZzJczyzTSKvPtWvVYTi5u6WAqVUKLgJbMRqJzYtk?cluster=devnet) |
+| 2026-07-25T14:47Z | 20.5 min | ok | [2RMiDsP6…](https://explorer.solana.com/tx/2RMiDsP6thht2eYQivBEudydjmrATYmfScrrjNLink7nCA3W7uULzknF2iFL37ZZNmZZCGn6fzihdLb2FayA8bV1?cluster=devnet) |
+| 2026-07-25T15:07Z | 20.5 min | ok | [3vnbatzq…](https://explorer.solana.com/tx/3vnbatzqHuUDEiovrS97RBGDjbV9J9mjqbwCiiqGRzJgUANGUhyAZKqPsN4GSBMT3vzJmTfLUXUpkR7eQ9Tqa2JY?cluster=devnet) |
+| 2026-07-25T15:28Z | 20.5 min | ok | [4F8w5Hby…](https://explorer.solana.com/tx/4F8w5HbyaYA6Rd9b9sUW4FhGMpDgyDZi6cf768UUESfQA3AavhDdMPFqUqDLBAtePiKohkaoRqcQAiKYrQABUugh?cluster=devnet) |
+| 2026-07-25T15:48Z | 20.5 min | ok | [5kBkui9R…](https://explorer.solana.com/tx/5kBkui9Rwmwm5hJhHo3g1pFJtott3Ci21T3HxAYjNS596grchtndWLWBNT5hV5FqNkKQTyEPwthhdrLyuxJd14kw?cluster=devnet) |
+
+The interval column is the point. Every gap is 20.5 minutes to the tenth of a minute, which is
+a timer running unattended on a box in Jeddah, not a person remembering to publish. Head of the
+feed at the time of writing: **sequence 35, 40.70C**. Read the live head yourself with
+`python3 scripts/verify-proof.py`, which fails if the feed has gone stale.
+
+Two honesty notes about this table, because both were wrong here until an audit caught them:
+
+- These rows deliberately come from `JEtuZk…`, **not** from `CfWaZA…`. An earlier version of
+  this section proved "yours, running" using the agent-driven feed, which the table above marks
+  historical and which has not published in over a day. A document cannot cite a dead feed as
+  evidence of a live one.
+- The cadence is 20 minutes. Earlier rows here showed gaps of two to nine hours, which was the
+  irregular hand-run era before the timer existed, presented under a heading that claimed a
+  schedule.
 
 (The device signs each reading inside the wasm sandbox; the host completes the fee-payer slot
 and broadcasts. Replay of a signed publish is refused on-chain by the strictly-increasing
 sequence guard, error `0x1771 = StaleSequence`.)
+
+### Historical: the agent-driven feed `CfWaZA…`
+Kept because it is the earliest evidence the oracle path worked end to end, and dropping it
+quietly would be worse than labelling it. It is **not** the "yours, running" proof and is no
+longer publishing.
+
+| UTC | seq | value | Settlement tx |
+|---|---|---|---|
+| 2026-07-23T02:42Z | 10 | 29.0C | [2pgdXYAS…](https://explorer.solana.com/tx/2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH?cluster=devnet) |
+| 2026-07-23T08:44Z | 13 | 41.1C | [2j9emSvs…](https://explorer.solana.com/tx/2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E?cluster=devnet) |
+| 2026-07-24T05:56Z | 17 | 33.0C | [agHTsrz1…](https://explorer.solana.com/tx/agHTsrz1Z6XhFjKN2g9DxFjJP363He2rHByvDN7r6KUDurzxxxcdj4LcfTA6AQpNsFk4cYqjk9k4kHfwgxWRFQd?cluster=devnet) |
 
 ## The x402 earning-node settled a real paid read (machine commerce)
 The node sold one reading over x402: a 402 challenge, a client-signed stablecoin payment, and
