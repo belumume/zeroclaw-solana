@@ -188,9 +188,64 @@ its provenance: the minimal input from the mutation above, not a field failure.
 ## Deliberate non-goals
 
 Antithesis's SDK ships macros that are inert off their platform, so it would add
-dead annotations and no signal here. A full deterministic-simulation rig is the
-wrong shape for a mostly pure library with a thin IO edge. Proof assistants and
-`quickcheck` are both dominated for this codebase by proptest plus the KATs above.
+dead annotations and no signal here, and a full deterministic-simulation hypervisor is
+the wrong shape for a mostly pure library with a thin IO edge. Both still hold. What
+did not hold is the wider conclusion we drew from them, that the whole approach was
+out of reach: the search technique underneath it needs no hypervisor when the target
+is already deterministic, and our decode path is. That became the layer below. Proof
+assistants and `quickcheck` are both dominated for this codebase by proptest plus the
+KATs above.
+
+## Searching for disagreement, rather than asserting a property
+
+Every layer above shares one shape. Known-answer vectors, properties and proofs all
+check something we thought to write down, so they are strong exactly where we
+anticipated the failure and silent where we did not. Being exhaustive over an input
+domain, which the shortvec proof is, is not the same as being open-ended about which
+domains matter. `differential-fuzz/` is the layer that searches instead.
+
+It mutates real serialized transactions and feeds each candidate to both our decoder
+and `solana-sdk`'s own deserializer, then classifies any disagreement. The oracle is
+the point. It is code nobody on this project wrote, which makes this the second check
+here graded externally rather than against invariants we picked ourselves. The KATs
+are the first; the properties and the Kani harnesses are not, and tests written by the
+same hand that chose the invariants can inherit one blind spot.
+
+Two details carry the value. The fitness signal is how far into the buffer both
+decoders stayed in agreement, not code coverage, because nearly every branch of the
+decoder runs on the first malformed byte and coverage saturates immediately. And
+mutations are correlated rather than independent per byte: the loop holds a mutation
+mode across a span, since uniform flips almost never move several related bytes
+together, which is what reaching a deeper parse state requires. A population of
+near-best inputs is kept rather than a single best, so the search can leave a local
+maximum instead of mutating inside it.
+
+Disagreements are graded, not counted. Accepting what the reference rejects is the
+dangerous direction, since it means acting on bytes the network would refuse. Both
+sides accepting and disagreeing about what the bytes MEAN is worse, and is the
+quietly-wrong-but-still-valid case none of the coarse invariants above can see. The
+two places this decoder deliberately differs, refusing address-table lookups and
+refusing trailing bytes, are classified as expected so that real findings cannot drown
+in known noise.
+
+The control gates the run, and it is the part worth checking first. Zero findings is
+exactly what a harness with a broken detector prints, which is the same failure this
+build removed from six other gates. So the self-test plants a divergence in every
+field the comparison covers, signature count, blockhash, account key, instruction
+data, a dropped instruction, a flipped version flag, and requires a complaint for each
+one. Ten of ten pass, and the binary refuses to report any fuzzing result if they do
+not.
+
+Current result: 220,000 iterations across five independent seeds, no unexplained
+divergence. The several hundred by-design refusals per run are the evidence that the
+search actually reaches the valid region rather than generating garbage both sides
+throw out.
+
+    cd differential-fuzz && cargo run --release              # self-test, then 20k
+    cargo run --release -- 50000 99999                       # iterations, rng seed
+
+The crate carries its own `[workspace]`, as the two devnet harnesses do, so
+`solana-sdk` stays unreachable from anything that has to build for wasm32-wasip2.
 
 ## Proved rather than sampled: shortvec
 
