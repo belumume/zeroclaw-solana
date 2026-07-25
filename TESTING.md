@@ -196,6 +196,40 @@ is already deterministic, and our decode path is. That became the layer below. P
 assistants and `quickcheck` are both dominated for this codebase by proptest plus the
 KATs above.
 
+## Walked, not sampled: the Token-2022 discriminant space
+
+Proptest samples 1024 cases per property. That is the right tool for a large space and the
+wrong one for a small space, where sampling 1024 of 65,535 leaves 98 percent unvisited and
+reports green either way. The shortvec proof already established that this codebase has
+domains worth enumerating; `crates/solana-core/tests/exhaustive.rs` is what came out of
+auditing for the others.
+
+The extension discriminant is a `u16`, and it earns the walk because a human acts on the
+result: `token-risk-check` reports RED, AMBER or GREEN from flags keyed on six of those
+values. Whether those six work is the easy question. The one worth answering is whether any
+of the other 65,529 can reach a flag they should not, in either direction. A false positive
+condemns a safe token; a false negative lets a mint carrying a real permanent delegate read
+as safe, and that is the direction that costs someone money.
+
+- Every live discriminant decodes without panicking, and is not rejected merely for being
+  unknown, since unknown extensions are the normal case on a chain that keeps adding them.
+- Each risk flag fires for exactly its own discriminant and no other.
+- Naming is honest: exactly the six live-verified values are named, the rest report unknown
+  rather than being guessed at.
+- Zero terminates the walk as padding rather than becoming an extension.
+- All 65,535 declarable TLV lengths that overrun the buffer are refused, not read past.
+
+Each walk ends with a count assertion. Without one, a loop that silently ran zero times would
+pass, which is the vacuous green this build spent a day removing elsewhere.
+
+The suite was mutation-checked rather than trusted, because green proves the loop ran and not
+that its assertions can fail. Two defects were planted: a permanent-delegate flag that also
+answers to a neighbouring discriminant, and a parser that silently drops unknown extensions
+instead of keeping them raw, which is exactly what would make a hostile discriminant invisible
+to a caller. Both were caught by the specific assertion aimed at them. `.tools/` carries the
+runner; it restores the source on every exit path and refuses to interpret a mutation unless
+the baseline was green first.
+
 ## Searching for disagreement, rather than asserting a property
 
 Every layer above shares one shape. Known-answer vectors, properties and proofs all
