@@ -36,10 +36,20 @@ pub const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 /// `getSignaturesForAddress` page size. Small: a cron SOP polls often, and the
 /// `until` cursor means each poll only sees signatures newer than the last one.
 const SIGNATURE_LIMIT: usize = 20;
-/// Hard cap on `getTransaction` candidates fetched per check, independent of
-/// what the node returns: a hostile/huge signature page cannot fan out into an
+/// How many `getSignaturesForAddress` pages one check will walk backwards through.
+/// Bounds the work an attacker can force by spamming the address, while still
+/// covering far more than a real shop sees between polls. Hitting this cap is not
+/// silent: the cursor refuses to advance and the verdict says the scan was partial.
+const MAX_SIGNATURE_PAGES: usize = 5;
+/// Hard cap on `getTransaction` candidates fetched per check, independent of what
+/// the node returns: a hostile or huge signature page cannot fan out into an
 /// unbounded number of RPC calls or blow the per-call budget.
-const MAX_TX_CHECKS: usize = 20;
+///
+/// Deliberately equal to the full paginated range. A lower value would reintroduce
+/// the exact gap pagination exists to close, one level down: every signature would
+/// be collected and the tail never examined, so a payment sitting there would go
+/// uncredited while the scan reported a clean NotYet.
+const MAX_TX_CHECKS: usize = MAX_SIGNATURE_PAGES * SIGNATURE_LIMIT;
 /// native SOL has 9 decimals (1 SOL = 1e9 lamports).
 const NATIVE_DECIMALS: u32 = 9;
 /// Cap a base-unit amount STRING before parsing it: a real balance is short; a
@@ -243,6 +253,11 @@ pub enum Verdict {
     NotYet {
         checked: usize,
         next_cursor: Option<String>,
+        /// False when the scan hit its page or candidate cap with transactions still
+        /// unexamined below it. The cursor is held rather than advanced in that case,
+        /// so nothing is skipped, but the caller is told the range was not fully
+        /// covered instead of reading a partial NotYet as a definitive one.
+        scan_complete: bool,
     },
 }
 
@@ -285,23 +300,80 @@ fn rpc_call<T: RpcTransport>(
         .ok_or_else(|| RpcError::Parse("missing `result`".into()))
 }
 
-/// `getSignaturesForAddress`, newest-first. `until` bounds the scan to
-/// signatures newer than the cursor.
+/// `getSignaturesForAddress`, newest-first. `until` bounds the scan to signatures
+/// newer than the cursor; `before` walks backwards through that range one page at
+/// a time.
 fn get_signatures<T: RpcTransport>(
     t: &T,
     address: &Pubkey,
     until: Option<&str>,
+    before: Option<&str>,
+    id: u64,
 ) -> Result<Vec<Value>, RpcError> {
     let mut opts = serde_json::json!({ "limit": SIGNATURE_LIMIT, "commitment": "confirmed" });
     if let Some(u) = until {
         opts["until"] = Value::String(u.to_string());
     }
+    if let Some(b) = before {
+        opts["before"] = Value::String(b.to_string());
+    }
     let params = serde_json::json!([address.to_base58(), opts]);
-    let result = rpc_call(t, 1, "getSignaturesForAddress", params)?;
+    let result = rpc_call(t, id, "getSignaturesForAddress", params)?;
     result
         .as_array()
         .cloned()
         .ok_or_else(|| RpcError::Parse("getSignaturesForAddress: result is not an array".into()))
+}
+
+/// Walk the whole range between the cursor and now, oldest page last.
+///
+/// A single `limit`-bounded call returns only the NEWEST page of that range. If
+/// more than `SIGNATURE_LIMIT` transactions touched the address between two polls,
+/// everything below that page was never fetched, and advancing the cursor to the
+/// newest entry would step over the unseen gap permanently. A customer's payment
+/// sitting in that gap would never be credited, and the poll would report NotYet
+/// forever while the money was on-chain the whole time.
+///
+/// This is reachable without an attacker on any busy address, and trivially
+/// reachable with one: roughly twenty dust transfers between polls is enough.
+///
+/// Returns the accumulated entries plus whether the range was fully drained.
+/// `drained == false` means a gap remains below what we scanned, and the caller
+/// must NOT advance the cursor past it.
+fn collect_signatures<T: RpcTransport>(
+    t: &T,
+    address: &Pubkey,
+    until: Option<&str>,
+) -> Result<(Vec<Value>, bool), RpcError> {
+    let mut all: Vec<Value> = Vec::new();
+    let mut before: Option<String> = None;
+
+    for page in 0..MAX_SIGNATURE_PAGES {
+        let sigs = get_signatures(t, address, until, before.as_deref(), (page + 1) as u64)?;
+        let short_page = sigs.len() < SIGNATURE_LIMIT;
+
+        // The oldest VALID signature on this page seeds the next `before`. A hostile
+        // RPC returning junk here must not be able to steer the next request.
+        let oldest = sigs
+            .iter()
+            .rev()
+            .filter_map(|e| e.get("signature").and_then(Value::as_str))
+            .find(|s| is_valid_signature(s))
+            .map(str::to_string);
+
+        all.extend(sigs);
+
+        if short_page {
+            return Ok((all, true)); // reached the cursor: nothing left below
+        }
+        match oldest {
+            Some(o) => before = Some(o),
+            // A full page with no usable signature to page from. Refusing to guess is
+            // the only safe move; treat the range as undrained.
+            None => return Ok((all, false)),
+        }
+    }
+    Ok((all, false)) // hit the page cap with more below
 }
 
 /// `getTransaction` with `jsonParsed` encoding and v0 support. `Ok(None)` means
@@ -331,15 +403,31 @@ fn get_transaction<T: RpcTransport>(
 /// each candidate transaction until one matches. Returns `Paid` on the first
 /// match, else `NotYet` with the newest signature as the cursor.
 pub fn find_payment<T: RpcTransport>(t: &T, v: &ValidatedArgs) -> Result<Verdict, RpcError> {
-    let sigs = get_signatures(t, &v.address, v.since_signature.as_deref())?;
+    let (sigs, drained) = collect_signatures(t, &v.address, v.since_signature.as_deref())?;
 
-    // The cursor is the newest VALID signature in the page (entries are
-    // newest-first). A cron SOP feeds it back as `since_signature`.
-    let next_cursor = sigs
+    // The cursor is the newest VALID signature seen (entries are newest-first). A
+    // cron SOP feeds it back as `since_signature`.
+    //
+    // It only advances when the range was fully drained. If a gap remains below what
+    // we scanned, advancing would skip those transactions forever, so the old cursor
+    // is held and the next poll re-attempts the same range. Re-scanning costs a few
+    // RPC calls; stepping over a real payment costs a customer their money and leaves
+    // the shop reporting NotYet against a settled transaction.
+    let newest = sigs
         .iter()
         .filter_map(|e| e.get("signature").and_then(Value::as_str))
         .find(|s| is_valid_signature(s))
         .map(str::to_string);
+    // Collecting every signature is only half of it. If the candidate list is longer
+    // than we are willing to fetch transactions for, the unfetched tail is the same
+    // gap one level down, so full coverage means BOTH drained and fully checked.
+    let all_checked = sigs.len() <= MAX_TX_CHECKS;
+    let complete = drained && all_checked;
+    let next_cursor = if complete {
+        newest
+    } else {
+        v.since_signature.clone().or(newest)
+    };
 
     let mut checked = 0usize;
     for entry in sigs.iter().take(MAX_TX_CHECKS) {
@@ -383,6 +471,7 @@ pub fn find_payment<T: RpcTransport>(t: &T, v: &ValidatedArgs) -> Result<Verdict
     Ok(Verdict::NotYet {
         checked,
         next_cursor,
+        scan_complete: complete,
     })
 }
 
@@ -693,6 +782,7 @@ pub fn compose_report(v: &ValidatedArgs, verdict: &Verdict) -> String {
         Verdict::NotYet {
             checked,
             next_cursor,
+            scan_complete,
         } => {
             let inv_part = inv.map(|l| format!("{l}: ")).unwrap_or_default();
             let ref_part = if v.reference.is_some() {
@@ -707,6 +797,14 @@ pub fn compose_report(v: &ValidatedArgs, verdict: &Verdict) -> String {
             match next_cursor {
                 Some(c) => out.push_str(&format!(" next cursor (since_signature): {c}")),
                 None => out.push_str(" no transactions on this address yet."),
+            }
+            if !scan_complete {
+                out.push_str(
+                    " PARTIAL SCAN: this address had more activity than one check covers, \
+                     so transactions below the scanned range were not examined and the \
+                     cursor was deliberately held rather than advanced past them. \
+                     Nothing was skipped, but this NOT_YET is not conclusive; poll again.",
+                );
             }
             out
         }
@@ -739,6 +837,22 @@ mod tests {
 
     // A getSignaturesForAddress response with the given (signature, err, memo)
     // entries, newest-first.
+    /// Distinct valid 88-char base58 signatures, generated by varying one character
+    /// of a real fixture so every entry passes `is_valid_signature`.
+    fn fake_sigs(n: usize) -> Vec<String> {
+        const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+        (0..n)
+            .map(|i| {
+                let mut s = SIG_A.to_string();
+                let c = ALPHABET[i % ALPHABET.len()] as char;
+                let d = ALPHABET[(i / ALPHABET.len()) % ALPHABET.len()] as char;
+                s.replace_range(0..1, &c.to_string());
+                s.replace_range(1..2, &d.to_string());
+                s
+            })
+            .collect()
+    }
+
     fn sigs_resp(entries: &[(&str, bool, Option<&str>)]) -> String {
         let arr: Vec<Value> = entries
             .iter()
@@ -988,16 +1102,94 @@ mod tests {
         let v = args(None, 25.0);
         let verdict = find_payment(&mock, &v).unwrap();
         match verdict {
-            Verdict::NotYet { checked, ref next_cursor } => {
+            Verdict::NotYet {
+                checked,
+                ref next_cursor,
+                scan_complete,
+            } => {
                 assert_eq!(checked, 2);
                 // newest entry (SIG_A) is the cursor for the next poll.
                 assert_eq!(next_cursor.as_deref(), Some(SIG_A));
+                // A short page means the whole range was drained, so advancing is safe.
+                assert!(scan_complete, "a short page should count as a complete scan");
             }
             other => panic!("expected NotYet, got {other:?}"),
         }
         let report = compose_report(&v, &verdict);
         assert!(report.starts_with("NOT_YET:"));
         assert!(report.contains(SIG_A)); // full cursor, usable as since_signature
+    }
+
+    /// The gap bug, as a test.
+    ///
+    /// `getSignaturesForAddress` with `until` returns only the NEWEST page of the
+    /// range. Before pagination, a full page meant everything older than it, still
+    /// above the cursor, was never fetched, and the cursor advanced to the newest
+    /// entry anyway. Those transactions became permanently unreachable: a customer
+    /// payment among them would never be credited while the poll reported NOT_YET
+    /// forever against a settled transaction. Roughly twenty dust transfers between
+    /// polls is enough to trigger it deliberately, and a busy address does it by
+    /// accident.
+    ///
+    /// Here every page comes back full, so the range is never drained and the page
+    /// cap is reached. The cursor must be HELD at its original value.
+    #[test]
+    fn a_full_page_never_advances_the_cursor_past_unscanned_history() {
+        let sigs = fake_sigs(SIGNATURE_LIMIT);
+        let entries: Vec<(&str, bool, Option<&str>)> =
+            sigs.iter().map(|s| (s.as_str(), true, None)).collect();
+
+        // Every page full => collect_signatures never sees a short page, so it walks
+        // to MAX_SIGNATURE_PAGES and reports the range as undrained. Entries carry
+        // err set, so no getTransaction call is made and only signature pages are
+        // consumed.
+        let pages: Vec<String> = (0..MAX_SIGNATURE_PAGES).map(|_| sigs_resp(&entries)).collect();
+        let mock = MockTransport::new(pages);
+
+        let mut v = args(None, 25.0);
+        v.since_signature = Some(SIG_B.to_string());
+
+        match find_payment(&mock, &v).unwrap() {
+            Verdict::NotYet {
+                ref next_cursor,
+                scan_complete,
+                ..
+            } => {
+                assert!(
+                    !scan_complete,
+                    "hitting the page cap with a full last page is an incomplete scan"
+                );
+                assert_eq!(
+                    next_cursor.as_deref(),
+                    Some(SIG_B),
+                    "the cursor must stay put: advancing it here steps over every \
+                     transaction below the scanned range, permanently"
+                );
+            }
+            other => panic!("expected NotYet, got {other:?}"),
+        }
+    }
+
+    /// The partial result must announce itself. A NOT_YET that silently means
+    /// "I did not look everywhere" is the same defect wearing a clean face.
+    #[test]
+    fn a_partial_scan_says_so_in_the_report() {
+        let sigs = fake_sigs(SIGNATURE_LIMIT);
+        let entries: Vec<(&str, bool, Option<&str>)> =
+            sigs.iter().map(|s| (s.as_str(), true, None)).collect();
+        let pages: Vec<String> = (0..MAX_SIGNATURE_PAGES).map(|_| sigs_resp(&entries)).collect();
+        let mock = MockTransport::new(pages);
+
+        let mut v = args(None, 25.0);
+        v.since_signature = Some(SIG_B.to_string());
+        let verdict = find_payment(&mock, &v).unwrap();
+        let report = compose_report(&v, &verdict);
+
+        assert!(report.starts_with("NOT_YET:"));
+        assert!(
+            report.contains("PARTIAL SCAN"),
+            "an incomplete scan must be visible in the report, got: {report}"
+        );
     }
 
     #[test]
