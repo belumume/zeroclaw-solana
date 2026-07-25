@@ -26,7 +26,11 @@ control characters or a fake instruction into whatever reads the summary. Every 
 through the response-path sanitizer before it enters the verdict text, so nothing from a
 market's metadata reaches the agent's context unsanitized.
 
-## Proven behavior (real transcript)
+## Proven behavior (host tests)
+The end-to-end capture of a live attack against a running agent, with a human in the
+loop refusing it, is [`docs/transcripts/injection-refund-redirect.md`](../../docs/transcripts/injection-refund-redirect.md). What follows below is the
+plugin's own test suite, which is a different and weaker kind of evidence.
+
 
 Host tests, no wasm toolchain, no network. Run with `cargo test --lib`:
 

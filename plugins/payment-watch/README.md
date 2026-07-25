@@ -69,7 +69,11 @@ Correctness is fail-safe by construction: a fixed-point rounding edge, an unexpe
 a failed transaction, or an amount off by a base unit all produce NOT_YET (retry on the next
 poll), never a false PAID.
 
-## Prompt injection fails closed (real transcript)
+## Prompt injection fails closed (host tests)
+The end-to-end capture of a live attack against a running agent, with a human in the
+loop refusing it, is [`docs/transcripts/injection-refund-redirect.md`](../../docs/transcripts/injection-refund-redirect.md). What follows below is the
+plugin's own test suite, which is a different and weaker kind of evidence.
+
 
 These are the plugin's own host tests, with no wasm toolchain and no network (the RPC is a
 mocked transport). Run them with `cargo test --lib`:

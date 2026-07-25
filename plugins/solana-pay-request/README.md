@@ -100,7 +100,11 @@ The percent-encoding uses the RFC 3986 unreserved set only (stricter than
 `encodeURIComponent`), which is safe because a wallet's `decodeURIComponent`
 decodes the extra escapes back to the same characters.
 
-## Prompt injection fails closed (real transcript)
+## Prompt injection fails closed (host tests)
+The end-to-end capture of a live attack against a running agent, with a human in the
+loop refusing it, is [`docs/transcripts/injection-refund-redirect.md`](../../docs/transcripts/injection-refund-redirect.md). What follows below is the
+plugin's own test suite, which is a different and weaker kind of evidence.
+
 
 These are the plugin's own host tests, with no wasm toolchain and no network. Run
 them with `cargo test --lib`:

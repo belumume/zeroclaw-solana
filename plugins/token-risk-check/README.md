@@ -40,7 +40,11 @@ any of it enters a verdict string that an agent will read, it is run through the
 response-path sanitizer and length-capped. Control characters, bidi overrides, and
 zero-width bytes cannot ride from a token's metadata into the agent's context.
 
-## Refusals and sanitization, proven (real transcript)
+## Refusals and sanitization, proven (host tests)
+The end-to-end capture of a live attack against a running agent, with a human in the
+loop refusing it, is [`docs/transcripts/injection-refund-redirect.md`](../../docs/transcripts/injection-refund-redirect.md). What follows below is the
+plugin's own test suite, which is a different and weaker kind of evidence.
+
 
 Host tests, no wasm toolchain, no network. Run with `cargo test --lib`:
 
