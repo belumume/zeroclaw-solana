@@ -93,7 +93,7 @@ payment link comes from the `solana-pay` **skill**, not a plugin (the tier demot
 write-up), so `solana_pay_request` is deliberately absent here:
 ```
 zeroclaw config set --no-interactive risk_profiles.demo.auto_approve \
-  '["token_risk_check","kamino_lending_health","payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_add","cron_list","glob_search","file_read","http_request","web_fetch","calculator"]'
+  '["payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_add","cron_list","glob_search","file_read","http_request","web_fetch","calculator"]'
 ```
 `zeroclaw security status --agent demo` shows the whole posture.
 

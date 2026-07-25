@@ -1,88 +1,120 @@
 # zeroclaw-solana
 
-Solana-native tool plugins for [ZeroClaw](https://github.com/zeroclaw-labs), built on a
-shared, host-testable core. The plugins let an agent read on-chain risk and sign a
-bounded, replay-proof attestation, with a safety posture that treats both the arguments
-coming in and the on-chain data coming back as untrusted.
+Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents doing real Solana work,
+and the plugins, on-chain programs, skills and SOPs they run on.
 
-## The plugins
+**A DePIN node that pays for itself.** An ARM box takes a sensor reading, signs it with a key
+generated on that box, and lands it in a typed account owned by our oracle program, where a
+separate consumer program reads it and acts. A `systemd` timer keeps it publishing with no
+laptop involved. The same node also sells that reading per request over x402, so the machine
+earns the gas it spends.
 
-| Plugin | Does | Custody |
+**A shop terminal that takes payments.** A merchant agent on WhatsApp and Telegram quotes an
+order, hands the customer a tappable payment link, and confirms settlement only from an
+on-chain reference match, never from the customer saying so. Brazilian orders are quoted in
+BRL at a stated rate and settled in USDC.
+
+Both are running. Live on-chain evidence, all clickable, is in
+[`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md), and `python3 scripts/verify-proof.py`
+re-checks every published claim against devnet in one command, stdlib only, nothing to install.
+
+## Start here
+
+| If you want | Read |
+|---|---|
+| What this is and why it is built this way | [`docs/WRITEUP-DRAFT.md`](docs/WRITEUP-DRAFT.md) |
+| To run it yourself | [`QUICKSTART.md`](QUICKSTART.md) |
+| Proof it is real, on chain | [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md) |
+| Why each design call went the way it did, including what was rejected | [`docs/DECISIONS.md`](docs/DECISIONS.md) |
+| How it is tested, and what each layer cannot catch | [`TESTING.md`](TESTING.md) |
+| The agent refusing an attack, verbatim | [`docs/transcripts/`](docs/transcripts/) |
+
+## Custody, which is the part that matters
+
+The agent never holds a key that can move funds. It emits an **unsigned** transaction for a
+human to approve, and spends are additionally bounded on chain by the audited Solana
+Foundation Allowances program. That bound is demonstrated rather than asserted: the agent's
+own session key signs an over-cap transfer and the program rejects it, custom error `0x12c`,
+with the failed transaction on devnet for anyone to open.
+
+The two use cases run **no T2 fund-signer**. Everything they touch sits at T0 (read-only) or
+T1 (builds an unsigned transaction, holds no key), which the brief calls the sweet spot and
+which is the honest place for an LLM-driven system to stop.
+
+## What the two use cases run on
+
+| Component | Job | Tier |
 |---|---|---|
-| [`token-risk-check`](plugins/token-risk-check) | Grades an SPL / Token-2022 mint RED / AMBER / GREEN from its extensions and authorities, corroborated by RugCheck | T0 read-only |
-| [`lending-health`](plugins/lending-health) | Reports a wallet's Kamino Lend liquidation health (Safe / Warning / Critical / Liquidatable) | T0 read-only |
-| [`depin-attest`](plugins/depin-attest) | Signs and broadcasts a replay-proof on-chain attestation of a physical DePIN sensor reading, fronted by a durable nonce | T2 scoped session key |
+| [`oracle-publish`](plugins/oracle-publish) | Device-signed reading into a typed on-chain feed, behind a durable nonce | T1 build, device co-signs |
+| [`payment-watch`](plugins/payment-watch) | Confirms a payment by matching its on-chain reference | T0 read-only |
+| [`spl-transfer-build`](plugins/spl-transfer-build) | Unsigned SPL transfers that survive an approval queue via durable nonces | T1 build |
+| [`allowance-spend-build`](plugins/allowance-spend-build) | Spends bounded by the audited SF Allowances program | T1 build |
+| [`solana-core`](crates/solana-core) | Shared wasm32-wasip2 core: transactions, PDAs, Token-2022, response-path sanitizer | library |
+| [`onchain/`](onchain) | `zeroclaw_oracle` and `consumer_example`, Anchor, live on devnet | on-chain |
+| [`x402-feed-gate`](x402-feed-gate) | Sells one signed reading per paid request | T0/T1, holds no key |
+| [`skills/solana-pay`](skills/solana-pay) | Builds the payment URL. A skill, not a plugin, on purpose | skill |
 
-## Custody ladder
+`solana-pay-request` was built as a wasm plugin and then **demoted to a skill**, because
+building a URL is string work with no funds at risk and does not need a sandbox. It stays in
+the tree as the evidence trail for that call rather than as part of the shipped path.
 
-The plugins sit at deliberate points on a custody ladder, so the safety bar rises only where
-signing does:
+Three earlier plugins (`token-risk-check`, `lending-health`, `depin-attest`) predate the two
+use cases and are **not part of them**. They keep their own READMEs and tests.
+`depin-attest` describes a T2 posture and is not run by either use case; `oracle-publish` is
+its T1 successor and is what actually publishes the live feed. The reasoning for both calls is
+in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
-- **T0 (read-only)**: holds no keys, builds no transaction. `token-risk-check` and
-  `lending-health`. The only outward actions are HTTPS reads.
-- **T2 (scoped session key)**: `depin-attest`. It signs with a session key the operator
-  injects through jailed config, holds no user wallet, and can only ever emit one
-  transaction shape (advance-nonce plus a sanitized memo). Its replay resistance is enforced
-  by consensus through a durable nonce, demonstrated on live devnet in its README.
+## The safety property worth knowing about
 
-## Shared safety: sanitize the data coming back
+On-chain data is attacker-controlled. A token name or a memo can carry control characters,
+bidi overrides, or injection framing aimed at whatever reads it next, which for an agent is
+the model's own context. `solana-core` sanitizes every such value on the way back, including
+the paths that are easy to forget: JSON-RPC error messages, HTTP error bodies, and serde parse
+errors are attacker-influenceable too.
 
-On-chain data is attacker-influenceable. A token name, a market symbol, a memo, or a
-RugCheck string can carry control characters, bidi overrides, or zero-width bytes designed to
-change how whatever reads it behaves. `solana-core`'s sanitizer runs every such value through
-a fixed cleanup and length cap before it enters a string an agent will read, and that coverage
-extends past the obvious data fields to the response paths that are easy to miss: JSON-RPC
-error messages, HTTP error bodies, and serde parse errors are attacker-influenceable too, so
-each is capped and stripped on the way to the agent rather than reaching its context raw. Each
-plugin carries a test that feeds it a hostile name or symbol and asserts the sanitized result.
-This sits on top of the standard argument-side defenses (base58 validation before any RPC call,
-`serde(deny_unknown_fields)`, https-only overrides), not instead of them.
+Run it. `cargo run --example injection_demo` in `crates/solana-core` feeds a 40 KB hostile
+token name carrying a bidi override, a zero-width space and injection framing through the real
+path, and shows it stripped, capped and labelled untrusted, on the data path and the error path.
 
-A runnable demonstration lives in `crates/solana-core/examples/injection_demo.rs`
-(`cargo run --example injection_demo`): a 40 KB hostile token name carrying a bidi override, a
-zero-width space, and injection framing comes out stripped, length-capped, and labeled untrusted
-on both the data path and the error path.
-
-## solana-core
-
-The plugins depend by path on `crates/solana-core`, a pure-Rust core with no wasm dependency.
-It is host-testable with `cargo test` and compiles clean to `wasm32-wasip2`. It carries the
-base58 codec and PDA/ATA derivation (validated differentially against `solana-program`), the
-JSON-RPC transport seam and client, SPL / Token-2022 mint decoding, the compact-u16 codec,
-instruction builders, legacy and v0 message compile and serialize (byte-validated against
-`solana-program` fixtures), durable-nonce decoding, deterministic ed25519 signing (RFC 8032
-anchored), and the response-path sanitizer. It ships **71 host tests**.
+The sanitizer contract is quantified over generated inputs rather than chosen ones, including
+idempotence, which is the property sanitizers most often fail. See [`TESTING.md`](TESTING.md).
 
 ## Build and test
-
-Each plugin is its own workspace. The core and every plugin build to `wasm32-wasip2` and are
-host-tested with mocked RPC and no live network, which is the deterministic merge gate:
 
 ```
 rustup target add wasm32-wasip2
 
-# core
-cd crates/solana-core && cargo test --locked
+cd crates/solana-core
+cargo test --locked                                   # 89 host tests
+cargo test --test properties                          # 19 properties, 1024 cases each
 
-# each plugin
 cd plugins/<name>
-cargo test --lib                                   # host tests, no wasm, no network
-cargo build --target wasm32-wasip2 --release       # the shipped component
+cargo test --lib                                      # host tests, mocked RPC, no network
+cargo build --target wasm32-wasip2 --release          # the shipped component
 ```
 
-`depin-attest` additionally has gated live-devnet integration tests
-(`ZEROCLAW_DEVNET_PROOF=1`) that broadcast the real attestation to devnet. They are not part
-of the normal test run, which uses mocked RPC only.
+Building the ZeroClaw host needs three feature flags, and one of them removes a channel in
+silence if omitted. That is step 1 of [`QUICKSTART.md`](QUICKSTART.md), worth reading before
+you build.
+
+`depin-attest` also carries gated live-devnet tests (`ZEROCLAW_DEVNET_PROOF=1`) that broadcast
+for real. They are excluded from the normal run, which is mocked and offline.
 
 ## Layout
 
 ```
-crates/solana-core/     shared, host-testable Solana core
-plugins/
-  token-risk-check/     T0 mint risk grader
-  lending-health/       T0 liquidation-health reader
-  depin-attest/         T2 durable-nonce attestation signer
-wit/                    the tool-plugin WIT world
+crates/solana-core/       shared wasm32-wasip2 core (transactions, PDAs, sanitizer)
+plugins/                  the tool plugins, one workspace each
+onchain/                  zeroclaw_oracle + consumer_example (Anchor)
+skills/solana-pay/        the payment-URL skill and its scripts
+sops/                     the SOPs the agents run on a schedule
+x402-feed-gate/           the paid-reading gate
+webshop-pay/              the hosted payment page
+e2e-localnet/             oracle flow against a validator
+e2e-track-a/              the shop payment flow end to end
+e2e-allowance/            the on-chain cap rejection
+scripts/verify-proof.py   one-command live check of every on-chain claim
+wit/                      the vendored tool-plugin WIT world
 ```
 
 ## License
