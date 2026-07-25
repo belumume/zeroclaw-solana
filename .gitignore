@@ -65,3 +65,8 @@ docs/DEMO-STORYBOARD.md
 webshop-pay/build.py
 __pycache__/
 docs/X-BUILDLOG-DRAFTS.md
+
+# Internal incident record: declares audience:internal and names a real third-party group.
+# The PUBLIC custody artifacts are docs/transcripts/whatsapp-allowlist-gate.md (anonymised)
+# and upstream issue 9348 / PR 9354, which report the same fail-open in full technical detail.
+docs/transcripts/whatsapp-fail-open-incident.md
