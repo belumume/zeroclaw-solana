@@ -136,13 +136,7 @@ mod component {
                     );
                     Ok(ToolResult {
                         success: true,
-                        output: format!(
-                            "attested {} (device {}) on-chain: {}\nreplay-proof via durable nonce {}",
-                            v.reading.as_str(),
-                            v.device_id,
-                            signature,
-                            v.nonce_account.to_base58()
-                        ),
+                        output: attest::compose_report(&v, &signature),
                         error: None,
                     })
                 }
