@@ -164,9 +164,19 @@ python3 scripts/verify-proof.py              # live on-chain claims, exits non-z
 python3 scripts/check-doc-links.py           # every link in these docs points at something real
 python3 scripts/check-config-drift.py        # the documented posture is the running one
 python3 scripts/check-shadowed-scripts.py    # no ignored copy shadows a tracked script
+python3 scripts/check-repo-paths.py          # every repo path a doc names is itself tracked
 ```
 
-The last two are pre-publish gates rather than tests. `check-doc-links.py` deliberately does
+`check-repo-paths.py` covers the gap next to `check-doc-links.py`: that one resolves links,
+this one resolves file references, and a reference is the case that looks fine locally and
+breaks only in a clone, because the file is right there on the author's disk while being
+gitignored. It skips references the surrounding sentence attributes elsewhere, since these docs
+legitimately cite the host's source and the audited program's source, and it matches bare
+filenames against tracked basenames. Both rules were earned: the first pass flagged twenty
+references and every one was a false positive, which is worse than no gate, because a check that
+cries wolf teaches its reader to skip it. A planted dead link is what proves it still fires.
+
+The last three are pre-publish gates rather than tests. `check-doc-links.py` deliberately does
 not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
 signature that does not exist, so a status-code checker would report a confident pass on a dead
 link. It extracts the signature or address and resolves it against devnet instead. It also
