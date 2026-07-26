@@ -47,7 +47,7 @@ blast radius of a hacked agent capped by on-chain math, not vibes.
   so the instructions are checked rather than asserted.
 
 ## What we had to build (and what fought us)
-**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (RPC settlement verification conjoining amount, mint, destination and reference, through the OWASP-LLM01 response sanitizer), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
+**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (RPC settlement verification conjoining amount, mint, destination and reference, through the OWASP-LLM01 response sanitizer, with optional independent-endpoint corroboration so one compromised RPC cannot fabricate a settled payment), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 89 host tests including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
 
 **The x402 earning-node (`x402-feed-gate`), the frontier piece.** The DePIN node does not just
 publish its feed, it SELLS it. A client asks for a reading; the node answers HTTP 402 with a
@@ -277,10 +277,38 @@ the reference*, not *this particular customer paid*. For a terminal that is argu
 behaviour, since a third party settling an invoice is still settlement, but "confirms a
 payment" reads stronger than what is proven, so here is what is proven.
 
+Third, and this one was worse than the two above because it was not written down anywhere until
+2026-07-26. Every check in the paragraphs above verifies the CONTENTS of an RPC response while
+trusting that the response describes the chain at all. A compromised endpoint can fabricate both
+the signature list and the transaction body, and then the amount, mint, destination and reference
+checks all pass, because they are reading the same forged bytes. The shop ships goods for a
+payment that never happened. That is a single unbounded trusted oracle sitting inside a project
+whose whole argument is that the on-chain program rather than the plugin or the model bounds the
+agent, and it went unstated through several review passes because checking it needs someone to ask
+what the checks are reading rather than whether the checks are right.
+
+`corroborating_rpc_urls` closes it by asking an independent endpoint to re-derive the payment from
+its own copy of the chain, re-running the whole conjunction rather than comparing a signature
+string, since a forged response can echo any signature back. Only the settle-worthy direction pays
+for it: a wrong PAID costs the merchant goods, a wrong NOT_YET costs one more poll, so a no-match
+needs no second call. A contradiction reports DISPUTED. An endpoint that cannot answer, or that
+does not have the transaction yet, reports UNCONFIRMED rather than either extreme, because a
+fabricated transaction is absent from an honest node and a real one is briefly absent while it
+propagates, and re-polling separates those two on its own.
+
+What that does NOT do, stated so the fix is not read as larger than it is. It moves the trust from
+one party to the configured set rather than removing it: endpoints that share an operator, a
+hosting provider or an upstream still fail together, and the plugin cannot tell that from genuine
+independence, so choosing genuinely separate parties is the operator's judgement and not something
+this code can verify. It is also opt-in, and a deployment that configures nothing still reports
+PAID, labelled SINGLE SOURCE. That default is deliberate, because silently requiring a second
+endpoint would break every existing config, but it does mean the guard protects operators who
+switch it on rather than everyone.
+
 | Component (the two use cases run on these) | Tier | Why it sits there |
 |---|---|---|
 | `solana-pay` (skill) | T0 | builds a `solana:` URL; no key. The recipient is a hardcoded invariant checked before the link is emitted, not a value the agent supplies |
-| `payment-watch` (plugin) | T0 | read-only RPC settlement check: amount, mint, destination and reference must all match |
+| `payment-watch` (plugin) | T0 | read-only RPC settlement check: amount, mint, destination and reference must all match, and with `corroborating_rpc_urls` set an independent endpoint must re-derive the same payment before it reads as settled |
 | `x402-feed-gate` (native) | T0/T1 | holds only its public receiving address; verifies inbound payment, no spend path |
 | `oracle-publish` (plugin) | T1 | device-co-signed reading; returns an unsigned partial tx, host completes the fee-payer slot |
 | `spl-transfer-build` (plugin) | T1 | unsigned transfer only; a human approves before any broadcast |
