@@ -1,0 +1,108 @@
+# What an adversarial audit of this repo found
+
+Three independent reviewers read this project cold in late July 2026, against the money path,
+the blast radius of the auto-approved tool set, and the gap between what the documents assert
+and what the code enforces. They found fourteen defects. This is the list, what changed, and
+what is still open.
+
+It is published for the same reason the decision record retracts its own reasoning in place
+rather than deleting it. A submission that only shows its finished surface is asking to be
+taken on trust, and the whole argument here is that nothing should be taken on trust.
+
+## The headline is a negative result
+
+The lead hypothesis was that settlement matched on the Solana Pay reference alone, so a stolen
+reference plus a dust payment would mark an order paid. That is false, and it was refuted with
+seven driven cases including a control that does return paid. `check_transaction` is a
+conjunction over reference, amount, mint and destination. Three of four is not paid.
+
+The finding survives as a documentation defect rather than a security one, and it is the most
+instructive item in the list, so it is number twelve below.
+
+A second hypothesis, that there is no egress filtering, was also false. Filtering, scheme
+checks and a private-host block all exist and work. Only the wildcard default was wrong.
+
+## The fourteen
+
+| # | Defect | State |
+|---|---|---|
+| 1 | Merchant recipient was a prompt constant with nothing in code enforcing it | Fixed, pinned in three files with tests |
+| 2 | Signature scan did not paginate, and the cursor stepped over unread history | Fixed, cursor held, three tests |
+| 3 | Every money parameter in the verification path is authored by the agent | Disclosed as a boundary, not fixable at this tier |
+| 4 | Egress allowlist defaulted to everything | Fixed in the documented posture, live check pending |
+| 5 | A tier-demotion argument rested on a false premise | Premise replaced |
+| 6 | The running proof used the feed the same document marked historical | Fixed, retraction left in place |
+| 7 | A liveness claim counted immutable facts as evidence of liveness | Split into static and live |
+| 8 | The documented publish cadence failed this repo's own verifier | Reconciled |
+| 9 | The write-up omitted a host patch the reproduction calls mandatory | Documented |
+| 10 | The testing doc cited scripts absent from a clone | Fixed, retraction left in place |
+| 11 | Dependency gating covered three graphs while the docs claimed nine | Nine gated |
+| 12 | Both judge-facing surfaces underclaimed the settlement check | Fixed |
+| 13 | Documented approval list did not match the running one | Regenerated, live check pending |
+| 14 | Assorted count and transcript defects | Fixed, and more found since |
+
+## The four worth reading about
+
+**The merchant address.** It lived in prose. Two markdown files named it and no code enforced
+it, while the page that moves the money read the recipient out of a URL parameter and
+transferred to whatever it found. This is not hypothetical: the build record already contains
+the same failure happening by accident, when stale rows in the agent's memory produced a wrong
+recipient with no attacker present. It is now a hardcoded invariant with tests, and one of
+those tests carries the wallet from that incident.
+
+The lesson is the one this project keeps relearning. A safety rule written in a prompt is a
+request. The enforced version has to live somewhere the model cannot reach.
+
+**The pagination gap.** Fail-safe in direction, since it can never produce a false paid, but it
+could lose a real payment permanently. Twenty dust transfers between two polls would push a
+genuine payment below the fetch window, and the cursor would then advance past it forever. The
+fix refuses to advance across history it has not read, and reports a partial scan rather than a
+confident not-yet. One of the three tests is named after the defect.
+
+**The liveness number.** A script reported eleven of eleven claims verified, and ten of those
+eleven were immutable: deployed programs stay deployed, account owners never change, devnet
+history cannot be rewritten. Exactly one check could go red, and a feed that had been dead for
+twenty-six hours still printed a pass. The count is now split, static from live, because a
+green tick that cannot go red is decoration.
+
+**The underclaim.** Both judge-facing surfaces described a four-way conjunction as a reference
+lookup. That phrasing is what generated the refuted vulnerability hypothesis at the top of this
+document: a reader who is told the check is a reference match will correctly observe that
+references can be copied. Underclaiming your own control costs points on the axis it belongs
+to, and invites an attack you are not actually open to.
+
+## Still open, stated rather than closed
+
+**The verification path takes its expected amount as an argument.** An agent that has been
+successfully injected can call the check with a small amount and receive a truthful paid for a
+small payment. This is not fixable inside a read-only lens, because the lens has no independent
+view of what was owed. It is named in the threat model rather than left for a reviewer to find.
+
+**Two live-configuration checks are unverified.** The documented posture is correct and the
+drift checker is committed, but confirming the running configuration matches it needs the host
+machine, which is currently unreachable. Re-run `scripts/check-config-drift.py` against a live
+config to close this.
+
+**One deliberate injection was never fired at the live agent for defect 1.** The structural gap
+was proven by reading the code, and the accidental variant is on the record, but the end-to-end
+deliberate exploit was assumed rather than demonstrated. The separate refund-redirect injection
+transcript is a real live test; this specific one is not.
+
+## What the audit did not find
+
+Recorded so they are not raised again. The shell jail is real and was confirmed live. Leak
+detection is correctly disabled, and re-enabling it would break payment links while fixing
+nothing, because the agent has no secret to leak. The reference-only-match vulnerability is
+refuted with code and driven cases. A long list of counts and claims checked out.
+
+## The pattern underneath
+
+Every defect sat in the gap between what a document asserted and what the code enforced. That
+is the gap a self-review cannot see, because a self-review reads the assertion and recognises
+its own intent. It took readers who had no idea what was meant.
+
+The same shape recurred after this audit closed. A claim that a Brazilian payment rail requires
+a licensed provider had passed three independent reviews before a competitor shipped the thing
+and disproved it. One on-screen test count had three different wrong values in circulation
+across four documents, each copied from the last, which is what makes a stale number look
+corroborated. Five files agreeing is not five witnesses when four of them are transcriptions.

@@ -235,6 +235,13 @@ real failures that document records, CI would have caught none of them on its ow
 covered by a drift workflow; the other two live outside this repository. `TESTING.md` carries
 the full picture, including what each layer cannot catch.
 
+Testing is what we thought to check. Three reviewers then read the repository cold and found
+fourteen defects the suites could not, because every one of them sat between what a document
+asserted and what the code enforced, which is the gap a self-review structurally cannot see.
+`docs/AUDIT.md` is that list: what was broken, what changed, the two hypotheses that turned
+out to be wrong, and the three items still open. The merchant address had been a sentence in a
+prompt with nothing in code holding it, and it is now an invariant with tests.
+
 **And one of these you can just operate.** Open `sanitizer-microworld/index.html` from the
 clone, no server and no build, and paste whatever a hostile token could put in its name field.
 The page is running `solana_core::sanitize` compiled to WebAssembly, so it is the shipped
