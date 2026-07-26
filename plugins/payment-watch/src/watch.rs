@@ -110,6 +110,12 @@ struct ExecuteArgs {
 #[serde(deny_unknown_fields)]
 struct WatchConfig {
     rpc_url: Option<String>,
+    /// Optional independent endpoints that must agree before a payment is
+    /// reported as confirmed. The primary endpoint alone is a single trusted
+    /// oracle: a compromised RPC can fabricate a signature list and a
+    /// transaction body, and every field check downstream would pass on the
+    /// fabrication. Operator-owned, like `rpc_url`.
+    corroborating_rpc_urls: Option<Vec<String>>,
 }
 
 /// Validated, ready-to-execute arguments. Everything here is trusted: the raw
@@ -124,6 +130,10 @@ pub struct ValidatedArgs {
     pub invoice_label: Option<String>,
     pub since_signature: Option<String>,
     pub rpc_url: String,
+    /// Independent endpoints, already https-validated and de-duplicated by host,
+    /// with the primary's own host excluded. Empty means no corroboration is
+    /// available and the report says so instead of implying it.
+    pub corroborating_rpc_urls: Vec<String>,
 }
 
 /// Parse + validate the raw args JSON. Every rejection happens here, before the
@@ -196,8 +206,11 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
         }
     };
 
-    // RPC endpoint: https-only when overridden.
-    let rpc_url = match args.config.and_then(|c| c.rpc_url) {
+    // RPC endpoints: https-only when overridden. The primary produces the
+    // candidate verdict; corroborating endpoints must independently re-derive it
+    // before a payment is reported as confirmed.
+    let cfg = args.config.unwrap_or_default();
+    let rpc_url = match cfg.rpc_url {
         Some(url) => {
             if !url.starts_with("https://") {
                 return Err(format!("rpc_url must be https, got: {url}"));
@@ -206,6 +219,7 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
         }
         None => DEFAULT_RPC.to_string(),
     };
+    let corroborating_rpc_urls = validate_corroborating(cfg.corroborating_rpc_urls, &rpc_url)?;
 
     Ok(ValidatedArgs {
         address,
@@ -216,7 +230,64 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
         invoice_label,
         since_signature,
         rpc_url,
+        corroborating_rpc_urls,
     })
+}
+
+/// Host portion of an `https://` URL: everything between the scheme and the
+/// first `/`, with any port stripped. Used only to decide whether two endpoints
+/// are the same party, so a lowercase compare of this is enough.
+pub fn endpoint_host(url: &str) -> String {
+    url.trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_lowercase()
+}
+
+/// Validate the corroborating endpoint list. Rejects non-https, rejects the
+/// primary's own host (querying one party twice is not corroboration, and
+/// silently accepting it would report "corroborated" for no added assurance),
+/// de-duplicates by host, and bounds the count so a config cannot turn one
+/// verdict into an unbounded fan of RPC calls.
+fn validate_corroborating(list: Option<Vec<String>>, primary: &str) -> Result<Vec<String>, String> {
+    const MAX_CORROBORATING: usize = 3;
+    let Some(list) = list else {
+        return Ok(Vec::new());
+    };
+    if list.len() > MAX_CORROBORATING {
+        return Err(format!(
+            "corroborating_rpc_urls accepts at most {MAX_CORROBORATING} endpoints, got {}",
+            list.len()
+        ));
+    }
+    let primary_host = endpoint_host(primary);
+    let mut out: Vec<String> = Vec::new();
+    let mut seen: Vec<String> = vec![primary_host.clone()];
+    for url in list {
+        if !url.starts_with("https://") {
+            return Err(format!("corroborating_rpc_urls must be https, got: {url}"));
+        }
+        let host = endpoint_host(&url);
+        if host.is_empty() {
+            return Err(format!("corroborating_rpc_urls entry has no host: {url}"));
+        }
+        if host == primary_host {
+            return Err(format!(
+                "corroborating_rpc_urls entry {url} shares the primary's host {primary_host}; \
+                 the same party answering twice is not corroboration"
+            ));
+        }
+        if seen.contains(&host) {
+            continue;
+        }
+        seen.push(host);
+        out.push(url);
+    }
+    Ok(out)
 }
 
 /// A base58 string that decodes to exactly 64 bytes is a real Solana signature.
@@ -261,6 +332,94 @@ pub enum Verdict {
     },
 }
 
+/// What an independent endpoint said about a payment the primary reported.
+///
+/// This exists because every other check in this plugin verifies the CONTENTS of
+/// an RPC response while trusting that the response describes the chain at all.
+/// A compromised endpoint can fabricate both the signature list and the
+/// transaction body, and the recipient, mint, amount and reference checks all
+/// pass on the fabrication because they read the same forged bytes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Corroboration {
+    /// No independent endpoint configured. The verdict rests on one party and the
+    /// report says exactly that rather than implying agreement.
+    NotConfigured,
+    /// An independent endpoint re-derived the same payment from its own copy.
+    Agrees { host: String },
+    /// An independent endpoint HAS the transaction and its copy does not support
+    /// the payment. This is the fabrication and the tampering signature, and it
+    /// downgrades a payment to DISPUTED.
+    Disagrees { host: String, detail: String },
+    /// An independent endpoint could not answer, or does not have the
+    /// transaction yet. Ambiguous by nature: a fabricated transaction is absent
+    /// from an honest node, and a genuine one is briefly absent while it
+    /// propagates. Reported as not-yet-confirmed so the next poll settles it,
+    /// which resolves lag on its own and never confirms a fabrication.
+    Unconfirmed { host: String, detail: String },
+}
+
+impl Corroboration {
+    /// True only when the shop may treat the payment as settled. `NotConfigured`
+    /// qualifies because a single-endpoint deployment is the documented
+    /// pre-existing posture, and the report labels it as single-source.
+    pub fn permits_settlement(&self) -> bool {
+        matches!(
+            self,
+            Corroboration::Agrees { .. } | Corroboration::NotConfigured
+        )
+    }
+}
+
+/// Ask one independent endpoint to re-derive a payment the primary reported.
+///
+/// It re-fetches that exact signature and re-runs the FULL conjunction through
+/// `check_transaction` rather than comparing a signature string, because a forged
+/// response can echo any signature back. Agreement therefore means the second
+/// party's own copy independently satisfies recipient, mint, exact amount,
+/// direction and reference.
+pub fn corroborate<T: RpcTransport>(
+    t: &T,
+    v: &ValidatedArgs,
+    m: &PaymentMatch,
+    host: &str,
+) -> Corroboration {
+    let host = host.to_string();
+    match get_transaction(t, &m.signature, 1) {
+        Err(e) => Corroboration::Unconfirmed {
+            host,
+            detail: format!("endpoint did not answer: {e:?}"),
+        },
+        Ok(None) => Corroboration::Unconfirmed {
+            host,
+            detail: "endpoint does not have this transaction (propagation lag, or the \
+                     primary invented it)"
+                .to_string(),
+        },
+        Ok(Some(tx)) => match check_transaction(&tx, v) {
+            None => Corroboration::Disagrees {
+                host,
+                detail: "endpoint has this transaction but its copy does not satisfy \
+                         recipient, mint, amount and reference"
+                    .to_string(),
+            },
+            Some(hit) => {
+                if hit.amount_base != m.amount_base || hit.decimals != m.decimals {
+                    Corroboration::Disagrees {
+                        host,
+                        detail: format!(
+                            "endpoint reports {} base units at {} decimals, primary reported \
+                             {} at {}",
+                            hit.amount_base, hit.decimals, m.amount_base, m.decimals
+                        ),
+                    }
+                } else {
+                    Corroboration::Agrees { host }
+                }
+            }
+        },
+    }
+}
+
 // --- the two-step RPC poll (hand-rolled JSON-RPC over the transport seam) ----
 
 /// Issue one JSON-RPC call and return its `result` value (or a mapped error).
@@ -289,7 +448,9 @@ fn rpc_call<T: RpcTransport>(
             // compromised/hostile RPC can inject unbounded or hidden framing
             // here); strip control/zero-width/bidi and cap it.
             message: sanitize_onchain(
-                err.get("message").and_then(Value::as_str).unwrap_or_default(),
+                err.get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
                 200,
             )
             .text,
@@ -595,7 +756,10 @@ fn sum_token(meta: &Value, key: &str, owner: &str, mint: &str) -> (i128, Option<
                 None => continue,
             };
             if decimals.is_none() {
-                decimals = uta.get("decimals").and_then(Value::as_u64).map(|d| d as u32);
+                decimals = uta
+                    .get("decimals")
+                    .and_then(Value::as_u64)
+                    .map(|d| d as u32);
             }
             if let Some(amt) = amount_i128(uta.get("amount")) {
                 sum = sum.saturating_add(amt);
@@ -755,7 +919,38 @@ fn format_amount(base: i128, decimals: u32) -> String {
 /// The compact (1-3 line) verdict the agent reads. On NOT_YET the FULL cursor
 /// signature is included so a cron SOP can copy it straight into
 /// `since_signature` for the next cheap poll.
-pub fn compose_report(v: &ValidatedArgs, verdict: &Verdict) -> String {
+/// Endpoint host, bounded for the report. Config is operator-owned rather than
+/// attacker-controlled, but the report's size bound is asserted in a test and a
+/// bound that depends on a config string is not a bound.
+const HOST_MAX: usize = 64;
+
+/// Corroboration detail, bounded for the same reason. One of these details wraps
+/// an `RpcError`, whose Debug can carry a chunk of a hostile endpoint's response,
+/// so this one is bounding genuinely untrusted text rather than being defensive.
+const DETAIL_MAX: usize = 200;
+
+/// Truncate on a char boundary. Slicing bytes would panic mid-codepoint on a
+/// multi-byte host or a non-ASCII error body.
+fn clamp(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let cut = (0..=max)
+        .rev()
+        .find(|i| s.is_char_boundary(*i))
+        .unwrap_or(0);
+    format!("{}...", &s[..cut])
+}
+
+fn short_host(h: &str) -> String {
+    clamp(h, HOST_MAX)
+}
+
+fn short_detail(d: &str) -> String {
+    clamp(d, DETAIL_MAX)
+}
+
+pub fn compose_report(v: &ValidatedArgs, verdict: &Verdict, corr: &Corroboration) -> String {
     let asset = asset_label(v);
     let addr = short_pubkey(&v.address_b58);
     let expected = format!("{}", v.expected_amount);
@@ -768,7 +963,14 @@ pub fn compose_report(v: &ValidatedArgs, verdict: &Verdict) -> String {
                 Some(label) => format!("{label} paid"),
                 None => format!("payment received on {addr}"),
             };
-            let mut out = format!("PAID: {head} -> {amount} {asset} from {}", p.from_short);
+            // Lead with what the shop may ACT on. A reader deciding whether to hand
+            // over goods must not have to infer that from a trailing clause.
+            let lead = match corr {
+                Corroboration::Agrees { .. } | Corroboration::NotConfigured => "PAID",
+                Corroboration::Disagrees { .. } => "DISPUTED",
+                Corroboration::Unconfirmed { .. } => "UNCONFIRMED",
+            };
+            let mut out = format!("{lead}: {head} -> {amount} {asset} from {}", p.from_short);
             out.push_str(&format!(" (tx {}", p.signature));
             if let Some(t) = p.block_time {
                 out.push_str(&format!(", unix {t}"));
@@ -776,6 +978,26 @@ pub fn compose_report(v: &ValidatedArgs, verdict: &Verdict) -> String {
             out.push(')');
             if let Some(m) = &p.memo {
                 out.push_str(&format!("; memo: {m}"));
+            }
+            match corr {
+                Corroboration::NotConfigured => out.push_str(
+                    "; SINGLE SOURCE: one endpoint reported this and nothing checked it. \
+                     Set corroborating_rpc_urls to require independent agreement.",
+                ),
+                Corroboration::Agrees { host } => {
+                    out.push_str(&format!("; corroborated by {}", short_host(host)))
+                }
+                Corroboration::Disagrees { host, detail } => out.push_str(&format!(
+                    "; DO NOT SETTLE: {} contradicts the primary ({})",
+                    short_host(host),
+                    short_detail(detail)
+                )),
+                Corroboration::Unconfirmed { host, detail } => out.push_str(&format!(
+                    "; NOT SETTLED: {} has not confirmed it ({}). Poll again; a real \
+                     payment corroborates once it propagates.",
+                    short_host(host),
+                    short_detail(detail)
+                )),
             }
             out
         }
@@ -820,7 +1042,7 @@ mod tests {
     const WALLET: &str = "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6Js6CckuTnak"; // recipient
     const SENDER: &str = "H6rHXmXoCQvq8Ue81MqNh7ow5ysPa1dSozwt3Rwg1jos"; // payer
     const REF: &str = "DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek"; // reference
-    // Real 64-byte base58 signatures (from live devnet fixtures in the repo).
+                                                                      // Real 64-byte base58 signatures (from live devnet fixtures in the repo).
     const SIG_A: &str =
         "31cev4tXLWcr21Xz4Zfu9ADTGZPUWyLqtMV3wBewF3cX4aVKCPK41N1WLhGeyU52uPahRXvFZEUVntaTiTrdd3nB";
     const SIG_B: &str =
@@ -1052,7 +1274,15 @@ mod tests {
         // recipient 1 -> 26 USDC (+25), sender 100 -> 75 USDC (-25), decimals 6.
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, Some("Invoice #412"))]),
-            spl_tx(WALLET, SENDER, USDC_MINT, ("1000000", "26000000"), ("100000000", "75000000"), 6, &[]),
+            spl_tx(
+                WALLET,
+                SENDER,
+                USDC_MINT,
+                ("1000000", "26000000"),
+                ("100000000", "75000000"),
+                6,
+                &[],
+            ),
         ]);
         let v = args(None, 25.0);
         let verdict = find_payment(&mock, &v).unwrap();
@@ -1065,7 +1295,7 @@ mod tests {
             }
             other => panic!("expected Paid, got {other:?}"),
         }
-        let report = compose_report(&v, &verdict);
+        let report = compose_report(&v, &verdict, &Corroboration::NotConfigured);
         assert!(report.starts_with("PAID:"));
         assert!(report.contains("25 USDC"));
         assert!(report.contains(SIG_A)); // full, verifiable signature
@@ -1086,7 +1316,7 @@ mod tests {
             }
             other => panic!("expected Paid, got {other:?}"),
         }
-        assert!(compose_report(&v, &verdict).contains("0.5 SOL"));
+        assert!(compose_report(&v, &verdict, &Corroboration::NotConfigured).contains("0.5 SOL"));
     }
 
     // ---- NOT_YET with cursor advance, and `until` threading ----
@@ -1096,8 +1326,24 @@ mod tests {
         // Two recent txs, neither matching the expected amount.
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, None), (SIG_B, false, None)]),
-            spl_tx(WALLET, SENDER, USDC_MINT, ("0", "1000000"), ("100000000", "99000000"), 6, &[]),
-            spl_tx(WALLET, SENDER, USDC_MINT, ("0", "2000000"), ("100000000", "98000000"), 6, &[]),
+            spl_tx(
+                WALLET,
+                SENDER,
+                USDC_MINT,
+                ("0", "1000000"),
+                ("100000000", "99000000"),
+                6,
+                &[],
+            ),
+            spl_tx(
+                WALLET,
+                SENDER,
+                USDC_MINT,
+                ("0", "2000000"),
+                ("100000000", "98000000"),
+                6,
+                &[],
+            ),
         ]);
         let v = args(None, 25.0);
         let verdict = find_payment(&mock, &v).unwrap();
@@ -1111,11 +1357,14 @@ mod tests {
                 // newest entry (SIG_A) is the cursor for the next poll.
                 assert_eq!(next_cursor.as_deref(), Some(SIG_A));
                 // A short page means the whole range was drained, so advancing is safe.
-                assert!(scan_complete, "a short page should count as a complete scan");
+                assert!(
+                    scan_complete,
+                    "a short page should count as a complete scan"
+                );
             }
             other => panic!("expected NotYet, got {other:?}"),
         }
-        let report = compose_report(&v, &verdict);
+        let report = compose_report(&v, &verdict, &Corroboration::NotConfigured);
         assert!(report.starts_with("NOT_YET:"));
         assert!(report.contains(SIG_A)); // full cursor, usable as since_signature
     }
@@ -1143,7 +1392,9 @@ mod tests {
         // to MAX_SIGNATURE_PAGES and reports the range as undrained. Entries carry
         // err set, so no getTransaction call is made and only signature pages are
         // consumed.
-        let pages: Vec<String> = (0..MAX_SIGNATURE_PAGES).map(|_| sigs_resp(&entries)).collect();
+        let pages: Vec<String> = (0..MAX_SIGNATURE_PAGES)
+            .map(|_| sigs_resp(&entries))
+            .collect();
         let mock = MockTransport::new(pages);
 
         let mut v = args(None, 25.0);
@@ -1177,13 +1428,15 @@ mod tests {
         let sigs = fake_sigs(SIGNATURE_LIMIT);
         let entries: Vec<(&str, bool, Option<&str>)> =
             sigs.iter().map(|s| (s.as_str(), true, None)).collect();
-        let pages: Vec<String> = (0..MAX_SIGNATURE_PAGES).map(|_| sigs_resp(&entries)).collect();
+        let pages: Vec<String> = (0..MAX_SIGNATURE_PAGES)
+            .map(|_| sigs_resp(&entries))
+            .collect();
         let mock = MockTransport::new(pages);
 
         let mut v = args(None, 25.0);
         v.since_signature = Some(SIG_B.to_string());
         let verdict = find_payment(&mock, &v).unwrap();
-        let report = compose_report(&v, &verdict);
+        let report = compose_report(&v, &verdict, &Corroboration::NotConfigured);
 
         assert!(report.starts_with("NOT_YET:"));
         assert!(
@@ -1213,7 +1466,15 @@ mod tests {
         // recipient receives 24 USDC, not 25.
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, None)]),
-            spl_tx(WALLET, SENDER, USDC_MINT, ("1000000", "25000000"), ("100000000", "76000000"), 6, &[]),
+            spl_tx(
+                WALLET,
+                SENDER,
+                USDC_MINT,
+                ("1000000", "25000000"),
+                ("100000000", "76000000"),
+                6,
+                &[],
+            ),
         ]);
         assert!(matches!(
             find_payment(&mock, &args(None, 25.0)).unwrap(),
@@ -1226,7 +1487,15 @@ mod tests {
         // A +25 delta but for a DIFFERENT mint (SENDER reused as a mint id).
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, None)]),
-            spl_tx(WALLET, SENDER, SENDER, ("1000000", "26000000"), ("100000000", "75000000"), 6, &[]),
+            spl_tx(
+                WALLET,
+                SENDER,
+                SENDER,
+                ("1000000", "26000000"),
+                ("100000000", "75000000"),
+                6,
+                &[],
+            ),
         ]);
         // Watching USDC: the other-mint transfer must not match.
         assert!(matches!(
@@ -1240,7 +1509,15 @@ mod tests {
         // The +25 USDC lands on SENDER, not the watched WALLET.
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, None)]),
-            spl_tx(SENDER, REF, USDC_MINT, ("1000000", "26000000"), ("100000000", "75000000"), 6, &[]),
+            spl_tx(
+                SENDER,
+                REF,
+                USDC_MINT,
+                ("1000000", "26000000"),
+                ("100000000", "75000000"),
+                6,
+                &[],
+            ),
         ]);
         assert!(matches!(
             find_payment(&mock, &args(None, 25.0)).unwrap(),
@@ -1254,21 +1531,40 @@ mod tests {
     fn reference_absent_from_tx_is_not_a_match() {
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, None)]),
-            spl_tx(WALLET, SENDER, USDC_MINT, ("1000000", "26000000"), ("100000000", "75000000"), 6, &[]),
+            spl_tx(
+                WALLET,
+                SENDER,
+                USDC_MINT,
+                ("1000000", "26000000"),
+                ("100000000", "75000000"),
+                6,
+                &[],
+            ),
         ]);
         let v = parse_and_validate(&format!(
             r#"{{"address":"{WALLET}","expected_amount":25,"reference":"{REF}"}}"#
         ))
         .unwrap();
         // Correct amount + mint + recipient, but the reference key is not present.
-        assert!(matches!(find_payment(&mock, &v).unwrap(), Verdict::NotYet { .. }));
+        assert!(matches!(
+            find_payment(&mock, &v).unwrap(),
+            Verdict::NotYet { .. }
+        ));
     }
 
     #[test]
     fn reference_present_in_tx_matches() {
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, None)]),
-            spl_tx(WALLET, SENDER, USDC_MINT, ("1000000", "26000000"), ("100000000", "75000000"), 6, &[REF]),
+            spl_tx(
+                WALLET,
+                SENDER,
+                USDC_MINT,
+                ("1000000", "26000000"),
+                ("100000000", "75000000"),
+                6,
+                &[REF],
+            ),
         ]);
         let v = parse_and_validate(&format!(
             r#"{{"address":"{WALLET}","expected_amount":25,"reference":"{REF}"}}"#
@@ -1302,7 +1598,8 @@ mod tests {
     #[test]
     fn rpc_error_object_propagates() {
         let mock = MockTransport::single(
-            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"bad params"}}"#.to_string(),
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"bad params"}}"#
+                .to_string(),
         );
         match find_payment(&mock, &args(None, 25.0)) {
             Err(RpcError::Rpc { code, message }) => {
@@ -1318,7 +1615,8 @@ mod tests {
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, None)]),
             // A getTransaction result with no `meta`, missing fields everywhere.
-            r#"{"jsonrpc":"2.0","id":2,"result":{"slot":1,"transaction":{"message":{}}}}"#.to_string(),
+            r#"{"jsonrpc":"2.0","id":2,"result":{"slot":1,"transaction":{"message":{}}}}"#
+                .to_string(),
         ]);
         assert!(matches!(
             find_payment(&mock, &args(None, 25.0)).unwrap(),
@@ -1343,7 +1641,15 @@ mod tests {
         let flood = "9".repeat(50); // exceeds AMOUNT_STR_MAX
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, None)]),
-            spl_tx(WALLET, SENDER, USDC_MINT, ("0", &flood), ("100000000", "75000000"), 6, &[]),
+            spl_tx(
+                WALLET,
+                SENDER,
+                USDC_MINT,
+                ("0", &flood),
+                ("100000000", "75000000"),
+                6,
+                &[],
+            ),
         ]);
         // The absurd inbound amount is dropped (not parsed), so no false match.
         assert!(matches!(
@@ -1393,7 +1699,11 @@ mod tests {
                 &[],
             ),
         ]);
-        let paid_out = compose_report(&v, &find_payment(&mock, &v).unwrap());
+        let paid_out = compose_report(
+            &v,
+            &find_payment(&mock, &v).unwrap(),
+            &Corroboration::NotConfigured,
+        );
 
         // NOT_YET with every optional piece present at once: cursor, reference and the
         // partial-scan note, which is the longest this branch can be. These fields are
@@ -1406,6 +1716,7 @@ mod tests {
                 next_cursor: Some(SIG_A.to_string()),
                 scan_complete: false,
             },
+            &Corroboration::NotConfigured,
         );
 
         for (name, out) in [("PAID", &paid_out), ("NOT_YET", &not_yet_out)] {
@@ -1439,11 +1750,19 @@ mod tests {
         );
         let mock = MockTransport::new([
             sigs_resp(&[(SIG_A, false, Some(&hostile))]),
-            spl_tx(WALLET, SENDER, USDC_MINT, ("1000000", "26000000"), ("100000000", "75000000"), 6, &[]),
+            spl_tx(
+                WALLET,
+                SENDER,
+                USDC_MINT,
+                ("1000000", "26000000"),
+                ("100000000", "75000000"),
+                6,
+                &[],
+            ),
         ]);
         let v = args(None, 25.0);
         let verdict = find_payment(&mock, &v).unwrap();
-        let report = compose_report(&v, &verdict);
+        let report = compose_report(&v, &verdict, &Corroboration::NotConfigured);
         // Payment still detected...
         assert!(report.starts_with("PAID:"));
         // ...but the memo is stripped (no zero-width), capped, and flagged.
@@ -1485,7 +1804,7 @@ mod tests {
         let mock = MockTransport::new([sigs_resp(&[(SIG_A, false, None)]), tx]);
         let v = args(None, 25.0);
         let verdict = find_payment(&mock, &v).unwrap();
-        let report = compose_report(&v, &verdict);
+        let report = compose_report(&v, &verdict, &Corroboration::NotConfigured);
         assert!(report.starts_with("PAID:")); // detected via balance delta
         assert!(!report.contains('\u{202E}')); // bidi override stripped from `from`
         assert!(!report.contains('\u{200B}')); // zero-width stripped
@@ -1497,15 +1816,31 @@ mod tests {
     fn reports_are_compact() {
         let paid = MockTransport::new([
             sigs_resp(&[(SIG_A, false, Some("Invoice #412"))]),
-            spl_tx(WALLET, SENDER, USDC_MINT, ("1000000", "26000000"), ("100000000", "75000000"), 6, &[]),
+            spl_tx(
+                WALLET,
+                SENDER,
+                USDC_MINT,
+                ("1000000", "26000000"),
+                ("100000000", "75000000"),
+                6,
+                &[],
+            ),
         ]);
         let v = args(None, 25.0);
-        let r = compose_report(&v, &find_payment(&paid, &v).unwrap());
+        let r = compose_report(
+            &v,
+            &find_payment(&paid, &v).unwrap(),
+            &Corroboration::NotConfigured,
+        );
         assert!(r.len() < 400, "PAID report too long: {}", r.len());
 
         let notyet = MockTransport::single(sigs_resp(&[(SIG_A, false, None)]));
         let vn = args(None, 25.0);
-        let rn = compose_report(&vn, &find_payment(&notyet, &vn).unwrap());
+        let rn = compose_report(
+            &vn,
+            &find_payment(&notyet, &vn).unwrap(),
+            &Corroboration::NotConfigured,
+        );
         assert!(rn.len() < 400, "NOT_YET report too long: {}", rn.len());
     }
 
@@ -1516,5 +1851,274 @@ mod tests {
         assert_eq!(format_amount(1_234_500, 6), "1.2345");
         assert_eq!(format_amount(1, 9), "0.000000001");
         assert_eq!(format_amount(42, 0), "42");
+    }
+
+    // ---- RPC corroboration -------------------------------------------------
+    // Every other check here verifies the CONTENTS of an RPC response while
+    // trusting that it describes the chain at all. These cover the endpoint
+    // itself lying.
+
+    fn args_with_corroborators(amount: f64, urls: &[&str]) -> Result<ValidatedArgs, String> {
+        let list = urls
+            .iter()
+            .map(|u| format!("\"{u}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        parse_and_validate(&format!(
+            r#"{{"address":"{WALLET}","expected_amount":{amount},"__config":{{"corroborating_rpc_urls":[{list}]}}}}"#
+        ))
+    }
+
+    /// One USDC, paid by SENDER to WALLET. Used as both the primary's answer and,
+    /// where the test wants agreement, the second endpoint's independent copy.
+    fn one_usdc_tx() -> String {
+        spl_tx(
+            WALLET,
+            SENDER,
+            USDC_MINT,
+            ("0", "1000000"),
+            ("1000000", "0"),
+            6,
+            &[],
+        )
+    }
+
+    /// Drive the real entry point rather than hand-building a `PaymentMatch`,
+    /// because a hand-built one can hold field combinations the sanitizer makes
+    /// unreachable, and a test that asserts against those proves nothing.
+    fn paid_verdict(v: &ValidatedArgs) -> Verdict {
+        let primary = MockTransport::new([sigs_resp(&[(SIG_A, false, None)]), one_usdc_tx()]);
+        find_payment(&primary, v).unwrap()
+    }
+
+    #[test]
+    fn corroboration_agrees_when_a_second_endpoint_re_derives_the_payment() {
+        let v = args_with_corroborators(1.0, &["https://second.example.com"]).unwrap();
+        assert_eq!(v.corroborating_rpc_urls.len(), 1);
+        let verdict = paid_verdict(&v);
+        let Verdict::Paid(m) = &verdict else {
+            panic!("fixture should be Paid, got {verdict:?}")
+        };
+
+        let second = MockTransport::single(one_usdc_tx());
+        let c = corroborate(&second, &v, m, "second.example.com");
+        assert!(matches!(c, Corroboration::Agrees { .. }), "got {c:?}");
+        assert!(c.permits_settlement());
+
+        let report = compose_report(&v, &verdict, &c);
+        assert!(report.starts_with("PAID:"), "{report}");
+        assert!(
+            report.contains("corroborated by second.example.com"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn a_contradicting_second_endpoint_downgrades_the_payment_to_disputed() {
+        let v = args_with_corroborators(1.0, &["https://liar.example.com"]).unwrap();
+        let verdict = paid_verdict(&v);
+        let Verdict::Paid(m) = &verdict else {
+            panic!("fixture should be Paid")
+        };
+
+        // Same signature, but this endpoint's copy moves one base unit rather
+        // than the whole dollar. That is the shape of a fabricated or tampered
+        // response: the signature echoes back, the money does not.
+        let second = MockTransport::single(spl_tx(
+            WALLET,
+            SENDER,
+            USDC_MINT,
+            ("0", "1"),
+            ("1", "0"),
+            6,
+            &[],
+        ));
+        let c = corroborate(&second, &v, m, "liar.example.com");
+        assert!(matches!(c, Corroboration::Disagrees { .. }), "got {c:?}");
+        assert!(
+            !c.permits_settlement(),
+            "a contradicted payment must never be settleable"
+        );
+
+        let report = compose_report(&v, &verdict, &c);
+        assert!(report.starts_with("DISPUTED:"), "{report}");
+        assert!(report.contains("DO NOT SETTLE"), "{report}");
+        assert!(!report.starts_with("PAID"), "{report}");
+    }
+
+    #[test]
+    fn a_second_endpoint_without_the_transaction_leaves_it_unconfirmed_not_paid() {
+        let v = args_with_corroborators(1.0, &["https://lagging.example.com"]).unwrap();
+        let verdict = paid_verdict(&v);
+        let Verdict::Paid(m) = &verdict else {
+            panic!("fixture should be Paid")
+        };
+
+        let second = MockTransport::single(r#"{"jsonrpc":"2.0","id":1,"result":null}"#);
+        let c = corroborate(&second, &v, m, "lagging.example.com");
+        assert!(matches!(c, Corroboration::Unconfirmed { .. }), "got {c:?}");
+        assert!(!c.permits_settlement());
+
+        // Deliberately NOT Disagrees: an honest node briefly lacks a real
+        // transaction while it propagates, and calling that fraud would train
+        // operators to ignore disputes. Re-polling settles both cases.
+        let report = compose_report(&v, &verdict, &c);
+        assert!(report.starts_with("UNCONFIRMED:"), "{report}");
+        assert!(report.contains("Poll again"), "{report}");
+    }
+
+    #[test]
+    fn an_unreachable_second_endpoint_is_unconfirmed_rather_than_agreement() {
+        let v = args_with_corroborators(1.0, &["https://down.example.com"]).unwrap();
+        let verdict = paid_verdict(&v);
+        let Verdict::Paid(m) = &verdict else {
+            panic!("fixture should be Paid")
+        };
+
+        // Not JSON at all, which is what a broken or hostile endpoint returns.
+        let second = MockTransport::single("<html>502 Bad Gateway</html>");
+        let c = corroborate(&second, &v, m, "down.example.com");
+        assert!(matches!(c, Corroboration::Unconfirmed { .. }), "got {c:?}");
+        assert!(
+            !c.permits_settlement(),
+            "silence must never be read as agreement"
+        );
+    }
+
+    #[test]
+    fn a_single_source_payment_is_labelled_rather_than_implying_agreement() {
+        let v = args(None, 1.0);
+        assert!(
+            v.corroborating_rpc_urls.is_empty(),
+            "default posture is one endpoint"
+        );
+        let verdict = paid_verdict(&v);
+
+        let report = compose_report(&v, &verdict, &Corroboration::NotConfigured);
+        // Still PAID, because one endpoint is the documented pre-existing
+        // posture and this must not break deployments that never opted in.
+        assert!(report.starts_with("PAID:"), "{report}");
+        assert!(report.contains("SINGLE SOURCE"), "{report}");
+        assert!(report.contains("corroborating_rpc_urls"), "{report}");
+        assert!(
+            !report.contains("corroborated by"),
+            "must not imply an agreement nobody gave: {report}"
+        );
+    }
+
+    #[test]
+    fn the_primarys_own_host_is_refused_as_a_corroborator() {
+        let e = args_with_corroborators(1.0, &[DEFAULT_RPC]).unwrap_err();
+        assert!(e.contains("shares the primary's host"), "{e}");
+
+        // Also refused when the path differs, since the party is what matters.
+        let e2 = args_with_corroborators(1.0, &["https://api.mainnet-beta.solana.com/other"])
+            .unwrap_err();
+        assert!(e2.contains("shares the primary's host"), "{e2}");
+    }
+
+    #[test]
+    fn corroborating_endpoints_are_https_only_and_bounded_and_deduped() {
+        let e = args_with_corroborators(1.0, &["http://second.example.com"]).unwrap_err();
+        assert!(e.contains("must be https"), "{e}");
+
+        let e2 = args_with_corroborators(
+            1.0,
+            &[
+                "https://a.example.com",
+                "https://b.example.com",
+                "https://c.example.com",
+                "https://d.example.com",
+            ],
+        )
+        .unwrap_err();
+        assert!(e2.contains("at most 3"), "{e2}");
+
+        // Two URLs, one party: de-duplicated to a single endpoint so the report
+        // cannot claim two independent confirmations from one host.
+        let v = args_with_corroborators(
+            1.0,
+            &["https://dup.example.com/a", "https://dup.example.com/b"],
+        )
+        .unwrap();
+        assert_eq!(v.corroborating_rpc_urls.len(), 1);
+    }
+
+    #[test]
+    fn only_agreement_and_the_unconfigured_default_permit_settlement() {
+        let cases = [
+            (Corroboration::NotConfigured, true),
+            (
+                Corroboration::Agrees {
+                    host: "a".to_string(),
+                },
+                true,
+            ),
+            (
+                Corroboration::Disagrees {
+                    host: "a".to_string(),
+                    detail: "d".to_string(),
+                },
+                false,
+            ),
+            (
+                Corroboration::Unconfirmed {
+                    host: "a".to_string(),
+                    detail: "d".to_string(),
+                },
+                false,
+            ),
+        ];
+        // Count asserted so a future variant cannot silently skip the table.
+        assert_eq!(cases.len(), 4);
+        for (c, expected) in cases {
+            assert_eq!(c.permits_settlement(), expected, "wrong verdict for {c:?}");
+        }
+    }
+
+    #[test]
+    fn the_corroborated_report_stays_bounded_on_every_branch() {
+        let v = args_with_corroborators(1.0, &["https://second.example.com"]).unwrap();
+        let verdict = paid_verdict(&v);
+        let long_host = "h".repeat(4096);
+        let branches = [
+            Corroboration::NotConfigured,
+            Corroboration::Agrees {
+                host: long_host.clone(),
+            },
+            Corroboration::Disagrees {
+                host: long_host.clone(),
+                detail: "x".repeat(4096),
+            },
+            Corroboration::Unconfirmed {
+                host: long_host,
+                detail: "x".repeat(4096),
+            },
+        ];
+        assert_eq!(branches.len(), 4);
+        for c in branches {
+            let out = compose_report(&v, &verdict, &c);
+            // Printed so the README's byte figures are measured rather than
+            // estimated. Run with `--nocapture` to read them.
+            eprintln!(
+                "corroborated report bytes: {:>5}  branch {}",
+                out.len(),
+                match &c {
+                    Corroboration::NotConfigured => "NotConfigured",
+                    Corroboration::Agrees { .. } => "Agrees",
+                    Corroboration::Disagrees { .. } => "Disagrees",
+                    Corroboration::Unconfirmed { .. } => "Unconfirmed",
+                }
+            );
+            assert!(
+                out.len() < 2000,
+                "report unbounded on {c:?}: {} bytes",
+                out.len()
+            );
+            assert!(
+                !out.contains(&"h".repeat(HOST_MAX + 1)),
+                "host was not truncated"
+            );
+        }
     }
 }

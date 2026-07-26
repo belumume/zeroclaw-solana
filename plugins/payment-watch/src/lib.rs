@@ -128,20 +128,85 @@ mod component {
                 }
             };
 
-            // A landed payment is reported as an INBOUND event, per the loop this
-            // plugin closes; a no-match is a normal COMPLETE.
-            let (action, message) = match &verdict {
-                watch::Verdict::Paid(_) => (PluginAction::Inbound, "payment detected"),
-                watch::Verdict::NotYet { .. } => (PluginAction::Complete, "no matching payment yet"),
+            // Corroboration is asked for ONLY on the settle-worthy direction, and
+            // the asymmetry is the point: a wrong PAID costs the shop its goods,
+            // while a wrong NOT_YET costs one more poll. So a no-match needs no
+            // second endpoint and stays as cheap as it is today.
+            let corr = match &verdict {
+                watch::Verdict::NotYet { .. } => watch::Corroboration::NotConfigured,
+                watch::Verdict::Paid(m) => corroborate_all(&v, m),
             };
-            emit(action, PluginOutcome::Success, message);
+
+            // A landed payment is reported as an INBOUND event, per the loop this
+            // plugin closes; a no-match is a normal COMPLETE. A payment an
+            // independent endpoint contradicts is neither: it is a failure the
+            // operator has to see, and it must not look like money arriving.
+            let (action, outcome, message) = match (&verdict, &corr) {
+                (watch::Verdict::Paid(_), watch::Corroboration::Disagrees { .. }) => (
+                    PluginAction::Fail,
+                    PluginOutcome::Failure,
+                    "payment disputed by an independent endpoint",
+                ),
+                (watch::Verdict::Paid(_), watch::Corroboration::Unconfirmed { .. }) => (
+                    PluginAction::Complete,
+                    PluginOutcome::Success,
+                    "payment not corroborated yet",
+                ),
+                (watch::Verdict::Paid(_), _) => (
+                    PluginAction::Inbound,
+                    PluginOutcome::Success,
+                    "payment detected",
+                ),
+                (watch::Verdict::NotYet { .. }, _) => (
+                    PluginAction::Complete,
+                    PluginOutcome::Success,
+                    "no matching payment yet",
+                ),
+            };
+            emit(action, outcome, message);
 
             Ok(ToolResult {
                 success: true,
-                output: watch::compose_report(&v, &verdict),
+                output: watch::compose_report(&v, &verdict, &corr),
                 error: None,
             })
         }
+    }
+
+    /// Ask every configured independent endpoint, aggregating FAIL-CLOSED.
+    ///
+    /// A single disagreement disqualifies the payment regardless of what the
+    /// others say, because a disagreement is the tampering signature and a
+    /// majority vote would let an attacker who controls two endpoints outvote the
+    /// honest one. Absent any disagreement, one genuine agreement is
+    /// corroboration. If nobody could answer, the payment stays uncorroborated
+    /// rather than being upgraded by silence.
+    fn corroborate_all(v: &watch::ValidatedArgs, m: &watch::PaymentMatch) -> watch::Corroboration {
+        if v.corroborating_rpc_urls.is_empty() {
+            return watch::Corroboration::NotConfigured;
+        }
+        let mut best: Option<watch::Corroboration> = None;
+        for url in &v.corroborating_rpc_urls {
+            let host = watch::endpoint_host(url);
+            let t = WakiTransport::new(url);
+            match watch::corroborate(&t, v, m, &host) {
+                d @ watch::Corroboration::Disagrees { .. } => return d,
+                a @ watch::Corroboration::Agrees { .. } => best = Some(a),
+                u @ watch::Corroboration::Unconfirmed { .. } => {
+                    if best.is_none() {
+                        best = Some(u);
+                    }
+                }
+                watch::Corroboration::NotConfigured => {}
+            }
+        }
+        // Defensive default is the fail-closed one: never NotConfigured here,
+        // since that would report a corroborated-looking PAID for a list that
+        // was configured precisely to prevent one.
+        best.unwrap_or(watch::Corroboration::Unconfirmed {
+            host: "none".to_string(),
+            detail: "no configured endpoint returned a usable answer".to_string(),
+        })
     }
 
     fn fail(message: String) -> ToolResult {

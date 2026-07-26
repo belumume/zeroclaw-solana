@@ -62,8 +62,35 @@ OWASP LLM01 on the response path). Both directions are handled fail-closed, in t
    text, and any oversized balance amount are stripped of control / zero-width / bidi characters
    and capped before they enter the report. A sender pubkey is re-validated as base58 before it
    is displayed, so a crafted `from` string can never panic a byte-slice or leak hidden framing.
-7. The report itself is shaped: 1 to 3 lines, well under 400 characters, versus a raw
-   `getTransaction` of roughly 40 KB. Judges call `execute` and count tokens; this never floods.
+7. The report itself is shaped: 1 to 3 lines, measured at 495 bytes worst-case PAID and 556
+   worst-case NOT_YET, versus a raw `getTransaction` of roughly 40 KB. Judges call `execute` and
+   count tokens; this never floods. The figures are printed by the tests rather than asserted
+   from memory, so they cannot drift (`worst_case_output_is_bounded_on_both_verdict_branches`,
+   `the_corroborated_report_stays_bounded_on_every_branch`).
+8. Every check above verifies the CONTENTS of an RPC response while trusting that the response
+   describes the chain at all. That trust is the last unguarded assumption here, and it is the
+   expensive one: a compromised endpoint can fabricate both the signature list and the
+   transaction body, at which point the recipient, mint, amount and reference checks all pass
+   because they are reading the same forged bytes, and the shop ships goods for a payment that
+   never happened. So `corroborating_rpc_urls` asks an independent endpoint to re-derive the
+   payment from its own copy of the chain, re-running the whole conjunction rather than comparing
+   a signature string, since a forged response can echo any signature back.
+
+   Corroboration is asked for only on the settle-worthy direction, and the asymmetry is
+   deliberate: a wrong PAID costs the shop its goods, a wrong NOT_YET costs one more poll. A
+   no-match therefore needs no second endpoint and stays exactly as cheap as before.
+
+   Four outcomes, aggregated fail-closed. A single disagreement disqualifies the payment
+   regardless of what any other endpoint says, because a majority vote would let an attacker
+   holding two endpoints outvote the honest one. An endpoint that HAS the transaction and
+   contradicts it downgrades the verdict to `DISPUTED`. An endpoint that cannot answer, or does
+   not have the transaction yet, yields `UNCONFIRMED` rather than either extreme, because a
+   fabricated transaction is absent from an honest node and a genuine one is briefly absent while
+   it propagates; re-polling resolves the lag on its own and never confirms a fabrication.
+   Configuring none is still permitted, since one endpoint is the pre-existing posture, but the
+   report then says `SINGLE SOURCE` instead of implying an agreement nobody gave. An endpoint
+   sharing the primary's host is refused outright: the same party answering twice is not
+   corroboration.
 
 Correctness is fail-safe by construction: a fixed-point rounding edge, an unexpected RPC shape,
 a failed transaction, or an amount off by a base unit all produce NOT_YET (retry on the next
@@ -174,6 +201,21 @@ inputs:
 ```
 rpc_url   optional https-only Solana RPC override (defaults to mainnet-beta). A user RPC
           endpoint is supported here; a plain-http override is refused.
+
+corroborating_rpc_urls
+          optional list of up to 3 INDEPENDENT https endpoints that must agree before a
+          payment is reported settle-worthy. Each is https-only, de-duplicated by host, and
+          refused if it shares the primary's host. Omit it and a payment still reports PAID,
+          labelled SINGLE SOURCE. Set it and a contradiction reports DISPUTED, while an
+          endpoint that cannot answer reports UNCONFIRMED so the next poll decides.
+```
+
+Example, primary plus one independent corroborator:
+
+```toml
+[tools.payment_watch.config]
+rpc_url = "https://api.devnet.solana.com"
+corroborating_rpc_urls = ["https://devnet.helius-rpc.com/?api-key=REDACTED"]
 ```
 
 ## Build
