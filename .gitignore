@@ -88,3 +88,8 @@ manifest.out.json
 # Verbatim user directive: internal only. Its own frontmatter says public:false;
 # this is what actually enforces it. Carries home paths and internal process.
 docs/USER-DIRECTIVE-2026-07-26-VERBATIM.md
+
+# Internal, never published. Holds upstream security findings that are CONFIRMED but not yet
+# filed with the maintainer; committing them here would be a 0-day drop on someone else's
+# project. They move into public docs only after upstream has been notified and given time.
+build-readiness/
