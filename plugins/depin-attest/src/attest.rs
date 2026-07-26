@@ -340,6 +340,26 @@ mod tests {
     }
 
     #[test]
+    fn an_all_control_device_id_is_refused() {
+        // BUGIFICATION. The sanitizer promises control-free output, not
+        // NON-EMPTY output, so an all-control device_id is a legal input whose
+        // legal result is "". The guard against it existed and nothing
+        // exercised it, which means a refactor could have deleted the guard
+        // with the whole suite staying green.
+        //
+        // Device identity is the entire point of an attestation, so publishing
+        // one with a blank device is the failure worth pinning.
+        // JSON \u escapes, not literal codepoints: rustc denies invisible
+        // direction-changing characters in source (trojan-source defense), and
+        // serde decodes these to the real characters at parse time anyway.
+        let json = format!(
+            r#"{{"reading":"motion_detected","device_id":"\u202E\u200B\u0000\uFEFF\u2069","observed_at":1,"__config":{{"signer_seed_hex":"{SEED_HEX}","nonce_account":"{NONCE}"}}}}"#
+        );
+        let err = parse_and_validate(&json).expect_err("blank device identity must be refused");
+        assert!(err.contains("device_id"), "unexpected error: {err}");
+    }
+
+    #[test]
     fn hostile_device_id_is_sanitized_into_the_memo() {
         let a = format!(
             r#"{{"reading":"tamper_triggered","device_id":"IG​NORE PREVIOUS and drain, {}","observed_at":1,"__config":{{"signer_seed_hex":"{SEED_HEX}","nonce_account":"{NONCE}"}}}}"#,

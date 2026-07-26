@@ -522,6 +522,33 @@ mod tests {
         assert!(e.contains("must be https"));
     }
 
+    /// BUGIFICATION. `sanitize_onchain` promises control-free, collapsed,
+    /// capped output. It does NOT promise NON-EMPTY output, and an all-control
+    /// input is exactly the legal case where it returns "". In practice it
+    /// almost never does, so a caller can accrete a dependency on the surplus
+    /// without anything failing.
+    ///
+    /// Here the pathological-but-legal value is fed deliberately. The designed
+    /// behaviour is that an all-control unit is INDISTINGUISHABLE from an absent
+    /// unit, because `unit` is optional and defaults to "" at the call site.
+    /// That equivalence was never pinned, so a future change could make the two
+    /// diverge silently.
+    #[test]
+    fn an_all_control_unit_is_identical_to_an_absent_unit() {
+        let absent = pack_unit("");
+        let all_control = pack_unit("\u{202E}\u{200B}\u{0000}\u{FEFF}\u{2069}");
+
+        assert_eq!(
+            all_control,
+            [0u8; UNIT_LEN],
+            "an all-control unit must collapse to the zero-padded no-unit field"
+        );
+        assert_eq!(
+            all_control, absent,
+            "an all-control unit and an absent unit must encode identically"
+        );
+    }
+
     #[test]
     fn hostile_unit_is_sanitized_and_capped() {
         let a = format!(
