@@ -256,6 +256,16 @@ stays with the approval gate and the on-chain cap.
 ## Custody tier + threat model
 Declared per component. Each funds-touching plugin ships a prompt-injection transcript; the read-only lenses ship a proven-behaviour transcript instead.
 
+**The host-side layer was audited rather than trusted.** This design deliberately does not rely
+on host-side controls, pushing the real spending bound onto an audited on-chain program instead.
+That is only an honest argument if someone checked whether the host-side controls hold, so the
+host was audited: ten defects found, verified, and reported upstream, six of them host-side
+authorization or audit gaps. Five of the ten are one shape, a control the operator sets that the
+config validates and no runtime path reads, which is exactly the failure mode a custody claim
+cannot afford to depend on. Findings and issue links are in
+[`HOST-SECURITY-AUDIT.md`](HOST-SECURITY-AUDIT.md). An over-cap spend here cannot fail that way,
+because the rejection is produced by the chain and shows up as a failed transaction.
+
 **What a PAID verdict does and does not prove.** `payment-watch` matches on amount, mint,
 destination and reference together, so a dust payment or an attacker-minted token cannot
 satisfy it. But the expected amount is a tool-call argument, which means it is authored by the

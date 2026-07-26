@@ -31,6 +31,7 @@ re-checks every published claim against devnet in one command, stdlib only, noth
 | Why each design call went the way it did, including what was rejected | [`docs/DECISIONS.md`](docs/DECISIONS.md) |
 | How it is tested, and what each layer cannot catch | [`TESTING.md`](TESTING.md) |
 | What an adversarial audit found here, including what is still open | [`docs/AUDIT.md`](docs/AUDIT.md) |
+| Ten verified defects found in the HOST this runs on, all reported upstream | [`docs/HOST-SECURITY-AUDIT.md`](docs/HOST-SECURITY-AUDIT.md) |
 | The agent refusing an attack, verbatim | [`docs/transcripts/`](docs/transcripts/) |
 | To poke the sanitizer yourself, no build needed | [`microworld/sanitizer.html`](microworld/sanitizer.html) |
 
