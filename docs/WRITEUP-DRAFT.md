@@ -339,6 +339,19 @@ The tiers in words:
   accepts, still rests on the operator. That surface is narrowed here, not closed.
 - Third-party trust declared: none held; RPC endpoints and open-meteo are read-only inputs;
   no MCP servers in the loop.
+- **A slow endpoint can hold a plugin call open, and we cannot fix that from inside the plugin.**
+  Found by reading the host's own issue tracker rather than by testing, and verified against our
+  code and our HTTP client afterwards. The runtime bounds a plugin call with fuel, which meters
+  executing WebAssembly instructions, so a guest awaiting a host import burns none and the limit
+  never trips. That leaves the HTTP timeouts, and the client available to plugins today exposes
+  only the connect timeout, which is the one our transport already sets to ten seconds. The other
+  two fall back to ten minutes each, and the between-bytes bound resets on every frame, so a drip
+  slower than the call and faster than the fallback runs on. Upstream measured a two-second drip
+  holding one call open for eleven minutes.
+  What actually limits this here is the egress allowlist: four hosts, so the slow endpoint has to
+  be one we already chose to trust rather than anything an attacker names. It costs liveness, not
+  custody, since no funds move on a hung read. Stated because a reviewer who reads the host's
+  tracker will find it, and finding it here first is the better outcome.
 
 ## Custody design space (mapped to the brief's named patterns)
 The brief names three experimental-edge custody patterns; we built all three and name them in
