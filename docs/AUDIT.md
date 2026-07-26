@@ -108,11 +108,42 @@ bundle and the TLS crates. Both are permissive and both were read rather than wa
 the strength of the word appearing in a title. This is the whole argument for running a gate
 locally before adding it to CI: the alternative was discovering it from a red badge.
 
+## A second one, and it was in the monitoring rather than the code
+
+The laptop feed publisher stopped running and nothing said so for six and a half hours. Three
+layers reported healthy over one dead process. Its launcher was fire-and-forget, so it returned
+success the instant it started something, regardless of what happened next. Task Scheduler
+therefore logged about twenty consecutive successful runs with zero missed. And the proof script
+called the frozen feed "quiet (allowed)", which is a real state, because that machine is allowed
+to sleep.
+
+The publish log could not settle it either. It holds no failure line for those hours, because
+the script never executed far enough to write one. Absence of a complaint was being read as
+absence of a problem.
+
+The root cause is worth more than the outage. A laptop that was switched off and a publisher
+that ran and failed produce an identical signature: both simply stop appending. No amount of
+reading that log separates them, so the verifier could not have been fixed on its own. The
+evidence it needed did not exist yet. The launcher now records an attempt before it runs and the
+outcome after, so a start with no outcome reads as hung and killed, and the verifier can say
+"running and not landing" instead of "allowed". Writing the marker first is the part that
+matters, because a hung run gets killed and a killed process never reaches its own logging.
+
+Two smaller things fell out. The scheduled task had no wall-clock limit at all, so hung runs
+accumulated orphaned processes, one per attempt, with nothing ever waiting to reap them. And
+this project reports fail-open defects upstream, where an unconfigured control should deny
+rather than permit. It had one in its own monitoring the whole time.
+
 ## The pattern underneath
 
 Every defect sat in the gap between what a document asserted and what the code enforced. That
 is the gap a self-review cannot see, because a self-review reads the assertion and recognises
 its own intent. It took readers who had no idea what was meant.
+
+The monitoring defect above is the same shape one layer out: the gap between what a check
+reported and what was true. A green light is an assertion too, and it earns no more trust than
+a sentence in a document. The question to ask of any check is not whether it passes but what it
+would have to observe in order to fail.
 
 The same shape recurred after this audit closed. A claim that a Brazilian payment rail requires
 a licensed provider had passed three independent reviews before a competitor shipped the thing
