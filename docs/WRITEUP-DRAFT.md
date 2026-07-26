@@ -348,6 +348,13 @@ The tiers in words:
   two fall back to ten minutes each, and the between-bytes bound resets on every frame, so a drip
   slower than the call and faster than the fallback runs on. Upstream measured a two-second drip
   holding one call open for eleven minutes.
+  The interface is not what is missing, which is worth stating because it makes this fixable
+  rather than merely regrettable. `wasi:http`'s `request-options` already defines
+  `set-first-byte-timeout` and `set-between-bytes-timeout` next to the connect one, and the
+  second of those is specified as the timeout for receiving each further chunk of the response
+  body, which is exactly the bound this attack needs. Only the Rust client omits them, so
+  exposing them is additive and mirrors a method it already carries. That is the ecosystem fix,
+  and it would let every plugin bound its own reads rather than each one waiting on the host.
   What actually limits this here is the egress allowlist: four hosts, so the slow endpoint has to
   be one we already chose to trust rather than anything an attacker names. It costs liveness, not
   custody, since no funds move on a hung read. Stated because a reviewer who reads the host's
