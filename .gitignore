@@ -74,3 +74,6 @@ docs/transcripts/whatsapp-fail-open-incident.md
 # Machine-specific WSL helper scripts (carry the local WSL username).
 .cfg-read.sh
 .fmt-run.sh
+
+# scratch artifact from the Pages direct-upload script
+manifest.out.json
