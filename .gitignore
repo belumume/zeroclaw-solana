@@ -77,3 +77,7 @@ docs/transcripts/whatsapp-fail-open-incident.md
 
 # scratch artifact from the Pages direct-upload script
 manifest.out.json
+
+# Demo video build intermediates: explorer frame captures, re-derivable by
+# re-running the browser capture against the live explorer URLs in DEVNET-PROOF.
+.demo-assets/
