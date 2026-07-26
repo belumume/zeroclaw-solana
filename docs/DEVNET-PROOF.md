@@ -104,11 +104,14 @@ on-chain settlement before the reading was served.
 The full shop flow ran end to end on devnet with the real plugin logic (no reimplementation): a
 Solana Pay request with a fresh reference, an UNSIGNED transfer the agent builds (T1, it never
 holds a broadcast-ready transaction), the host signs and broadcasts, and payment_watch detects
-settlement by matching the reference. A second check with a different reference correctly returns
-NOT_YET, so a payment is confirmed only from the on-chain match, never the customer's say-so.
+settlement. That last step is a conjunction, not a lookup: the reference must appear, AND the
+amount must match exactly, AND the mint must match, AND the destination must be ours. A payment
+that satisfies three of the four is not PAID. A second check with a different reference correctly
+returns NOT_YET, so a payment is confirmed only from the on-chain match, never the customer's
+say-so.
 
 - Transfer tx `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`
-  (payment_watch verdict PAID, reference matched, memo invoice-e2e-1):
+  (payment_watch verdict PAID on all four of reference, amount, mint and destination; memo invoice-e2e-1):
   https://explorer.solana.com/tx/4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS?cluster=devnet
 - Reference key (threaded through all three steps) `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`.
 
