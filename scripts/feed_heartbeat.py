@@ -11,8 +11,21 @@ CI check can page you.
 Stdlib only. Usage:
     FEED_PDA=<base58> [RPC_URL=...] [STALE_HOURS=8] python3 scripts/feed_heartbeat.py
 
-Exit 0 = fresh; exit 1 = STALLED (or the account/RPC is unreadable). The feed
-account layout is the zeroclaw_oracle DeviceFeed:
+Exit 0 = fresh. Exit 1 = STALLED, meaning the feed itself stopped advancing or
+the account is gone. Exit 2 = UNKNOWN, meaning the network would not answer, so
+this run has no opinion either way.
+
+That third code is the point. An alarm that fires on a network blip is an alarm
+people learn to ignore, and this project has already paid for that once: a
+publisher died silently for 6.6 hours while three separate layers reported fine.
+"The publisher is dead" and "I could not reach the RPC just now" are different
+facts and used to share exit 1, which the previous docstring admitted in passing
+("or the account/RPC is unreadable") without treating it as a defect. A caller
+can now retry a 2 and page on a 1. Same distinction, and the same reasoning, as
+scripts/verify-proof.py; the two are separate stdlib-only files on purpose, so
+the small transport predicate is duplicated rather than shared.
+
+The feed account layout is the zeroclaw_oracle DeviceFeed:
     8 disc | 32 authority | 32 device | 1 kind | 8 value(i64) | 1 scale(i8)
     | 12 unit | 8 sequence(u64) | 8 observed_at(i64) | 8 published_at(i64) | 1 bump
 """
@@ -23,6 +36,7 @@ import os
 import struct
 import sys
 import time
+import urllib.error
 import urllib.request
 
 RPC = os.environ.get("RPC_URL", "https://api.devnet.solana.com")
@@ -36,31 +50,65 @@ if not FEED:
     sys.exit(1)
 
 
+ATTEMPTS = 3
+
+
+def is_transport_error(e):
+    """True when the network refused, rather than the feed having a real problem."""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code >= 500
+    if isinstance(e, urllib.error.URLError):
+        return True
+    return isinstance(e, (TimeoutError, ConnectionError))
+
+
+class Unreachable(Exception):
+    """The RPC never answered, so this run cannot judge the feed either way."""
+
+
 def rpc(method, params):
-    req = urllib.request.Request(
-        RPC,
-        data=json.dumps(
-            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-        ).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.load(r)
+    for attempt in range(ATTEMPTS):
+        req = urllib.request.Request(
+            RPC,
+            data=json.dumps(
+                {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+            ).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.load(r)
+        except Exception as e:
+            if not is_transport_error(e):
+                raise
+            if attempt == ATTEMPTS - 1:
+                raise Unreachable(f"{type(e).__name__}: {e}") from e
+            time.sleep(1.0 * (attempt + 1))
 
 
 try:
-    res = rpc(
-        "getAccountInfo", [FEED, {"encoding": "base64", "commitment": "confirmed"}]
+    res = (
+        rpc("getAccountInfo", [FEED, {"encoding": "base64", "commitment": "confirmed"}])
+        or {}
     )
     val = res.get("result", {}).get("value")
     if not val:
+        # A missing account is a real finding about the feed, not about the network.
         print(f"STALLED: feed account {FEED} not found on {RPC}", file=sys.stderr)
         sys.exit(1)
     data = base64.b64decode(val["data"][0])
     sequence = struct.unpack_from("<Q", data, 94)[0]
     value = struct.unpack_from("<q", data, 73)[0]
     published_at = struct.unpack_from("<q", data, 110)[0]
-except Exception as e:  # noqa: BLE001 - a heartbeat must report any failure loudly
+except Unreachable as e:
+    # Exit 2, never 1. Reporting "STALLED" here would be the alarm lying: we did not
+    # observe a stalled feed, we failed to observe anything. Retries are already spent
+    # by this point, so the network is genuinely not answering rather than flickering.
+    print(f"UNKNOWN: RPC did not answer after {ATTEMPTS} tries ({e})", file=sys.stderr)
+    sys.exit(2)
+except Exception as e:  # noqa: BLE001 - any real read failure must still be loud
+    # Decode failures land here and DO mean exit 1: the account answered and its bytes
+    # were not a DeviceFeed, which is a genuine problem with the thing being watched.
     print(f"STALLED: could not read feed ({type(e).__name__}: {e})", file=sys.stderr)
     sys.exit(1)
 
