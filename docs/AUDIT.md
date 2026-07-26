@@ -134,6 +134,41 @@ accumulated orphaned processes, one per attempt, with nothing ever waiting to re
 this project reports fail-open defects upstream, where an unconfigured control should deny
 rather than permit. It had one in its own monitoring the whole time.
 
+## A third, and it was in the instrument a reader runs rather than in anything it watches
+
+Found on a connection that started returning empty responses to the Solana devnet RPC while
+GitHub, the pay page and other hosts answered normally in the same second. A live feed read
+needed two attempts to succeed. Nothing about that connection is unusual, and anyone can be on
+one.
+
+`scripts/verify-proof.py` is the artifact a stranger runs to re-verify the claims in
+`DEVNET-PROOF.md`, and it made single-shot requests with no retry. The retry existed, but it
+lived in `proof-check.yml`, which reruns the whole script on a transport blip. So continuous
+integration was resilient to exactly this and a human was not, which is backwards for the one
+deliverable whose purpose is being re-runnable by someone other than us. On that network it
+would have gone red while every claim still held.
+
+`scripts/feed_heartbeat.py` had the same shape and worse consequences, because it is the alarm.
+It exited 1 for both "the feed stopped advancing" and "the RPC did not answer", and its own
+docstring conceded that in passing without treating it as a defect. An alarm that fires on a
+blip is one people learn to ignore, which is the failure this repo already recorded when a
+publisher died silently for 6.6 hours. It now separates the two: exit 1 when the feed genuinely
+stalled, exit 2 when the network would not answer and the run therefore has no opinion.
+
+Two other networked scripts were left alone on purpose. The allowance reproduction harness sends
+through a library that already retries until blockhash expiry, and its remaining reads crash
+loudly instead of printing a false verdict, which is honest failure rather than a lie. The
+certified broadcaster runs on a twenty minute cron where a missed cycle heals itself before
+anyone looks, and it is the one place where retrying is not obviously free.
+
+The distinction that made the fixes safe is worth more than the fixes. Retrying inside the RPC
+helper cannot launder a broken claim into a healthy one, and not because we were careful: a
+claim that stopped holding does not raise. It arrives as a successful response carrying a
+different value and is judged by the caller. The helper only ever sees the network refusing.
+A first attempt at the fix was still wrong, and only a control caught it. A per-call retry
+budget is cheap per call and ruinous across a dozen checks against an endpoint that hangs rather
+than refuses, so the budget is global and is charged for the failed attempt as well as the pause.
+
 ## The pattern underneath
 
 Every defect sat in the gap between what a document asserted and what the code enforced. That
