@@ -355,6 +355,14 @@ The tiers in words:
   body, which is exactly the bound this attack needs. Only the Rust client omits them, so
   exposing them is additive and mirrors a method it already carries. That is the ecosystem fix,
   and it would let every plugin bound its own reads rather than each one waiting on the host.
+  Two honest qualifications on that, since a reviewer will reach both. The client's last release
+  and last commit are both from December 2024, so an upstream fix is not something to plan
+  around. And because the bindings are right there, this is a CHOICE rather than an
+  impossibility: calling `wasi:http` directly instead of through the client would let us set the
+  between-bytes bound ourselves, at the cost of hand-rolling the request path that the client
+  exists to provide. We have not made that trade, and the reason is that the egress allowlist
+  below already bounds who can do this to us, which is a cheaper control than rewriting every
+  network call. Stating it as a decision rather than a wall.
   What actually limits this here is the egress allowlist: four hosts, so the slow endpoint has to
   be one we already chose to trust rather than anything an attacker names. It costs liveness, not
   custody, since no funds move on a hung read. Stated because a reviewer who reads the host's
