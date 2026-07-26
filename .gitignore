@@ -81,3 +81,6 @@ manifest.out.json
 # Demo video build intermediates: explorer frame captures, re-derivable by
 # re-running the browser capture against the live explorer URLs in DEVNET-PROOF.
 .demo-assets/
+
+# Comprehension artifacts: quiz-gated explainers for the builder, not judge deliverables.
+.comprehension/
