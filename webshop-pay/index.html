@@ -2346,6 +2346,13 @@ var url=p.get('u')?b64urlDecode(p.get('u')):(p.get('url')||'');
 // makes a swapped address survive a glance, so a mismatch is refused rather than
 // shown, and the full address is rendered on the happy path.
 var MERCHANT='C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ';
+// Asset names come from THIS map, keyed by mint address, and never from the mint's own
+// on-chain metadata. A mint can call itself whatever it likes, so reading the symbol off
+// the token would let a worthless mint present itself as USDC next to an amount the
+// customer is about to approve. An unknown mint stays the generic word, which is the
+// honest thing to show when we cannot name the asset ourselves.
+var KNOWN_MINTS={'4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU':'devnet USDC'};
+function assetName(mint){return KNOWN_MINTS[mint]||'token'}
 var recip='',amount='',label='Payment',message='',token='',reference='';
 function status(m,cls){el('status').textContent=m;el('status').className='status '+(cls||'')}
 if(!url||url.indexOf('solana:')!==0){el('card').textContent='No valid Solana Pay request in this link.';el('card').className='card err';}
@@ -2364,7 +2371,7 @@ else{
     el('card').className='card err';
   }else{
   el('label').textContent=label;
-  el('amt').textContent=amount?(amount+(token?' token':' SOL')):'(amount set in your wallet)';
+  el('amt').textContent=amount?(amount+' '+(token?assetName(token):'SOL')):'(amount set in your wallet)';
   el('msg').textContent=message;if(!message)el('msg').style.display='none';
   el('recip').textContent=recip;
   try{var qr=qrcode(0,'M');qr.addData(url);qr.make();el('qr').innerHTML=qr.createImgTag(5,8);}catch(e){el('qr').textContent='(QR too large)';}
@@ -2401,14 +2408,16 @@ async function connectAndPay(){
       var fromAta=await spl.getAssociatedTokenAddress(mint,payer);
       var toAta=await spl.getAssociatedTokenAddress(mint,recipientPk);
       var amt=BigInt(Math.round(parseFloat(amount)*Math.pow(10,mintInfo.decimals)));
-      var isUsdc=(token==='4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
+      // same allowlist as the headline, so the two cannot drift into disagreeing
+      // about what the customer is being asked to pay.
+      var knownName=KNOWN_MINTS[token];
       // preflight: the payer must actually hold the token, else the wallet returns a cryptic
       // "Internal error". Detect it and say exactly what's wrong + where to get devnet USDC.
       var have=-1n;try{have=(await spl.getAccount(conn,fromAta)).amount;}catch(e2){have=-1n;}
       if(have<amt){
         var haveStr=have<0n?'0':(Number(have)/Math.pow(10,mintInfo.decimals)).toString();
         var needStr=(Number(amt)/Math.pow(10,mintInfo.decimals)).toString();
-        status('This wallet holds '+haveStr+(isUsdc?' devnet USDC':' of the requested token')+', needs '+needStr+'. Get free devnet USDC at faucet.circle.com (pick Solana Devnet, paste this wallet), then retry.','err');
+        status('This wallet holds '+haveStr+(knownName?' '+knownName:' of the requested token')+', needs '+needStr+'. Get free devnet USDC at faucet.circle.com (pick Solana Devnet, paste this wallet), then retry.','err');
         el('pay').disabled=false;return;
       }
       // ensure the recipient's token account exists (idempotent; payer funds the tiny rent) so
