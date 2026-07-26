@@ -10,7 +10,7 @@ local). Set the explorer cluster to **devnet**.
 | `zeroclaw_oracle` | `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn` | https://explorer.solana.com/address/EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn?cluster=devnet |
 | `consumer_example` | `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt` | https://explorer.solana.com/address/B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt?cluster=devnet |
 | Device feed PDA (**ARM node, node-born key, 24/7**) | `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` | https://explorer.solana.com/address/JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg?cluster=devnet |
-| Device feed PDA (deterministic, LLM-free, live) | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` | https://explorer.solana.com/address/3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K?cluster=devnet |
+| Device feed PDA (deterministic, LLM-free, laptop-hosted) | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` | https://explorer.solana.com/address/3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K?cluster=devnet |
 | Device feed PDA (agent-driven, historical) | `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` | https://explorer.solana.com/address/CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU?cluster=devnet |
 
 The first of those three is the one that matters for "yours, running." Its device keypair was
@@ -25,8 +25,10 @@ signs its own readings" architecturally true and literally false, and anyone rea
 deploy path could see the seed had travelled. The arithmetic also did not support the excuse:
 at one reading every twenty minutes a fresh feed accrues roughly 936 readings by the
 submission date. So the node generated its own seed instead, the transported copy was
-shredded unused, and that copy was never the key behind this feed. The second feed is the deterministic publisher that runs here and
-predates the node; the third is the original agent-driven proof, kept because its sequence
+shredded unused, and that copy was never the key behind this feed. The second feed is the deterministic publisher hosted on this
+laptop, which predates the node and is therefore only as continuous as the laptop is awake;
+`scripts/verify-proof.py` reports its actual state rather than this page asserting one, and
+distinguishes a machine that was away from a publisher that ran and failed; the third is the original agent-driven proof, kept because its sequence
 history is the earliest evidence and deliberately marked historical rather than quietly
 dropped.
 

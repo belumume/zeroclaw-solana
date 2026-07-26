@@ -78,6 +78,57 @@ SECONDARY_FEED = (
 # check nobody has watched fail is indistinguishable from one that cannot fail.
 MAX_FEED_AGE_MIN = int(os.environ.get("MAX_FEED_AGE_MIN", "90"))
 
+# The laptop publisher fires on this cadence. Used only to decide whether a publish
+# ATTEMPT is recent enough to be meaningful, never to gate anything.
+PUBLISH_CADENCE_MIN = 20
+
+# Written by .tools/feed_publish_hidden.vbs on every run, including failed ones.
+# Gitignored with the rest of .devnet-proof, so a fresh clone simply has no file here
+# and the helper below returns None, which is the correct answer for a machine that
+# does not run the publisher at all.
+_ATTEMPT_LOG = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    ".devnet-proof",
+    "feed-attempt.log",
+)
+
+
+def attempt_heartbeat():
+    """Age in minutes of the last publish attempt, plus how it ended.
+
+    This exists because of a real 2026-07-26 failure. The WSL VM wedged, the publisher
+    stopped running entirely, and NOTHING went red: the launcher was fire-and-forget so
+    it returned 0, Task Scheduler logged ~20 consecutive successes with zero missed
+    runs, and this script called a 6.6-hour-dead feed "quiet (allowed)". The publish log
+    could not help either, because a script that never executes cannot write its own
+    failure line.
+
+    The root problem was that two very different situations produced an identical
+    signature: a laptop that was switched off, and a publisher that ran and failed, both
+    just stop appending to the publish log. The launcher now records every attempt before
+    and after it runs, so the two can be told apart here.
+
+    Returns (age_min, outcome) where outcome is "rc=N" or "no result, killed mid-run",
+    or (None, None) when there is no log to read.
+    """
+    try:
+        age_min = (time.time() - os.path.getmtime(_ATTEMPT_LOG)) / 60.0
+        lines = [
+            ln.strip()
+            for ln in open(_ATTEMPT_LOG, "r", encoding="utf-8", errors="replace")
+            if ln.strip()
+        ]
+    except Exception:
+        return None, None
+
+    if not lines:
+        return age_min, "empty log"
+    # A trailing "start" with no "rc=" after it means the run hung and was killed by the
+    # task's execution time limit before it could record an outcome.
+    last = lines[-1]
+    return age_min, last if last.startswith("rc=") else "no result, killed mid-run"
+
+
 # The shop half of "Both are running". Checked because the node and the shop fail
 # independently: the node is Oracle Cloud systemd, the shop is a laptop daemon plus a CDN
 # page, so the node can publish happily through a completely dead shop.
@@ -227,11 +278,37 @@ def main():
     label, addr = SECONDARY_FEED
     try:
         reading, seq, age_min = read_feed(addr)
-        state = "fresh" if age_min <= MAX_FEED_AGE_MIN else "quiet (allowed)"
-        print(
-            f"INFO  {label}: {state} ({reading}, seq={seq}, {age_min:.0f} min ago, "
-            f"not gating)"
-        )
+        if age_min <= MAX_FEED_AGE_MIN:
+            print(
+                f"INFO  {label}: fresh ({reading}, seq={seq}, {age_min:.0f} min ago, "
+                f"not gating)"
+            )
+        else:
+            # Stale. Two very different causes, and until 2026-07-26 they were
+            # indistinguishable here, which let a dead publisher read as "allowed" for
+            # 6.6 hours. The attempt heartbeat separates them.
+            beat_age, outcome = attempt_heartbeat()
+            recent_attempt = (
+                beat_age is not None and beat_age <= 2 * PUBLISH_CADENCE_MIN
+            )
+            if recent_attempt:
+                print(
+                    f"WARN  {label}: stale AND the publisher is still firing "
+                    f"({reading}, seq={seq}, {age_min:.0f} min ago; last attempt "
+                    f"{beat_age:.0f} min ago, {outcome}). It is running and not "
+                    f"landing, so this is broken rather than asleep. Still not "
+                    f"gating: the ARM node above carries the claim."
+                )
+            else:
+                detail = (
+                    "no publish attempt logged recently, so this machine was away"
+                    if beat_age is None
+                    else f"last attempt {beat_age:.0f} min ago, so this machine was away"
+                )
+                print(
+                    f"INFO  {label}: quiet (allowed) ({reading}, seq={seq}, "
+                    f"{age_min:.0f} min ago; {detail}, not gating)"
+                )
     except Exception as e:
         print(f"INFO  {label}: unreadable ({e}, not gating)")
 
