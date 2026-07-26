@@ -366,7 +366,13 @@ Scoped non-goals (deliberate):
   so. Every other payment here is confirmed by checking amount, mint and destination against the
   chain, and the point of doing that is that it does not rest on anyone's word. One leg that could
   only ever rest on someone's word would invite the reader to ask why the verified ones are worth
-  the trouble. We ship the rail we can check.
+  the trouble. We ship the rail we can check. Worth saying, since the fiat framing hides it: a
+  merchant who wants to be paid in reais on chain already can. `payment-watch` takes the mint as an
+  argument and defaults to USDC rather than hardcoding it, so a BRL stablecoin settles through the
+  same four-way check with no code change. We run USDC and have not demonstrated a BRL-stablecoin
+  payment, so treat that as a supported configuration rather than a proven one. One detail there is
+  deliberate: an unrecognised mint is displayed as a short address, never as a symbol read from the
+  mint's own metadata, so a token that calls itself USDC cannot borrow the label.
 - **No reputation-gated signing, privacy spend caps, or Agent Registry integration** (brief-named
   edges), out of scope for a two-use-case showcase, not overlooked.
 
