@@ -18,6 +18,7 @@ import os
 import struct
 import sys
 import time
+import urllib.error
 import urllib.request
 
 RPC = os.environ.get("RPC_URL", "https://api.devnet.solana.com")
@@ -196,9 +197,34 @@ def read_feed(addr):
     return f"{value * (10**scale):.2f} {unit}", seq, (time.time() - published) / 60
 
 
+def is_transport_error(e):
+    """True when the network refused, rather than a claim failing to hold.
+
+    CI needs this distinction and could not previously get it. proof-check retries a
+    transport blip but must NOT retry a claim that stopped holding, and it decided which
+    was which by grepping this script's own output for words like "unreachable". That
+    grep reads the whole log, including the SECONDARY feed line, which is non-gating and
+    prints exactly that word when its read fails. So a genuine broken claim landing in the
+    same run as a secondary-read blip was classified as transport, retried three times,
+    and finally reported as an RPC problem rather than as the claim that actually broke.
+
+    An exit code cannot be misread that way, so the script now says which kind of failure
+    it had and the workflow branches on a number instead of on a sentence.
+    """
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code >= 500
+    if isinstance(e, urllib.error.URLError):
+        return True
+    return isinstance(e, (TimeoutError, ConnectionError))
+
+
 def main():
     fails = 0
     static_fails = 0
+    # Counted only for GATING checks. The secondary feed never gates, so its transport
+    # trouble must not make a real failure elsewhere look retryable, which is the exact
+    # confusion this replaces.
+    transport_fails = 0
     print(f"verifying docs/DEVNET-PROOF.md against {RPC}\n")
     print(
         "STATIC claims -- the record. These are immutable devnet history and deployed"
@@ -228,6 +254,8 @@ def main():
         except Exception as e:
             print(f"FAIL  {label}: RPC error {e}")
             fails += 1
+            if is_transport_error(e):
+                transport_fails += 1
 
     for label, sig, want_err in TXS:
         try:
@@ -247,6 +275,8 @@ def main():
         except Exception as e:
             print(f"FAIL  {label}: RPC error {e}")
             fails += 1
+            if is_transport_error(e):
+                transport_fails += 1
 
     static_fails = fails
 
@@ -271,6 +301,8 @@ def main():
     except Exception as e:
         print(f"FAIL  {label} freshness: {e}")
         fails += 1
+        if is_transport_error(e):
+            transport_fails += 1
 
     # Reported, never gating. This publisher runs on a laptop that is allowed to sleep, so
     # failing the whole run on it would teach a reader that a red line here means nothing,
@@ -348,6 +380,8 @@ def main():
     except Exception as e:
         print(f"FAIL  shop pay page unreachable: {e}")
         fails += 1
+        if is_transport_error(e):
+            transport_fails += 1
 
     # Report the two kinds separately, because collapsing them into one number is exactly
     # how a dead system prints a clean bill of health. An audit put it plainly: of the
@@ -370,7 +404,26 @@ def main():
     )
     if fails == 0:
         print("\nThe record holds and the node is live.")
-    sys.exit(0 if fails == 0 else 1)
+        sys.exit(0)
+
+    # Three exit codes rather than two, because CI has to tell these apart and was
+    # previously guessing from prose.
+    #   0  every claim holds
+    #   2  every GATING failure was the network refusing. Safe to retry.
+    #   1  at least one claim stopped holding. Never retry this; it is the finding.
+    # Mixed runs deliberately exit 1: if anything substantive broke, the presence of a
+    # transport blip alongside it must not downgrade the verdict.
+    if transport_fails == fails:
+        print(
+            f"\nAll {fails} gating failure(s) were transport, not claims. "
+            f"Exiting 2 so a retry is allowed."
+        )
+        sys.exit(2)
+    print(
+        f"\n{fails - transport_fails} of {fails} gating failure(s) are claims that "
+        f"stopped holding. Exiting 1; this is not a transport problem."
+    )
+    sys.exit(1)
 
 
 if __name__ == "__main__":
