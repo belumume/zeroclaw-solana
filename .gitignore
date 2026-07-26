@@ -70,3 +70,7 @@ docs/X-BUILDLOG-DRAFTS.md
 # The PUBLIC custody artifacts are docs/transcripts/whatsapp-allowlist-gate.md (anonymised)
 # and upstream issue 9348 / PR 9354, which report the same fail-open in full technical detail.
 docs/transcripts/whatsapp-fail-open-incident.md
+
+# Machine-specific WSL helper scripts (carry the local WSL username).
+.cfg-read.sh
+.fmt-run.sh

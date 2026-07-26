@@ -238,8 +238,20 @@ def main():
     # The shop is the other headline use case, and until now nothing in this script touched
     # it. An audit put the hole precisely: the ARM node runs on Oracle Cloud systemd,
     # independent of the shop, so a dead shop plus a publishing node printed a clean bill of
-    # health. A liveness proof that can only see one of the two live things is a liveness
-    # proof for that one thing, mislabelled.
+    # health.
+    #
+    # HONEST SCOPE, because the first version of this comment overclaimed. What follows
+    # checks a STATIC Cloudflare Pages asset. That page is served by a CDN and answers 200
+    # whether or not the shop daemon is running, so this does NOT detect a dead daemon and
+    # does NOT by itself close the false-green. Demonstrated the day it was written: the WSL
+    # VM hosting the daemon was wedged (marked Running, unresponsive past 45s) while this
+    # check would still have passed on pin presence alone.
+    #
+    # What it DOES prove is narrower and still worth gating on: that the deployed page is
+    # the pinned build rather than a stale one. That is a real regression class, since the
+    # merchant pin is the control standing between a swapped recipient and a transfer.
+    # Detecting a dead daemon needs a signal from the daemon itself (a health endpoint or a
+    # channel round-trip) and is tracked separately rather than pretended at here.
     try:
         req = urllib.request.Request(
             SHOP_PAY_URL, headers={"User-Agent": "Mozilla/5.0 (verify-proof)"}
