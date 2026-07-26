@@ -79,6 +79,39 @@ reach is not evidence about the inputs an attacker sends.
 *Cannot catch:* anything about a real validator, a real RPC endpoint, or a real
 wallet. Properties are about our own functions.
 
+**Mined invariants.** `crates/solana-core/tests/mined_invariants.rs`. Every layer
+above asserts a property somebody chose to write down, which makes them strong
+where we anticipated the failure and silent everywhere else. This one runs the
+other direction: it OBSERVES the range of eight quantities over 2,000
+correlated-hostile samples plus the full 65,536-value `u16` domain, prints each
+one's envelope and how often a candidate law held, and asserts almost nothing.
+Promotion is a separate, deliberate step in the named tests below it, because an
+envelope that holds only because the generator never produced a counterexample is
+a description of the generator, not an invariant.
+
+The triage rule is the useful part, and it is not ours: always-holds is a
+candidate law, never-holds is discarded, and MOSTLY-holds is the interesting
+bucket. Two rows came back MOSTLY, and one of them was a law we had already
+written down and promoted.
+
+We asserted the conservation identity `out + stripped <= in`, on the reasoning
+that `stripped` counts removals so the two cannot sum past the input. The mine put
+it at 90 percent and minimized the counterexample to a line separator between two
+sentences: `U+2028` is REPLACED by a space rather than dropped, and it is still
+counted in `stripped`, so a substituted character is counted twice. The field's
+doc comment said "characters removed", which is precisely what made the wrong law
+look obviously right.
+
+Nothing in any plugin does arithmetic on `stripped`, so this was a
+documentation-accuracy defect and not a correctness one. The field now documents
+what it actually counts, states that the sum is not a conservation identity, and
+gives the law that does hold, `stripped <= input length`. The counterexample is
+pinned as a known-answer test so the substitution stays intentional.
+
+*Cannot catch:* anything the watched quantities do not cover. Choosing what to
+watch is still an act of imagination, so this narrows the gap the unit tests leave
+rather than closing it.
+
 **Live devnet end-to-end.** `e2e-localnet`, `e2e-track-a`, and `e2e-allowance` run
 the real flows against real devnet, and deliberately reuse the plugin's own core
 rather than reimplementing it, so the bytes under test are the bytes the wasm

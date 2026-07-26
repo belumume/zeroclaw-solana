@@ -85,7 +85,21 @@ pub struct Sanitized {
     /// True if the input exceeded `max_chars` and was truncated (with an
     /// ellipsis). The final `text` never exceeds `max_chars` characters.
     pub truncated: bool,
-    /// Count of control/zero-width/bidi characters removed.
+    /// Count of control/zero-width/bidi/format characters NEUTRALIZED.
+    ///
+    /// Neutralized, not merely removed: most such characters are dropped
+    /// outright, but a line or paragraph separator (`\n`, `\r`, `\t`, `U+2028`,
+    /// `U+2029`) is REPLACED by a single space, and it still counts here. So
+    /// `stripped` is the number of dangerous characters that did not survive as
+    /// themselves, which is the number that matters for deciding whether a field
+    /// deserves an untrusted label.
+    ///
+    /// The consequence, found by mining the observed envelope rather than by
+    /// reading the code: `text.chars().count() + stripped` can EXCEED the input
+    /// length, because a substituted separator is counted in `stripped` while
+    /// its replacement space is counted in `text`. Do not treat this as a
+    /// conservation identity. The law that does hold is `stripped <= input
+    /// character count`, since each input character increments it at most once.
     pub stripped: usize,
     /// Advisory only: obvious injection framing survived sanitization. Never a
     /// gate — the plugin should LABEL the field (e.g. render it quoted and note
