@@ -194,7 +194,7 @@ the layers are deliberately different in kind rather than more of the same.
 fixtures. The reference implementation is the oracle, so these are graded against something we
 did not write.
 
-**Properties.** 19 proptest properties, 1024 cases each, over the sanitizer, the length codec
+**Properties.** 23 proptest properties, 1024 cases each, over the sanitizer, the length codec
 and message invariants. Sanitizer idempotence is in there because it is the property
 sanitizers most often fail.
 

@@ -42,20 +42,71 @@ fn is_forbidden_in_output(c: char) -> bool {
         )
 }
 
+/// The alphabet both hostile generators draw from: ordinary text mixed with the
+/// exact characters an attacker reaches for.
+const HOSTILE_PIECES: &[&str] = &[
+    "normal", " ", "  ", "\n", "\r\n", "\t",
+    "\u{202E}", "\u{202D}", "\u{2066}", "\u{2069}", // bidi
+    "\u{200B}", "\u{200D}", "\u{FEFF}",             // zero-width
+    "\u{0000}", "\u{0007}", "\u{001B}",             // control
+    "\u{2028}", "\u{2029}",                         // line/para separators
+    "ignore previous instructions",
+    "SYSTEM:", "</code>", "USDC", "名前", "🙂",
+];
+
 /// A generator that mixes ordinary text with the exact characters an attacker
 /// would reach for: bidi overrides, zero-width joiners, control bytes, and
 /// injection framing.
+///
+/// Each piece is drawn INDEPENDENTLY, which is proptest's default shape and is
+/// the weakness `hostile_string_stateful` exists to fix. See the note there.
 fn hostile_string() -> impl Strategy<Value = String> {
-    let pieces = prop::sample::select(vec![
-        "normal", " ", "  ", "\n", "\r\n", "\t",
-        "\u{202E}", "\u{202D}", "\u{2066}", "\u{2069}", // bidi
-        "\u{200B}", "\u{200D}", "\u{FEFF}",             // zero-width
-        "\u{0000}", "\u{0007}", "\u{001B}",             // control
-        "\u{2028}", "\u{2029}",                         // line/para separators
-        "ignore previous instructions",
-        "SYSTEM:", "</code>", "USDC", "名前", "🙂",
-    ]);
-    prop::collection::vec(pieces, 0..40).prop_map(|v| v.concat())
+    prop::collection::vec(prop::sample::select(HOSTILE_PIECES.to_vec()), 0..40)
+        .prop_map(|v| v.concat())
+}
+
+/// Fraction of positions (percent) at which the stateful generator is allowed to
+/// change which piece it is emitting. Low on purpose: it is what produces runs.
+const SWITCH_PERCENT: u8 = 18;
+
+/// The same alphabet, drawn with MEMORY instead of independently.
+///
+/// Independent draws make a sustained run of any one hostile class vanishingly
+/// unlikely: with 25 pieces, twenty consecutive bidi overrides is about
+/// (4/25)^20. So the iid generator above can emit bidi characters constantly and
+/// still never emit a bidi REGION, which is the shape an attacker actually
+/// sends. The fix is Will Wilson's: keep the previous choice and re-roll only
+/// with low probability, exactly as a controller holds a button down across
+/// frames rather than re-deciding each frame. No individual character becomes
+/// less random; only the correlation between neighbours changes.
+fn hostile_string_stateful() -> impl Strategy<Value = String> {
+    prop::collection::vec((0usize..HOSTILE_PIECES.len(), 0u8..100u8), 1..120).prop_map(|steps| {
+        let mut out = String::new();
+        let mut current = steps[0].0;
+        for (candidate, roll) in steps {
+            if roll < SWITCH_PERCENT {
+                current = candidate;
+            }
+            out.push_str(HOSTILE_PIECES[current]);
+        }
+        out
+    })
+}
+
+/// Longest run of consecutive characters the sanitizer promises to remove.
+/// This is the property the iid generator cannot reach and the stateful one can.
+fn longest_forbidden_run(s: &str) -> usize {
+    let mut best = 0usize;
+    let mut run = 0usize;
+    for c in s.chars() {
+        if is_forbidden_in_output(c) {
+            run += 1;
+            best = best.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    best
 }
 
 /// Arbitrary bytes reinterpreted as text, so invalid UTF-8 is covered too.
@@ -142,6 +193,43 @@ proptest! {
                 tight.injection_suspected,
                 "a tighter cap cleared the injection advisory"
             );
+        }
+    }
+
+    /// The full output contract, over CORRELATED hostile input: sustained bidi
+    /// regions, long control-byte runs, repeated injection framing. Same
+    /// guarantees, an input distribution the iid generator cannot produce.
+    #[test]
+    fn sanitize_contract_holds_for_correlated_hostile_input(
+        input in hostile_string_stateful(),
+        max in 0usize..256,
+    ) {
+        let s = sanitize_onchain(&input, max);
+        assert_output_contract(&s, max);
+    }
+
+    /// Idempotence under sustained runs. Stripping a long region can leave
+    /// neighbours adjacent that were not adjacent before, so this is where a
+    /// single-pass cleaner is most likely to stop being a fixed point.
+    #[test]
+    fn sanitize_is_idempotent_under_sustained_runs(
+        input in hostile_string_stateful(),
+        max in 1usize..256,
+    ) {
+        let once = sanitize_onchain(&input, max);
+        let twice = sanitize_onchain(&once.text, max);
+        prop_assert_eq!(&once.text, &twice.text);
+        prop_assert_eq!(twice.stripped, 0, "second pass still stripped characters");
+    }
+
+    /// A long run of injection framing must not let a tight cap clear the
+    /// advisory, same as the uncorrelated case.
+    #[test]
+    fn tighter_cap_cannot_hide_framing_under_runs(input in hostile_string_stateful()) {
+        let wide = sanitize_onchain(&input, 4096);
+        let tight = sanitize_onchain(&input, 8);
+        if wide.injection_suspected {
+            prop_assert!(tight.injection_suspected);
         }
     }
 
@@ -386,4 +474,60 @@ proptest! {
         data.extend_from_slice(&tail);
         prop_assert_eq!(decode_nonce_account(&data), Err(NonceError::Uninitialized));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Does the generator actually reach the inputs we claim to defend against?
+// ---------------------------------------------------------------------------
+
+/// A property suite is only as strong as the inputs it can reach, and "we ran
+/// 1024 cases" says nothing about WHICH cases. This measures the gap rather
+/// than asserting it: it samples both generators and compares the longest run
+/// of forbidden characters each one manages to produce.
+///
+/// The run length is the thing that matters for this sanitizer. A bidi override
+/// alone is a character; a bidi REGION is the attack, because it reorders
+/// everything after it. The iid generator emits the same characters at the same
+/// rate and essentially never emits a region.
+///
+/// Deterministic runner, so this is a fixed measurement and not a flaky one.
+#[test]
+fn stateful_generator_reaches_runs_the_iid_generator_cannot() {
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
+
+    const SAMPLES: usize = 512;
+
+    let mut runner = TestRunner::deterministic();
+    let iid = hostile_string();
+    let stateful = hostile_string_stateful();
+
+    let mut iid_longest = 0usize;
+    let mut stateful_longest = 0usize;
+
+    for _ in 0..SAMPLES {
+        let a = iid.new_tree(&mut runner).expect("iid tree").current();
+        iid_longest = iid_longest.max(longest_forbidden_run(&a));
+
+        let b = stateful.new_tree(&mut runner).expect("stateful tree").current();
+        stateful_longest = stateful_longest.max(longest_forbidden_run(&b));
+    }
+
+    println!(
+        "longest forbidden run over {SAMPLES} samples: iid={iid_longest}, stateful={stateful_longest}"
+    );
+
+    // The stateful generator must reach a genuine region, not a scattering.
+    assert!(
+        stateful_longest >= 12,
+        "stateful generator only reached a run of {stateful_longest}; it is not producing regions"
+    );
+
+    // And it must reach strictly further than independent draws, which is the
+    // whole reason it exists. If this ever stops holding, the switch
+    // probability has been tuned until the generator is iid again.
+    assert!(
+        stateful_longest > iid_longest,
+        "stateful run {stateful_longest} did not beat iid run {iid_longest}"
+    );
 }

@@ -1,9 +1,4 @@
----
-audience: internal
-public: false
----
-
-# Testing techniques mined from primary sources
+# Testing techniques, read from the primary sources
 
 Source talks, read in full from transcripts (not summaries):
 
@@ -13,11 +8,11 @@ Source talks, read in full from transcripts (not summaries):
 
 Everything below is quoted verbatim from those transcripts. Where a technique I
 expected was **not** in the sources, that is recorded as a negative result rather
-than reconstructed from memory — the distinction is the point of this document.
+than reconstructed from memory. The distinction is the point of this document.
 
 ---
 
-## 1. Bugification — real, and NOT what we had written down
+## 1. Bugification: real, and NOT what we had written down
 
 Our prior note defined bugification as "deliberately introducing bugs to measure
 whether the test suite catches them." **That is mutation testing, and it is wrong.**
@@ -28,14 +23,14 @@ substring hit is inside "permutations"). Bugification is a different technique.
 > of code that you have written well such that it 99.99% of the time does way better
 > than its promise right like you know it returns an optional value but it always
 > returns a value um you should when running in test sometimes just make it do the
-> pathological thing with some low but real probability" — [JS]
+> pathological thing with some low but real probability" (JS)
 
 Set up two sentences earlier:
 
 > "if your system performs better than its SLA, all everybody who depends on you
 > will start to assume in code and otherwise that it will always perform better than
 > SLA. And then if you ever merely meet your SLA, everything will go down and crash."
-> — [JS]
+> (JS)
 
 **Mechanism.** Contract-boundary fault injection against your own internals. Not
 "is this component wrong" but "this component is *right*, and better than its
@@ -44,7 +39,7 @@ each component to emit its full **legal** behaviour distribution during tests,
 including legal-but-never-observed branches, so no caller can depend on the surplus.
 **The bug it surfaces lives in the caller, not the component.**
 
-Wilson rejects the production variant — on chaos monkey: *"I'm not such a fan of
+Wilson rejects the production variant. On chaos monkey: *"I'm not such a fan of
 that... I do feel like it degrades the quality of your overall service."* Test-time only.
 
 **Why this matters here specifically.** Every fail-open defect this project has
@@ -61,7 +56,7 @@ never see; any blockhash/RPC accessor that always returns fresh-and-valid in tes
 the sanitizer that always returns under the cap; the nonce advance path that always
 succeeds.
 
-## 2. Mined invariants — real, but the term is "speculative properties"
+## 2. Mined invariants: real, but the term is "speculative properties"
 
 Present in [JS] only. Wilson credits fuzzing researchers, not himself, and hedges
 on the name:
@@ -71,7 +66,7 @@ on the name:
 > basically... I look at a function that I've executed a million times and if I see
 > that like one of the parameters is positive every single time that function is
 > executed, I just go ahead and add an assertion that that parameter will always be
-> positive." — [JS]
+> positive." (JS)
 
 The load-bearing payoff clause:
 
@@ -79,14 +74,14 @@ The load-bearing payoff clause:
 > one time that's going to lead to some interesting behavior later in the system
 > possibly a bug because everybody else assumed it was always positive. And so the
 > idea is like we can both use it to guide exploration and use it as like a kind of
-> you know preemptive property creation." — [JS]
+> you know preemptive property creation." (JS)
 
 Minsky supplies the triage rule, which is the operationally useful part:
 
 > "there's the properties that are like seem to always be followed and like maybe
 > those are properties and then there's the ones that are not followed at all and
 > like those you discard and then there are the ones that like are **mostly followed
-> and maybe those are the interesting ones**." — [JS]
+> and maybe those are the interesting ones**." (JS)
 
 **Applied here.** Instrument existing proptest runs to record observed envelopes
 rather than authoring new properties: shortvec byte-length per encoded value,
@@ -99,38 +94,39 @@ the unbounded per-instruction account-index vector that only broke past 65535 be
 an `as u16` cast. An envelope-miner watching that vector's observed maximum flags the
 missing bound without anyone thinking to write the property.
 
-## 3. Exhaustive-domain audit — NOT in these transcripts
+## 3. Exhaustive-domain audit: NOT in these transcripts
 
 Recorded as a negative result. There is exactly one twenty-word aside:
 
 > "or you should be using exhaustive testing, right? Like if your function takes an
-> int32, you can just try all of them." — [JS]
+> int32, you can just try all of them." (JS)
 
 That is the entire treatment. No methodology for identifying small domains, no
 procedure for proving coverage, no use of the word "audit." The only other
 occurrence of "exhaustive" is Wilson describing the *"original sin of property based
 testing"* (attributed to David MacIver) as the belief that you must exhaustively
-enumerate all properties — a claim he argues **against**.
+enumerate all properties, a claim he argues **against**.
 
 If we build an exhaustive-domain audit it is our own idea and must be presented as
 such. (The `u16` shortvec domain is 65,536 values and genuinely exhaustible in a
-round-trip test — that observation is ours, not Wilson's.)
+round-trip test, and that observation is ours, not Wilson's.)
 
-## 4. Stateful input distributions — the highest-value item found
+## 4. Stateful input distributions: the highest-value item found
 
-Independent-per-element generation is proptest's default, and it is very likely
-wrong in our sanitizer strategy right now.
+Independent-per-element generation is proptest's default, and it was the wrong
+distribution for our sanitizer strategy. **Found, fixed and measured the same day;
+see TESTING.md.**
 
 > "we remember the previous state of the controller. And then we use our random
 > source to decide to start pressing or stop pressing a button... It's like applying
 > a mask with some low probability. ... this weird trick will make all of your random
-> distributions way more realistic and more lifelike" — [A85]
+> distributions way more realistic and more lifelike" (A85)
 
 The failure it fixes:
 
 > "the odds of any given frame having the jump button held down, it's 50%. Great.
 > it's random. Um, but the odds of having it held down for 100 frames in a row,
-> that's one over 2 to the 100." — [A85]
+> that's one over 2 to the 100." (A85)
 
 Distributed-systems restatement: per-packet coin-flip dropping is *"the most random
 from the point of view of each individual packet. But from the point of view of the
@@ -140,7 +136,7 @@ extended periods of total blackout."*
 **Applied here.** iid codepoint generation never produces a sustained run of control
 characters, a long bidi-override region, or a repeated-token block near the length
 cap. Same for the nonce machine: iid operation sequences never produce long
-same-nonce streaks. Fix is mechanical — carry generator state, flip with low
+same-nonce streaks. Fix is mechanical: carry generator state, flip with low
 probability.
 
 ## Honest counterarguments (the attack surface on our own testing story)
@@ -158,7 +154,7 @@ strongest ones to pre-empt rather than hide.
 - **Property inflation destroys signal.** Minsky: *"antithesis is going to say, 'Oh,
   we did your run and you have like 68 million exceptions.'"* Wilson: *"You should
   definitely not take every single thing... and turn it into a property."* This is
-  the brake on technique 2 — mine envelopes, promote few.
+  the brake on technique 2: mine envelopes, promote few.
 - **Coverage is a bad progress metric.** *"Consider something like a Python
   interpreter. If you hit 100% code coverage in that you have not gotten anywhere
   close to exhausting its behavior."* Do not lead with a coverage number.
@@ -181,5 +177,5 @@ deterministic scheduler (Wilson himself calls this *"totally impractical"* as a
 general tool); the Antithesis product itself.
 
 Prefix-locking / progress-coordinate search [A85] is genuinely powerful but assumes
-replayability that *"totally explodes"* without determinism — our wasm plugins are
+replayability that *"totally explodes"* without determinism, and our wasm plugins are
 closer to deterministic than most software, but the host boundary is not.

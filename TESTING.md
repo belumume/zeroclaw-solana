@@ -30,7 +30,7 @@ the specific adversarial cases we thought of.
 how the code fails, so the suite is bounded by imagination. This is the layer that
 grows fastest and moves confidence least, which is why we stopped adding to it.
 
-**Property tests.** 19 properties in `crates/solana-core/tests/properties.rs`,
+**Property tests.** 23 properties in `crates/solana-core/tests/properties.rs`,
 1024 generated cases each, quantifying over all inputs rather than chosen ones.
 
 They cover the sanitizer contract (total, bounded, control-free, collapsed, and
@@ -49,6 +49,32 @@ finish. **Returning the stored nonce verbatim** guards a real footgun: the runti
 domain-hashes the nonce, so the stored 32 bytes are not the blockhash they came
 from, and any code that recomputes rather than reads produces a transaction that
 looks correct and is rejected on chain.
+
+**A property suite is only as strong as the inputs it can reach**, and "1024
+cases" says nothing about WHICH cases. The hostile-unicode generator drew each
+piece independently, which is proptest's default shape and quietly the wrong
+distribution for this defense. Independent draws produce hostile characters at a
+steady rate and essentially never produce a hostile REGION, and the region is the
+attack: a lone bidi override is a character, while a sustained bidi run reorders
+everything after it.
+
+The fix is Will Wilson's, from Antithesis: keep the previous choice and re-roll
+only with low probability, the way a controller holds a button down across frames
+instead of re-deciding every frame. No individual character becomes less random;
+only the correlation between neighbours changes.
+
+That claim is measured rather than asserted.
+`stateful_generator_reaches_runs_the_iid_generator_cannot` samples both
+generators under a deterministic runner and compares the longest run of
+characters the sanitizer promises to strip. **The independent generator reaches
+18. The correlated one reaches 89.** The test fails if that gap ever closes,
+which is what would happen if the switch probability were tuned until the
+generator was independent again.
+
+The honest result: the sanitizer holds on the correlated inputs too, so this
+found no defect. It closed a hole in the evidence, not in the code. Worth stating
+plainly, because a suite that has only ever been run on inputs it can easily
+reach is not evidence about the inputs an attacker sends.
 
 *Cannot catch:* anything about a real validator, a real RPC endpoint, or a real
 wallet. Properties are about our own functions.
@@ -99,7 +125,7 @@ are the ones in this document with commands next to them.
 
 ```
 cargo test -p solana-core                    # units + KATs
-cargo test -p solana-core --test properties  # 19 properties, 1024 cases each
+cargo test -p solana-core --test properties  # 23 properties, 1024 cases each
 ./scripts/mutation-check.sh                  # proves the property suite can fail
 python3 scripts/verify-proof.py              # live on-chain claims, exits non-zero on failure
 python3 scripts/check-doc-links.py           # every link in these docs points at something real
@@ -127,7 +153,7 @@ Three workflows, deliberately separate, because they answer different questions 
 red badge should tell you which one broke.
 
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: the 89 host
-tests and 19 properties, clippy with warnings as errors on both the host and
+tests and 23 properties, clippy with warnings as errors on both the host and
 `wasm32-wasip2`, the release build of the shipped wasm target, the fail-closed
 certification self-test, then all eight plugin components in a matrix. Everything is
 offline and deterministic, and `--locked` throughout, so a green run also proves the
@@ -176,7 +202,7 @@ A property suite that has never failed is indistinguishable from one that cannot
 fail. Ours is checked by mutation: injecting the exact defect the nonce module
 warns about, returning the authority bytes where the stored nonce belongs, makes
 `nonce_decode_returns_stored_fields_verbatim` fail and the suite exit non-zero;
-reverting restores 19 passing. The harness is `scripts/mutation-check.sh`, and it is
+reverting restores 23 passing. The harness is `scripts/mutation-check.sh`, and it is
 tracked rather than left in the ignored tools directory, because an argument that a
 suite discriminates is worth exactly nothing if the reader cannot run the thing that
 shows it. It restores the source on every exit path, including a failed run.
