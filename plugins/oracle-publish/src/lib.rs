@@ -128,20 +128,7 @@ mod component {
             );
             Ok(ToolResult {
                 success: true,
-                output: format!(
-                    "device-signed reading ready (feed {}, seq {}). This is a PARTIAL transaction \
-                     (base64) with the fee-payer slot empty: the HOST must sign it with the agent \
-                     session key {} and broadcast. The plugin holds no wallet and moved no funds.\n\
-                     {}\n\
-                     feed PDA: {}  |  replay-proof: durable nonce {} (chain) + strictly-increasing \
-                     on-chain sequence (program)",
-                    v.feed_kind.as_str(),
-                    v.sequence,
-                    v.agent_session_pubkey.to_base58(),
-                    b64,
-                    v.feed_pda.to_base58(),
-                    v.nonce_account.to_base58()
-                ),
+                output: publish::compose_report(&v, &b64),
                 error: None,
             })
         }
