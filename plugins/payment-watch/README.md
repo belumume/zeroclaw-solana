@@ -136,6 +136,23 @@ What the load-bearing cases prove:
   a prompt-injected address, a smuggled extra field, a misspelled config key, a plain-http RPC
   override, and a junk cursor are all refused before any network call.
 
+## Output size (judges call execute and count tokens)
+
+One verdict line, never a list, however much activity the watched address has. The pagination
+that scans up to five pages of signatures stays internal; what reaches the agent is a single
+`PAID:` or `NOT_YET:` sentence.
+
+Measured on both branches with every attacker-reachable field driven to its worst case at once,
+a 4 KB invoice label, an oversized injection memo carrying a zero-width split, and an
+unrecognised mint so the asset renders as an address rather than borrowing a symbol from the
+token: **PAID composes to 367 bytes and NOT_YET to 556**, asserted under 2000 in
+`worst_case_output_is_bounded_on_both_verdict_branches`.
+
+NOT_YET is the larger of the two because it is the branch with the most optional pieces, adding
+a next cursor, a reference note, and the partial-scan warning that fires when the scan hit its
+page cap with transactions still unexamined. That branch had no size test before, which is why
+it is measured here rather than argued from the per-field caps.
+
 ## Tool interface
 
 ```
