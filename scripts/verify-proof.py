@@ -166,15 +166,61 @@ TXS = [
 ]
 
 
+# Three attempts, ~1s then ~2s apart. Deliberately small: enough to ride out a blip,
+# short enough that a genuinely unreachable RPC still fails the run promptly.
+RPC_ATTEMPTS = 3
+
+# The retry budget is GLOBAL, not per call, and that is the load-bearing part. Per call
+# it looks cheap, but this script makes a dozen gating checks, so against an RPC that
+# HANGS rather than refuses the worst case is attempts x timeout x checks, which is
+# minutes of a reader staring at nothing. One shared budget means a genuinely dead
+# endpoint costs the retries once and every later check fails fast.
+RETRY_BUDGET_S = 25.0
+_retry_spent = 0.0
+
+
 def rpc(method, params):
+    """One JSON-RPC call, retrying only a TRANSPORT failure.
+
+    proof-check.yml already retries the whole script on a transport blip, so CI was
+    resilient to a flaky network and a human running this by hand was not. That is
+    backwards for the artifact whose entire job is letting a stranger re-verify the
+    claims: a reader on hotel wifi got a red result while every claim still held.
+
+    Retrying HERE is safe, and safe by construction rather than by a heuristic, which
+    is the part worth keeping. The transport-versus-claim distinction this file is
+    careful about survives because a claim that stopped holding does not raise. It
+    arrives as a SUCCESSFUL response carrying a different value, and is judged by the
+    caller. This function only ever sees the network refusing, so it can never retry a
+    broken claim into looking healthy.
+    """
     body = json.dumps(
         {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
     ).encode()
-    req = urllib.request.Request(
-        RPC, data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.load(r).get("result")
+    global _retry_spent
+    for attempt in range(RPC_ATTEMPTS):
+        started = time.monotonic()
+        req = urllib.request.Request(
+            RPC, data=body, headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.load(r).get("result")
+        except Exception as e:
+            # A non-transport error is the caller's to see immediately, and the last
+            # attempt re-raises so an unreachable RPC still exits as a transport
+            # failure with its original exception rather than a synthesised one.
+            if not is_transport_error(e) or attempt == RPC_ATTEMPTS - 1:
+                raise
+            # Charge BOTH the failed attempt and the pause to the shared budget. The
+            # attempt is the expensive half when the endpoint hangs, so a budget that
+            # counted only sleeps would not bound anything.
+            _retry_spent += time.monotonic() - started
+            if _retry_spent >= RETRY_BUDGET_S:
+                raise
+            pause = 1.0 * (attempt + 1)
+            time.sleep(pause)
+            _retry_spent += pause
 
 
 def read_feed(addr):
