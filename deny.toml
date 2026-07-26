@@ -1,10 +1,30 @@
 # Supply-chain policy for the shipped crates.
 #
 # The allow-list below is DERIVED, not guessed: it is the exact set of distinct
-# licenses present across solana-core and all eight plugin components, enumerated
-# with `cargo deny list`. Every one is permissive. There is no GPL, LGPL, AGPL,
-# MPL or SSPL anywhere in the graph, which is what makes the MIT license on this
-# repo honest for redistribution rather than aspirational.
+# licenses present across solana-core, all eight plugin components, and the x402
+# gate, enumerated with `cargo deny list`. Every one is permissive. There is no
+# GPL, LGPL, AGPL, MPL or SSPL anywhere in the graph, which is what makes the MIT
+# license on this repo honest for redistribution rather than aspirational.
+#
+# Two entries arrived together with the x402 gate, which pulls ureq and with it
+# the usual Rust TLS stack. Both were checked before being added.
+#
+# CDLA-Permissive-2.0 covers webpki-roots, a bundle of root CA certificates. The
+# Community Data License Agreement is built for exactly that shape, data rather
+# than code, and it is permissive in the sense that matters here: the only
+# obligation when redistributing is to carry the agreement text and the warranty
+# and liability disclaimers along with the data. It places no condition on the
+# rest of the aggregate, so shipping it inside an MIT repo is honest. It was
+# checked against the license text rather than assumed from the name, because
+# "Permissive" appearing in a title is not an argument.
+#
+# ISC covers untrusted and rustls-webpki, and appears once as the compound
+# expression "Apache-2.0 AND ISC". It is the OpenBSD license, functionally
+# equivalent to MIT and to BSD-2-Clause with the redundant clause removed, and
+# both OSI and the FSF classify it as permissive.
+#
+# Neither is a copyleft foothold, so the "no GPL, LGPL, AGPL, MPL or SSPL"
+# statement above survives them intact.
 #
 # Worth recording why this comes back clean when a Solana project usually cannot:
 # these crates do not depend on `solana-sdk`. The wire format is decoded by hand,
@@ -28,6 +48,8 @@ allow = [
     "BSD-1-Clause",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
     "MIT",
     "Unicode-3.0",
     "Unlicense",

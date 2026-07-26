@@ -36,7 +36,7 @@ checks and a private-host block all exist and work. Only the wildcard default wa
 | 8 | The documented publish cadence failed this repo's own verifier | Reconciled |
 | 9 | The write-up omitted a host patch the reproduction calls mandatory | Documented |
 | 10 | The testing doc cited scripts absent from a clone | Fixed, retraction left in place |
-| 11 | Dependency gating covered three graphs while the docs claimed nine | Nine gated |
+| 11 | Dependency gating covered three graphs while the docs claimed nine | Ten gated, one more than the defect asked for |
 | 12 | Both judge-facing surfaces underclaimed the settlement check | Fixed |
 | 13 | Documented approval list did not match the running one | Regenerated, live check pending |
 | 14 | Assorted count and transcript defects | Fixed, and more found since |
@@ -94,6 +94,19 @@ Recorded so they are not raised again. The shell jail is real and was confirmed 
 detection is correctly disabled, and re-enabling it would break payment links while fixing
 nothing, because the agent has no secret to leak. The reference-only-match vulnerability is
 refuted with code and driven cases. A long list of counts and claims checked out.
+
+## One the audit did not catch, found while checking its work
+
+Defect 11 asked for nine dependency graphs to be gated and nine were. Re-verifying it turned up
+that nine was the wrong target. Eighteen manifests exist here; the matrix had been built from
+the plugin surface alone, which left the x402 gate outside the check even though it ships and a
+judge will read it. The harnesses and the microworlds are not shipped, and the Anchor workspace
+is a separate graph scoped out on purpose, so the gate is now ten.
+
+Adding it failed on the first run, on two licenses no plugin graph pulls: the root certificate
+bundle and the TLS crates. Both are permissive and both were read rather than waved through on
+the strength of the word appearing in a title. This is the whole argument for running a gate
+locally before adding it to CI: the alternative was discovering it from a red badge.
 
 ## The pattern underneath
 

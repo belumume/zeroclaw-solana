@@ -93,6 +93,7 @@ jobs:
           - plugins/solana-pay-request
           - plugins/spl-transfer-build
           - plugins/token-risk-check
+          - x402-feed-gate
     steps:
       - uses: actions/checkout@v4
 
