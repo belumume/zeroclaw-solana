@@ -29,6 +29,10 @@
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
+use solana_core::instruction::{AccountMeta, Instruction};
+use solana_core::message::compile;
+use solana_core::nonce::decode_nonce_account;
+use solana_core::pubkey::Pubkey;
 use solana_core::sanitize::sanitize_onchain;
 use solana_core::shortvec::{decode_len, encode_len};
 
@@ -107,6 +111,29 @@ fn correlated_hostile() -> impl Strategy<Value = String> {
     })
 }
 
+fn arb_pubkey() -> impl Strategy<Value = Pubkey> {
+    any::<[u8; 3]>().prop_map(|seed| {
+        let mut b = [0u8; 32];
+        b[..3].copy_from_slice(&seed);
+        Pubkey::new(b)
+    })
+}
+
+fn arb_meta() -> impl Strategy<Value = AccountMeta> {
+    (arb_pubkey(), any::<bool>(), any::<bool>()).prop_map(|(pubkey, is_signer, is_writable)| {
+        AccountMeta { pubkey, is_signer, is_writable }
+    })
+}
+
+fn arb_instruction() -> impl Strategy<Value = Instruction> {
+    (
+        arb_pubkey(),
+        prop::collection::vec(arb_meta(), 0..6),
+        prop::collection::vec(any::<u8>(), 0..16),
+    )
+        .prop_map(|(program_id, accounts, data)| Instruction { program_id, accounts, data })
+}
+
 #[test]
 fn mine_envelopes() {
     const SAMPLES: usize = 2000;
@@ -140,6 +167,54 @@ fn mine_envelopes() {
         e_grow.observe(out_chars - in_chars, out_chars <= in_chars);
     }
 
+    // Message envelopes. The account-index vector is the one that matters:
+    // it is the quantity that broke past 65535 before an `as u16` cast, and an
+    // envelope watcher would have flagged the missing bound without anyone
+    // thinking to write the property.
+    let mut e_keys = Envelope::new("message: account_keys length");
+    let mut e_ixs = Envelope::new("message: instruction count");
+    let mut e_idx = Envelope::new("message: account_indexes per instruction");
+    let mut e_idx_fits = Envelope::new("message: every index < account_keys len");
+    let mut e_shortvec_w = Envelope::new("message: shortvec width for key count");
+
+    let msg_gen = (
+        arb_pubkey(),
+        prop::collection::vec(arb_instruction(), 1..6),
+        any::<[u8; 32]>(),
+    );
+    for _ in 0..SAMPLES {
+        let (payer, ixs, blockhash) = msg_gen.new_tree(&mut runner).expect("tree").current();
+        let Ok(msg) = compile(&payer, &ixs, &blockhash) else { continue };
+        let n = msg.account_keys.len();
+
+        e_keys.observe(n as i64, n <= u16::MAX as usize);
+        e_ixs.observe(msg.instructions.len() as i64, true);
+
+        let mut widest = Vec::new();
+        encode_len(n.min(u16::MAX as usize) as u16, &mut widest);
+        e_shortvec_w.observe(widest.len() as i64, widest.len() <= 3);
+
+        for ci in &msg.instructions {
+            let count = ci.account_indexes.len();
+            // The bound that the `as u16` truncation violated: an instruction's
+            // account-index vector must fit the shortvec width it is encoded at.
+            e_idx.observe(count as i64, count <= u16::MAX as usize);
+            let all_in_range = ci.account_indexes.iter().all(|i| (*i as usize) < n);
+            e_idx_fits.observe(i64::from(all_in_range), all_in_range);
+        }
+    }
+
+    // Nonce envelope: the decoder over arbitrary bytes must be total.
+    let mut e_nonce = Envelope::new("nonce: decode is total (never panics)");
+    let byte_gen = prop::collection::vec(any::<u8>(), 0..200);
+    for _ in 0..SAMPLES {
+        let bytes = byte_gen.new_tree(&mut runner).expect("tree").current();
+        let decoded = decode_nonce_account(&bytes);
+        // Total means it returns, Ok or Err, for every input. Reaching this line
+        // is the observation.
+        e_nonce.observe(i64::from(decoded.is_ok()), true);
+    }
+
     // Shortvec envelopes over the whole u16 domain, not a sample.
     let mut e_bytes = Envelope::new("shortvec: encoded byte length");
     let mut e_roundtrip = Envelope::new("shortvec: decode(encode(n)) == n");
@@ -154,10 +229,18 @@ fn mine_envelopes() {
     println!("\n=== mined envelopes ({SAMPLES} hostile samples, full u16 domain) ===");
     for e in [
         &e_out_len, &e_stripped, &e_conserve, &e_trunc, &e_inject, &e_grow,
+        &e_keys, &e_ixs, &e_idx, &e_idx_fits, &e_shortvec_w, &e_nonce,
         &e_bytes, &e_roundtrip,
     ] {
         e.report();
     }
+    println!(
+        "  NOTE: 'message: shortvec width' reads 100% at width 1 ONLY because the\n\
+         \x20       generator caps at {} account keys. That row is a description of\n\
+         \x20       the generator, not a law, and is deliberately NOT promoted. The\n\
+         \x20       3-byte region is reached by the exhaustive u16 walk instead.",
+        e_keys.max
+    );
     println!();
 
     // The mine itself asserts only that it actually ran. Promotion is deliberate
