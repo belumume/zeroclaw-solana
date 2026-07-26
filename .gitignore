@@ -84,3 +84,7 @@ manifest.out.json
 
 # Comprehension artifacts: quiz-gated explainers for the builder, not judge deliverables.
 .comprehension/
+
+# Verbatim user directive: internal only. Its own frontmatter says public:false;
+# this is what actually enforces it. Carries home paths and internal process.
+docs/USER-DIRECTIVE-2026-07-26-VERBATIM.md
