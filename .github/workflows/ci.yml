@@ -66,6 +66,37 @@ jobs:
             --harness accepted_encodings_are_uniquely_canonical
             --harness every_u16_roundtrips
 
+  publish-gates:
+    name: repo paths resolve, no shadowed scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Full history is not needed, but the default shallow checkout still gives
+      # git ls-files everything these two read, since both ask about the INDEX
+      # rather than about history.
+      - uses: actions/checkout@v4
+
+      # Two of the four pre-publish gates run here and two deliberately do not.
+      #
+      # These two are pure git plus filesystem: same answer on any machine, no
+      # network, no local state. That makes them meaningful on a runner, and a
+      # runner is the only place they run at all, since a gate that fires only
+      # when someone remembers to type it is close to no gate.
+      #
+      # check-doc-links.py is NOT here on purpose. It exits non-zero on the
+      # unfilled repo-URL placeholders, which is intended behaviour until the
+      # repository is public, and wiring a known-red check into CI would train
+      # a reader to ignore a red badge. It goes in at publish.
+      #
+      # check-config-drift.py is NOT here because it compares the documented
+      # posture against a config on the operator's machine. A runner has no such
+      # file, so it would be asserting nothing while looking like coverage.
+      - name: every repo path a doc names is itself tracked
+        run: python3 scripts/check-repo-paths.py
+
+      - name: no gitignored copy shadows a tracked script
+        run: python3 scripts/check-shadowed-scripts.py
+
   supply-chain:
     name: advisories, licenses, sources
     runs-on: ubuntu-latest

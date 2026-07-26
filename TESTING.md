@@ -176,6 +176,14 @@ filenames against tracked basenames. Both rules were earned: the first pass flag
 references and every one was a false positive, which is worse than no gate, because a check that
 cries wolf teaches its reader to skip it. A planted dead link is what proves it still fires.
 
+Two of these now run in CI, in the `publish-gates` job: `check-repo-paths.py` and
+`check-shadowed-scripts.py`. Both are pure git plus filesystem, so they give the same answer on
+any machine, which is what makes them meaningful on a runner. The other two stay manual on
+purpose. `check-doc-links.py` exits non-zero on the unfilled repo-URL placeholders, and wiring a
+known-red check into CI teaches a reader to ignore a red badge, so it goes in at publish.
+`check-config-drift.py` compares against a config on the operator's machine, which a runner does
+not have, so running it there would assert nothing while looking like coverage.
+
 The last three are pre-publish gates rather than tests. `check-doc-links.py` deliberately does
 not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
 signature that does not exist, so a status-code checker would report a confident pass on a dead
