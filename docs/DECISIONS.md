@@ -115,13 +115,25 @@ a disabled security setting deserves the argument rather than a silent flag.
 
 **Chosen.** The shop quotes in BRL at a stated rate source and settles in USDC on chain.
 
-**Rejected: real PIX.** PIX is the flow the brief most wants to see, and it is a fiat rail
-that requires a licensed Brazilian payment provider holding funds. Adding a custodial PSP to
-a submission whose entire argument is self-custody would contradict the thesis to win a
-mention.
+**Rejected: real PIX.** PIX is the flow the brief most wants to see, so the reason for
+refusing it has to survive being checked.
 
-**Consequence.** The Brazil claim is narrower and true: BRL invoicing and USDC reconciliation,
-with PIX named as a deliberate non-goal and the reason given, rather than a fig leaf.
+The reason recorded here until 2026-07-26 did not survive. It said PIX requires a licensed
+provider holding funds, and a rival entry disproved it by shipping the thing. A static BR
+Code is EMV TLV plus a CRC over the merchant's own key, generated offline, custodian
+nowhere in it. Issuing a PIX charge is roughly the difficulty of the Solana Pay URL we
+already build.
+
+The real obstacle is on the settlement side, and it is not about difficulty. A bank transfer
+is invisible to this software, so a PIX invoice can only be marked paid because a human said
+so. Everything else here is confirmed by checking amount, mint and destination against the
+chain, and that is the whole claim, not a detail of it. Shipping one leg that a human
+attests to would let a reader ask why the attested one is not enough, which is the question
+the submission exists to answer.
+
+**Consequence.** The Brazil claim is narrower and true: BRL invoicing and USDC
+reconciliation, with PIX named as a deliberate non-goal on the settlement argument rather
+than a regulatory one.
 
 ## 7. Blinks and gitlana are mentioned, not built
 

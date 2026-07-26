@@ -358,10 +358,15 @@ Scoped non-goals (deliberate):
 - **BRL invoicing and USDC reconciliation, but not PIX.** The brief names three Brazil-first flows:
   "PIX and USDC reconciliation, BRL invoicing." We deliver the two on-chain ones: the shop invoices
   in BRL (a public USD/BRL rate, the amount stated in reais) and settles + reconciles in USDC
-  on-chain (the amount, mint and destination match IS the reconciliation). PIX is the fiat one, and it is a deliberate
-  non-goal, not an oversight: PIX is a Brazilian Central-Bank fiat rail that requires a licensed PSP
-  and a custodial party to hold the BRL, which is the opposite of a self-custodial agent that never
-  holds a key or a balance. Bridging fiat would reintroduce exactly the custodian this design removes.
+  on-chain (the amount, mint and destination match IS the reconciliation). PIX is the fiat one and a
+  deliberate non-goal, though the obstacle is not the one you would guess. Issuing a PIX charge is
+  easy: a static BR Code is EMV TLV plus a CRC over the merchant's own key, buildable offline, with
+  nobody holding anything. Knowing it was paid is the hard part, because a bank transfer leaves
+  nothing this software can read, so a PIX invoice can only be marked settled because a person said
+  so. Every other payment here is confirmed by checking amount, mint and destination against the
+  chain, and the point of doing that is that it does not rest on anyone's word. One leg that could
+  only ever rest on someone's word would invite the reader to ask why the verified ones are worth
+  the trouble. We ship the rail we can check.
 - **No reputation-gated signing, privacy spend caps, or Agent Registry integration** (brief-named
   edges), out of scope for a two-use-case showcase, not overlooked.
 
@@ -393,11 +398,16 @@ the thing this build validates byte for byte against the reference implementatio
 Blink and the shop behaves identically, which makes it decoration rather than a solution to a
 problem we have.
 
-**PIX.** Named in the brief and genuinely wanted, and still a non-goal, because a fiat rail
-needs a licensed custodial payment provider and that contradicts the self-custody thesis the
-rest of this rests on. What is delivered instead is the honest half: BRL invoicing with USDC
-settlement at a stated rate source, which is the part that does not require handing custody to
-anyone.
+**PIX.** Named in the brief and genuinely wanted, and still a non-goal, though not for the
+reason an earlier draft of this document gave. That draft said PIX needs a licensed provider
+and a custodian, and that is wrong: a static BR Code payload is EMV TLV plus a CRC over the
+merchant's own key, buildable offline, and nobody holds anything. The real obstacle is on the
+other side. A bank transfer leaves no trace this software can read, so the only way to mark a
+PIX invoice paid is for a human to say it was. Every other payment here is confirmed by
+checking amount, mint and destination against the chain, and the value of that is precisely
+that it does not rest on anyone's word. A leg that could only ever rest on someone's word
+would take the claim out of the rest. What is delivered instead is the honest half: BRL
+invoicing with USDC settlement at a stated rate source.
 
 **A plugin we had already built.** `solana-pay-request` was written as a Tier 3 plugin, and the
 tier test says a URL built from known inputs is a skill. It was demoted. It stays in the tree
