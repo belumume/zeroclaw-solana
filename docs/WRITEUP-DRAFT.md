@@ -6,7 +6,7 @@ claimed here is that they share a single custody spine rather than being two pro
 folder. One coherent
 body from the physical edge (a device signing its own readings on-chain), through machine
 commerce (the node sells that feed and pays for its own gas), to on-chain-enforced custody (an
-audited program, not the LLM, bounds every spend), reproducible from a clean machine in an evening.
+audited program bounds the delegated spends, and a human gate bounds the rest), reproducible from a clean machine in an evening.
 1. **The DePIN talking node**: a node that reads REAL ambient temperature (Madinah, from the
    keyless open-meteo API on the interim host now; a physical Raspberry Pi + DHT11 sensor
    replaces that source when the kit lands, so the day/night swing in the values is real weather,
@@ -343,7 +343,7 @@ The tiers in words:
   The agent refuses and the attacker address enters zero tool calls (`spl_transfer_build` is
   never invoked). Three independent layers hold, and no message talks past all three: the
   model's refusal (demonstrated in the transcript), the unsigned-build-needs-approval gate (the
-  agent never holds a broadcast-ready transaction), and the on-chain allowance program. Every spend executes only through the audited SF cap,
+  agent never holds a broadcast-ready transaction), and the on-chain allowance program. Delegated spends execute under the audited SF cap, and direct transfers are emitted unsigned for a human to approve, so neither path lets the model move funds on its own,
   and this is demonstrated live on devnet: the agent's session key signed an over-cap transfer
   and the program rejected it (custom error 0x12c), while a within-cap transfer settled (see
   DEVNET-PROOF). The program bounds a complying agent, not only a refusing one.
