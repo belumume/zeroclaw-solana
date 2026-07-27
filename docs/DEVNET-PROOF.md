@@ -1,8 +1,42 @@
 # Live devnet proof (clickable on-chain evidence)
 
-Every claim below is a public Solana **devnet** transaction or account. Click any link; no
-account of ours needs to be trusted, and nothing here is a secret (operator keypairs stay
-local). Set the explorer cluster to **devnet**.
+Every claim below is a public Solana **devnet** transaction or account. Nothing here is a secret;
+operator keypairs stay local. Set the explorer cluster to **devnet**.
+
+## Read this before clicking: the explorer links expire, the proof does not
+
+Public devnet RPC retains roughly **four days** of transaction history. Measured against the
+signatures in this file on 2026-07-27: the oldest one still served had a block time of
+2026-07-23 22:59, and everything before that boundary already returns nothing, including via
+`getSignatureStatuses` with `searchTransactionHistory`. Those transactions are real. The signatures
+are well-formed and decode to exactly 64 bytes. The public endpoint simply stops serving them.
+
+We are stating that rather than shipping links that rot quietly, because the arithmetic matters:
+anything published by the deadline is pruned well before judging, so an explorer link is a
+convenience with an expiry date set by a third party, not evidence.
+
+**The evidence lives in this repo instead.** `docs/proof-bundle/devnet-transactions.json` carries,
+for every transaction still retrievable at capture time, the raw base64 bytes, slot, block time,
+sha256 digest and length. Verify all of it with no network at all:
+
+```
+python scripts/verify_proof_offline.py --verbose
+```
+
+It recomputes each digest, splits the signatures from the serialized message, verifies every
+ed25519 signature against the message and the matching account key, and decodes the instructions so
+you see what each transaction did rather than trusting a caption. Standard library only, so a fresh
+clone runs it with no install step.
+
+A signature that verifies against a public key proves the holder of that private key signed exactly
+those bytes. That holds whether or not any RPC still answers, which is a stronger claim than a link.
+
+The script gates itself on two negative controls and refuses to report results unless both pass: one
+flipped message byte and one flipped signature byte must each be rejected. A checker that has never
+failed on bad input has not been shown to work. Current result: 8 of 8 captured transactions verify,
+controls pass, exit 0.
+
+A link below that returns nothing is therefore expected, not a broken claim. Check it offline.
 
 ## On-chain programs (DePIN oracle)
 | Program | Address | Explorer |
@@ -45,7 +79,7 @@ feed account stores only the LATEST reading, so the *sequence history* is the le
 
 | UTC | Interval | Result | Settlement tx |
 |---|---|---|---|
-| 2026-07-25T14:06Z | — | ok | [3MhyEGJo…](https://explorer.solana.com/tx/3MhyEGJo4AgCMoRtsM5nGspF5wXnDVQjRyzzmffKvztHg2Adu5fLnfpF4cP9ZmQumkWnA4xxxFGEnPZTATXZY3KD?cluster=devnet) |
+| 2026-07-25T14:06Z | n/a | ok | [3MhyEGJo…](https://explorer.solana.com/tx/3MhyEGJo4AgCMoRtsM5nGspF5wXnDVQjRyzzmffKvztHg2Adu5fLnfpF4cP9ZmQumkWnA4xxxFGEnPZTATXZY3KD?cluster=devnet) |
 | 2026-07-25T14:26Z | 20.5 min | ok | [5UEd5BnQ…](https://explorer.solana.com/tx/5UEd5BnQUxb42LWJYmEgdvJb2Sk6dJeuJAx7HVcFiS9T2sSEZzJczyzTSKvPtWvVYTi5u6WAqVUKLgJbMRqJzYtk?cluster=devnet) |
 | 2026-07-25T14:47Z | 20.5 min | ok | [2RMiDsP6…](https://explorer.solana.com/tx/2RMiDsP6thht2eYQivBEudydjmrATYmfScrrjNLink7nCA3W7uULzknF2iFL37ZZNmZZCGn6fzihdLb2FayA8bV1?cluster=devnet) |
 | 2026-07-25T15:07Z | 20.5 min | ok | [3vnbatzq…](https://explorer.solana.com/tx/3vnbatzqHuUDEiovrS97RBGDjbV9J9mjqbwCiiqGRzJgUANGUhyAZKqPsN4GSBMT3vzJmTfLUXUpkR7eQ9Tqa2JY?cluster=devnet) |

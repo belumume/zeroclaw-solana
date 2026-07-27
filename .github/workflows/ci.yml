@@ -97,6 +97,16 @@ jobs:
       - name: no gitignored copy shadows a tracked script
         run: python3 scripts/check-shadowed-scripts.py
 
+      # The on-chain evidence outlives the links to it. Public devnet RPC prunes
+      # after about four days, so every explorer link in DEVNET-PROOF is dead well
+      # before judging. This verifies the captured raw transactions instead:
+      # ed25519 over the serialized message, standard library only, no network. It
+      # belongs on a runner precisely because it needs nothing but the repo, and it
+      # self-gates on two negative controls, so a green step means the checker was
+      # shown to reject bad input on this run rather than merely printing PASS.
+      - name: captured on-chain proofs verify with no network
+        run: python3 scripts/verify_proof_offline.py
+
       # The deployed checkout page and the generator that produces it drifted once, and
       # the drift was silent: index.html had gained the pinned merchant address, the
       # mint-keyed asset names, the wrong-recipient refusal and the Portuguese
