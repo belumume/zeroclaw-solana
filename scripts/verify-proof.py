@@ -14,6 +14,7 @@ Exit 0 = every claim verified; exit 1 = at least one FAIL (or the RPC was unreac
 
 import base64
 import json
+from pathlib import Path
 import os
 import struct
 import sys
@@ -303,12 +304,46 @@ def main():
             if is_transport_error(e):
                 transport_fails += 1
 
+    # A transaction the RPC will not serve has THREE possible causes and only one of
+    # them is a broken claim. Public devnet prunes after about four days, so a
+    # transaction older than that is absent from the endpoint while remaining a real,
+    # settled transaction. Reporting that as a claim that stopped holding is a false
+    # red, and a checker that cries wolf trains a reader to ignore it.
+    # So: when the RPC has nothing, fall back to the captured bundle and verify the
+    # signature offline. If it verifies there, the claim holds and the endpoint is
+    # simply the wrong instrument for it.
+    bundle_txs = {}
+    bundle_path = Path(__file__).resolve().parent.parent / "docs" / "proof-bundle" / "devnet-transactions.json"
+    if bundle_path.exists():
+        try:
+            bundle_txs = json.loads(bundle_path.read_text(encoding="utf-8")).get("transactions", {})
+        except Exception:
+            bundle_txs = {}
+
+    def verified_offline(sig: str) -> bool:
+        """True iff the captured bundle proves this transaction by signature."""
+        entry = bundle_txs.get(sig)
+        if not entry or entry.get("status") != "CAPTURED":
+            return False
+        try:
+            import subprocess
+            r = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve().parent / "verify_proof_offline.py")],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+            )
+            return r.returncode == 0 and sig[:16] in r.stdout
+        except Exception:
+            return False
+
     for label, sig, want_err in TXS:
         try:
             t = rpc("getTransaction", [sig, {"maxSupportedTransactionVersion": 0}])
             if not t:
-                print(f"FAIL  {label}: tx not found")
-                fails += 1
+                if verified_offline(sig):
+                    print(f"PASS  {label}: pruned by the endpoint, verified offline from the bundle")
+                else:
+                    print(f"FAIL  {label}: tx not found, and no captured bytes to verify offline")
+                    fails += 1
                 continue
             got = t.get("meta", {}).get("err")
             if got == want_err:

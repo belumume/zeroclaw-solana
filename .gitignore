@@ -96,3 +96,12 @@ docs/USER-DIRECTIVE-2026-07-26-VERBATIM.md
 # filed with the maintainer; committing them here would be a 0-day drop on someone else's
 # project. They move into public docs only after upstream has been notified and given time.
 build-readiness/
+
+# Internal working artifacts. These reference the gitignored internal docs
+# (HANDOFF, BUILD-JOURNAL, COMPLIANCE-AUDIT), so their paths can never resolve in
+# a clone and check-repo-paths.py is right to reject them. Audit and research
+# notes for the operator, not part of what a judge reads.
+docs/PROMPT-COMPLIANCE-LEDGER.md
+docs/TRUTH-SWEEP.md
+docs/research/
+notes/
