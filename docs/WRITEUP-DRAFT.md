@@ -527,8 +527,9 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   publish ledger, the proof the node keeps running. `scripts/verify-proof.py` checks all three
   feeds and additionally asserts the node feed is FRESH, since an owned-but-dead feed would
   otherwise pass an ownership check forever.
-- x402 settlement `5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc`
-  (err None); a replayed payment refused NonceReused.
+- x402 settlement `EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE`
+  (err None, devnet USDC, buyer on a different machine from the node); a replayed payment refused
+  NonceReused.
 - shop terminal Track-A settlement `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`
   (payment_watch verdict PAID on an exact amount + mint + destination match, with the reference
   also matching; a wrong amount, a foreign mint, or a wrong reference each return NOT_YET), reference

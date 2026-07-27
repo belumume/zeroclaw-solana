@@ -151,7 +151,7 @@ TXS = [
     ),
     (
         "x402 machine-commerce settlement",
-        "5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc",
+        "EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE",
         None,
     ),
     (
@@ -313,10 +313,17 @@ def main():
     # signature offline. If it verifies there, the claim holds and the endpoint is
     # simply the wrong instrument for it.
     bundle_txs = {}
-    bundle_path = Path(__file__).resolve().parent.parent / "docs" / "proof-bundle" / "devnet-transactions.json"
+    bundle_path = (
+        Path(__file__).resolve().parent.parent
+        / "docs"
+        / "proof-bundle"
+        / "devnet-transactions.json"
+    )
     if bundle_path.exists():
         try:
-            bundle_txs = json.loads(bundle_path.read_text(encoding="utf-8")).get("transactions", {})
+            bundle_txs = json.loads(bundle_path.read_text(encoding="utf-8")).get(
+                "transactions", {}
+            )
         except Exception:
             bundle_txs = {}
 
@@ -327,9 +334,17 @@ def main():
             return False
         try:
             import subprocess
+
             r = subprocess.run(
-                [sys.executable, str(Path(__file__).resolve().parent / "verify_proof_offline.py")],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve().parent / "verify_proof_offline.py"),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=180,
             )
             return r.returncode == 0 and sig[:16] in r.stdout
         except Exception:
@@ -340,9 +355,13 @@ def main():
             t = rpc("getTransaction", [sig, {"maxSupportedTransactionVersion": 0}])
             if not t:
                 if verified_offline(sig):
-                    print(f"PASS  {label}: pruned by the endpoint, verified offline from the bundle")
+                    print(
+                        f"PASS  {label}: pruned by the endpoint, verified offline from the bundle"
+                    )
                 else:
-                    print(f"FAIL  {label}: tx not found, and no captured bytes to verify offline")
+                    print(
+                        f"FAIL  {label}: tx not found, and no captured bytes to verify offline"
+                    )
                     fails += 1
                 continue
             got = t.get("meta", {}).get("err")

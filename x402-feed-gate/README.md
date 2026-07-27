@@ -62,9 +62,12 @@ Run end-to-end against devnet with a real token transfer:
   paying the gate.
 - The gate verified the bytes, simulated, broadcast, and **confirmed on-chain**, then served
   the feed reading (sequence + value) plus an `X-Payment-Response` receipt.
-- Settlement transaction `5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc`
-  (slot 478350917, `err: None`); the seller ATA received the tokens.
-- A replayed payment was refused `NonceReused`.
+- Settlement transaction `EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE`
+  (slot 479305550, `err: None`); the seller ATA `6L348RziHrFG1TELfCNUTUPQjBLziYn5JatxsQoY4ekD`
+  received 1.000000 devnet USDC.
+- A replayed payment was refused `NonceReused` (HTTP 402, with a fresh challenge offered).
+- Driven 2026-07-27 against the gate running under `systemd --user` on the ARM node, with the
+  buyer signing on a separate machine, so this is a remote purchase and not a self-payment.
 
 (The demo used a purpose-created 6-decimal devnet mint so the whole settlement path is
 exercised without depending on acquiring a specific USDC balance; the code is

@@ -127,14 +127,26 @@ longer publishing.
 The node sold one reading over x402: a 402 challenge, a client-signed stablecoin payment, and
 on-chain settlement before the reading was served.
 
-- Settlement tx `5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc`
-  (slot 478350917, `err: None`):
-  https://explorer.solana.com/tx/5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc?cluster=devnet
-- A replayed payment was refused `NonceReused` (the payment's memo nonce is single-use).
-- Public parties: buyer `EDPAQadqVyf3MVgwuqxtDfxg6Fq1f3mECfUumYZJjhwS`, seller receiving wallet
-  `C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ`, demo mint
-  `6Anrqvy3BvG2QvK9k6sGvRYndFwiSudw2JMnDMhbdAK` (a purpose-created 6-decimal devnet mint so the
-  full settlement path runs without needing a specific USDC balance; the code is mint-agnostic).
+Re-driven 2026-07-27 against the gate running on the ARM node, and the payment is now in real
+Circle devnet USDC rather than the purpose-created mint the earlier run used, so the settlement
+path is exercised end to end against the asset a real buyer would hold.
+
+- Settlement tx `EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE`
+  (slot 479305550, `err: None`, 390 bytes):
+  https://explorer.solana.com/tx/EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE?cluster=devnet
+- The reading served in exchange came from the node's own feed `JEtuZkcRze…` at sequence 177.
+- Replaying the identical `X-PAYMENT` header was refused with HTTP 402 and
+  `"rejected":"NonceReused"`, because the payment's memo nonce is single-use. The refusal offers a
+  fresh challenge rather than failing silently.
+- Public parties: buyer `E36NJ7FvFSQxegFemCEL76GrBVUcVSEWvihne5WFxBdf`, seller receiving wallet
+  `C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ` (receiving ATA
+  `6L348RziHrFG1TELfCNUTUPQjBLziYn5JatxsQoY4ekD`), asset
+  `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` (devnet USDC, 6 decimals), price 1.000000 USDC.
+- The buyer signed on a separate machine from the node, so the settlement is a genuine remote
+  purchase rather than the seller paying itself.
+- These bytes are captured in `docs/proof-bundle/devnet-transactions.json`, so the claim survives
+  the explorer link expiring. `python scripts/verify_proof_offline.py` re-verifies the ed25519
+  signature with no network at all.
 
 ## The shop terminal took a real payment (Track A, reference-threaded)
 The full shop flow ran end to end on devnet with the real plugin logic (no reimplementation): a
