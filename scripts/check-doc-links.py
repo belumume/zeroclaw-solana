@@ -99,10 +99,26 @@ def check_url(url):
         return False, f"{type(e).__name__}: {e}"
 
 
+def load_bundle():
+    """Signature -> capture status from the offline proof bundle.
+
+    Public devnet prunes after about four days, so an explorer link going dark is the expected
+    end state for every transaction here rather than a defect. What separates a surviving claim
+    from a lost one is whether the raw bytes were captured before that happened, so this is the
+    fact the link check has to consult before calling a dead link a failure.
+    """
+    path = REPO / "docs" / "proof-bundle" / "devnet-transactions.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("transactions", {})
+    except Exception:
+        return {}
+
+
 def main():
     findings = []
     checked = 0
     cache = {}
+    bundle = load_bundle()
 
     for doc in DOCS:
         path = REPO / doc
@@ -124,10 +140,26 @@ def main():
                     got = rpc(
                         "getTransaction", [sig, {"maxSupportedTransactionVersion": 0}]
                     )
-                    ok = got is not None
-                    detail = "on chain" if ok else "NOT on chain"
+                    if got is not None:
+                        ok, detail = True, "on chain"
+                    else:
+                        # Absent from the endpoint. Whether that is a problem depends entirely
+                        # on whether we hold the bytes, so ask the bundle rather than the RPC.
+                        status = bundle.get(sig, {}).get("status")
+                        if status == "CAPTURED":
+                            ok, detail = True, "pruned, bytes held"
+                        elif status:
+                            ok, detail = False, "pruned before capture"
+                        else:
+                            ok, detail = False, "NOT on chain"
                 except Exception as e:
-                    ok, detail = False, f"RPC error {e}"
+                    # Could not ask the endpoint. That is only a finding if the endpoint was the
+                    # sole evidence: a transaction whose bytes are captured is proven offline
+                    # whether or not devnet answers, so a rate limit must not turn it red.
+                    if bundle.get(sig, {}).get("status") == "CAPTURED":
+                        ok, detail = True, "bytes held (RPC unreachable)"
+                    else:
+                        ok, detail = False, f"RPC error {e}"
             elif ad := EXPLORER_ADDR.search(url):
                 pk = ad.group(1)
                 try:

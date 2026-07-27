@@ -24,17 +24,39 @@ python scripts/verify_proof_offline.py --verbose
 ```
 
 It recomputes each digest, splits the signatures from the serialized message, verifies every
-ed25519 signature against the message and the matching account key, and decodes the instructions so
+ed25519 signature against the message and the matching account key, and decodes every instruction so
 you see what each transaction did rather than trusting a caption. Standard library only, so a fresh
 clone runs it with no install step.
 
 A signature that verifies against a public key proves the holder of that private key signed exactly
 those bytes. That holds whether or not any RPC still answers, which is a stronger claim than a link.
 
-The script gates itself on two negative controls and refuses to report results unless both pass: one
-flipped message byte and one flipped signature byte must each be rejected. A checker that has never
-failed on bad input has not been shown to work. Current result: 8 of 8 captured transactions verify,
-controls pass, exit 0.
+The instruction names are derived, not asserted. An Anchor instruction is identified by recomputing
+`sha256("global:<name>")[:8]` and matching it against the discriminator present in the bytes, so
+`publish_reading` below is a decode result. Anything the decoder cannot name from the bytes prints
+as unrecognized rather than receiving a plausible label.
+
+**Current result: 12 of 12 captured transactions verify, controls pass, exit 0.** Three further
+signatures were pruned by the endpoint before capture could reach them; they are recorded as
+`ALREADY_PRUNED` rather than dropped, and are deliberately not counted as verified.
+
+The script gates itself on negative controls and refuses to report anything unless each behaves: a
+flipped message byte, a flipped signature byte and a flipped transaction byte must each be rejected,
+and every control asserts it actually perturbed what it claims to perturb. A checker that has never
+failed on bad input has not been shown to work, and a control that silently perturbs nothing passes
+for the wrong reason.
+
+That the controls can fail is itself checkable, because a self-test nobody has broken is another
+untested claim:
+
+```
+bash scripts/mutation-check-offline-proof.sh
+```
+
+It plants three defects in a copy of the verifier and requires each to be refused by the control
+that names it. Writing it found a real gap: the digest control tested the hash function directly
+while the per-transaction loop compared separately, so a broken comparison there was uncovered until
+both were routed through one shared function.
 
 A link below that returns nothing is therefore expected, not a broken claim. Check it offline.
 
@@ -89,6 +111,24 @@ feed account stores only the LATEST reading, so the *sequence history* is the le
 The interval column is the point. Every gap is 20.5 minutes to the tenth of a minute, which is
 a timer running unattended on a box in Jeddah, not a person remembering to publish.
 
+**All six rows are captured, so the cadence outlives the links.** Decoded from the raw bytes with
+no network, the sequence numbers are consecutive and the readings are real, which is the same
+evidence the table above asserts:
+
+```
+        ix1  zeroclaw_oracle: publish_reading seq=30 value=41.70C observed_at=1784988366 feed_kind=0
+        ix1  zeroclaw_oracle: publish_reading seq=31 value=41.70C observed_at=1784989596 feed_kind=0
+        ix1  zeroclaw_oracle: publish_reading seq=32 value=41.50C observed_at=1784990826 feed_kind=0
+        ix1  zeroclaw_oracle: publish_reading seq=33 value=41.30C observed_at=1784992056 feed_kind=0
+        ix1  zeroclaw_oracle: publish_reading seq=34 value=41.20C observed_at=1784993286 feed_kind=0
+        ix1  zeroclaw_oracle: publish_reading seq=35 value=40.70C observed_at=1784994516 feed_kind=0
+```
+
+Each of those transactions carries `AdvanceNonceAccount` as its first instruction, which is the
+durable-nonce replay guard, and the sequence rises strictly. Both are visible in the decode rather
+than taken on trust. The `observed_at` values are 1230 seconds apart, matching the 20.5 minute
+column above to the second.
+
 Do not take the head of the feed from this file, because any sequence number written here is
 stale within twenty minutes of being written. Read it live:
 
@@ -117,11 +157,21 @@ Kept because it is the earliest evidence the oracle path worked end to end, and 
 quietly would be worse than labelling it. It is **not** the "yours, running" proof and is no
 longer publishing.
 
-| UTC | seq | value | Settlement tx |
-|---|---|---|---|
-| 2026-07-23T02:42Z | 10 | 29.0C | [2pgdXYAS…](https://explorer.solana.com/tx/2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH?cluster=devnet) |
-| 2026-07-23T08:44Z | 13 | 41.1C | [2j9emSvs…](https://explorer.solana.com/tx/2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E?cluster=devnet) |
-| 2026-07-24T05:56Z | 17 | 33.0C | [agHTsrz1…](https://explorer.solana.com/tx/agHTsrz1Z6XhFjKN2g9DxFjJP363He2rHByvDN7r6KUDurzxxxcdj4LcfTA6AQpNsFk4cYqjk9k4kHfwgxWRFQd?cluster=devnet) |
+| UTC | seq | value | Settlement tx | Offline status |
+|---|---|---|---|---|
+| 2026-07-23T02:42Z | 10 | 29.0C | [2pgdXYAS…](https://explorer.solana.com/tx/2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH?cluster=devnet) | pruned before capture |
+| 2026-07-23T08:44Z | 13 | 41.1C | [2j9emSvs…](https://explorer.solana.com/tx/2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E?cluster=devnet) | pruned before capture |
+| 2026-07-24T05:56Z | 17 | 33.0C | [agHTsrz1…](https://explorer.solana.com/tx/agHTsrz1Z6XhFjKN2g9DxFjJP363He2rHByvDN7r6KUDurzxxxcdj4LcfTA6AQpNsFk4cYqjk9k4kHfwgxWRFQd?cluster=devnet) | captured, verifies |
+
+**Two of those three are the honest loss, and they are labelled rather than quietly dropped.**
+The bundle was built after they had already aged out, so no bytes exist for them and no offline
+check can prove them. They are recorded as `ALREADY_PRUNED`, `scripts/check-doc-links.py` reports
+them as `pruned before capture` rather than as generic dead links, and they are deliberately not
+counted anywhere as verified. The third was captured in time and decodes to seq 17 at 33.00C,
+which is exactly what its row claims, so the row can be checked rather than believed.
+
+That two-out-of-three ratio is the argument for capturing early. Nothing about those transactions
+changed; only our ability to prove them did, and it expired on a schedule set by someone else.
 
 ## The x402 earning-node settled a real paid read (machine commerce)
 The node sold one reading over x402: a 402 challenge, a client-signed stablecoin payment, and
@@ -146,20 +196,39 @@ path is exercised end to end against the asset a real buyer would hold.
   purchase rather than the seller paying itself.
 - These bytes are captured in `docs/proof-bundle/devnet-transactions.json`, so the claim survives
   the explorer link expiring. `python scripts/verify_proof_offline.py` re-verifies the ed25519
-  signature with no network at all.
+  signature and decodes the payment with no network at all:
+
+  ```
+  PASS  EkBmoDknDryQpDtD..  slot=479305550  sigs 1/1 verified  succeeded
+          ix0  ComputeBudget: SetComputeUnitLimit 50000
+          ix1  ComputeBudget: SetComputeUnitPrice 1 microlamports
+          ix2  SPL Token: TransferChecked 1.000000 (raw 1000000, 6 dp)
+          ix3  SPL Memo: Memo "x402-18c632a32e04eb24-1"
+  ```
+
+  The price and the single-use memo nonce are both in the bytes. That nonce is what makes the
+  replayed header refusable, so the mechanism is legible offline rather than only in the narration
+  above.
 
 ## The shop terminal took a real payment (Track A, reference-threaded)
 The full shop flow ran end to end on devnet with the real plugin logic (no reimplementation): a
 Solana Pay request with a fresh reference, an UNSIGNED transfer the agent builds (T1, it never
 holds a broadcast-ready transaction), the host signs and broadcasts, and payment_watch detects
 settlement. That last step is a conjunction, not a lookup: the reference must appear, AND the
-amount must match exactly, AND the mint must match, AND the destination must be ours. A payment
+amount must match exactly, AND the asset must match, AND the destination must be ours. A payment
 that satisfies three of the four is not PAID. A second check with a different reference correctly
 returns NOT_YET, so a payment is confirmed only from the on-chain match, never the customer's
 say-so.
 
+The asset term is deliberately not written as "mint" here, because this particular settlement is a
+native SOL transfer and native SOL has no mint. `payment-watch` treats the asset as either a
+specific SPL or Token-2022 mint, checked through the token-balance deltas, or native lamports,
+checked through the account lamport delta. Earlier wording here said "mint" for all four cases,
+which is right for a stablecoin payment and wrong for this one. Decoding the captured bytes is what
+exposed the imprecision.
+
 - Transfer tx `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`
-  (payment_watch verdict PAID on all four of reference, amount, mint and destination; memo invoice-e2e-1):
+  (payment_watch verdict PAID on all four of reference, amount, asset and destination; memo invoice-e2e-1):
   https://explorer.solana.com/tx/4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS?cluster=devnet
 - Reference key (threaded through all three steps) `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`.
 
@@ -184,6 +253,20 @@ say-so.
 - Reproduce: `E2E_RPC=https://api.devnet.solana.com E2E_FUNDER=<operator.json> cargo run --release`
   in `e2e-track-a/` reruns the whole flow against live devnet.
 
+**The captured bytes carry the reference mechanism, not just the payment.** Decoded offline:
+
+```
+PASS  4kDo6NCcAxSe3BST..  slot=478425564  sigs 1/1 verified  succeeded
+        ix0  System: Transfer 0.001000000 SOL
+        ix1  SPL Memo: Memo "invoice-e2e-1"
+```
+
+The transfer instruction carries three accounts: sender, recipient, and
+`6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`, the reference. That third account is read-only and
+never funded, which is why the explorer shows nothing for it while the transaction that mentions it
+is exactly the one `payment-watch` finds. `python scripts/verify_proof_offline.py --verbose` prints
+the account list so the marker can be checked against the invoice without any RPC.
+
 ## The on-chain allowance cap rejects an over-cap agent spend (custody)
 The audited Solana Foundation Allowances program (`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`)
 bounds a COMPLYING agent, not just a refusing model. On devnet the agent's session key (the
@@ -201,8 +284,34 @@ the over-cap transfer was rejected on-chain.
 - Reproduce: `cd e2e-allowance && npm install && E2E_FUNDER=<operator.json> node demo.js` (devnet)
   reruns the whole create-delegation then within-cap-then-over-cap flow.
 
+**Primary evidence is the captured bundle, not the three links above.** This is the claim that
+carries the most weight here, and it is the one that survives the links expiring intact. The raw
+bytes decode to the whole argument, cap and both amounts and the on-chain refusal, with no RPC:
+
+```
+PASS  3eeM43DgvcJqrkUA..  slot=478432691  sigs 1/1 verified  succeeded
+        ix0  SF Allowances: createFixedDelegation cap=5000000 raw units (nonce 1)
+PASS  5qyr7jJi8zb6SjZj..  slot=478432693  sigs 2/2 verified  succeeded
+        ix0  SF Allowances: transferFixed amount=5000000 raw units
+PASS  3TLSrfWVYdC3hSiA..  slot=478432696  sigs 2/2 verified  FAILED ON CHAIN: {"InstructionError": [0, {"Custom": 300}]}
+        ix0  SF Allowances: transferFixed amount=10000000 raw units
+```
+
+Read it in order: a cap of 5,000,000 base units was set, a transfer of exactly that settled, and a
+transfer of twice that was refused by the program with `Custom: 300`. The delegatee signed all
+three, so the rejection came from the audited program rather than from our plugin declining to
+build the transaction. Reproduce with `python scripts/verify_proof_offline.py`.
+
 ## How to re-verify
-Two ways, no account of ours needed:
+Three ways, no account of ours needed. The first needs no network and is the one that still works
+after the links expire, so it is listed first deliberately:
+
+- **Offline, from the repo alone:** `python scripts/verify_proof_offline.py --verbose` recomputes
+  every digest, verifies every ed25519 signature against the exact serialized message, and decodes
+  every instruction. Standard library only, no RPC, no install. Prove its controls can fail with
+  `bash scripts/mutation-check-offline-proof.sh`, which plants three defects in a copy and requires
+  each to be refused. Both run in CI on every push to main and every pull request, so neither
+  depends on anyone remembering to run them.
 - **One command, no install:** `python3 scripts/verify-proof.py` (stdlib only) queries devnet and
   prints PASS/FAIL for every claim above (programs executable, feed PDA owner, and each tx's exact
   success or rejection), exiting non-zero if any fails. A clean run prints `10/10 static claims`

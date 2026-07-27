@@ -1,5 +1,5 @@
 {
-  "captured_utc": "2026-07-27T16:43:42Z",
+  "captured_utc": "2026-07-27T19:04:40Z",
   "cluster": "devnet",
   "source_rpc": "https://api.devnet.solana.com",
   "note": "Raw base64 transactions captured before public devnet RPC prunes them (~4 day retention). Each entry is verifiable offline: the signature is ed25519 over the serialized message.",

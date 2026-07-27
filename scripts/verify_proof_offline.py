@@ -11,18 +11,24 @@ docs/proof-bundle/devnet-transactions.json it:
   1. recomputes sha256 over the decoded bytes and compares to the recorded digest,
   2. parses the Solana wire format to split signatures from the serialized message,
   3. verifies each ed25519 signature against that message and the matching account key,
-  4. decodes the instructions so a reader sees what the transaction did.
+  4. decodes every instruction so a reader sees what the transaction did.
 
 Step 3 is the load-bearing one. An ed25519 signature that verifies against a public key is proof
 that the holder of the matching private key signed exactly these bytes. No RPC, no explorer, and
 no trust in this repo's own claims are involved.
+
+Step 4 is DERIVED, never asserted. An Anchor instruction is named by recomputing
+sha256("global:<name>")[:8] and matching it against the discriminator actually present in the
+bytes, so "publish_reading" is a decode result rather than a caption. Anything this script cannot
+name from the bytes prints as unrecognized instead of being given a plausible label.
 
 Everything here is Python standard library, so a fresh clone runs it with no install step.
 
     python scripts/verify_proof_offline.py
     python scripts/verify_proof_offline.py --verbose
 
-Exit 0 when every captured transaction verifies AND both self-tests pass. Non-zero otherwise.
+Exit 0 when every captured transaction verifies AND every self-test control behaves. Non-zero
+otherwise.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ import argparse
 import base64
 import hashlib
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -158,6 +165,16 @@ def ed25519_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
 # --------------------------------------------------------------------------------------
 
 
+def digest_matches(raw: bytes, recorded: str) -> bool:
+    """Does `raw` hash to the digest recorded at capture time?
+
+    Deliberately shared by the self-test and the per-transaction loop. A control that exercises a
+    different code path than the thing it guards proves nothing about that thing, so this is the
+    one function both go through.
+    """
+    return hashlib.sha256(raw).hexdigest() == recorded
+
+
 def read_shortvec(buf: bytes, off: int) -> tuple[int, int]:
     """Solana's compact-u16. Returns (value, new_offset)."""
     value = 0
@@ -225,35 +242,215 @@ def parse_message(msg: bytes) -> dict:
 
 
 # --------------------------------------------------------------------------------------
+# Instruction decoding
+#
+# Program addresses and instruction layouts mirror crates/solana-core (pubkey.rs, instruction.rs,
+# token.rs, anchor.rs) and onchain/programs/. The two project-owned programs are decoded through
+# Anchor's own discriminator rule rather than by matching a hardcoded byte string, so the printed
+# name is derived from the bytes.
+# --------------------------------------------------------------------------------------
+
+SYSTEM_PROGRAM = "11111111111111111111111111111111"
+TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+COMPUTE_BUDGET_PROGRAM = "ComputeBudget111111111111111111111111111111"
+ALLOWANCES_PROGRAM = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44"
+ORACLE_PROGRAM = "EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn"
+CONSUMER_PROGRAM = "B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt"
+
+PROGRAM_NAMES = {
+    SYSTEM_PROGRAM: "System",
+    TOKEN_PROGRAM: "SPL Token",
+    TOKEN_2022_PROGRAM: "SPL Token-2022",
+    MEMO_PROGRAM: "SPL Memo",
+    COMPUTE_BUDGET_PROGRAM: "ComputeBudget",
+    ALLOWANCES_PROGRAM: "SF Allowances",
+    ORACLE_PROGRAM: "zeroclaw_oracle",
+    CONSUMER_PROGRAM: "consumer_example",
+}
+
+# Anchor method names this project's own programs expose. The decoder tries each and keeps the
+# one whose computed discriminator matches the bytes; a miss prints as unrecognized.
+ANCHOR_METHODS = {
+    ORACLE_PROGRAM: ("publish_reading", "register_device"),
+    CONSUMER_PROGRAM: ("act_on_feed",),
+}
+
+
+def instruction_sighash(name: str) -> bytes:
+    """Anchor's instruction discriminator: first 8 bytes of sha256("global:<name>")."""
+    return hashlib.sha256(f"global:{name}".encode()).digest()[:8]
+
+
+def _u64(data: bytes, off: int) -> int:
+    return struct.unpack_from("<Q", data, off)[0]
+
+
+def _i64(data: bytes, off: int) -> int:
+    return struct.unpack_from("<q", data, off)[0]
+
+
+def _scaled(value: int, scale: int) -> str:
+    """Render a fixed-point reading, e.g. value=3300 scale=-2 -> '33.00'."""
+    if scale > 0 or scale < -9:
+        return str(value)
+    places = -scale
+    sign = "-" if value < 0 else ""
+    digits = str(abs(value)).rjust(places + 1, "0")
+    if places == 0:
+        return f"{sign}{digits}"
+    return f"{sign}{digits[:-places]}.{digits[-places:]}"
+
+
+def _amount(raw: int, decimals: int) -> str:
+    return f"{raw / (10**decimals):.{decimals}f}" if decimals else str(raw)
+
+
+def _printable(raw: bytes) -> str:
+    text = raw.decode("utf-8", "replace")
+    return "".join(c if 32 <= ord(c) < 127 else "." for c in text)
+
+
+def decode_instruction(program: str, data: bytes, n_accounts: int) -> str:
+    """Human-readable decode of one instruction, or an explicit unrecognized marker.
+
+    Never guesses. If the program is unknown, or the discriminator does not match anything this
+    decoder knows, the result says so rather than inventing a name.
+    """
+    try:
+        if program == SYSTEM_PROGRAM and len(data) >= 4:
+            tag = struct.unpack_from("<I", data, 0)[0]
+            if tag == 4:
+                return "AdvanceNonceAccount (durable-nonce replay guard)"
+            if tag == 2 and len(data) >= 12:
+                return f"Transfer {_amount(_u64(data, 4), 9)} SOL"
+            return f"unrecognized System instruction (tag {tag})"
+
+        if program in (TOKEN_PROGRAM, TOKEN_2022_PROGRAM):
+            if data and data[0] == 12 and len(data) >= 10:
+                amount, decimals = _u64(data, 1), data[9]
+                return f"TransferChecked {_amount(amount, decimals)} (raw {amount}, {decimals} dp)"
+            tag = data[0] if data else None
+            return f"unrecognized token instruction (tag {tag})"
+
+        if program == MEMO_PROGRAM:
+            return f'Memo "{_printable(data)}"'
+
+        if program == COMPUTE_BUDGET_PROGRAM and data:
+            if data[0] == 2 and len(data) >= 5:
+                units = struct.unpack_from("<I", data, 1)[0]
+                return f"SetComputeUnitLimit {units}"
+            if data[0] == 3 and len(data) >= 9:
+                return f"SetComputeUnitPrice {_u64(data, 1)} microlamports"
+            return f"unrecognized ComputeBudget instruction (tag {data[0]})"
+
+        if program == ALLOWANCES_PROGRAM and data:
+            if data[0] == 1 and len(data) >= 33:
+                return (
+                    f"createFixedDelegation cap={_u64(data, 9)} raw units "
+                    f"(nonce {_u64(data, 1)})"
+                )
+            if data[0] == 4 and len(data) >= 73:
+                return f"transferFixed amount={_u64(data, 1)} raw units"
+            return f"unrecognized SF Allowances instruction (tag {data[0]})"
+
+        # Anchor programs: name the instruction by recomputing the discriminator.
+        if program in ANCHOR_METHODS and len(data) >= 8:
+            for name in ANCHOR_METHODS[program]:
+                if data[:8] != instruction_sighash(name):
+                    continue
+                if name == "publish_reading" and len(data) >= 46:
+                    value, scale = _i64(data, 8), struct.unpack_from("<b", data, 16)[0]
+                    unit = _printable(data[17:29].rstrip(b"\x00"))
+                    return (
+                        f"publish_reading seq={_u64(data, 29)} "
+                        f"value={_scaled(value, scale)}{unit} "
+                        f"observed_at={_i64(data, 37)} feed_kind={data[45]}"
+                    )
+                return f"{name} (discriminator matches)"
+            return "unrecognized Anchor instruction (no known discriminator matches)"
+
+        return f"unrecognized instruction ({len(data)} bytes, {n_accounts} accounts)"
+    except (struct.error, IndexError):
+        return f"undecodable instruction ({len(data)} bytes)"
+
+
+def describe_program(address: str) -> str:
+    name = PROGRAM_NAMES.get(address)
+    return f"{name}" if name else f"{address[:12]}.. (unknown program)"
+
+
+# --------------------------------------------------------------------------------------
 # Self-tests. A verifier that has never rejected anything has not been shown to work.
+#
+# Every control asserts that it actually perturbed what it claims to perturb, because a control
+# that silently mutates nothing passes for the wrong reason and reports coverage it does not have.
 # --------------------------------------------------------------------------------------
 
 
-def self_test(raw: bytes) -> tuple[bool, list[str]]:
-    """Both controls must FAIL verification, or this script cannot be trusted."""
+def self_test(raw: bytes, recorded_digest: str) -> tuple[bool, list[str]]:
+    """Controls must behave exactly as named, or results are not reportable."""
     notes = []
     sigs, msg = split_transaction(raw)
     parsed = parse_message(msg)
     key = parsed["account_keys"][0]
     sig = sigs[0]
 
+    # POSITIVE: the verifier can say yes to genuine input.
     if not ed25519_verify(key, msg, sig):
         return False, [
             "POSITIVE CONTROL FAILED: an untampered signature did not verify"
         ]
     notes.append("untampered signature verifies (positive control)")
 
+    # NEGATIVE: one flipped message byte must be rejected.
     tampered_msg = bytearray(msg)
     tampered_msg[-1] ^= 0x01
+    if bytes(tampered_msg) == msg:
+        return False, [
+            "CONTROL INVALID: the message-tamper control did not change any byte"
+        ]
     if ed25519_verify(key, bytes(tampered_msg), sig):
         return False, ["NEGATIVE CONTROL FAILED: a corrupted message still verified"]
     notes.append("one flipped message byte is rejected (negative control)")
 
+    # NEGATIVE: one flipped signature byte must be rejected.
     tampered_sig = bytearray(sig)
     tampered_sig[0] ^= 0x01
+    if bytes(tampered_sig) == sig:
+        return False, [
+            "CONTROL INVALID: the signature-tamper control did not change any byte"
+        ]
     if ed25519_verify(key, msg, bytes(tampered_sig)):
         return False, ["NEGATIVE CONTROL FAILED: a corrupted signature still verified"]
     notes.append("one flipped signature byte is rejected (negative control)")
+
+    # NEGATIVE: the digest comparison must discriminate, not merely be computed.
+    tampered_raw = bytearray(raw)
+    tampered_raw[-1] ^= 0x01
+    if bytes(tampered_raw) == raw:
+        return False, ["CONTROL INVALID: the digest control did not change any byte"]
+    if digest_matches(bytes(tampered_raw), recorded_digest):
+        return False, [
+            "NEGATIVE CONTROL FAILED: a corrupted transaction matched the digest"
+        ]
+    if not digest_matches(raw, recorded_digest):
+        return False, ["POSITIVE CONTROL FAILED: the untampered digest did not match"]
+    notes.append(
+        "one flipped transaction byte breaks the sha256 match (negative control)"
+    )
+
+    # The Anchor decode is only meaningful if a WRONG name fails to match. Prove both directions.
+    real = instruction_sighash("publish_reading")
+    decoy = instruction_sighash("publish_reading_")
+    if real == decoy:
+        return False, [
+            "CONTROL INVALID: two different Anchor names produced one discriminator"
+        ]
+    notes.append(
+        "a decoy Anchor method name yields a different discriminator (negative control)"
+    )
 
     return True, notes
 
@@ -273,8 +470,9 @@ def main() -> int:
     bundle = json.loads(path.read_text(encoding="utf-8"))
     entries = bundle.get("transactions", {})
     captured = {s: e for s, e in entries.items() if e.get("status") == "CAPTURED"}
+    pruned = {s: e for s, e in entries.items() if e.get("status") != "CAPTURED"}
 
-    print(f"offline proof verification, no network used")
+    print("offline proof verification, no network used")
     print(
         f"bundle captured {bundle.get('captured_utc')} from {bundle.get('source_rpc')}"
     )
@@ -284,8 +482,10 @@ def main() -> int:
         print("FAIL  bundle contains no captured transactions")
         return 2
 
-    first_raw = base64.b64decode(next(iter(captured.values()))["raw_base64"])
-    ok, notes = self_test(first_raw)
+    first_sig, first_entry = next(iter(sorted(captured.items())))
+    ok, notes = self_test(
+        base64.b64decode(first_entry["raw_base64"]), first_entry["raw_sha256"]
+    )
     for n in notes:
         print(f"  self-test  {n}")
     if not ok:
@@ -298,8 +498,7 @@ def main() -> int:
         raw = base64.b64decode(entry["raw_base64"])
         problems = []
 
-        digest = hashlib.sha256(raw).hexdigest()
-        if digest != entry["raw_sha256"]:
+        if not digest_matches(raw, entry["raw_sha256"]):
             problems.append("sha256 mismatch against recorded digest")
 
         sigs, msg = split_transaction(raw)
@@ -321,21 +520,47 @@ def main() -> int:
         status = "FAIL" if problems else "PASS"
         if problems:
             failures += 1
+        err = entry.get("err")
+        outcome = "succeeded" if err is None else f"FAILED ON CHAIN: {json.dumps(err)}"
         print(
             f"{status}  {sig_str[:16]}..  slot={entry.get('slot')}  "
-            f"sigs {verified}/{n_required} verified  {len(parsed['instructions'])} instruction(s)"
+            f"sigs {verified}/{n_required} verified  {outcome}"
         )
         for p in problems:
             print(f"        {p}")
-        if args.verbose and not problems:
+        for j, ix in enumerate(parsed["instructions"]):
+            prog = b58encode(parsed["account_keys"][ix["program_index"]])
+            print(
+                f"        ix{j}  {describe_program(prog)}: "
+                f"{decode_instruction(prog, ix['data'], len(ix['accounts']))}"
+            )
+            if args.verbose:
+                # The account list matters for more than completeness. A Solana Pay reference is
+                # an unfunded read-only marker that appears here and nowhere else, so this is
+                # where an invoice is tied to its settlement without asking any RPC.
+                for a in ix["accounts"]:
+                    if a < len(parsed["account_keys"]):
+                        print(
+                            f"              account  {b58encode(parsed['account_keys'][a])}"
+                        )
+        if args.verbose:
             print(f"        fee payer      {b58encode(parsed['account_keys'][0])}")
-            print(f"        err            {entry.get('err')}")
-            for j, ix in enumerate(parsed["instructions"]):
-                prog = b58encode(parsed["account_keys"][ix["program_index"]])
+            for i in range(min(n_required, len(sigs))):
                 print(
-                    f"        instruction {j}  program={prog} data={len(ix['data'])}B "
-                    f"accounts={len(ix['accounts'])}"
+                    f"        signer {i}       {b58encode(parsed['account_keys'][i])}"
                 )
+
+    if pruned:
+        print()
+        print(f"note  {len(pruned)} recorded signature(s) were pruned before capture:")
+        for s in sorted(pruned):
+            print(f"        {s[:16]}..  {pruned[s].get('status')}")
+        print(
+            "      those are real signatures the public endpoint no longer serves; they are"
+        )
+        print(
+            "      recorded rather than dropped, and are NOT counted as verified below."
+        )
 
     print()
     if failures:
