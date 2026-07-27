@@ -24,7 +24,7 @@ steps 1-7 below.
 
 ## 0. Prerequisites (10 min)
 - Rust stable ≥ 1.96 (`rustup update stable`), plus `rustup target add wasm32-wasip2`
-- A Telegram bot token (@BotFather → `/newbot`, 2 minutes)
+- A Telegram bot token (@BotFather then `/newbot`, 2 minutes)
 - A funded **devnet** keypair for the operator (`solana-keygen new`, `solana airdrop 2 --url devnet`)
 
 ## 1. Build the host with plugin support (15–20 min, one-time)
@@ -213,7 +213,7 @@ Send `/bind <code>` (printed at startup) to your bot, then talk to it:
 > a customer wants to pay 25 USDC for order #1, make me the payment link
 
 WhatsApp (optional): the daemon prints a pairing QR (`channels.whatsapp.shop.session_path`
-enables Web mode, no Meta account). Scan it from WhatsApp → Linked devices. If your terminal
+enables Web mode, no Meta account). Scan it from WhatsApp under Linked devices. If your terminal
 font distorts the QR, render it to an image first; expired refs rotate every ~20s.
 
 **Fund the paying wallet before you open the link.** The shop quotes in **devnet USDC**
@@ -253,7 +253,7 @@ Verify on explorer: the feed account's sequence increments with each run; the co
 program (`act_on_feed`) proves the feed is consumable, not a memo.
 
 ## Troubleshooting the sharp edges we hit (each cost us real time)
-| Symptom | Cause → fix |
+| Symptom | Cause and fix |
 |---|---|
 | plugins `discovered: N, registered: 0` | missing `plugins-wasm-cranelift` feature |
 | headless turn hangs forever | a tool waits on the `[Y]es/[N]o` approval prompt; auto-approve it or run attended |
