@@ -130,10 +130,42 @@ non-matching sender is refused and attributed, not that this specific customer w
 refused if some other entry were present. The admit measurement covers the converse and the
 two together bracket the policy, but neither is a substitute for the other.
 
-The group half of the policy was deliberately **not** exercised live. `group_policy =
-"ignore"` is verified at the source level instead, because the failure it prevents already
-happened once to real people, and reproducing it to generate a screenshot would repeat that
-harm for no additional evidentiary value.
+## The group half, and what it actually proves
+
+The group policy was originally left source-verified only, because the failure it prevents
+happened once to real people and reproducing it would repeat that harm. That reasoning still
+holds for a real group. It does not hold for a two-member test group containing only the
+operator and the shop, so the group side was exercised there on 2026-07-27, and the result is
+not the one that was expected.
+
+Sending an order into the group produced no reply, which is what the policy predicts, and no
+trace record at all. An absence proves nothing on its own, so the trace was checked with a
+positive control: a later direct message produced `processing inbound message`, a reply-intent
+precheck and a disposition, and the trace file grew. The instrument was therefore live and
+recording while the group message produced nothing, and the group message had been delivered.
+
+The stronger result came from trying to close the remaining ambiguity. Flipping `group_policy`
+to `"all"` to confirm that group traffic reaches the daemon at all did not open the gate,
+because **the daemon refused to start.** An `ExecStartPre` posture guard runs before the
+service and rejects the configuration outright:
+
+```
+group_policy = "all" admits every group regardless of the allowlist
+Job for zc-shop.service failed because the control process exited with error code.
+```
+
+It carries three gates: `allowed_groups` must exist, it must not be empty (on this build an
+empty list permits every group rather than none), `group_policy` must never be the open value,
+and the `mode = "business"` combination that would skip the group policy entirely is refused by
+name because that is the upstream defect this project reported. Reverting to `"ignore"` started
+the service immediately, so the guard was observed failing and passing rather than only passing.
+
+Be precise about which claim that supports. It establishes that an operator **cannot deploy an
+open group posture on this host**, deterministically, before any model runs. It does not by
+itself establish what the runtime does with a group message that arrives, and the attempt to
+measure that was stopped by the guard. The two together are a stronger custody story than the
+behavioural test would have been, because a boot-time refusal does not depend on a model
+choosing correctly, but they are different claims and the docs should not merge them.
 
 ## Why the policy is set this way
 
