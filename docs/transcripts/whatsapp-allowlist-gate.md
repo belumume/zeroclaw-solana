@@ -55,7 +55,9 @@ through the host's own structured log rather than stdout, and it lands in
 of this claim from an inference into a record.
 
 On 2026-07-27, on the ARM node, that trace carries thirteen refusals between 03:00:31Z and
-11:10:13Z, every one of them at `whatsapp_web.rs:2096` and every one at `WARN`. One record
+12:00:41Z, every one of them at `whatsapp_web.rs:2096` and every one at `WARN`. Thirteen is the
+count of distinct event ids: a plain grep returns sixteen lines because the live trace and its
+rotated temporary files overlap, and counting those would have overstated it by three. One record
 in full, unedited apart from line wrapping:
 
 ```json
@@ -71,8 +73,8 @@ They arrive in two shapes, and the difference between them is the interesting pa
 
 | shape | count | what it means |
 |---|---|---|
-| `candidates_count=1`, no address diagnostic | 8 | a plain phone-address sender, resolved, absent from the allowlist |
-| `candidates_count=2` plus `sender is LID; resolved phone did not match any allowlist entry` | 5 | a linked-identity sender whose resolution **succeeded**, still absent from the allowlist |
+| `candidates_count=1`, no address diagnostic | 9 | a plain phone-address sender, resolved, absent from the allowlist |
+| `candidates_count=2` plus `sender is LID; resolved phone did not match any allowlist entry` | 4 | a linked-identity sender whose resolution **succeeded**, still absent from the allowlist |
 
 The second shape is worth separating out. WhatsApp increasingly addresses senders by a linked
 identity rather than a phone number, and there is a known upstream defect where such a sender
@@ -86,24 +88,47 @@ Thirteen refusals over eight hours, spanning a daemon restart at 10:54Z, is also
 liveness claim wants: the channel was up and reachable throughout, and every message that
 reached it was disposed of deliberately.
 
+## The admit side, on the same host, the same day
+
+The refusals above were all produced by an allowlist that named the shop's own number rather
+than the customer's. A shop is never its own inbound sender, so that entry could never match
+and the channel refused everyone. That is fail-safe, and it is also not the claim the docs
+make, so it was corrected: the customer was added alongside the existing entry and the daemon
+restarted at 12:08:58Z. The entry was re-read after the restart rather than assumed, because
+this host rewrites `config.toml` at startup and has silently restored entries mid-test before.
+
+The last refusal landed at 12:00:41Z, eight minutes before that restart. A real order was then
+sent from the same account, in the same chat, with nothing changed but the allowlist:
+
+> `Oi! Quero fazer um pedido de R$ 45, por favor.`
+
+The reply arrived in the same minute:
+
+> R$ 45,00 na cotação de 5.0827 BRL/USD (ECB, 2026-07-24) = 8.85 USDC
+> (considerando 1 USDC = 1 USD).
+
+which is arithmetically correct, since 45 divided by 5.0827 is 8.8534, and the pay link it
+carries ends in `&lang=pt`, so the Portuguese path is the one a Brazilian customer actually
+gets rather than one that merely exists in the code.
+
+The negative half of that observation is the part worth stating: **no refusal record was
+written for it.** The trace still ends at 12:00:41Z. So the admit is confirmed twice over, by
+the reply and by the absence of the warning that every denied message produces.
+
 ## What this does and does not establish
 
-Together the two measurements establish that the allowlist is load-bearing in both
-directions. The 2026-07-25 A/B shows the admit side, where the same sender with the same text
-gets a reply in one state and silence in the other with nothing but the allowlist moving
-between them. The 2026-07-27 trace shows the deny side with the host's own attribution, at a
-named source line, against both sender address formats.
+The allowlist is load-bearing in both directions, on the current host, with the host's own
+attribution on the deny side and a live order on the admit side, separated by one config
+change and eight minutes. Same account, same chat, same policy, only the list moved.
 
-Three honest limits. First, the A/B and the trace were taken on different hosts, before and
-after the shop moved off the operator's laptop onto the ARM node, so they are two measurements
-of the same policy rather than one continuous run. Second, during the 2026-07-25 deny window
-the host rewrote `config.toml` at startup and restored one of the two real entries, so the
-allowlist was narrowed rather than emptied. That the customer still received no reply means
-the surviving entry was not theirs, which is consistent with the gate working, but a fully
-empty allowlist was not what was under test. Third, the node's current allowlist does not
-carry the customer entry the laptop config had, so re-running the admit half against the node
-today would need that entry restored first. The deny half needs nothing restored, which is
-the half a custody reviewer is actually asking about.
+Two honest limits remain. First, during the 2026-07-25 window the host rewrote `config.toml`
+at startup and restored one of the two real entries, so that earlier allowlist was narrowed
+rather than emptied; the customer still received no reply, which is consistent with the gate
+working, but a fully empty allowlist was not what was under test then. Second, the deny
+records were produced by an allowlist that admitted nobody, so they demonstrate that a
+non-matching sender is refused and attributed, not that this specific customer would be
+refused if some other entry were present. The admit measurement covers the converse and the
+two together bracket the policy, but neither is a substitute for the other.
 
 The group half of the policy was deliberately **not** exercised live. `group_policy =
 "ignore"` is verified at the source level instead, because the failure it prevents already
