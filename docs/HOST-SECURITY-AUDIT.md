@@ -74,20 +74,24 @@ The interesting part of this audit is not the count, it is the ratio.
 
 | stage | candidates |
 |---|---|
-| investigated across six dimensions | 213 |
-| dropped at the hunt stage as already-defended, out of scope, or duplicate | 176 (83%) |
+| investigated across six dimensions | 128 |
+| dropped at the hunt stage as already-defended, out of scope, or duplicate | 107 (84%) |
 | raised to adversarial verification | 21 |
-| confirmed | 10 (4.7% of all candidates) |
+| confirmed | 10 (7.8% of all candidates) |
 | partial: real defect, original claim corrected | 11 |
 | refuted outright | 0 |
 
+The counts are the hunt agents' own returned `dropped_count` and finding totals summed across the
+six dimensions, so the stages close: 107 dropped plus 21 raised is the 128 investigated, and the 21
+raised split into 10 confirmed plus 11 partial.
+
 The six dimensions were fail-open policy, untrusted-input-to-model, approval bypass, capability and
 sandbox escape, secret handling, and blast radius of the dangerous built-in tools. Each hunter was
-required to look for an existing guard and to DROP the candidate on finding one, which is where 176
+required to look for an existing guard and to DROP the candidate on finding one, which is where 107
 candidates died.
 
 Each survivor then went to a verifier told to **refute** it, and to treat a paraphrased quote as a
-refutation on its own. Nothing was refuted outright, which is expected downstream of an 83%
+refutation on its own. Nothing was refuted outright, which is expected downstream of an 84%
 pre-screen, but eleven came back partial: six had their severity lowered, eight had at least one
 named exploit step falsified, and two were reclassified as documented-by-design. Those eleven are
 not reported here, because a corrected finding still needs its correction verified before it is worth

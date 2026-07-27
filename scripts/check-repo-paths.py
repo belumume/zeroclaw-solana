@@ -31,8 +31,14 @@ def tracked():
 # A repo-relative path inside backticks or a markdown link. Deliberately narrow:
 # it must carry a directory separator or a known extension, so prose like `enum`
 # or `0x12c` is not mistaken for a file.
+#
+# The leading `\.?` is load-bearing and was missing until 2026-07-27. Without it the
+# first character class rejected any path starting with a dot, so this gate was
+# structurally blind to `.tools/`, `.demo-assets/` and `.devnet-proof/` -- which in
+# this repo is EXACTLY the gitignored set, the only paths that can fail to resolve in
+# a clone. It reported PASS while naming a file no cloner receives.
 PATH_RE = re.compile(
-    r"[`(\[]([A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:py|rs|toml|md|yml|yaml|json|sh|wit|html))[`)\]]"
+    r"[`(\[](\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:py|rs|toml|md|yml|yaml|json|sh|wit|html))[`)\]]"
 )
 
 SKIP_PREFIX = ("http", "https", "www.", "target/", "node_modules/")
@@ -44,6 +50,23 @@ SKIP_PREFIX = ("http", "https", "www.", "target/", "node_modules/")
 FOREIGN = re.compile(
     r"audited program|upstream|the host|host'?s own|zeroclaw-labs|solana-foundation|"
     r"solana-program|reference implementation|their\s",
+    re.IGNORECASE,
+)
+
+# A dot-prefixed path is OURS by construction: foreign code is cited as a URL or under
+# `crates/zeroclaw-`, never as `.tools/...`. So prose attribution must NOT exempt it.
+# That distinction matters because FOREIGN is broad enough to fire on prose that happens
+# to mention the host for an unrelated reason, and it was also matched against the path
+# text itself, so `.tools/upstream-issue-body.md` shielded itself on the word "upstream"
+# sitting inside its own filename. Both of those made the dot-path blindness invisible.
+#
+# An unshipped path may still be NAMED, because some of these are genuinely local
+# operator tools that would ship a username rather than a capability. It just has to say
+# so where it is named, so a reader arriving at that line learns it without having read a
+# disclosure a hundred lines earlier.
+UNSHIPPED_DISCLOSURE = re.compile(
+    r"not in the tree|deliberately not|git-?ignored|untracked|does not ship|"
+    r"ignored directory|local operator tool|staging copy",
     re.IGNORECASE,
 )
 
@@ -64,19 +87,25 @@ def main():
             lines = p.read_text(encoding="utf-8", errors="replace").split("\n")
         except Exception:
             continue
-        # A doc filed under docs/upstream/ is about someone else's code by definition.
-        if doc.startswith("docs/upstream/"):
-            continue
         for i, line in enumerate(lines):
             # Look at the previous line too: attribution routinely wraps, which is how
             # "the audited program's\n`helpers/transfer_data.rs`" slipped through a
             # strictly per-line check.
             window = line + " " + (lines[i - 1] if i else "")
-            if FOREIGN.search(window):
-                continue
             for m in PATH_RE.finditer(line):
                 ref = m.group(1)
                 if ref.startswith(SKIP_PREFIX) or ref in files:
+                    continue
+                # Judge attribution on the PROSE, not on the path. Matching FOREIGN
+                # against a window still containing the path let any path whose own
+                # name carried an attribution word exempt itself.
+                prose = window.replace(ref, " ")
+                if ref.startswith("."):
+                    # Ours by construction, so prose attribution does not apply; it has
+                    # to be disclosed as unshipped instead.
+                    if UNSHIPPED_DISCLOSURE.search(prose):
+                        continue
+                elif FOREIGN.search(prose):
                     continue
                 # crates/zeroclaw-* is the host's crate namespace. Ours is
                 # crates/solana-core, so this distinguishes rather than blanket-skips.

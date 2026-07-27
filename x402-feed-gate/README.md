@@ -69,9 +69,18 @@ Run end-to-end against devnet with a real token transfer:
 - Driven 2026-07-27 against the gate running under `systemd --user` on the ARM node, with the
   buyer signing on a separate machine, so this is a remote purchase and not a self-payment.
 
-(The demo used a purpose-created 6-decimal devnet mint so the whole settlement path is
-exercised without depending on acquiring a specific USDC balance; the code is
-mint-agnostic; point it at devnet/mainnet USDC by config.)
+The asset is Circle's devnet USDC mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, so the
+settlement path is exercised against the token a real buyer would hold rather than against a
+stand-in. The gate reads the mint from `X402_MINT` and hardcodes nothing, so the same binary
+points at mainnet USDC by config.
+
+Public devnet stops serving a transaction after roughly four days, so the explorer link above is
+the perishable half of this proof and not the durable one. The raw bytes are captured in
+`../docs/proof-bundle/devnet-transactions.json`, and `python ../scripts/verify_proof_offline.py`
+re-verifies the signature and decodes the payment with no network at all. The HTTP half has no
+on-chain representation, because a refusal is a response rather than a transaction, so the full
+exchange (the 402 challenge, the receipt, the earnings ledger line, and the refused replay) is
+recorded in `../docs/proof-bundle/x402-purchase-and-replay.md`.
 
 ## Configuration
 

@@ -60,7 +60,11 @@ steady rate and essentially never produce a hostile REGION, and the region is th
 attack: a lone bidi override is a character, while a sustained bidi run reorders
 everything after it.
 
-The fix is Will Wilson's, from Antithesis: keep the previous choice and re-roll
+The fix is Will Wilson's, from Antithesis, and where these borrowed techniques came
+from is recorded in [`docs/CRAFT-TESTING-TECHNIQUES.md`](docs/CRAFT-TESTING-TECHNIQUES.md),
+which reads the three source talks from full transcripts rather than summaries and marks
+the places our prior notes had a technique wrong or had invented one the sources do not
+contain. This one it ranks the highest-value of the four. The fix: keep the previous choice and re-roll
 only with low probability, the way a controller holds a button down across frames
 instead of re-deciding every frame. No individual character becomes less random;
 only the correlation between neighbours changes.
@@ -84,9 +88,12 @@ wallet. Properties are about our own functions.
 **Mined invariants.** `crates/solana-core/tests/mined_invariants.rs`. Every layer
 above asserts a property somebody chose to write down, which makes them strong
 where we anticipated the failure and silent everywhere else. This one runs the
-other direction: it OBSERVES the range of eight quantities over 2,000
-correlated-hostile samples plus the full 65,536-value `u16` domain, prints each
-one's envelope and how often a candidate law held, and asserts almost nothing.
+other direction: it OBSERVES the range of fourteen quantities and asserts almost
+nothing. Six sanitizer quantities are drawn from 2,000 correlated-hostile strings,
+five message quantities and one nonce quantity from 2,000 arbitrary instructions and
+2,000 arbitrary byte strings, and the two shortvec quantities walk the full
+65,536-value `u16` domain. Each row prints its envelope and how often a candidate
+law held.
 Promotion is a separate, deliberate step in the named tests below it, because an
 envelope that holds only because the generator never produced a counterexample is
 a description of the generator, not an invariant.
@@ -123,6 +130,24 @@ claim live and exits non-zero if any fails.
 *Cannot catch:* whether the thing is actually deployed and running, which is a
 separate question from whether it works.
 
+**Offline verification of the on-chain claims.** Public devnet RPC retains roughly four
+days, and the deadline and the judging date are two weeks apart, so every explorer link
+here is dead before anyone clicks it. `scripts/capture-proof-bundle.py` pulls the raw
+transaction bytes into `docs/proof-bundle/` while they are still served, and
+`scripts/verify_proof_offline.py` checks the signatures and decodes the instructions with
+no network at all, so a fresh clone confirms every claim unaided.
+
+The capture tool refuses to overwrite an entry it already holds. Re-running it after a
+transaction ages out would replace real captured bytes with a pruned marker, which would
+destroy the thing it exists to preserve, and it would do that most reliably on the second
+run when everything looks routine. Both directions were driven before it was trusted:
+capture says OK, re-run says SKIP.
+
+*Cannot catch:* anything about a transaction that was already pruned before capture. Those
+are labelled as such rather than left looking like failures, because a transient fetch error
+and a permanent absence are different facts and recording them as one is how evidence dies
+quietly.
+
 ## The gaps between layers, which is where this build actually broke
 
 Every expensive failure here passed every layer above it.
@@ -156,11 +181,24 @@ and publishing it would ship a username rather than a capability. It is named he
 for its reasoning, not as evidence you can re-run. The checks a reader *can* run
 are the ones in this document with commands next to them.
 
+The one runtime check that does ship is `scripts/whatsapp_posture_guard.sh`, which runs as
+`ExecStartPre` and refuses to start the shop when the WhatsApp group posture is fail-open.
+It exists as a start gate rather than a comment because on this host build an empty
+`allowed_groups` means permit-all rather than permit-none, and the live config neutralises
+that with a dummy JID matching no real group. That dummy looks like junk, so the realistic
+failure is somebody tidying it away and silently reopening every group the account belongs
+to. This project has already had that incident once. The guard fails closed, since a shop
+that will not boot is recoverable and a shop that answers a school group is not, and it was
+observed both refusing and passing rather than only refusing: flipping the policy open made
+the daemon refuse to start, and reverting started it immediately. Its controls are
+`scripts/test_whatsapp_posture_guard.sh`, in both directions, because only-must-refuse is
+satisfied by a guard that refuses everything and only-must-pass by one that refuses nothing.
+
 ## Running them
 
 ```
-cargo test -p solana-core                    # units + KATs
-cargo test -p solana-core --test properties  # 23 properties, 1024 cases each
+(cd crates/solana-core && cargo test)                   # units + KATs
+(cd crates/solana-core && cargo test --test properties) # 23 properties, 1024 cases each
 ./scripts/mutation-check.sh                  # proves the property suite can fail
 python3 scripts/verify-proof.py              # live on-chain claims, exits non-zero on failure
 python3 scripts/check-doc-links.py           # every link in these docs points at something real
@@ -168,6 +206,14 @@ python3 scripts/check-config-drift.py        # the documented posture is the run
 python3 scripts/check-shadowed-scripts.py    # no ignored copy shadows a tracked script
 python3 scripts/check-repo-paths.py          # every repo path a doc names is itself tracked
 ```
+
+The two cargo lines carry a `cd` because there is no manifest at the repo root, so the
+`-p solana-core` form they used until 2026-07-27 failed in a fresh clone with "could not
+find `Cargo.toml`" before running a single test. Every crate here is its own workspace so
+that `solana-sdk`, which the devnet harnesses need and which does not compile for
+`wasm32-wasip2` inside a WIT component, stays out of the components' dependency graphs. The
+same applies to the build step in `QUICKSTART.md`. The remaining six lines run from the repo
+root as written.
 
 `check-repo-paths.py` covers the gap next to `check-doc-links.py`: that one resolves links,
 this one resolves file references, and a reference is the case that looks fine locally and
@@ -177,6 +223,20 @@ legitimately cite the host's source and the audited program's source, and it mat
 filenames against tracked basenames. Both rules were earned: the first pass flagged twenty
 references and every one was a false positive, which is worse than no gate, because a check that
 cries wolf teaches its reader to skip it. A planted dead link is what proves it still fires.
+
+Its own controls are `scripts/test_check_repo_paths.py`, and they run in both directions for
+a reason this gate demonstrated on itself. It reported PASS for as long as it existed while
+`TESTING.md` named a gitignored file, because its path pattern required a reference to begin
+with a letter, digit or underscore. A leading dot never matched, and in this repo the
+dot-prefixed directories are exactly the gitignored set, so it was structurally blind to the
+only paths that can fail to resolve in a clone. Two narrower faults hid it further: a
+reference whose own filename contained an attribution word exempted itself, since the
+citation check ran against text that still included the path, and everything under
+`docs/upstream/` was skipped wholesale. Any one of the three was sufficient on its own, so
+fixing only the pattern would have left a gate that still passed. The first must-fire case in
+the suite is that verbatim sentence, and all five must-fire cases are driven against a
+pre-fix copy of the gate as well, because a control that has never failed has not been shown
+to work.
 
 Two of these now run in CI, in the `publish-gates` job: `check-repo-paths.py` and
 `check-shadowed-scripts.py`. Both are pure git plus filesystem, so they give the same answer on
@@ -205,10 +265,14 @@ The devnet harnesses need a funded operator keypair and are documented in
 Three workflows, deliberately separate, because they answer different questions and a
 red badge should tell you which one broke.
 
-None of the three has ever executed. This repository has no git remote, so no push has
-triggered a run and no badge has rendered; what backs the section below is the same command
-list run on this machine, 19 of 19 passing, via `.tools/verify-ci-locally.sh`. Everything
-here is therefore true of the steps and not yet true of a run.
+Two of the three have now run. This repository gained a git remote on 2026-07-27, and the
+first push triggered `ci.yml` and `proof-check.yml` that afternoon. By that evening `ci.yml`
+had run seven times and `proof-check.yml` four, each green on its most recent run, each with
+failures earlier the same day while the offline proof bundle was being built. `host-drift.yml`
+has never executed: its schedule fires at 05:41 UTC and the repository has only existed on the
+remote since 14:51 UTC, while its push trigger is filtered to `wit/**`, which no push since
+has touched. So the two workflows that gate this repository's own code are backed by real
+runs, and the one that watches upstream is still true of its steps rather than of a run.
 
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
 in `crates/solana-core`, which executes all four suites there for 120 tests rather than the
@@ -217,7 +281,7 @@ errors on both the host and `wasm32-wasip2`, the release build of the shipped wa
 the fail-closed certification self-test, then all eight plugin components in a matrix.
 Everything is offline and deterministic, and `--locked` throughout, so a green run also
 proves the committed lockfiles are the ones that work. That is the claim a reproducibility
-promise actually rests on, and it rests on this machine until the first push.
+promise actually rests on, and it now rests on a clean runner rather than on this machine.
 
 `ci.yml` also gates the supply chain with `cargo deny`, and the allow-list in `deny.toml`
 is derived rather than guessed: it is the exact set of distinct licenses in the graph, all
@@ -260,8 +324,11 @@ failure where something builds here and nowhere else, and it catches a lockfile 
 from the code. Of the three failures in the section above, it would have caught none of
 them on its own. The drift one is now covered by `host-drift.yml`; the dropped cargo
 feature and the wrong-direction pre-flight assertion both live in the host and the live
-config, outside this repo's reach, which is why `.tools/demo-preflight.sh` reads the
-running daemon's own banner instead.
+config, outside this repo's reach, which is why the pre-flight script reads the running
+daemon's own banner instead. That script, `.tools/demo-preflight.sh`, is gitignored and
+deliberately not in the tree, as above: it is hardcoded to one machine's socket, log path
+and home directory, so publishing it would ship a username rather than a capability. It is
+named here for its reasoning and is not something you can run from a clone.
 
 ## Keeping the properties honest
 

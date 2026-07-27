@@ -2,11 +2,14 @@
 
 Status: FILED 2026-07-25 as https://github.com/zeroclaw-labs/zeroclaw/issues/9348
 
-Body as filed: `.tools/upstream-issue-body.md` (audited before posting: 0 em
-dashes, 0 flagged vocabulary, 0 operator identifiers, no local paths, no phone
-numbers, no group names). Maintainers active on this area: JordanTheJet, tidux,
-Audacity88, Nillth. Offered a PR for whichever of the three fixes they prefer,
-so the follow-up is a genuine merge opportunity rather than a drive-by report.
+Body as filed is reproduced in full below, between the horizontal rules, from
+`## Title` to the end of `## Notes` (audited before posting: 0 em dashes, 0
+flagged vocabulary, 0 operator identifiers, no local paths, no phone numbers, no
+group names). This line pointed at a gitignored staging copy until 2026-07-27,
+which resolved to nothing in a clone while the text it named was already on the
+page. Maintainers active on this area: JordanTheJet, tidux, Audacity88, Nillth.
+Offered a PR for whichever of the three fixes they prefer, so the follow-up is a
+genuine merge opportunity rather than a drive-by report.
 
 Prior art checked (none cover this): 4110 (policy keys rejected as unknown
 config keys, closed), 6371 (per-JID allowed_groups feature, closed), 6413

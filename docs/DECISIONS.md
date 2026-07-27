@@ -104,13 +104,27 @@ deterministic pattern eats Solana Pay's mandatory `spl-token=` parameter, so eve
 link left the shop as unusable redacted text. Keeping it on would have meant the demo does
 not work.
 
-**Why this is not a hole.** The defense belongs at the source. This agent's jail gives it a
-workspace-only shell and no path to the config, so it has no access to a secret to leak. An
-output regex is the wrong layer to defend a boundary that is already closed upstream, and it
-was actively breaking the correct behaviour.
+**Why this is not a hole.** The reason recorded here until 2026-07-27 was that the agent's
+jail gives it a workspace-only shell and no path to the config, so it has no secret to leak.
+That claim is retracted. It rested on one verified axis, the `unrestricted_filesystem = false`
+flag, and generalised it into a guarantee about secrets that nothing here established. It is
+also falsified by our own host audit: issue #9386 records a Gemini API key travelling in a
+request URL, surviving error sanitization, and being posted into the originating chat. That
+path never touches the filesystem, so a jail that closes the filesystem does not close it,
+and this shop runs Gemini primary with the detector off, which is precisely where the two
+compound.
+
+The narrower claim is the one that holds, and it is the one `QUICKSTART.md` and the write-up
+already make: this agent holds no key that can move funds. Signing lives outside it, the
+recipient is pinned in the page that transfers, and the spend ceiling is enforced by an
+audited on-chain program rather than by any jail or regex. The assets actually at risk are
+customer funds, shop business data and durable agent memory, and an outbound regex is the
+wrong layer for all three while demonstrably mangling public on-chain data.
 
 **Consequence.** Stated plainly in QUICKSTART with the reasoning, because a reviewer who sees
-a disabled security setting deserves the argument rather than a silent flag.
+a disabled security setting deserves the argument rather than a silent flag. An operator who
+does hold secrets reachable from this agent should keep the detector on and expect broken
+payment links until upstream grows an allowlist.
 
 ## 6. Brazilian payments are quoted in BRL and settled in USDC
 

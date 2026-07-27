@@ -64,9 +64,10 @@ OWASP LLM01 on the response path). Both directions are handled fail-closed, in t
    is displayed, so a crafted `from` string can never panic a byte-slice or leak hidden framing.
 7. The report itself is shaped: 1 to 3 lines, measured at 495 bytes worst-case PAID and 556
    worst-case NOT_YET, versus a raw `getTransaction` of roughly 40 KB. Judges call `execute` and
-   count tokens; this never floods. The figures are printed by the tests rather than asserted
-   from memory, so they cannot drift (`worst_case_output_is_bounded_on_both_verdict_branches`,
-   `the_corroborated_report_stays_bounded_on_every_branch`).
+   count tokens; this never floods. Both figures are printed by
+   `worst_case_output_is_bounded_on_both_verdict_branches` under `--nocapture`, so a reader can
+   re-derive them instead of trusting this line; the bound is asserted there and in
+   `the_corroborated_report_stays_bounded_on_every_branch`.
 8. Every check above verifies the CONTENTS of an RPC response while trusting that the response
    describes the chain at all. That trust is the last unguarded assumption here, and it is the
    expensive one: a compromised endpoint can fabricate both the signature list and the
@@ -185,7 +186,7 @@ that scans up to five pages of signatures stays internal; what reaches the agent
 Measured on both branches with every attacker-reachable field driven to its worst case at once,
 a 4 KB invoice label, an oversized injection memo carrying a zero-width split, and an
 unrecognised mint so the asset renders as an address rather than borrowing a symbol from the
-token: **PAID composes to 367 bytes and NOT_YET to 556**, asserted under 2000 in
+token: **PAID composes to 495 bytes and NOT_YET to 556**, asserted under 2000 in
 `worst_case_output_is_bounded_on_both_verdict_branches`.
 
 NOT_YET is the larger of the two because it is the branch with the most optional pieces, adding

@@ -36,9 +36,10 @@ The instruction names are derived, not asserted. An Anchor instruction is identi
 `publish_reading` below is a decode result. Anything the decoder cannot name from the bytes prints
 as unrecognized rather than receiving a plausible label.
 
-**Current result: 12 of 12 captured transactions verify, controls pass, exit 0.** Three further
-signatures were pruned by the endpoint before capture could reach them; they are recorded as
-`ALREADY_PRUNED` rather than dropped, and are deliberately not counted as verified.
+**Current result: every captured transaction verifies, controls pass, exit 0.** The script prints
+the count it verified rather than this page asserting one; at the capture in this bundle it reports
+12. Three further signatures were pruned by the endpoint before capture could reach them; they are
+recorded as `ALREADY_PRUNED` rather than dropped, and are deliberately not counted as verified.
 
 The script gates itself on negative controls and refuses to report anything unless each behaves: a
 flipped message byte, a flipped signature byte and a flipped transaction byte must each be rejected,
@@ -187,7 +188,11 @@ path is exercised end to end against the asset a real buyer would hold.
 - The reading served in exchange came from the node's own feed `JEtuZkcRze…` at sequence 177.
 - Replaying the identical `X-PAYMENT` header was refused with HTTP 402 and
   `"rejected":"NonceReused"`, because the payment's memo nonce is single-use. The refusal offers a
-  fresh challenge rather than failing silently.
+  fresh challenge rather than failing silently. That refusal is a response and not a transaction,
+  so it has no on-chain representation and no signature to look up. The full HTTP exchange that
+  carries it, the 402 challenge with both price tiers, the receipt header, the served reading, the
+  refused replay, and the earnings ledger line, is recorded verbatim in
+  `docs/proof-bundle/x402-purchase-and-replay.md`.
 - Public parties: buyer `E36NJ7FvFSQxegFemCEL76GrBVUcVSEWvihne5WFxBdf`, seller receiving wallet
   `C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ` (receiving ATA
   `6L348RziHrFG1TELfCNUTUPQjBLziYn5JatxsQoY4ekD`), asset

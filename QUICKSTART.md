@@ -13,8 +13,9 @@ create your own.
 the `x402-feed-gate` node, and the `webshop-pay` pay page. Steps 2-7 run from a clone of this repo.
 
 **Fastest path to "seeing it work" (5 min, after the one-time build in step 1):** run
-`cargo test` across `crates/solana-core` and `x402-feed-gate` (all green, no network), then
-`zeroclaw sop validate`. To confirm the live chain instead of rebuilding, run
+`(cd crates/solana-core && cargo test)` and `(cd x402-feed-gate && cargo test)` (all green,
+no network), then `zeroclaw sop validate`. The `cd` is required rather than stylistic: there
+is no cargo manifest at the repo root, for the reason given in step 2. To confirm the live chain instead of rebuilding, run
 `python3 scripts/verify-proof.py` (stdlib only, no install): it queries devnet and prints
 PASS/FAIL for every on-chain claim, ending in `10/10 static claims` plus `2/2 live claims`
 (the split matters: only the live ones can go red). Or open any explorer link
@@ -97,17 +98,35 @@ strings <plugin>.wasm | grep -c memory-audit    # expect 1; a stale build gives 
 while any plugin is unbuilt, so it cannot pass you on partial evidence.
 
 ## 2. Build + install the plugins (10 min)
+There is deliberately no cargo manifest at the repo root, so `cargo` has to run inside a
+crate directory and a bare `cargo build` here fails with "could not find `Cargo.toml`".
+Every plugin is its own workspace on purpose: `solana-sdk` does not compile for
+`wasm32-wasip2` inside a WIT component, and the devnet harnesses depend on it, so a root
+workspace would drag it into every component's graph. The isolation is the reason the wire
+format is hand-decoded at all.
+
 From this repo:
 ```
-cargo build --target wasm32-wasip2 --release            # builds all plugin components
+for d in plugins/*/; do (cd "$d" && cargo build --target wasm32-wasip2 --release) || break; done
 zeroclaw plugin install ./plugins/<name>/               # per plugin; repeat as needed
 zeroclaw config set plugins.enabled true
 ```
+Each component lands at `plugins/<name>/target/wasm32-wasip2/release/<name>.wasm` with the
+hyphens in its name turned to underscores, so `payment-watch` produces `payment_watch.wasm`.
+That is the path the `strings <plugin>.wasm` check in step 1 wants.
+
 Each plugin dir carries `manifest.toml` (minimal permissions) and a README with its config
-keys, custody tier and threat model. The plugins that build a transaction or sign one also
-carry a captured prompt-injection transcript; the two read-only ones (`token-risk-check`,
-`lending-health`) carry the threat model without a captured attack, because there is no
-action for an injection to redirect.
+keys, custody tier and threat model. Six of the eight carry a captured prompt-injection
+transcript. The two that do not, `token-risk-check` and `lending-health`, carry the threat
+model without a captured attack, because an injection reaching them has nothing to redirect.
+
+Being read-only is not what decides that, and this page used to say it was. Three plugins
+are T0 read-only, not two: `token-risk-check`, `lending-health` and `payment-watch`.
+`payment-watch` holds no key and signs nothing, and it carries a transcript anyway, because
+the verdict it returns is what a shop acts on when it hands over goods, and the on-chain
+memo it reads back is attacker-controlled. What predicts a transcript is whether an
+injection has something to redirect: a transaction for four of them, the recipient inside
+the payment URL for `solana-pay-request`, and a settle-or-not verdict for `payment-watch`.
 
 ## 3. Configure the agent (10 min)
 ```
@@ -213,8 +232,20 @@ Send `/bind <code>` (printed at startup) to your bot, then talk to it:
 > a customer wants to pay 25 USDC for order #1, make me the payment link
 
 WhatsApp (optional): the daemon prints a pairing QR (`channels.whatsapp.shop.session_path`
-enables Web mode, no Meta account). Scan it from WhatsApp under Linked devices. If your terminal
-font distorts the QR, render it to an image first; expired refs rotate every ~20s.
+enables Web mode, no Meta account). Scan it from WhatsApp under Linked devices. The code
+rotates about every 20 seconds and the daemon stops emitting after roughly two minutes, so
+any route that copies an image to a phone is slower than the rotation and hands over a code
+that is already dead. Serving the live one is what works:
+```
+python3 scripts/qr_live_server.py        # serves on 127.0.0.1 port 8899, self-refreshing
+```
+It reads the daemon log, reconstructs the modules from the half-block art (each text row
+carries two module rows, so this is lossless), and emits SVG, which needs no imaging library.
+It self-tests before serving and prints the grid size, because a page that renders nothing
+looks exactly like the pairing window having closed. The log path and port are constants at
+the top of the file; the default is the reference node's, so edit it if yours differs. A
+terminal font that distorts the QR is a rendering problem in your terminal rather than in the
+code, and this sidesteps it by never asking the terminal to draw it.
 
 **Fund the paying wallet before you open the link.** The shop quotes in **devnet USDC**
 (mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, Circle's devnet USDC), so devnet SOL

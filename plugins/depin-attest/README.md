@@ -106,7 +106,13 @@ Attestation landed on devnet:
 - instruction 0: `system::advanceNonce`; instruction 1: `spl-memo` with
   `zeroclaw-depin/v1 tamper_triggered dev=sensor-A7 at=1737300000`
 - signed by the scoped operator, `err: None`
-- https://explorer.solana.com/tx/cHvDQsPXk8EfFuiyRPuT1S3jCVag3RozQ5vpGtNzyQeEGrL9bfoHj7NmGzFDqK34ZCbFza5pkAKbiKoBNwUGVJr?cluster=devnet
+
+That signature no longer resolves and is kept here as history rather than offered as evidence.
+Public devnet stops serving a transaction after roughly four days, and this run predates the
+offline proof bundle, so its raw bytes were never captured and there is nothing to check it
+against. What is checkable today is the reproduce path below, which re-drives the same flow
+against live devnet, and the repo's `docs/proof-bundle/devnet-transactions.json`, which holds the
+raw bytes for the transactions that were captured before they aged out.
 
 Replay proof demonstrated on devnet:
 
