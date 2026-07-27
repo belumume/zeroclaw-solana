@@ -1,5 +1,5 @@
 {
-  "captured_utc": "2026-07-27T19:04:40Z",
+  "captured_utc": "2026-07-27T22:04:36Z",
   "cluster": "devnet",
   "source_rpc": "https://api.devnet.solana.com",
   "note": "Raw base64 transactions captured before public devnet RPC prunes them (~4 day retention). Each entry is verifiable offline: the signature is ed25519 over the serialized message.",
@@ -130,6 +130,10 @@
       "raw_base64": "AQvaUXSBYp+/g6vxbTqqO29uXPYRuWaOy5xkSocMWODySciAXtPgio873TzUv+isbZ7IncOPZ0ZcdbTyCyYZZA8BAAQHwbEpCtggX4jKhf4mUQL9XOy9P7nMlfLhSpBgYQW7Ks5PKsraURCuXapLSeYdlQ2OIn+lY4R4HcJxptR7BtGD5tR2DLiahp3AvuGq7D8vxLKRJPvTUi9nzafT77yWbz05AwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAAFSlNamSkhBk0k6HFg2jh8fDW13bySu4HkH6hAQQVEjQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpO0Qss5EhV/E6kz0BNCgtAytf/s0Botvxt3kGCN8ALqesEVETuG0qEM3uacqbHBIIBY1Hg6k3bnR1UDCErG8L8wQDAAUCUMMAAAMACQMBAAAAAAAAAAUEAgYBAAoMQEIPAAAAAAAGBAEAF3g0MDItMThjNjMyYTMyZTA0ZWIyNC0x",
       "raw_sha256": "8f3b322d855670e4412c9946d2f36ace33206f9177a251ff0f4aa612b9d12b15",
       "raw_len": 390
+    },
+    "cHvDQsPXk8EfFuiyRPuT1S3jCVag3RozQ5vpGtNzyQeEGrL9bfoHj7NmGzFDqK34ZCbFza5pkAKbiKoBNwUGVJr": {
+      "status": "ALREADY_PRUNED",
+      "detail": "endpoint no longer serves this transaction"
     }
   }
 }

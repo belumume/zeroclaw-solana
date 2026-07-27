@@ -201,7 +201,8 @@ satisfied by a guard that refuses everything and only-must-pass by one that refu
 (cd crates/solana-core && cargo test --test properties) # 23 properties, 1024 cases each
 ./scripts/mutation-check.sh                  # proves the property suite can fail
 python3 scripts/verify-proof.py              # live on-chain claims, exits non-zero on failure
-python3 scripts/check-doc-links.py           # every link in these docs points at something real
+python3 scripts/check-doc-links.py           # every link in a tracked doc points at something real
+python3 scripts/check-proof-links.py         # every linked transaction is backed by captured bytes
 python3 scripts/check-config-drift.py        # the documented posture is the running one
 python3 scripts/check-shadowed-scripts.py    # no ignored copy shadows a tracked script
 python3 scripts/check-repo-paths.py          # every repo path a doc names is itself tracked
@@ -212,7 +213,7 @@ The two cargo lines carry a `cd` because there is no manifest at the repo root, 
 find `Cargo.toml`" before running a single test. Every crate here is its own workspace so
 that `solana-sdk`, which the devnet harnesses need and which does not compile for
 `wasm32-wasip2` inside a WIT component, stays out of the components' dependency graphs. The
-same applies to the build step in `QUICKSTART.md`. The remaining six lines run from the repo
+same applies to the build step in `QUICKSTART.md`. The remaining seven lines run from the repo
 root as written.
 
 `check-repo-paths.py` covers the gap next to `check-doc-links.py`: that one resolves links,
@@ -238,20 +239,44 @@ the suite is that verbatim sentence, and all five must-fire cases are driven aga
 pre-fix copy of the gate as well, because a control that has never failed has not been shown
 to work.
 
-Two of these now run in CI, in the `publish-gates` job: `check-repo-paths.py` and
-`check-shadowed-scripts.py`. Both are pure git plus filesystem, so they give the same answer on
-any machine, which is what makes them meaningful on a runner. The other two stay manual on
-purpose. `check-doc-links.py` exits non-zero on the unfilled repo-URL placeholders, and wiring a
-known-red check into CI teaches a reader to ignore a red badge, so it goes in at publish.
+`check-proof-links.py` closes a different gap again, and it is the one the other two could not
+see. A clickable explorer link is an offer of evidence, but public devnet stops serving a
+transaction after about four days, so the only durable backing is the raw bytes in
+`docs/proof-bundle/`. A link to a signature nobody captured renders exactly like one that is
+fully backed, and decays into a dead end on a schedule this repo does not control. So the rule is
+that any `explorer.solana.com/tx/` link in a tracked document must resolve to a `CAPTURED` entry
+in the bundle. There is no prose escape hatch, because two rows in `DEVNET-PROOF.md` carried one:
+the adjacent column read "pruned before capture" while the signature stayed clickable, so the
+label was accurate and the link was still a dead end. The two remedies are to capture the bytes
+with `scripts/capture-proof-bundle.py` while the endpoint still serves them, or to de-link the
+signature so it reads as history, which is what `plugins/depin-attest/README.md` does.
+
+Its controls are `scripts/test_check_proof_links.py`, ten cases in three directions rather than
+the usual two. Must-fire covers both halves of the incident, the labelled dead link and the plugin
+README that no hand-maintained document list could see. Must-not-fire covers the de-linked history
+form, since a gate that flagged that would be pushing authors to delete real history rather than
+to stop offering it as proof. The third bucket is the one most suites omit: a missing bundle, a
+bundle holding nothing, or a scan that matches no links at all must exit 2 rather than 0, because
+a gate that cannot do its job must not print what a gate that did its job prints.
+
+Three of these now run in CI, in the `publish-gates` job: `check-repo-paths.py`,
+`check-shadowed-scripts.py` and `check-proof-links.py`, the last with its own control suite as a
+separate step. All three are pure git plus filesystem, so they give the same answer on any
+machine, which is what makes them meaningful on a runner. The other two stay manual on purpose.
+`check-doc-links.py` exits non-zero on the unfilled repo-URL placeholders, and wiring a known-red
+check into CI teaches a reader to ignore a red badge, so it goes in at publish.
 `check-config-drift.py` compares against a config on the operator's machine, which a runner does
 not have, so running it there would assert nothing while looking like coverage.
 
-The last three are pre-publish gates rather than tests. `check-doc-links.py` deliberately does
-not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
+The four `check-*` lines are pre-publish gates rather than tests. `check-doc-links.py` deliberately
+does not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
 signature that does not exist, so a status-code checker would report a confident pass on a dead
 link. It extracts the signature or address and resolves it against devnet instead. It also
 knows that a Solana Pay reference is never a funded account and checks the signature index for
-those, since calling that a dead link would be a false alarm on the mechanism working.
+those, since calling that a dead link would be a false alarm on the mechanism working. Its scope is
+derived from `git ls-files` rather than enumerated, because the enumerated version listed six
+documents and the plugin READMEs were not among them, which is how a dead link survived every
+green run of a checker built to find exactly that.
 
 It currently exits non-zero on two unfilled `<repo URL>` placeholders, which is the intended
 behaviour: those are the one thing that cannot be filled before the repository is public, and a

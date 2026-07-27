@@ -160,16 +160,22 @@ longer publishing.
 
 | UTC | seq | value | Settlement tx | Offline status |
 |---|---|---|---|---|
-| 2026-07-23T02:42Z | 10 | 29.0C | [2pgdXYAS…](https://explorer.solana.com/tx/2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH?cluster=devnet) | pruned before capture |
-| 2026-07-23T08:44Z | 13 | 41.1C | [2j9emSvs…](https://explorer.solana.com/tx/2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E?cluster=devnet) | pruned before capture |
+| 2026-07-23T02:42Z | 10 | 29.0C | `2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH` | pruned before capture, no bytes held |
+| 2026-07-23T08:44Z | 13 | 41.1C | `2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E` | pruned before capture, no bytes held |
 | 2026-07-24T05:56Z | 17 | 33.0C | [agHTsrz1…](https://explorer.solana.com/tx/agHTsrz1Z6XhFjKN2g9DxFjJP363He2rHByvDN7r6KUDurzxxxcdj4LcfTA6AQpNsFk4cYqjk9k4kHfwgxWRFQd?cluster=devnet) | captured, verifies |
 
 **Two of those three are the honest loss, and they are labelled rather than quietly dropped.**
 The bundle was built after they had already aged out, so no bytes exist for them and no offline
-check can prove them. They are recorded as `ALREADY_PRUNED`, `scripts/check-doc-links.py` reports
-them as `pruned before capture` rather than as generic dead links, and they are deliberately not
+check can prove them. They are recorded as `ALREADY_PRUNED` in the bundle and deliberately not
 counted anywhere as verified. The third was captured in time and decodes to seq 17 at 33.00C,
 which is exactly what its row claims, so the row can be checked rather than believed.
+
+The first two signatures are printed here as plain text rather than as explorer links, and that
+difference is the whole point of the last column. A link is an offer of evidence, so offering one
+to a transaction whose bytes nobody holds hands a reader a dead end dressed as a proof. Only the
+third is linked, because only the third can be checked. `scripts/check-proof-links.py` enforces
+that rule mechanically across every tracked document, so the distinction cannot quietly erode the
+next time a row is added.
 
 That two-out-of-three ratio is the argument for capturing early. Nothing about those transactions
 changed; only our ability to prove them did, and it expired on a schedule set by someone else.

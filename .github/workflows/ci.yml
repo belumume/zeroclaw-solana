@@ -97,6 +97,28 @@ jobs:
       - name: no gitignored copy shadows a tracked script
         run: python3 scripts/check-shadowed-scripts.py
 
+      # A clickable explorer link is an offer of evidence, and public devnet stops serving a
+      # transaction after about four days, so the only durable backing is the captured bytes in
+      # the proof bundle. A link to a signature nobody captured renders identically to one that
+      # is fully backed and decays into a dead end on someone else's schedule. Two of them sat in
+      # DEVNET-PROOF's own table with the adjacent column correctly reading "pruned before
+      # capture", which is why an accurate label is not a substitute for the link being real.
+      #
+      # This belongs on a runner rather than beside check-doc-links.py: it is pure git plus one
+      # JSON file, no network, so it is green today and a red badge means a real regression. Its
+      # own controls run in the step below.
+      - name: every linked transaction is backed by captured bytes
+        run: python3 scripts/check-proof-links.py
+
+      # The step above is only worth something if it can tell a backed link from a dead one, and
+      # a suite written alongside the code it tests can agree with a bug. These ten cases cover
+      # three directions: must-fire on the two real incident shapes, must-not-fire on the
+      # de-linked history form the gate steers toward, and must-refuse-to-pass when the bundle or
+      # the scope derivation cannot be read at all. Case 1 is the verbatim table row that
+      # shipped, so if it stops firing the gate is blind again.
+      - name: the proof-link gate's controls actually gate
+        run: python3 scripts/test_check_proof_links.py
+
       # The on-chain evidence outlives the links to it. Public devnet RPC prunes
       # after about four days, so every explorer link in DEVNET-PROOF is dead well
       # before judging. This verifies the captured raw transactions instead:

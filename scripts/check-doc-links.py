@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
-"""Every link in the judge-facing docs points at something that exists. (stdlib only)
+"""Every link in a tracked document points at something that exists. (stdlib only)
 
     python3 scripts/check-doc-links.py
 
-Exit 0 = every link resolves to a real object. Exit 1 = at least one is dead.
+Exit 0 = every link resolves to a real object. 1 = at least one is dead. 2 = could not verify.
+
+SCOPE IS DERIVED, AND THAT IS A FIX RATHER THAN A STYLE CHOICE
+--------------------------------------------------------------
+This enumerated six documents by hand until 2026-07-27. Plugin READMEs were not among them, which
+is how a dead explorer link sat in `plugins/depin-attest/README.md` through every green run of
+this checker: the link was never looked at, so the gate could not have found it however correct
+its logic was. A hand-maintained scope does not stay wrong, it goes wrong later, because the list
+is edited by whoever remembers and the repo grows by whoever ships.
+
+Scope is now every tracked markdown file, because a reader receives exactly the tracked tree. The
+six former entries survive only as a canary: if the derivation ever stops finding them, that is a
+broken instrument rather than a clean repo, and this exits 2 instead of pretending.
 
 WHY THIS IS NOT AN HTTP LINK CHECKER
 ------------------------------------
-Twenty of the links here are `explorer.solana.com` URLs, and the explorer is a
+Most links here are `explorer.solana.com` URLs, and the explorer is a
 single-page app: it returns HTTP 200 for a transaction signature that does not
 exist, renders "not found" in JavaScript, and a checker looking at status codes
 calls that a pass. Running one would produce a green result that means nothing,
@@ -29,6 +41,7 @@ false failure gets muted just as fast as one that reports a false pass.
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -39,21 +52,59 @@ REPO = Path(__file__).resolve().parent.parent
 RPC = os.environ.get("RPC_URL", "https://api.devnet.solana.com")
 UA = "Mozilla/5.0 (compatible; zeroclaw-doc-link-check/1.0)"
 
-DOCS = [
+# NOT the scope. These are the six documents this checker used to enumerate, kept as a floor: any
+# derivation that stops returning them has broken, and a broken derivation reports a clean tree.
+CANARY = (
     "README.md",
     "QUICKSTART.md",
     "TESTING.md",
     "docs/WRITEUP-DRAFT.md",
     "docs/DEVNET-PROOF.md",
     "docs/DECISIONS.md",
-]
+)
+
+# Two shapes that are ILLUSTRATIONS of a URL rather than URLs, and both only became reachable when
+# the scope widened past the six prose documents. Fetching either is meaningless: the first cannot
+# be encoded at all, and the second is a documented shape whose secret was deliberately removed.
+# They are reported as skipped rather than dropped, because a link nobody checked should say so.
+ABBREVIATED = re.compile(
+    r"[^\x00-\x7f]"
+)  # a prose ellipsis, so the URL is a display fragment
+REDACTED_QUERY = re.compile(r"REDACTED|YOUR[_-]|xxxxx", re.I)
+
+
+def tracked_markdown():
+    """Every markdown file a cloner receives. Raises rather than returning a short list."""
+    out = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "*.md"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+    if out.returncode != 0:
+        raise RuntimeError(f"git ls-files failed: {out.stderr.strip()[:200]}")
+    docs = [p for p in out.stdout.splitlines() if p]
+    missing = [c for c in CANARY if c not in docs]
+    if missing:
+        raise RuntimeError(f"derivation lost known documents: {', '.join(missing)}")
+    return docs
+
 
 URL_RE = re.compile(r'https?://[^\s)\]<>"`]+')
 EXPLORER_TX = re.compile(r"explorer\.solana\.com/tx/([1-9A-HJ-NP-Za-km-z]+)")
 EXPLORER_ADDR = re.compile(r"explorer\.solana\.com/address/([1-9A-HJ-NP-Za-km-z]+)")
-# A placeholder nobody has filled in is a dead link with extra steps.
+# A placeholder nobody has filled in is a dead link with extra steps. Scoped to the promise this
+# was built to catch, an unfilled repo URL, and deliberately NOT to a bare "url": widening the
+# scope brought in skills/, where `<the full URL>` is a command template an agent fills at call
+# time rather than a promise to a reader. Flagging that is a false alarm on a file working as
+# designed, and TESTING.md and ci.yml both already describe this check as the repo-URL one.
+# The opening guard is a LOOKAHEAD rather than a consuming class, and that is load-bearing: the
+# consuming form ate the "r" of "<repo URL>", so once "url" left the alternation the one shape
+# this check exists for stopped matching. Its own control caught that.
 PLACEHOLDER = re.compile(
-    r"<[A-Za-z][^<>\n()|$]{0,60}?\b(repo|url|fill|todo|tbd)\b[^<>\n()|$]{0,60}?>",
+    r"<(?=[A-Za-z])[^<>\n()|$]{0,60}?\b(repo|fill|todo|tbd)\b[^<>\n()|$]{0,60}?>",
     re.I,
 )
 
@@ -94,6 +145,12 @@ def check_url(url):
         with urllib.request.urlopen(req, timeout=25) as r:
             return (200 <= r.status < 400), f"HTTP {r.status}"
     except urllib.error.HTTPError as e:
+        # 402 is this repo's own x402 gate answering correctly. The question here is whether a
+        # link points at something that exists, and a payment challenge is the endpoint doing
+        # exactly what README describes one line above the link. Reading it as dead would have
+        # the gate contradict the sentence the link sits in, which is how a gate gets muted.
+        if e.code == 402:
+            return True, "HTTP 402 (x402 challenge)"
         return False, f"HTTP {e.code}"
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
@@ -120,7 +177,15 @@ def main():
     cache = {}
     bundle = load_bundle()
 
-    for doc in DOCS:
+    try:
+        docs = tracked_markdown()
+    except Exception as exc:
+        # Scanning nothing and scanning everything cleanly print the same closing line, so a
+        # derivation that fails has to be louder than a tree that passes.
+        print(f"CANNOT VERIFY  {exc}")
+        return 2
+
+    for doc in docs:
         path = REPO / doc
         if not path.is_file():
             continue
@@ -131,6 +196,14 @@ def main():
 
         for url in dict.fromkeys(URL_RE.findall(text)):
             url = url.rstrip(".,;")
+            if ABBREVIATED.search(url) or REDACTED_QUERY.search(url):
+                why = (
+                    "shortened in prose"
+                    if ABBREVIATED.search(url)
+                    else "secret removed on purpose"
+                )
+                print(f"SKIP  {why:<18} {url[:96]}")
+                continue
             checked += 1
             if url in cache:
                 ok, detail = cache[url]
@@ -191,7 +264,7 @@ def main():
                 findings.append(f"{doc}: {url}  ({detail})")
 
     print()
-    print(f"{checked} link(s) checked across {len(DOCS)} judge-facing documents")
+    print(f"{checked} link(s) checked across {len(docs)} tracked documents")
     if findings:
         print(f"\n{len(findings)} problem(s):")
         for f in findings:
