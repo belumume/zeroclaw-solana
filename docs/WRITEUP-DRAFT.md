@@ -225,7 +225,7 @@ silently drops unknown extensions. Each refuses to interpret a mutation unless t
 green first, and restores the source on every exit path. A passing suite is then evidence that it
 would catch a regression, rather than an assumption that it would.
 
-Supply chain is gated at 9 of 9 on advisories, licences and sources, with the licence allow
+Supply chain is gated at 10 of 10 on advisories, licences and sources, with the licence allow
 list derived from the dependency graph rather than guessed. Three CI workflows keep this
 honest on a machine that is not ours, deliberately separate so a red badge says which thing
 broke.

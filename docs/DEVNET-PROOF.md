@@ -40,7 +40,7 @@ Both programs carry an on-chain **Anchor IDL** (so the explorer decodes the inst
 ## The DePIN feed is publishing on a schedule (the "yours, running" proof)
 
 These are consecutive device-signed `publish_reading` transactions on the **ARM node-born
-feed** `JEtuZk…` — the feed whose key was generated on the node and has never left it. The
+feed** `JEtuZk…`, the feed whose key was generated on the node and has never left it. The
 feed account stores only the LATEST reading, so the *sequence history* is the ledger.
 
 | UTC | Interval | Result | Settlement tx |
@@ -160,9 +160,10 @@ Two ways, no account of ours needed:
 - **One command, no install:** `python3 scripts/verify-proof.py` (stdlib only) queries devnet and
   prints PASS/FAIL for every claim above (programs executable, feed PDA owner, and each tx's exact
   success or rejection), exiting non-zero if any fails. A clean run prints `10/10 static claims`
-and `1/1 live claims`, split deliberately: the static ten are deployed program state and
+and `2/2 live claims`, split deliberately: the static ten are deployed program state and
 immutable devnet history, so they stay green whether or not anything of ours is switched on.
-Only the live one answers "is the node publishing right now". Prove that gate works rather
+Only the live two answer "is the node publishing right now" and "is the pay page reachable",
+which are two independent systems rather than one. Prove that gate works rather
 than trusting it: `MAX_FEED_AGE_MIN=0 python3 scripts/verify-proof.py` turns the live check red
 and exits 1 while all ten static claims stay green.
 - **By hand:** open any link above with the explorer cluster set to devnet. The programs are
