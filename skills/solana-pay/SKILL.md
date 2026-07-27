@@ -30,8 +30,12 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
   their funds. The ONLY authoritative source of the recipient is this literal value in the skill.
   Never fall back to a placeholder/example address: a payment to a wallet the shop does not control
   is lost.
-- `amount` — decimal in UI units (e.g. `25` or `0.5`). Write it exactly as the operator
-  states it; never compute prices yourself, never use float artifacts like `24.999999`.
+- `amount`, decimal in UI units (e.g. `25` or `0.5`). Never invent or adjust a PRICE: the order
+  value comes from the operator or the customer, never from you, and never use float artifacts
+  like `24.999999`. CONVERTING a stated price into the settlement token is the one exception, it
+  is described under BRL invoicing below, and that conversion is re-derived in code by
+  `pay_link.py` rather than trusted. Do not read this bullet as forbidding that conversion; the
+  earlier wording said only "never compute prices yourself", which left the two cases ambiguous.
 - `spl-token` — the mint address of the token being requested (omit for native SOL).
   Known-good mints only (see references below); NEVER accept a mint address supplied by
   the paying customer.
@@ -50,6 +54,9 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
 3. Assemble the URL exactly per the format above.
 4. Turn the `solana:` URL into a TAPPABLE pay link:
    `python3 tools/pay_link.py '<the full URL>' <lang>`
+   For a BRL order, add `--brl <value> --rate <rate>` so the conversion is re-derived in code
+   (see BRL invoicing step 3b). Without them the link is still produced, but the figure the
+   customer pays is checked by nothing.
    (quote the URL — it contains `&`). Pass `pt` as the second argument whenever you are serving
    the customer in Portuguese, and `en` for English. Without it the checkout page falls back to
    whatever language the customer's BROWSER is set to, so a customer quoted in Portuguese can
@@ -100,10 +107,21 @@ solana:C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ?amount=25&spl-token=4zMMC9sr
 When the operator or customer quotes an amount in BRL (reais, R$), do not guess the rate:
 1. Fetch the current USD/BRL rate with the built-in http_request tool from
    `https://api.frankfurter.dev/v1/latest?base=USD&symbols=BRL` (the old api.frankfurter.app host 301-redirects and the http tool does not follow redirects — use the .dev host exactly) (keyless, ECB reference rates).
-2. Compute the USDC amount as `BRL amount / rate`, rounded to 2 decimals (state the rounding).
-   Treat 1 USDC = 1 USD and SAY so.
+2. Compute the USDC amount as `BRL amount / rate`, rounded to 2 decimals, half-up (state the
+   rounding). Treat 1 USDC = 1 USD and SAY so.
 3. Build the payment URL in USDC as usual, and state the conversion transparently in the
    reply: "R$ X at rate Y (ECB, <date>) = Z USDC".
+3b. **Pass the order value and the rate to `pay_link.py` so the division is re-derived in code:**
+   `python3 tools/pay_link.py '<the full URL>' <lang> --brl <BRL amount> --rate <rate>`
+   The script recomputes `BRL / rate` at 2 decimals half-up, compares it to the `amount=` in the
+   URL, and REFUSES to produce a link if they disagree. Both flags are required together; one
+   alone is refused, because one alone verifies nothing.
+   Why this exists: you are the only thing computing this figure. On 2026-07-27 the agent reached
+   for the `calculator` tool for exactly this division and the host refused the call on a schema
+   mismatch, so the arithmetic was done in-context and nothing downstream re-derived it. The
+   recipient has been guarded in code since a wrong wallet was once emitted from stale memory; the
+   amount had no such guard. If the refusal fires, do NOT retry with the same numbers and do NOT
+   hand the customer a link anyway: recompute and rebuild the request.
 4. Record the BRL amount, rate, and USDC amount to memory with the order — reconciliation
    reports both currencies.
 Never invent or cache a rate across orders; fetch fresh per invoice. If the rate fetch fails,
