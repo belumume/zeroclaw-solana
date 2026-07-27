@@ -41,11 +41,27 @@ re-checks every published claim against devnet in one command, stdlib only, noth
 
 ## Custody, which is the part that matters
 
-The agent never holds a key that can move funds. It emits an **unsigned** transaction for a
-human to approve, and spends are additionally bounded on chain by the audited Solana
-Foundation Allowances program. That bound is demonstrated rather than asserted: the agent's
-own session key signs an over-cap transfer and the program rejects it, custom error `0x12c`,
-with the failed transaction on devnet for anyone to open.
+No plugin here holds a key that can move funds. Each emits an **unsigned** transaction for a
+human to approve. Spends are additionally bounded on chain by the audited Solana Foundation
+Allowances program.
+
+That bound is demonstrated rather than asserted, and the demonstration deliberately does the
+opposite of avoiding a key, because avoiding one proves nothing about what happens when an
+agent has one. A delegated session key, held by the agent, **signs** an over-cap transfer, and
+the audited program rejects it with custom error `0x12c`. The chain refused the transfer; no
+plugin, no prompt and no operator had to be right for that to happen. A within-cap transfer
+signed by the same key settles normally, which is the control that stops the rejection being
+read as the key simply not working.
+
+Read the two sentences above together, because they are easy to mistake for a contradiction.
+The **use cases** run no fund-signing key at all. The **cap demonstration** uses one on
+purpose, bounded on chain, so the guarantee can be shown failing closed rather than described.
+
+Both transactions predate devnet's retention window, so their explorer links no longer
+resolve. Their raw bytes are captured in [`docs/proof-bundle/`](docs/proof-bundle), and
+`python3 scripts/verify_proof_offline.py` re-checks the ed25519 signature over the exact
+serialized message with no network at all. That is the stronger artifact anyway: an explorer
+link is someone else's retention policy, and this one expires about four days after the fact.
 
 Human approval is a weak boundary on its own, because the sentence the human reads is one the
 model wrote. So the paths with a fixed intent never ask: `scripts/broadcast_certified.py`
