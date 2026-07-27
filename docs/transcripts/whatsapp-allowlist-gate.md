@@ -152,9 +152,17 @@ sibling drop messages next to it in the same match, is **zero**.
 
 So the group message never reached the handler, and the runtime group policy was never exercised.
 The delivery receipt in the customer's client confirms delivery to the shop's *account*, which its
-phone satisfies; it does not show delivery to the linked session the agent runs on. The honest
-reading is that this linked session did not receive the group traffic, which is a practical
-isolation rather than a demonstrated control, and it is not claimed as one.
+phone satisfies; it does not show delivery to the linked session the agent runs on.
+
+The session store says why, and the reason is cryptographic rather than policy. The linked session
+holds sender keys naming two group addresses, so it knows the groups exist, while the three tables
+that track sender-key distribution to this device are all empty. A group message is encrypted to a
+sender key each device must be given, and this device has never been given one, so the message
+cannot be decrypted and nothing surfaces to the handler to accept or refuse.
+
+That is a real isolation and it is worth knowing, but it is an artifact of how this session was
+paired rather than a control anyone designed, and it would evaporate if the distribution state ever
+syncs. It is recorded here as a mechanism, not claimed as a defence.
 
 The stronger result came from trying to close the remaining ambiguity. Flipping `group_policy`
 to `"all"` to confirm that group traffic reaches the daemon at all did not open the gate,
