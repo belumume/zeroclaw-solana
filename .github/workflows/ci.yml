@@ -97,6 +97,16 @@ jobs:
       - name: no gitignored copy shadows a tracked script
         run: python3 scripts/check-shadowed-scripts.py
 
+      # The deployed checkout page and the generator that produces it drifted once, and
+      # the drift was silent: index.html had gained the pinned merchant address, the
+      # mint-keyed asset names, the wrong-recipient refusal and the Portuguese
+      # translation, while build.py still held the version from before all four. Running
+      # the generator would have reverted them, including the control that stops a
+      # customer paying a wallet this shop does not own. This asserts they still agree,
+      # which is a property a reader cannot check by eye on a 72 KB file.
+      - name: the deployed pay page matches its sources
+        run: python3 webshop-pay/build.py --check
+
   supply-chain:
     name: advisories, licenses, sources
     runs-on: ubuntu-latest

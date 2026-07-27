@@ -61,8 +61,11 @@ docs/DEMO-STORYBOARD.md
 # Cloudflare Pages deploy cache
 .wrangler/
 
-# stale/leaky dev build script (index.html is the self-contained artifact)
-webshop-pay/build.py
+# webshop-pay/build.py was ignored here while it carried absolute paths with a username
+# and had drifted behind the artifact it generates. Both are fixed: it reads only paths
+# relative to itself, and `python build.py --check` asserts index.html still matches its
+# sources. It is TRACKED now, because a clone that cannot rebuild the deployed page
+# cannot reproduce the submission.
 __pycache__/
 docs/X-BUILDLOG-DRAFTS.md
 

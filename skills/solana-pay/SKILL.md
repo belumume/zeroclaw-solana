@@ -48,12 +48,20 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
 1. Operator or SOP states: who pays, how much, which token.
 2. Generate a fresh reference: `python3 tools/gen_reference.py` → one base58 line.
 3. Assemble the URL exactly per the format above.
-4. Turn the `solana:` URL into a TAPPABLE pay link: `python3 tools/pay_link.py '<the full URL>'`
-   (quote the URL — it contains `&`). It prints one `https://` link. Then send the customer TWO
+4. Turn the `solana:` URL into a TAPPABLE pay link:
+   `python3 tools/pay_link.py '<the full URL>' <lang>`
+   (quote the URL — it contains `&`). Pass `pt` as the second argument whenever you are serving
+   the customer in Portuguese, and `en` for English. Without it the checkout page falls back to
+   whatever language the customer's BROWSER is set to, so a customer quoted in Portuguese can
+   still land on an English payment screen. The page's translation is complete; the link is what
+   has to say which language to use. It prints one `https://` link. Then send the customer TWO
    message segments, in this order:
-   a. the `https://` pay-page link verbatim in a code block — this link IS auto-linked and
-      tappable in the chat (a raw `solana:` URI is not). Never send only a summary like "link's
-      ready" (streaming drafts are replaced; a URL only in a draft is lost).
+   a. the `https://` pay-page link verbatim, as a BARE URL on its own line. Do NOT put it in a
+      code block or backticks: chat clients auto-link a bare URL, and a code block renders as
+      monospace that the customer has to select and copy by hand. (This instruction previously
+      said to use a code block and claimed that was tappable. It is not, and it cost every
+      customer a manual copy.) Never send only a summary like "link's ready" (streaming drafts
+      are replaced; a URL only in a draft is lost).
    b. one how-to-pay line, written in the SAME language the customer is using. The WHOLE reply
       must be in the customer's language — never leave an English fragment inside a non-English
       reply. Use the matching version:

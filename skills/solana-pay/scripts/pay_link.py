@@ -7,8 +7,19 @@ the request in a hosted pay page whose https link IS auto-linked and tappable in
 any chat. Tapping it opens a page that renders a scannable QR, an "open wallet"
 button (Phantom/Solflare), and the amount, so a customer can actually pay.
 
-Usage: python3 tools/pay_link.py '<solana:...url...>'
+Usage: python3 tools/pay_link.py '<solana:...url...>' [lang]
 Prints one line: the https pay-page link to send the customer.
+
+`lang` is optional and is `pt` when the customer is being served in Portuguese.
+Without it the page falls back to the BROWSER's language, which is why a customer
+quoted in Portuguese could still land on an English checkout: the page's own
+translation was complete, the link simply never said which language to use. That
+break of character lands on the one screen where someone decides whether to trust
+a payment page.
+
+It is whitelisted to exactly two values rather than passed through, because this
+string is appended to a URL a customer is about to click. Only chrome is
+translated; the recipient, amount and asset never pass through the language layer.
 """
 
 import base64
@@ -36,10 +47,20 @@ PAGE = "https://zeroclaw-shop-pay.pages.dev/"
 # is signed, and no approval prompt fires. The funds that move are the customer's.
 MERCHANT = "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
 
-if len(sys.argv) != 2 or not sys.argv[1].startswith("solana:"):
-    sys.exit("usage: pay_link.py '<solana: URL>'")
+if len(sys.argv) not in (2, 3) or not sys.argv[1].startswith("solana:"):
+    sys.exit("usage: pay_link.py '<solana: URL>' [pt|en]")
 
 url = sys.argv[1]
+
+# Whitelisted, never interpolated from free text. An unrecognised value is a hard
+# refusal rather than a silent fallback: silently dropping it is how the customer
+# ends up on the wrong-language checkout again with nothing reporting a problem.
+lang = ""
+if len(sys.argv) == 3:
+    requested = sys.argv[2].strip().lower()
+    if requested not in ("pt", "en"):
+        sys.exit(f"REFUSED: unsupported lang {requested!r}; expected 'pt' or 'en'")
+    lang = requested
 
 # solana:<recipient>[?params] -- the recipient is everything between the scheme and
 # the query string. Split on "?" first so a "recipient" carrying a crafted query
@@ -56,4 +77,4 @@ if recipient != MERCHANT:
     )
 
 encoded = base64.urlsafe_b64encode(url.encode()).decode()
-print(f"{PAGE}?u={encoded}")
+print(f"{PAGE}?u={encoded}" + (f"&lang={lang}" if lang else ""))
