@@ -111,8 +111,11 @@ else choosing to pay for the data.
 
 This is the part we did not plan and would rather have as evidence than as an argument. The
 submission's whole posture is that a security control which is not configured should deny
-rather than permit. Building on ZeroClaw surfaced three places where the platform does the
-opposite, all in one file, all reported with source citations rather than described.
+rather than permit. Building on ZeroClaw surfaced places where the platform does the opposite.
+The three below are the ones the shop hit in production rather than found by looking, they sit
+in one file, and each was reported with source citations rather than described. They are not
+the whole of it: a later audit of the host found ten more, and that is a separate section
+lower down.
 
 States are as of 2026-07-25 and every row links to the live thread, so click through rather
 than trusting this table. If #9354 has merged by the time you read it, that is the outcome we

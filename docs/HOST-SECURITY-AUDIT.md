@@ -104,7 +104,7 @@ Concretely, verification killed claims like these:
   misparse rather than an approval bypass, because approval is a pre-execution hook over a live
   operator answer and is never read back from history text
 
-## The credential exposure, and what this operator did about it
+## The credential exposure
 
 [#9386](https://github.com/zeroclaw-labs/zeroclaw/issues/9386) is the one that affects anyone
 running this stack with a Google-keyed provider. The chain, with each link either read from source

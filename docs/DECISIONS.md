@@ -90,9 +90,10 @@ only the request path leaves the model reading whatever an attacker minted.
 **Consequence.** The sanitizer became the piece worth quantifying over all inputs rather than
 a few cases, including idempotence, which is the property sanitizers most often fail.
 
-You can operate it: `microworld/sanitizer.html` runs the real function, compiled to wasm,
-with no server. It deliberately includes a case the advisory flag does not catch, because a
-demonstration that only shows wins teaches the wrong model of what the defense is.
+You can operate it: `sanitizer-microworld/index.html` runs the real function, compiled to
+wasm, with no server. It deliberately includes a case the advisory flag does not catch, the
+injection-framing preset that carries no invisible characters at all, because a demonstration
+that only shows wins teaches the wrong model of what the defense is.
 
 ## 5. The leak detector is disabled for this agent, deliberately
 

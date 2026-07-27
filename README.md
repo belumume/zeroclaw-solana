@@ -33,7 +33,7 @@ re-checks every published claim against devnet in one command, stdlib only, noth
 | What an adversarial audit found here, including what is still open | [`docs/AUDIT.md`](docs/AUDIT.md) |
 | Ten verified defects found in the HOST this runs on, all reported upstream | [`docs/HOST-SECURITY-AUDIT.md`](docs/HOST-SECURITY-AUDIT.md) |
 | The agent refusing an attack, verbatim | [`docs/transcripts/`](docs/transcripts/) |
-| To poke the sanitizer yourself, no build needed | [`microworld/sanitizer.html`](microworld/sanitizer.html) |
+| To poke the sanitizer yourself, no build needed | [`sanitizer-microworld/index.html`](sanitizer-microworld/index.html) |
 
 ## Custody, which is the part that matters
 

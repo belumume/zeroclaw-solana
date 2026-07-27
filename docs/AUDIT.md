@@ -79,9 +79,10 @@ small payment. This is not fixable inside a read-only lens, because the lens has
 view of what was owed. It is named in the threat model rather than left for a reviewer to find.
 
 **Two live-configuration checks are unverified.** The documented posture is correct and the
-drift checker is committed, but confirming the running configuration matches it needs the host
-machine, which is currently unreachable. Re-run `scripts/check-config-drift.py` against a live
-config to close this.
+drift checker is committed, and what is missing is a run rather than access. This paragraph used
+to say the host machine was unreachable. That was written about a daemon on a laptop; the shop
+has run on the ARM node under `systemd --user` since 2026-07-27, and that node is reachable.
+Run `scripts/check-config-drift.py` against the node's live config to close this.
 
 **One deliberate injection was never fired at the live agent for defect 1.** The structural gap
 was proven by reading the code, and the accidental variant is on the record, but the end-to-end

@@ -22,9 +22,11 @@ code and the expectation.
 *Cannot catch:* anything about inputs nobody generated a fixture for, and anything
 about behaviour over time. A KAT is one point.
 
-**Unit tests.** 89 in `solana-core`, plus 17 in `oracle-publish`, 29 in
+**Unit tests.** 89 in `solana-core`, plus 19 in `oracle-publish`, 41 in
 `payment-watch`, 10 in `x402-feed-gate`. These cover branches, error variants, and
-the specific adversarial cases we thought of.
+the specific adversarial cases we thought of. The middle two read 17 and 29 until
+2026-07-27, having been written before those suites grew; all four figures are counted
+off the sources rather than carried forward.
 
 *Cannot catch:* the case nobody thought of. Every unit test is a hypothesis about
 how the code fails, so the suite is bounded by imagination. This is the layer that
@@ -203,13 +205,19 @@ The devnet harnesses need a funded operator keypair and are documented in
 Three workflows, deliberately separate, because they answer different questions and a
 red badge should tell you which one broke.
 
-`ci.yml` runs every layer above on a clean Ubuntu runner on each push: the 89 host
-tests and 23 properties, clippy with warnings as errors on both the host and
-`wasm32-wasip2`, the release build of the shipped wasm target, the fail-closed
-certification self-test, then all eight plugin components in a matrix. Everything is
-offline and deterministic, and `--locked` throughout, so a green run also proves the
-committed lockfiles are the ones that work. That is the claim a reproducibility promise
-actually rests on, and until now it rested on one laptop.
+None of the three has ever executed. This repository has no git remote, so no push has
+triggered a run and no badge has rendered; what backs the section below is the same command
+list run on this machine, 19 of 19 passing, via `.tools/verify-ci-locally.sh`. Everything
+here is therefore true of the steps and not yet true of a run.
+
+`ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
+in `crates/solana-core`, which executes all four suites there for 120 tests rather than the
+89 unit tests and 23 properties this line named until 2026-07-27, clippy with warnings as
+errors on both the host and `wasm32-wasip2`, the release build of the shipped wasm target,
+the fail-closed certification self-test, then all eight plugin components in a matrix.
+Everything is offline and deterministic, and `--locked` throughout, so a green run also
+proves the committed lockfiles are the ones that work. That is the claim a reproducibility
+promise actually rests on, and it rests on this machine until the first push.
 
 `ci.yml` also gates the supply chain with `cargo deny`, and the allow-list in `deny.toml`
 is derived rather than guessed: it is the exact set of distinct licenses in the graph, all
