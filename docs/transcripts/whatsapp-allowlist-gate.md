@@ -142,7 +142,19 @@ Sending an order into the group produced no reply, which is what the policy pred
 trace record at all. An absence proves nothing on its own, so the trace was checked with a
 positive control: a later direct message produced `processing inbound message`, a reply-intent
 precheck and a disposition, and the trace file grew. The instrument was therefore live and
-recording while the group message produced nothing, and the group message had been delivered.
+recording while the group message produced nothing.
+
+Reading the source is what turned that absence into an answer, and the answer is not the
+flattering one. The group branch is not silent when it drops: under `Ignore` it emits
+`ignoring group message (group_policy=ignore)` at `DEBUG` and returns before any model runs.
+`DEBUG` is captured in this trace, 181 records of it. The count of that string, and of the three
+sibling drop messages next to it in the same match, is **zero**.
+
+So the group message never reached the handler, and the runtime group policy was never exercised.
+The delivery receipt in the customer's client confirms delivery to the shop's *account*, which its
+phone satisfies; it does not show delivery to the linked session the agent runs on. The honest
+reading is that this linked session did not receive the group traffic, which is a practical
+isolation rather than a demonstrated control, and it is not claimed as one.
 
 The stronger result came from trying to close the remaining ambiguity. Flipping `group_policy`
 to `"all"` to confirm that group traffic reaches the daemon at all did not open the gate,
@@ -161,11 +173,17 @@ name because that is the upstream defect this project reported. Reverting to `"i
 the service immediately, so the guard was observed failing and passing rather than only passing.
 
 Be precise about which claim that supports. It establishes that an operator **cannot deploy an
-open group posture on this host**, deterministically, before any model runs. It does not by
-itself establish what the runtime does with a group message that arrives, and the attempt to
-measure that was stopped by the guard. The two together are a stronger custody story than the
-behavioural test would have been, because a boot-time refusal does not depend on a model
-choosing correctly, but they are different claims and the docs should not merge them.
+open group posture on this host**, deterministically, before any model runs. It does not
+establish what the runtime does with a group message that arrives, and that remains unmeasured
+for a reason worth stating plainly rather than hiding behind the guard: no group message has
+reached the handler, so there has been nothing for the runtime policy to act on.
+
+The group half therefore rests on two legs and openly lacks a third. The code path is read and
+quoted, and it refuses before any model runs. The deployment posture is guarded and the guard was
+observed both refusing and passing. What is missing is a live group message travelling through
+that code path, and no amount of restating the first two supplies it. A boot-time refusal is a
+stronger control than a model choosing correctly, so this is not a weak position, but it is a
+different claim from the one the DM section proves and the two are not merged here.
 
 ## Why the policy is set this way
 
