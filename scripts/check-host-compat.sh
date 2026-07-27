@@ -36,17 +36,85 @@ echo "repo: $REPO"
 echo "host: $HOST"
 echo ""
 
-# 1. The tool-plugin world must be identical. Only these four files are in our world;
-#    drift in channel/memory/sockets/ws-client cannot affect a tool plugin, so comparing
-#    the whole directory would produce noise that trains people to ignore this check.
+# 1. The tool-plugin world must be identical. Only the files in our world matter; drift in
+#    channel/memory/sockets/ws-client cannot affect a tool plugin, so comparing the whole
+#    directory would produce noise that trains people to ignore this check.
+#
+#    That membership used to be four filenames written here by hand. It was correct by
+#    definition on the day it was written, which is the property that makes it dangerous:
+#    nothing ever contradicts it, so it goes stale in silence the moment upstream adds an
+#    interface to the world. The world is machine-readable, so it is read instead.
+#
+#    It is derived from the HOST'S copy on purpose. Deriving from ours would reproduce the
+#    exact staleness this whole script exists to catch, since a world member we have never
+#    heard of is invisible in our own tree. Reading the authority means a newly-added
+#    interface arrives as a finding rather than as silence.
 echo "wit/v0 tool-plugin world (the one that silently breaks registration)"
-WORLD="logging.wit tool.wit plugin-info.wit types.wit"
+
+# interface name -> the basename of the .wit declaring it, in the host's tree
+iface_file() {
+  basename "$(grep -lE "^[[:space:]]*interface[[:space:]]+$1[[:space:]]*\{" \
+               "$HOST"/wit/v0/*.wit 2>/dev/null | head -1)" 2>/dev/null
+}
+
+seed="$(grep -lE "^[[:space:]]*world[[:space:]]+tool-plugin[[:space:]]*\{" \
+        "$HOST"/wit/v0/*.wit 2>/dev/null | head -1)"
+WORLD=""
+if [ -n "$seed" ]; then
+  WORLD="$(basename "$seed")"
+  members="$(sed -n "/^[[:space:]]*world[[:space:]]\+tool-plugin[[:space:]]*{/,/^[[:space:]]*}/p" "$seed" \
+             | grep -oE "^[[:space:]]*(import|export)[[:space:]]+[a-z][a-z0-9-]*" \
+             | awk '{print $2}')"
+  for m in $members; do
+    g="$(iface_file "$m")"
+    [ -n "$g" ] && WORLD="$WORLD $g"
+  done
+  # `types` reaches the world through `use types.{json-string}` inside the members rather
+  # than through the world body, so a members-only read would drop the file every other
+  # interface depends on. Two passes settle this graph; a third is cheap insurance.
+  for _ in 1 2 3; do
+    more=""
+    for f in $WORLD; do
+      for n in $(grep -oE "use[[:space:]]+[a-z][a-z0-9-]*\." "$HOST/wit/v0/$f" 2>/dev/null \
+                 | awk '{print $2}' | tr -d '.'); do
+        g="$(iface_file "$n")"
+        [ -n "$g" ] && more="$more $g"
+      done
+    done
+    WORLD="$(printf '%s %s\n' "$WORLD" "$more" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')"
+  done
+fi
+
+# The four this enumerated by hand until 2026-07-27, kept as a floor rather than as the scope.
+# A derivation that stops returning them has broken, and a broken derivation that returns two
+# files would compare two files and print PASS, which is the reassuring sentence rather than
+# the alarm.
+for c in logging.wit tool.wit plugin-info.wit types.wit; do
+  case " $WORLD " in
+    *" $c "*) ;;
+    *)
+      bad "world derivation lost $c, so it cannot be trusted about the rest"
+      fix "check that $HOST/wit/v0 still declares 'world tool-plugin' and its interfaces"
+      WORLD=""
+      break
+      ;;
+  esac
+done
+
+[ -n "$WORLD" ] && echo "  world members (derived from the host): $WORLD"
 for f in $WORLD; do
   ours="$REPO/wit/v0/$f"
   theirs="$HOST/wit/v0/$f"
   if [ ! -f "$theirs" ]; then
     bad "$f missing from the host clone"
     fix "check the host path, or the host moved wit/v0"
+    continue
+  fi
+  if [ ! -f "$ours" ]; then
+    # The host's world names an interface we do not vendor at all. Every plugin here fails
+    # to instantiate against it, and nothing local can observe that.
+    bad "$f is in the host's tool-plugin world and we do not vendor it"
+    fix "copy $theirs into $REPO/wit/v0/$f, then rebuild every plugin"
     continue
   fi
   if diff -q <(tr -d '\r' < "$ours") <(tr -d '\r' < "$theirs") >/dev/null 2>&1; then

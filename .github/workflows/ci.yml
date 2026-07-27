@@ -94,8 +94,25 @@ jobs:
       - name: every repo path a doc names is itself tracked
         run: python3 scripts/check-repo-paths.py
 
+      # Both gates above ran here for weeks without their controls, while the proof-link gate
+      # below has always had its suite as a sibling step. That asymmetry is the whole reason
+      # these two are here: check-repo-paths.py spent its entire life passing on a dead citation
+      # because its PATH_RE demanded an alphanumeric first character, so a leading dot never
+      # matched and it was structurally blind to exactly the gitignored set it existed to police.
+      # A gate with no control in CI cannot tell a clean repo from a blind checker, and both
+      # print the same reassuring line.
+      - name: the repo-path gate's controls actually gate
+        run: python3 scripts/test_check_repo_paths.py
+
       - name: no gitignored copy shadows a tracked script
         run: python3 scripts/check-shadowed-scripts.py
+
+      # Case 1 of this suite is the incident shape itself, a diverged staging copy of the
+      # pay-page generator. Until this session both of that gate's scopes were hardcoded, and
+      # one of them left webshop-pay/build.py unprotectable, which is the file whose drift
+      # incident this project had already written up. If case 1 stops firing, the gate is blind.
+      - name: the shadowed-script gate's controls actually gate
+        run: python3 scripts/test_check_shadowed_scripts.py
 
       # A clickable explorer link is an offer of evidence, and public devnet stops serving a
       # transaction after about four days, so the only durable backing is the captured bytes in

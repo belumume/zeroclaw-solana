@@ -205,6 +205,8 @@ python3 scripts/check-doc-links.py           # every link in a tracked doc point
 python3 scripts/check-proof-links.py         # every linked transaction is backed by captured bytes
 python3 scripts/check-config-drift.py        # the documented posture is the running one
 python3 scripts/check-shadowed-scripts.py    # no ignored copy shadows a tracked script
+python3 scripts/test_check_shadowed_scripts.py  # that gate's controls, in three directions
+./scripts/mutation-check-shadowed-scripts.sh    # proves those controls can fail
 python3 scripts/check-repo-paths.py          # every repo path a doc names is itself tracked
 ```
 
@@ -213,7 +215,7 @@ The two cargo lines carry a `cd` because there is no manifest at the repo root, 
 find `Cargo.toml`" before running a single test. Every crate here is its own workspace so
 that `solana-sdk`, which the devnet harnesses need and which does not compile for
 `wasm32-wasip2` inside a WIT component, stays out of the components' dependency graphs. The
-same applies to the build step in `QUICKSTART.md`. The remaining seven lines run from the repo
+same applies to the build step in `QUICKSTART.md`. The remaining nine lines run from the repo
 root as written.
 
 `check-repo-paths.py` covers the gap next to `check-doc-links.py`: that one resolves links,
@@ -259,6 +261,32 @@ to stop offering it as proof. The third bucket is the one most suites omit: a mi
 bundle holding nothing, or a scan that matches no links at all must exit 2 rather than 0, because
 a gate that cannot do its job must not print what a gate that did its job prints.
 
+`check-shadowed-scripts.py` is the third instance of the same shape, and it carried it twice over.
+It asks whether a gitignored script is a second copy of a tracked one, which is the failure that
+left a mutation harness in a directory a reader could neither run nor read, and it answered by
+consulting two hand-written lists. The ignored side named one directory and walked it one level
+deep, which on this tree is 112 of 271 gitignored scripts: it missed 150 at the repo root, 8 in
+three other ignored directories, and one under `.tools/yt-corpus/` whose parent WAS named. The
+tracked side named two directory prefixes, which left `webshop-pay/build.py` unprotectable, and
+that file is the canonical case: its own generator drifted behind the artifact it generates until
+one run would have reverted four fixes, one of them the pinned merchant address that stops a
+customer paying a wallet this shop does not own. A gate built to catch a drifting second copy
+could not see the one file here that has already drifted. Both scopes are derived from git now,
+so a directory nobody has created yet is in scope on the day it appears, and vendored build
+output is excluded by name rather than our own code being included by name.
+
+Its controls are `scripts/test_check_shadowed_scripts.py`, ten cases in three directions.
+Must-fire covers the shape each blindness hid: a diverged staging copy of the pay-page generator,
+a gitignored script at the repo root, and one two levels below a directory that was already
+named. Must-not-fire covers the margin that keeps it usable, since the real tree's highest
+overlap is 0.214 against a 0.5 threshold, and covers a fresh clone with no ignored files at all,
+which is the state of every CI run and is not a broken derivation. The third bucket is the one
+that matters most here, because this gate printed a clean line for its whole life: a `git` call
+that failed, a tracked derivation that lost its canary, or a comparison with nothing on the
+tracked side all exit 2 rather than 0. `scripts/mutation-check-shadowed-scripts.sh` plants each
+half of the old scope back and requires the suite to go red, which is what separates ten green
+cases from ten cases that can fail.
+
 Three of these now run in CI, in the `publish-gates` job: `check-repo-paths.py`,
 `check-shadowed-scripts.py` and `check-proof-links.py`, the last with its own control suite as a
 separate step. All three are pure git plus filesystem, so they give the same answer on any
@@ -268,7 +296,10 @@ check into CI teaches a reader to ignore a red badge, so it goes in at publish.
 `check-config-drift.py` compares against a config on the operator's machine, which a runner does
 not have, so running it there would assert nothing while looking like coverage.
 
-The four `check-*` lines are pre-publish gates rather than tests. `check-doc-links.py` deliberately
+The five `check-*` lines are pre-publish gates rather than tests. That count read four until
+2026-07-27, one short of the list directly above it, which is the same class of defect these
+gates exist to close: a number nobody recounts after the list it describes grows.
+`check-doc-links.py` deliberately
 does not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
 signature that does not exist, so a status-code checker would report a confident pass on a dead
 link. It extracts the signature or address and resolves it against devnet instead. It also
@@ -422,7 +453,9 @@ This sentence used to point at `.tools/`, which is git-ignored. That was accurat
 and became false when the runner was ported, which is the same defect one level up: a claim
 about evidence that a reader cannot reach. `scripts/check-shadowed-scripts.py` now fails if an
 ignored copy shadows a tracked script, since remembering this rule did not prevent committing
-it twice in one day.
+it twice in one day. Its two scopes were written from that one incident, `.tools/` on the ignored
+side and `scripts/` on the tracked side, so it covered the pair it was built for and nothing
+wider. Both scopes are derived from git now, which is what puts the rest of the tree under it.
 
 ## One layer you can operate rather than read
 
