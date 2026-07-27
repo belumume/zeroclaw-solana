@@ -29,7 +29,7 @@ checks and a private-host block all exist and work. Only the wildcard default wa
 | 1 | Merchant recipient was a prompt constant with nothing in code enforcing it | Fixed, pinned in three files with tests |
 | 2 | Signature scan did not paginate, and the cursor stepped over unread history | Fixed, cursor held, three tests |
 | 3 | Every money parameter in the verification path is authored by the agent | Disclosed as a boundary, not fixable at this tier |
-| 4 | Egress allowlist defaulted to everything | Fixed in the documented posture, live check pending |
+| 4 | Egress allowlist defaulted to everything | Fixed, and verified against the running node |
 | 5 | A tier-demotion argument rested on a false premise | Premise replaced |
 | 6 | The running proof used the feed the same document marked historical | Fixed, retraction left in place |
 | 7 | A liveness claim counted immutable facts as evidence of liveness | Split into static and live |
@@ -38,7 +38,7 @@ checks and a private-host block all exist and work. Only the wildcard default wa
 | 10 | The testing doc cited scripts absent from a clone | Fixed, retraction left in place |
 | 11 | Dependency gating covered three graphs while the docs claimed nine | Ten gated, one more than the defect asked for |
 | 12 | Both judge-facing surfaces underclaimed the settlement check | Fixed |
-| 13 | Documented approval list did not match the running one | Regenerated, live check pending |
+| 13 | Documented approval list did not match the running one | Regenerated, and verified against the running node |
 | 14 | Assorted count and transcript defects | Fixed, and more found since |
 
 ## The four worth reading about
@@ -78,11 +78,17 @@ successfully injected can call the check with a small amount and receive a truth
 small payment. This is not fixable inside a read-only lens, because the lens has no independent
 view of what was owed. It is named in the threat model rather than left for a reviewer to find.
 
-**Two live-configuration checks are unverified.** The documented posture is correct and the
-drift checker is committed, and what is missing is a run rather than access. This paragraph used
-to say the host machine was unreachable. That was written about a daemon on a laptop; the shop
-has run on the ARM node under `systemd --user` since 2026-07-27, and that node is reachable.
-Run `scripts/check-config-drift.py` against the node's live config to close this.
+**Two live-configuration checks are now verified.** This paragraph twice said something that was
+no longer true, and the sequence is worth keeping because it is the same shape as defects 4 and 13
+themselves. It first said the host machine was unreachable, which had been written about a daemon
+on a laptop and stopped being true once the shop moved to the ARM node under `systemd --user`. It
+then said the run was still owed. Both were corrected only when someone went and looked.
+
+The run has happened. `scripts/check-config-drift.py` was executed against the node's live config
+on 2026-07-27 and reports no drift across all four compared sets: the demo profile's 13
+auto-approved tools, the depin profile's 9, and the 4 allowed domains each for `http_request` and
+`web_fetch`. What the reproduction documents is what is running, checked by machine rather than
+by eye, which is the whole point of committing the checker.
 
 **One deliberate injection was never fired at the live agent for defect 1.** The structural gap
 was proven by reading the code, and the accidental variant is on the record, but the end-to-end

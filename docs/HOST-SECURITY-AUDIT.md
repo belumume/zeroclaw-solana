@@ -122,6 +122,13 @@ or tested:
 
 No attacker is required. A DNS blip does it.
 
+The obvious rebuttal is that the leak detector would have caught it if it were wired onto that
+path. It would not, and this is the part worth reading twice. The detector's only Google pattern
+is `AIza[a-zA-Z0-9_-]{35}`, while keys issued by AI Studio today carry an `AQ.` prefix. That
+character class excludes `.`, so the pattern fails at the third character and cannot match a
+current key at all. Enabling the mitigation everyone assumes exists would have changed nothing
+here, which is why the fix below targets the property rather than the pattern list.
+
 The recommended fix upstream is the property rather than the list: strip the query string from any
 URL appearing in error text, instead of adding one more vendor prefix, because the next provider to
 put a credential in a URL will not be caught by an `AIza` entry.
