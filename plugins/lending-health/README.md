@@ -35,7 +35,7 @@ plugin's own test suite, which is a different and weaker kind of evidence.
 Host tests, no wasm toolchain, no network. Run with `cargo test --lib`:
 
 ```
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 The load-bearing cases:

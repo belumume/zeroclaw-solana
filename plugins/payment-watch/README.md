@@ -106,10 +106,18 @@ These are the plugin's own host tests, with no wasm toolchain and no network (th
 mocked transport). Run them with `cargo test --lib`:
 
 ```
-running 29 tests
+running 41 tests
+test watch::tests::a_contradicting_second_endpoint_downgrades_the_payment_to_disputed ... ok
+test watch::tests::a_full_page_never_advances_the_cursor_past_unscanned_history ... ok
+test watch::tests::a_partial_scan_says_so_in_the_report ... ok
+test watch::tests::a_second_endpoint_without_the_transaction_leaves_it_unconfirmed_not_paid ... ok
+test watch::tests::a_single_source_payment_is_labelled_rather_than_implying_agreement ... ok
 test watch::tests::amount_formatting_is_exact ... ok
+test watch::tests::an_unreachable_second_endpoint_is_unconfirmed_rather_than_agreement ... ok
 test watch::tests::attacker_crafted_from_string_does_not_panic_or_leak ... ok
 test watch::tests::bad_reference_is_rejected_good_reference_is_kept ... ok
+test watch::tests::corroborating_endpoints_are_https_only_and_bounded_and_deduped ... ok
+test watch::tests::corroboration_agrees_when_a_second_endpoint_re_derives_the_payment ... ok
 test watch::tests::failed_signature_entry_is_skipped ... ok
 test watch::tests::garbage_transaction_shape_does_not_panic ... ok
 test watch::tests::hostile_memo_is_sanitized_capped_and_flagged ... ok
@@ -122,6 +130,7 @@ test watch::tests::non_array_signatures_result_is_an_error ... ok
 test watch::tests::nonpositive_and_out_of_range_amounts_are_refused ... ok
 test watch::tests::not_yet_returns_newest_signature_as_cursor ... ok
 test watch::tests::null_transaction_result_is_skipped_not_matched ... ok
+test watch::tests::only_agreement_and_the_unconfigured_default_permit_settlement ... ok
 test watch::tests::oversized_amount_string_is_rejected_not_parsed ... ok
 test watch::tests::reference_absent_from_tx_is_not_a_match ... ok
 test watch::tests::reference_present_in_tx_matches ... ok
@@ -131,12 +140,16 @@ test watch::tests::since_signature_is_sent_as_until_param ... ok
 test watch::tests::since_signature_is_shape_checked ... ok
 test watch::tests::sol_and_native_sentinels_select_lamport_mode ... ok
 test watch::tests::spl_usdc_payment_is_detected ... ok
+test watch::tests::the_corroborated_report_stays_bounded_on_every_branch ... ok
+test watch::tests::the_primarys_own_host_is_refused_as_a_corroborator ... ok
+test watch::tests::unknown_top_level_field_fails_closed ... ok
 test watch::tests::valid_args_default_to_usdc_and_default_rpc ... ok
+test watch::tests::worst_case_output_is_bounded_on_both_verdict_branches ... ok
 test watch::tests::wrong_amount_is_rejected ... ok
 test watch::tests::wrong_mint_is_rejected ... ok
 test watch::tests::wrong_recipient_is_rejected ... ok
 
-test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 What the load-bearing cases prove:

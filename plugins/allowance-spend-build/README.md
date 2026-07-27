@@ -207,10 +207,10 @@ attacker address in the memo never becomes a transaction ACCOUNT (Scenario C). A
 it, the audited on-chain program is the final, uncircumventable cap.
 
 The same guarantees are pinned by the host test suite (`cargo test`, no wasm toolchain, no network).
-36 tests pass; the load-bearing ones:
+37 tests pass; the load-bearing ones:
 
 ```
-running 36 tests
+running 37 tests
 test allowance::tests::build_spend_hostile_delegatee_fails_closed ... ok
 test allowance::tests::build_spend_over_cap_fails_closed_with_onchain_note ... ok
 test allowance::tests::build_spend_wrong_owner_delegation_fails_closed ... ok
@@ -226,7 +226,7 @@ test allowance::tests::build_spend_recurring_durable_nonce ... ok
 test allowance::tests::hostile_memo_is_sanitized_in_bytes_and_labeled_in_summary ... ok
 test allowance::tests::output_is_compact_and_carries_the_summary ... ok
 ...
-test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 The RPC-dependent orchestration (getAccountInfo on the delegation, the mint, and the receiver token
