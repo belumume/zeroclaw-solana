@@ -184,7 +184,7 @@ fn main() {
 
         let path = url.split('?').next().unwrap_or("/");
         let response_body: (u16, String, Option<String>) = match path {
-            "/health" => (200, r#"{"ok":true}"#.to_string(), None),
+            "/health" => handle_health(),
             "/price" => {
                 let nonce = issue_nonce(&nonce_counter);
                 (402, cfg.challenge(&nonce).to_json(), None)
@@ -202,6 +202,77 @@ fn main() {
         }
         let _ = request.respond(resp);
     }
+}
+
+/// Liveness for the node, not just for this process.
+///
+/// This used to return a hardcoded `{"ok":true}`, which could not fail and so
+/// asserted nothing the TCP connection had not already proven.
+///
+/// The gap it now closes: the shop agent is a Telegram and WhatsApp CLIENT with
+/// no inbound port, so nothing about it was observable from outside. Its trace
+/// is entirely traffic-driven, with no heartbeat or periodic poll anywhere in
+/// 200 sampled records, which means a QUIET shop and a DEAD shop produced an
+/// identical signal. That ambiguity is what hid the 2026-07-26 outage. This gate
+/// runs on the same box under the same `systemd --user` session, so it can
+/// answer the question from the inside and make it one unauthenticated request.
+///
+/// NECESSARY, NOT SUFFICIENT, and the response says so itself rather than
+/// leaving a reader to assume: it proves the unit is running and when the shop
+/// last handled traffic. It does NOT prove the channel binding still works or
+/// that the model provider is reachable. Only a synthetic round-trip proves
+/// those, and that costs a model call and pollutes the agent's memory, which is
+/// the measured cause of reply-extraction degrading.
+///
+/// It also separates two failures that were previously indistinguishable: no
+/// answer at all means the box is down, while an answer reporting the shop
+/// inactive means that process died specifically.
+fn handle_health() -> (u16, String, Option<String>) {
+    let unit = "zc-shop.service";
+
+    // `is-active` exits non-zero for anything but active, so the status code is
+    // the signal and stdout is only for the reason.
+    let (active, state) = match std::process::Command::new("systemctl")
+        .args(["--user", "is-active", unit])
+        .output()
+    {
+        Ok(o) => {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            (o.status.success(), if s.is_empty() { "unknown".into() } else { s })
+        }
+        // systemctl absent (a non-systemd host, or a dev box) is reported as
+        // unknown rather than as a dead shop. Claiming an outage because the
+        // instrument is missing is worse than reporting that it is missing.
+        Err(_) => (false, "unavailable".to_string()),
+    };
+
+    // HOME rather than a literal path: the deployed copy must not carry an
+    // operator username, and this response is public.
+    let trace_age = std::env::var("HOME").ok().and_then(|h| {
+        std::fs::metadata(format!("{h}/.zeroclaw/data/state/runtime-trace.jsonl"))
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .map(|d| d.as_secs())
+    });
+
+    // Built with serde_json rather than format!, matching every other response
+    // in this file. A hand-built body compiles fine while emitting broken JSON,
+    // and the checker reading this endpoint would see a 200 either way.
+    let body = serde_json::json!({
+        "gate": "ok",
+        "shop": {
+            "unit": unit,
+            "active": active,
+            "state": state,
+            "trace_age_seconds": trace_age,
+        },
+        "proves": "this gate answered, plus the shop unit's state and when it last \
+                   handled traffic. Does NOT prove the channel binding or the model \
+                   provider are working: only a synthetic round-trip proves those.",
+    })
+    .to_string();
+    (200, body, None)
 }
 
 /// The core request handler: no payment -> 402 challenge; a payment -> verify,
@@ -336,4 +407,68 @@ fn reject_to_response(
         body = v.to_string();
     }
     (402, body, None)
+}
+
+#[cfg(test)]
+mod health_tests {
+    use super::*;
+
+    /// The route this replaced returned a hardcoded `{"ok":true}` that could not
+    /// fail, so it asserted nothing. These assert the replacement actually says
+    /// something, and that it stays parseable: the body is built by `format!`
+    /// over a `concat!`, which compiles happily while emitting broken JSON.
+    #[test]
+    fn health_body_is_valid_json_with_the_fields_a_checker_reads() {
+        let (status, body, hdr) = handle_health();
+        assert_eq!(status, 200);
+        assert!(hdr.is_none());
+
+        // Balanced braces and quotes: the cheapest structural check that does
+        // not pull a JSON dependency into a crate that has none.
+        // A real parse, not a brace count. The body is machine-read by the
+        // scheduled checker, so "looks structurally plausible" is not the bar.
+        let v: serde_json::Value =
+            serde_json::from_str(&body).unwrap_or_else(|e| panic!("invalid JSON ({e}): {body}"));
+        assert_eq!(v["gate"], "ok");
+        assert!(v["shop"]["unit"].is_string());
+        assert!(v["shop"]["active"].is_boolean());
+        assert!(v["shop"]["state"].is_string());
+        // null when the trace is unreadable, a number when it is not. Never a
+        // string, because a checker comparing it against a threshold would then
+        // silently compare against text.
+        let age = &v["shop"]["trace_age_seconds"];
+        assert!(age.is_u64() || age.is_null(), "trace age must be numeric or null: {age}");
+
+        assert!(v["proves"].is_string(), "the limit clause must be present");
+    }
+
+    /// The honesty clause is load-bearing rather than decorative. Without it a
+    /// reader takes a 200 as proof the shop can serve an order, which this
+    /// endpoint cannot know: it sees the unit and the trace, not the channel
+    /// binding or the model provider.
+    #[test]
+    fn health_states_its_own_limit() {
+        let (_, body, _) = handle_health();
+        // Case-insensitive on purpose: the clause is prose and its first word
+        // capitalises or not depending on where a sentence break lands. Pinning
+        // the case makes the test fail on a rewording that changed nothing.
+        let lower = body.to_lowercase();
+        assert!(lower.contains("does not prove"), "limit clause missing: {body}");
+        assert!(lower.contains("channel binding"), "limit is not specific: {body}");
+        assert!(lower.contains("model provider"), "limit is not specific: {body}");
+    }
+
+    /// A missing `systemctl` must read as unknown, never as a dead shop. On a
+    /// dev box or a non-systemd host this path is the normal one, and reporting
+    /// an outage because the instrument is absent is worse than reporting the
+    /// instrument is absent.
+    #[test]
+    fn absent_instrument_is_not_reported_as_an_outage() {
+        let (_, body, _) = handle_health();
+        if body.contains("\"state\":\"unavailable\"") {
+            assert!(body.contains("\"active\":false"));
+            assert!(!body.contains("\"gate\":\"down\""),
+                "a missing instrument must not be reported as the gate failing");
+        }
+    }
 }
