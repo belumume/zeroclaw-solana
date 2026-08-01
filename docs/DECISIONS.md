@@ -213,3 +213,68 @@ Recorded because the wrong lesson was available and cheap to draw.
 **Consequence.** The testing argument is about which layer catches which kind of wrong, and
 what each is blind to, which is recorded in TESTING.md including the failures that passed
 every layer.
+
+## 9. The attestation plugin was superseded by a lower-custody successor
+
+**Chosen.** `oracle-publish` publishes the device's readings, and `depin-attest` runs in
+neither use case. It stays in the tree with its own README, tests and devnet proof, the same
+way the demoted payment plugin does.
+
+**Rejected: keeping `depin-attest` on the live path.** It works, it has a real devnet
+attestation, and it demonstrated an on-chain replay refusal, so there was every incentive to
+keep shipping a component that already had proof attached. It is T2: it holds a scoped
+ed25519 session key, it signs, and it broadcasts. `oracle-publish` does the same job at T1,
+because the device co-signs the reading and the fee-payer slot comes back empty, so its output
+cannot be broadcast by anything that does not already hold the agent's session key. The brief
+puts T0 and T1 at the sweet spot, which makes a signing-and-broadcasting component worth
+keeping only when nothing lower does the job. Something does.
+
+**Rejected: deleting it.** A tier argument is checkable only when both sides of it are in the
+tree. Deleting the T2 version leaves a claim that a T1 design was available with nothing to
+compare it against.
+
+**Rejected: a memo the successor also writes.** The two are not the same shape. `depin-attest`
+writes an `spl-memo` a human reads back; `oracle-publish` writes a typed `DeviceFeed` account
+a consumer program CPI-reads, which is why the custody went down while the capability went up.
+
+**What would justify going back to T2.** A reading that must land on chain with no agent
+session key in the loop, such as a device publishing while the host is offline. Neither use
+case needs that, because the agent is the thing running the schedule.
+
+**Consequence.** The live feed sits one tier lower than the component it replaced, and
+`depin-attest` reads as an orphan in the tree unless someone says why it is there, which is
+what this entry is for.
+
+## 10. The two read-only lenses stay Tier 3, and the reason is ordering rather than the RPC call
+
+**Chosen.** `token-risk-check` and `lending-health` are wasm plugins at T0 read-only custody.
+Both predate the two use cases and run in neither; they keep their own READMEs and tests.
+
+**Rejected: a Tier 1 skill plus the built-in `http_request` tool.** This is the option the
+brief names, and refusing it needs a better reason than preference, because from outside both
+look like the shape the brief rejects: one HTTP call, then shaping. The reason is ordering. A
+skill's instructions are text the model reads, and `http_request` puts the response into the
+model's context first, so the instructions can only ask the model to be careful about bytes it
+has already read. A plugin runs before anything reaches context, so `sanitize_onchain` and
+`label_untrusted` see the attacker-controlled fields (a token name, a market symbol, an RPC
+error string) while there is still somewhere for them to be stripped to. That is the argument
+`payment-watch` rests on, applied to the two components where it is easiest to doubt.
+
+**Rejected: treating the third-party API as the source of truth.** `token-risk-check` does not
+rest on RugCheck. It calls `getAccountInfo` and decodes the Token-2022 TLV itself through
+`decode_mint`, and its report ends by saying so: on-chain extensions are authoritative,
+RugCheck is corroboration only. Token-2022 TLV parsing for risk checks is the brief's own first
+example of work that belongs inside the sandbox. A wrapper would inherit whichever verdict a
+third party returned, including the case where it returns nothing.
+
+**Consequence.** Both fail closed rather than downward, which is the property the tier buys.
+`lending-health` turns a non-finite ratio into `Unknown` instead of letting it slide to `Safe`,
+and caps every symbol at 24 characters so a minted name cannot flood the context window the
+brief warns about. Both bounds are measured by a test that prints the figure: 1,355 bytes for
+the risk lens under a 200-entry hostile flood, 5,810 for the positions lens under 300 hostile
+positions carrying 40 symbols each. The tests assert a ceiling rather than those exact numbers,
+so re-run them rather than quoting these if the shaping changes.
+
+**What would justify Tier 1.** A lens reading only values the chain itself constrains, with no
+operator-supplied text and no third-party JSON anywhere in the response. Neither of these is
+that, and a lens over token metadata never will be.

@@ -98,7 +98,10 @@ which is the honest place for an LLM-driven system to stop.
 | [`skills/solana-pay`](skills/solana-pay) | Builds the payment URL. A skill, not a plugin, on purpose | skill |
 
 `solana-pay-request` was built as a wasm plugin and then **demoted to a skill**, because
-building a URL is string work with no funds at risk and does not need a sandbox. It stays in
+building a URL is string work and string work does not need a sandbox. The reason first given
+for that call was wrong, and the correction is in [`docs/DECISIONS.md`](docs/DECISIONS.md):
+the failure that matters is a well-formed URL carrying the wrong recipient, which a sandbox
+would not catch, so the guard is a hardcoded invariant in `pay_link.py`. The plugin stays in
 the tree as the evidence trail for that call rather than as part of the shipped path.
 
 Three earlier plugins (`token-risk-check`, `lending-health`, `depin-attest`) predate the two

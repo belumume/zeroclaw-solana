@@ -185,7 +185,39 @@ The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM. We
   its bytes is code, not a skill, and it runs host-side, so it reuses `solana-core`'s
   byte-validated primitives compiled natively. The crate's dual `crate-type` was for exactly
   this: the same decode/introspection logic the wasm plugins use, verified once.
-Every layer sits at the lowest tier that honestly does the job.
+- **The three transaction builders stay Tier 1, and none of them holds a fund-signing key.**
+  `oracle-publish`, `spl-transfer-build` and `allowance-spend-build` each build a transaction
+  and stop. The last two return every signature slot zeroed and their config sections carry
+  public keys only, so no code path in either could receive a seed. `oracle-publish` touches
+  exactly one key, the device seed, which signs readings and nothing else, and it returns a
+  partial transaction whose fee-payer slot is empty, so its output cannot be broadcast by
+  anyone who does not already hold the agent's session key. What would push any of them to T2
+  is a flow with no human and no host available to complete the signature. Both use cases have
+  one, so none of them needs it.
+- **The two read-only lenses stay Tier 3 on an ordering argument.** From outside,
+  `token-risk-check` and `lending-health` look like the shape the brief rejects, one call and
+  some shaping, so the reason for the sandbox has to be better than preference. A Tier-1 skill
+  plus the built-in `http_request` tool cannot sanitize a response, because the raw JSON
+  reaches the model's context before any skill instruction runs, and an instruction can only
+  ask the model to be careful about bytes it has already read. That is why every component
+  here that reads untrusted on-chain or third-party JSON stays Tier 3, and why the only
+  component that became a skill is the one that reads nothing. `token-risk-check` also does
+  not rest on RugCheck: it calls `getAccountInfo`, decodes the Token-2022 TLV itself, and ends
+  its report by saying that on-chain extensions are authoritative while RugCheck corroborates.
+  TLV parsing for risk checks is the brief's own first example of work belonging in the
+  sandbox. Tier 1 would need a lens whose response carries no attacker-controlled text at all.
+- **`depin-attest` is the one component whose tier went down by being replaced.** It signs and
+  broadcasts, which is T2, the tier the brief accepts only under caps and gates.
+  `oracle-publish` does the same job at T1 and writes something a program can consume rather
+  than a memo a human reads back, so the live feed runs on the successor and `depin-attest`
+  runs in neither use case. It stays in the tree for the reason `solana-pay-request` does: a
+  tier argument is checkable only when both sides of it are present. Going back up would take
+  a reading that has to reach the chain with no agent session key in the loop, which neither
+  use case has.
+Every layer sits at the lowest tier that honestly does the job, and the test applied to each
+is what would have to become true before the tier above it were warranted. The reasoning for
+the two components that sit in the tree without belonging to either use case is written out in
+DECISIONS.md.
 
 ## How the bytes are checked, since the custody claims rest on them
 
