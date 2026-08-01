@@ -336,6 +336,17 @@ a read-only plugin: any T0 lens answers the question it is handed. Closing it ne
 expected amount to come from an order ledger the agent cannot write, which is a design we have
 not built, so it is a stated boundary rather than a solved one.
 
+One narrower class inside that boundary is closed, and it is worth separating from the rest
+because the two are easy to confuse. The BRL conversion used to be computed by the model and
+checked by nothing: the pay link carried an `amount=` that no code had ever recomputed.
+`pay_link.py` now takes the order value and the rate, redoes the division at two decimal places
+half-up, compares the result against the `amount=` in the link, and refuses to emit on
+disagreement. That catches an ARITHMETIC error. It does not touch the paragraph above, because
+the model supplies the order value and the rate as well as the amount, so a consistent lie
+passes every check: an injected agent that says R$ 0.05 at a rate of 1.0 and asks for 0.05 USDC
+is internally coherent and will be emitted. Arithmetic is now machine-checked; intent is not,
+and the two failures look identical in the link.
+
 Second, narrower: the sender is displayed, never asserted. `from` is a heuristic (the owner
 whose balance decreased most) and is not part of the match condition. So a PAID proves *the
 merchant received exactly the expected amount of the expected asset in a transaction carrying
