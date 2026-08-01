@@ -8,9 +8,10 @@ body from the physical edge (a device signing its own readings on-chain), throug
 commerce (the node sells that feed and pays for its own gas), to on-chain-enforced custody (an
 audited program bounds the delegated spends, and a human gate bounds the rest), reproducible from a clean machine in an evening.
 1. **The DePIN talking node**: a node that reads REAL ambient temperature (Madinah, from the
-   keyless open-meteo API on the interim host now; a physical Raspberry Pi + DHT11 sensor
-   replaces that source when the kit lands, so the day/night swing in the values is real weather,
-   not synthetic), signs each reading with a device key the host never exposes, and publishes a
+   keyless open-meteo API, so the day/night swing in the values is real weather rather than
+   synthetic; a physical Raspberry Pi with a DHT11 is a drop-in for that source and is deliberately
+   NOT a dependency, because what gets signed is the reading and the device key, not the enclosure),
+   signs each reading with a device key the host never exposes, and publishes a
    typed on-chain feed another program consumes. Two publish paths share the same device
    signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
    publisher runs the durable feed on a schedule so the on-chain sequence never gaps. You can
