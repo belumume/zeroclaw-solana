@@ -269,6 +269,21 @@ the top of the file; the default is the reference node's, so edit it if yours di
 terminal font that distorts the QR is a rendering problem in your terminal rather than in the
 code, and this sidesteps it by never asking the terminal to draw it.
 
+**Keep this bound to localhost. Do not tunnel it.** The page serves a live pairing QR, and a
+pairing QR is a bearer credential: whoever scans it links their device to your shop's WhatsApp
+session. The obvious move when the daemon runs on a remote box is to expose port 8899 through
+something like `cloudflared tunnel --url http://127.0.0.1:8899` so you can scan it from your
+phone. That publishes the credential to the whole internet with no authentication in front of
+it. We did exactly that on the reference node and left it up for five days before catching it.
+Use SSH port-forwarding instead, which reaches the same page from your phone's network without
+publishing anything:
+
+```
+ssh -L 8899:127.0.0.1:8899 <your-node>   # then open http://127.0.0.1:8899 locally
+```
+
+Stop the server once the session is linked. It has no reason to keep running afterwards.
+
 **Fund the paying wallet before you open the link.** The shop quotes in **devnet USDC**
 (mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, Circle's devnet USDC), so devnet SOL
 alone cannot settle a payment: SOL covers the transaction fee, the transfer itself is the
