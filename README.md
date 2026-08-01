@@ -35,7 +35,13 @@ orders are quoted in BRL at a stated rate and settled in USDC.
 Both run on the same ARM node under `systemd --user`, and the two are not equally
 observable from outside, so this says which is which rather than leaving you to find out.
 The DePIN feed is continuously checkable: it publishes on a timer and every reading lands
-on chain, so `verify-proof.py` can go red on it. The shop is a Telegram and WhatsApp client
+on chain, so `verify-proof.py` can go red on it. It has been publishing on a roughly
+20-minute timer since the device registered itself at `2026-07-25T04:12:01Z`, and that
+duration is not something you have to take on trust. The oldest transaction on the feed
+account is the `RegisterDevice` call that created it, so the history on chain is the
+complete history, and one `getSignaturesForAddress` against
+`JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns all of it. A count is deliberately
+not quoted here, because it would be wrong within the hour. The shop is a Telegram and WhatsApp client
 with no inbound port, and its trace is traffic-driven, so from outside a quiet shop and a
 stopped one look identical. That half is asserted here and machine-checked by a `/health`
 endpoint on the x402 gate, which asks systemd on the node directly.
