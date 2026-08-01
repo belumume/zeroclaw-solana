@@ -13,6 +13,7 @@ stops firing, this gate is blind again.
 Run: python scripts/test_check_repo_paths.py
 """
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -153,6 +154,14 @@ def run_case(name, want, doc_path, body, extra_tracked, on_disk_untracked):
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text("x\n", encoding="utf-8")
 
+        # Lower the discovery floor for these fixtures. They are deliberately tiny, a doc or two,
+        # so the production floor would refuse every one of them and the must-fire cases would
+        # then pass for the FLOOR's reason rather than their own, which is a false green. The
+        # floor keeps its own dedicated cases below, driven at the real defaults.
+        env = dict(os.environ)
+        env["CHECK_REPO_PATHS_MIN_TRACKED"] = "0"
+        env["CHECK_REPO_PATHS_MIN_DOCS"] = "0"
+
         out = subprocess.run(
             [sys.executable, str(root / "scripts" / "check-repo-paths.py")],
             cwd=root,
@@ -160,6 +169,7 @@ def run_case(name, want, doc_path, body, extra_tracked, on_disk_untracked):
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
         return out.returncode, (out.stdout or "") + (out.stderr or "")
 
@@ -183,6 +193,66 @@ def main():
             print(f"  FAIL {name} (rc={rc} want={want})")
             print("       " + output.strip().replace("\n", "\n       "))
             nfail += 1
+
+    # ------------------------------------------------------ must REFUSE to report (floor)
+    # Driven at the PRODUCTION defaults, unlike every case above. Until 2026-08-01 this gate
+    # printed "PASS  every repo path named by a tracked doc is itself tracked" and exited 0 over
+    # ZERO tracked files, byte-identical to a clean run, while running in CI. Its two siblings
+    # exit non-zero on the same input, which is what showed this one was wrong rather than strict.
+    # A gate that reports success because it found nothing to check is worse than an absent gate,
+    # because the green badge is believed.
+    print("\nMUST REFUSE TO REPORT (rc!=0), at production floors:")
+    for label, setup in (
+        ("empty discovery: a git repo with no files at all", "empty"),
+        ("broken discovery: not a git repository", "nogit"),
+    ):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "scripts").mkdir(parents=True, exist_ok=True)
+            (root / "scripts" / "check-repo-paths.py").write_text(
+                GATE.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            if setup == "empty":
+                subprocess.run(["git", "init", "-q"], cwd=root, capture_output=True)
+            out = subprocess.run(
+                [sys.executable, str(root / "scripts" / "check-repo-paths.py")],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            blob = (out.stdout or "") + (out.stderr or "")
+            # Not merely non-zero: it must NOT have printed the PASS line, since the whole
+            # defect was a PASS line over nothing.
+            refused = out.returncode != 0 and "PASS  every repo path" not in blob
+            if refused:
+                print(f"  ok   {label} (rc={out.returncode})")
+                npass += 1
+            else:
+                print(f"  FAIL {label} (rc={out.returncode}) -> {blob.strip()[:160]}")
+                nfail += 1
+
+    # OVER-CORRECTION CONTROL. The floor must not swallow the real repository: if this fails,
+    # the floor is too high and every genuine run is being refused, which trades a false green
+    # for a false red rather than fixing anything.
+    real = subprocess.run(
+        [sys.executable, str(GATE)],
+        cwd=str(HERE.parent),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if real.returncode == 0 and "PASS  every repo path" in (real.stdout or ""):
+        print("  ok   over-correction control: the real repository still passes (rc=0)")
+        npass += 1
+    else:
+        print(
+            f"  FAIL over-correction control: the floor refuses the REAL repo "
+            f"(rc={real.returncode}); it is set too high"
+        )
+        nfail += 1
 
     print(f"\n{npass} passed, {nfail} failed")
     return 1 if nfail else 0

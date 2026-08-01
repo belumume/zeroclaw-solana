@@ -8,12 +8,28 @@ carelessness is most expensive.
 Reports only. Nothing here mutates the tree.
 """
 
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+# Floors, and why they are not the exact current counts. The sibling fmt job in ci.yml floors at
+# exactly its sixteen crates, which is right there because crates are stable and one appearing or
+# vanishing is news. Tracked files churn on every commit, so an exact floor would fail on any
+# legitimate deletion and train a reader to ignore it. These sit far below the live numbers (194
+# tracked, 31 docs at the time of writing) and far above zero, which is the only value the defect
+# actually produces.
+# Overridable so the suite can exercise the REST of this gate against a small fixture repo. That
+# override is the reason the floor needs its own dedicated cases: without them, lowering it for the
+# fixtures would leave the floor itself untested, which is the shape this whole fix is about. It
+# also matters that the must-FIRE fixture cases keep firing for their OWN reason rather than for
+# the floor's, since a case that passes for the wrong reason is a false green.
+MIN_TRACKED = int(os.environ.get("CHECK_REPO_PATHS_MIN_TRACKED", "100"))
+MIN_DOCS = int(os.environ.get("CHECK_REPO_PATHS_MIN_DOCS", "20"))
 
 
 def tracked():
@@ -25,6 +41,15 @@ def tracked():
         encoding="utf-8",
         errors="replace",
     )
+    # An unchecked return code was the root cause: git failing for any reason (not a repo, a
+    # broken index, a bad cwd) yields empty stdout, and an empty set flows through main() to a
+    # PASS line that is byte-identical to a clean run. A gate that reports success because it
+    # found nothing to check is worse than an absent gate, since the green badge is believed.
+    if out.returncode != 0:
+        raise SystemExit(
+            f"git ls-files failed with rc={out.returncode}; refusing to report a result.\n"
+            f"stderr: {out.stderr.strip()[:400]}"
+        )
     return set(out.stdout.split("\n")) - {""}
 
 
@@ -79,6 +104,17 @@ def main():
     # and five others that all ship, purely because the doc named them without a path.
     basenames = {Path(f).name for f in files}
     docs = [f for f in files if f.endswith(".md")]
+
+    # The floor. Everything below this line is a loop over `docs`, so an empty `docs` skips it
+    # entirely, leaves `missing` empty, and prints PASS. That is the same shape ci.yml's fmt job
+    # guards against, and this gate shipped without it while running in CI.
+    if len(files) < MIN_TRACKED or len(docs) < MIN_DOCS:
+        raise SystemExit(
+            f"discovery found {len(files)} tracked file(s) and {len(docs)} document(s), "
+            f"expected at least {MIN_TRACKED} and {MIN_DOCS}. The walk is broken; "
+            f"refusing to report a result over a scope this small."
+        )
+
     missing = {}
 
     for doc in docs:
