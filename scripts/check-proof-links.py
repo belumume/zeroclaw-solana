@@ -11,7 +11,10 @@ check in this repo. And it degrades on a schedule set by someone else, silently,
 a judge finds by clicking it.
 
 So the rule is one line: a clickable `explorer.solana.com/tx/<signature>` in a tracked markdown
-file must resolve to a `CAPTURED` entry in docs/proof-bundle/devnet-transactions.json.
+file must resolve to a `CAPTURED` entry in ANY bundle under docs/proof-bundle/, which are
+discovered by glob rather than named. Naming one file here was correct while devnet was the only
+cluster and became a false red the moment a second bundle landed, reporting captured signatures as
+missing and telling the reader to capture bytes that already existed one file over.
 
 TWO REMEDIES, AND BOTH ARE CORRECT ANSWERS
 ------------------------------------------
@@ -56,7 +59,14 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-BUNDLE = REPO / "docs" / "proof-bundle" / "devnet-transactions.json"
+# EVERY bundle, discovered rather than named. This was one hardcoded path to
+# devnet-transactions.json, which was correct while devnet was the only cluster and became a FALSE
+# RED the moment mainnet-transactions.json landed: three captured mainnet signatures reported as
+# "not in the bundle at all", and the script's own remedy told the reader to capture bytes that
+# were already captured one file over. A hand-named scope cannot see a file added later, which is
+# the whole reason the tracked-markdown scope above is derived from git rather than listed.
+BUNDLE_DIR = REPO / "docs" / "proof-bundle"
+BUNDLE_GLOB = "*-transactions.json"
 
 TX_LINK = re.compile(r"explorer\.solana\.com/tx/([1-9A-HJ-NP-Za-km-z]{32,})")
 
@@ -91,15 +101,38 @@ def main():
         )
         return 2
 
-    try:
-        bundle = json.loads(BUNDLE.read_text(encoding="utf-8")).get("transactions", {})
-    except Exception as exc:
-        print(f"CANNOT VERIFY  cannot read {BUNDLE.relative_to(REPO)}: {exc}")
+    bundle_files = sorted(BUNDLE_DIR.glob(BUNDLE_GLOB))
+    if not bundle_files:
+        print(
+            f"CANNOT VERIFY  no {BUNDLE_GLOB} under {BUNDLE_DIR.relative_to(REPO)}; "
+            "bundle discovery returned nothing"
+        )
         return 2
-    captured = {s for s, e in bundle.items() if e.get("status") == "CAPTURED"}
+
+    captured = set()
+    bundle = {}  # merged entries, so a non-captured status can still be reported by name
+    for bf in bundle_files:
+        try:
+            txs = json.loads(bf.read_text(encoding="utf-8")).get("transactions", {})
+        except Exception as exc:
+            print(f"CANNOT VERIFY  cannot read {bf.relative_to(REPO)}: {exc}")
+            return 2
+        for sig, entry in txs.items():
+            # A CAPTURED entry anywhere wins. One bundle recording a signature as pruned must not
+            # mask another holding its real bytes, which is the direction that loses evidence.
+            if entry.get("status") == "CAPTURED" or sig not in bundle:
+                bundle[sig] = entry
+        captured |= {s for s, e in txs.items() if e.get("status") == "CAPTURED"}
+
+    # Name what was actually read, so a bundle that stops being discovered is visible rather than
+    # silently shrinking the set every signature is checked against.
+    print(
+        f"checking against {len(captured)} captured signature(s) across "
+        f"{len(bundle_files)} bundle(s): {', '.join(b.name for b in bundle_files)}"
+    )
     if not captured:
         print(
-            "CANNOT VERIFY  bundle holds no captured transactions; nothing to check against"
+            "CANNOT VERIFY  bundles hold no captured transactions; nothing to check against"
         )
         return 2
 
