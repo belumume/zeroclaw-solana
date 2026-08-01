@@ -19,6 +19,21 @@ each part, and `--check` is what keeps the artifact and its sources from separat
 NEWLINES: the vendored sources are LF. `write_text` applies the platform ending on write,
 which is how the deployed file came to be CRLF, so `--check` compares text rather than
 bytes and is therefore correct on either platform.
+
+IF YOU ARE AUDITING THIS FILE AND FOUND ZERO MATCHES, READ THIS BEFORE FILING ANYTHING.
+Grepping this script for page content -- the Portuguese strings, the merchant address, the
+mint names -- returns zero BY CONSTRUCTION, because it is an assembler and every one of
+those strings lives in `src/`. That zero reads exactly like a missing feature, and three
+separate audits have now reported it as one: "build.py contains no i18n and would wipe the
+translation". It is false each time, and the remedy it prescribes is a rewrite of a
+generator that is already correct.
+
+Settle it with the instrument rather than the grep: `python build.py --check` returns
+`OK index.html matches its sources` and exit 0, which proves the artifact and the sources
+agree. `grep -c -E "Pagar|Conectar|navigator\\.language" src/app.js` returns a nonzero
+count. Both files are tracked, so a fresh clone rebuilds the Portuguese rather than losing
+it. The general form is in `~/.claude/rules/skill-consolidation-extract-diff-first.md`:
+searching an assembler for content that lives in its parts cannot find it.
 """
 
 import sys
