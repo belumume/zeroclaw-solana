@@ -145,9 +145,13 @@ zeroclaw config set agents.demo.model_provider "anthropic.default"
 zeroclaw config set --no-interactive providers.models.anthropic.default.api_key <YOUR_KEY>
 zeroclaw config set providers.models.anthropic.default.model claude-sonnet-5
 ```
-Auto-approve reads and the publish tool; keep every spend builder human-gated. The shop's
-payment link comes from the `solana-pay` **skill**, not a plugin (the tier demotion in the
-write-up), so `solana_pay_request` is deliberately absent here:
+Every spend builder stays human-gated. The auto-approved set is wider than "reads", and
+saying so here rather than leaving a reviewer to diff it against the block: it also carries
+`shell`, `memory_store`, `http_request` and `web_fetch`. What bounds those is not the
+model's judgement. Channel turns run jailed to the agent workspace, egress for both fetch
+tools is allowlisted to four hosts a few lines down, and `cron_add` was deliberately
+removed. The shop's payment link comes from the `solana-pay` **skill**, not a plugin (the
+tier demotion in the write-up), so `solana_pay_request` is deliberately absent here:
 ```
 zeroclaw config set --no-interactive risk_profiles.demo.auto_approve \
   '["token_risk_check","kamino_lending_health","payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_list","glob_search","file_read","http_request","web_fetch","calculator"]'
@@ -207,6 +211,16 @@ zeroclaw config set agents.demo.skill_bundles '["default"]'
   any real secret", which is broader than what we verified (a filesystem flag), and the assets
   at risk are not secrets anyway. If you hold secrets elsewhere, keep the detector on and
   expect broken links until upstream grows an allowlist.
+- `shell` is auto-approved, which is the line in this posture a reviewer should push on
+  hardest, so here is the honest account rather than a reassurance. It is what lets the
+  agent run the pay-link generator and the earnings summarizer without a human in the loop
+  on every order, and it is bounded by the workspace jail, which is a filesystem flag and
+  not a sandbox. The reason that trade is acceptable HERE is the same reason stated above:
+  this agent holds no key that can move funds, so the worst a redirected `shell` reaches is
+  a jailed working directory holding two stdlib scripts and a copy of the SOPs. It is not
+  acceptable by default. If you point this profile at an agent that does hold a signing key,
+  take `shell` out first, because nothing else in this configuration is standing between it
+  and that key.
 - `allow_scripts`: script-bearing skills are deny-by-default; our skill ships a 20-line
   stdlib reference generator you can audit at a glance.
 
@@ -299,7 +313,7 @@ program (`act_on_feed`) proves the feed is consumable, not a memo.
 | skill works in CLI, "blocked by security policy" in channels | workspace jail: put runnable files in `workspace/tools/` |
 | payment link arrives as `[REDACTED_…]` | leak detector (step 4) |
 | link appeared while streaming, gone in final message | `stream_mode partial` replacement; use `multi_message` |
-| `sop list` says none exist, files are right there | SOP.toml needs a `[sop]` table + **root-level** `[[triggers]]`; SOP.md needs a `## Steps` heading with `1. **Title** — body` items |
+| `sop list` says none exist, files are right there | SOP.toml needs a `[sop]` table + **root-level** `[[triggers]]`; SOP.md needs a `## Steps` heading with `1. **Title**: body` items, which is the form both shipped SOPs use |
 | agent loops retrying an http fetch | `http_request` does not follow redirects; a 301 host move returns Cloudflare HTML; point skills at the exact current host |
 | customer asks how to actually pay | the chat channels are TEXT-ONLY (no image send) and a `solana:` URI is not clickable in chat, so the shop sends a tappable **https pay-page** link (`tools/pay_link.py` wraps the `solana:` URL). The page renders a scannable QR (phone wallets) + a Connect-wallet-and-pay button (desktop extensions). Deploy your own page from `webshop-pay/` (`npx wrangler pages deploy webshop-pay`) and set its URL in `pay_link.py`, or reuse the reference deployment `pay_link.py` already defaults to: `https://zeroclaw-shop-pay.pages.dev/` (the page is static and stateless, safe to share) |
 | bot replays an old/broken link | it memorized its own earlier output; `zeroclaw memory clear --key <id> --yes` |
