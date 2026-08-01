@@ -102,7 +102,10 @@ impl GateConfig {
             error: "payment required to read this feed".into(),
             accepts: vec![
                 opt(self.price_single, "one feed reading"),
-                opt(self.price_day_pass, "day pass: unlimited reads this UTC day"),
+                opt(
+                    self.price_day_pass,
+                    "day pass: unlimited reads this UTC day",
+                ),
             ],
             extra: ChallengeExtra { memo: nonce.into() },
         }
@@ -258,6 +261,52 @@ impl DailyLedger {
         self.spent.insert(key, would_be);
         Ok(())
     }
+
+    /// Restore spend and redeemed nonces from settled sales.
+    ///
+    /// Without this the ledger lived only in process memory while the unit is
+    /// `Restart=always`, so every restart re-opened the full per-payer daily
+    /// allowance and forgot every redeemed nonce. A cap that resets whenever the
+    /// process does is not the per-day cap the brief asks for, and nothing in the
+    /// output would have shown it.
+    ///
+    /// HONEST SCOPE. This replays what actually SETTLED, because that is what the
+    /// earnings ledger records. A payment that passed `commit` and then failed to
+    /// broadcast consumed cap in the old process and is not restored here. That is
+    /// the accurate direction rather than the lenient one: no settlement means the
+    /// payer never actually bought anything, so charging them for it across a
+    /// restart would be the bug.
+    ///
+    /// Returns the number of records applied, so the caller can say so at startup
+    /// instead of leaving a silent no-op indistinguishable from an empty ledger.
+    pub fn rehydrate(&mut self, records: impl IntoIterator<Item = EarningRecord>) -> usize {
+        let mut applied = 0usize;
+        for r in records {
+            let key = (r.payer, r.day);
+            let entry = self.spent.entry(key).or_insert(0);
+            *entry = entry.saturating_add(r.amount);
+            if let Some(nonce) = r.nonce {
+                self.used_nonces.insert(nonce);
+            }
+            applied += 1;
+        }
+        applied
+    }
+}
+
+/// One settled sale, as the earnings ledger records it. Only the fields the
+/// rebuild above needs.
+///
+/// `nonce` is optional because lines written before the gate started recording it
+/// have none. Those still restore their spend, which is the half that bounds
+/// money; their nonces stay unredeemed, which is the half Solana would catch
+/// anyway when the duplicate signature reaches the network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EarningRecord {
+    pub day: i64,
+    pub payer: String,
+    pub amount: u64,
+    pub nonce: Option<String>,
 }
 
 /// The 200-OK settlement header (`X-PAYMENT-RESPONSE`) value: base64 of a small
@@ -417,8 +466,12 @@ mod tests {
         let day = 20_000;
 
         // Spend up to the cap across several payments.
-        assert!(ledger.commit(&payer, "a", day, 5_000_000, cfg.daily_cap).is_ok());
-        assert!(ledger.commit(&payer, "b", day, 5_000_000, cfg.daily_cap).is_ok());
+        assert!(ledger
+            .commit(&payer, "a", day, 5_000_000, cfg.daily_cap)
+            .is_ok());
+        assert!(ledger
+            .commit(&payer, "b", day, 5_000_000, cfg.daily_cap)
+            .is_ok());
         // One more would exceed 10 USDC.
         assert_eq!(
             ledger.commit(&payer, "c", day, 1_000_000, cfg.daily_cap),
@@ -433,7 +486,9 @@ mod tests {
             Err(Reject::NonceReused)
         );
         // A NEW day resets the cap for the same payer.
-        assert!(ledger.commit(&payer, "d", day + 1, 5_000_000, cfg.daily_cap).is_ok());
+        assert!(ledger
+            .commit(&payer, "d", day + 1, 5_000_000, cfg.daily_cap)
+            .is_ok());
     }
 
     #[test]
@@ -444,7 +499,9 @@ mod tests {
         let day = 20_001;
         assert!(ledger.within_cap(&payer, day, cfg.daily_cap, cfg.daily_cap));
         assert!(!ledger.within_cap(&payer, day, cfg.daily_cap + 1, cfg.daily_cap));
-        ledger.commit(&payer, "x", day, cfg.daily_cap, cfg.daily_cap).unwrap();
+        ledger
+            .commit(&payer, "x", day, cfg.daily_cap, cfg.daily_cap)
+            .unwrap();
         assert!(!ledger.within_cap(&payer, day, 1, cfg.daily_cap));
     }
 
@@ -452,9 +509,89 @@ mod tests {
     fn settlement_header_is_base64_json_receipt() {
         let payer = Pubkey::new(pubkey_from_seed(&[7; 32]));
         let h = settlement_header("5xSig", "solana-devnet", &payer);
-        let decoded = base64::engine::general_purpose::STANDARD.decode(&h).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&h)
+            .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
         assert_eq!(v["success"], true);
         assert_eq!(v["transaction"], "5xSig");
+    }
+
+    // ---- ledger rebuild across a restart -------------------------------------
+    //
+    // The unit is Restart=always and the ledger lived only in memory, so every
+    // restart handed each payer a fresh full allowance. These pin that it no longer
+    // does, and the last one is the control: it shows the assertions can fail, by
+    // running the same scenario WITHOUT the rebuild and requiring the cap to reopen.
+    // Without that, all three would pass just as happily against a no-op rehydrate.
+
+    fn earning(payer: &Pubkey, day: i64, amount: u64, nonce: Option<&str>) -> EarningRecord {
+        EarningRecord {
+            day,
+            payer: payer.to_base58(),
+            amount,
+            nonce: nonce.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn rehydrate_restores_spend_so_a_restart_does_not_reopen_the_daily_cap() {
+        let payer = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let cap = 1_000;
+        let mut fresh = DailyLedger::new();
+        let applied = fresh.rehydrate([earning(&payer, 42, 900, Some("n1"))]);
+        assert_eq!(applied, 1);
+
+        // 900 already spent today, so 200 more must not fit under a 1000 cap.
+        assert!(!fresh.within_cap(&payer, 42, 200, cap));
+        assert!(fresh.within_cap(&payer, 42, 100, cap));
+    }
+
+    #[test]
+    fn rehydrate_is_scoped_to_its_own_day_and_payer() {
+        let a = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let b = Pubkey::new(pubkey_from_seed(&[10; 32]));
+        let cap = 1_000;
+        let mut l = DailyLedger::new();
+        l.rehydrate([earning(&a, 42, 900, None)]);
+
+        // A different payer, and the same payer on a different day, both start clean.
+        assert!(l.within_cap(&b, 42, 900, cap));
+        assert!(l.within_cap(&a, 43, 900, cap));
+    }
+
+    #[test]
+    fn rehydrate_restores_nonces_so_a_replayed_payment_is_still_refused() {
+        let payer = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let mut l = DailyLedger::new();
+        l.rehydrate([earning(&payer, 42, 10, Some("memo-abc"))]);
+        assert!(matches!(
+            l.commit(&payer, "memo-abc", 42, 10, 1_000),
+            Err(Reject::NonceReused)
+        ));
+        // A nonce it never saw is still spendable, so this is not refusing everything.
+        assert!(l.commit(&payer, "memo-xyz", 42, 10, 1_000).is_ok());
+    }
+
+    #[test]
+    fn a_record_without_a_nonce_still_restores_its_spend() {
+        // Lines written before the gate recorded the memo. The half that bounds money
+        // must survive them; only the replay half is unavailable.
+        let payer = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let mut l = DailyLedger::new();
+        l.rehydrate([earning(&payer, 42, 900, None)]);
+        assert!(!l.within_cap(&payer, 42, 200, 1_000));
+        assert!(l.commit(&payer, "any-memo", 42, 50, 1_000).is_ok());
+    }
+
+    #[test]
+    fn control_without_the_rebuild_a_restart_does_reopen_the_cap() {
+        // The assertions above are only meaningful if they would notice a rehydrate
+        // that did nothing. This is that scenario: same payer, same day, same prior
+        // spend, no rebuild. The full allowance is available again, which is the
+        // defect the rebuild exists to remove.
+        let payer = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let restarted = DailyLedger::new();
+        assert!(restarted.within_cap(&payer, 42, 1_000, 1_000));
     }
 }

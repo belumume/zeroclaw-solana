@@ -48,6 +48,7 @@ is pure HTTP plus Solana JSON-RPC.
 | Replay a valid payment to read repeatedly | the payment's Memo nonce is single-use in the ledger; a replayed signed transaction is refused `NonceReused` |
 | Reuse one payment against a different request | the Memo nonce binds the payment to the challenge that issued it |
 | Drain via many small buys | per-payer per-day cap enforced in code, independent of the protocol |
+| Restart the gate to reset the cap | the ledger is rebuilt at startup from the earnings log, so spend and redeemed nonces survive a restart. This one mattered: the unit is `Restart=always`, so before the rebuild a crash loop handed every payer a fresh full allowance and nothing in the output would have shown it. Honest scope: the rebuild replays what SETTLED, so a payment that passed the cap check and then failed to broadcast is not restored, which is the accurate direction rather than the lenient one |
 | Malformed / adversarial `X-PAYMENT` bytes | every decode path is bounds-checked and fails closed (no panics); `tx_decode` rejects truncation, trailing bytes, oversized counts, and v0 address-table lookups |
 | Prompt-inject the agent into paying out | **not applicable**: the gate has no key and no spend path; it is receive-only |
 

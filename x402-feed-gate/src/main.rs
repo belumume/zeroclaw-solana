@@ -29,7 +29,8 @@ use solana_core::{Commitment, Pubkey, RpcError, SolanaRpc};
 use tiny_http::{Header, Response, Server};
 
 use x402_feed_gate::{
-    settlement_header, verify_x_payment, DailyLedger, GateConfig, Reject, VerifiedPayment,
+    settlement_header, verify_x_payment, DailyLedger, EarningRecord, GateConfig, Reject,
+    VerifiedPayment,
 };
 
 /// Native RPC transport: POST the JSON-RPC body to the configured endpoint over
@@ -117,23 +118,76 @@ fn feed_reading_json<T: RpcTransport>(rpc: &SolanaRpc<T>, feed: &Pubkey) -> Stri
     }
 }
 
-/// Append a settled sale to the earnings ledger (JSON-lines). The ZeroClaw
-/// agent reads this file in an SOP and reports the node's daily x402 revenue to
-/// the owner's channel ("the node announces what it sold"). Best-effort: any IO
-/// failure is swallowed so it can never withhold a paid response.
-fn record_earning(v: &VerifiedPayment, signature: &str, day: i64) {
+/// One place that decides where the earnings ledger lives, so the writer and the
+/// startup reader can never disagree about it. They did not disagree before; there
+/// was simply no reader, and a second literal is how that starts.
+fn earnings_log_path() -> String {
+    std::env::var("X402_EARNINGS_LOG").unwrap_or_else(|_| "x402-earnings.jsonl".to_string())
+}
+
+/// Read settled sales back out of the earnings ledger for the daily-cap rebuild.
+///
+/// Tolerant by design: a missing file is a first run, and a malformed line is
+/// skipped rather than fatal, because refusing to start over one bad line would
+/// take the node offline to protect an accounting number. Skips are counted and
+/// reported so a corrupt ledger is visible instead of silently shrinking the
+/// restored spend.
+fn load_earnings(path: &str) -> (Vec<EarningRecord>, usize) {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return (Vec::new(), 0),
+    };
+    let mut out = Vec::new();
+    let mut skipped = 0usize;
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let parsed: Option<EarningRecord> = serde_json::from_str::<serde_json::Value>(line)
+            .ok()
+            .and_then(|v| {
+                Some(EarningRecord {
+                    day: v.get("day")?.as_i64()?,
+                    payer: v.get("payer")?.as_str()?.to_string(),
+                    amount: v.get("amount")?.as_u64()?,
+                    nonce: v.get("nonce").and_then(|n| n.as_str()).map(str::to_string),
+                })
+            });
+        match parsed {
+            Some(r) => out.push(r),
+            None => skipped += 1,
+        }
+    }
+    (out, skipped)
+}
+
+/// Append a settled sale to the earnings ledger (JSON-lines). The ZeroClaw agent
+/// reads this file in an SOP and reports the node's daily x402 revenue to the
+/// owner's channel ("the node announces what it sold"), and since this change it is
+/// also what the daily cap is rebuilt from at startup. Best-effort: any IO failure
+/// is swallowed so it can never withhold a paid response.
+///
+/// That trade is worth naming now that the file has a second reader. A dropped write
+/// loses one sale from both the revenue report and the restored cap, which is the
+/// direction that favours the paying customer over our accounting. Withholding a
+/// response the customer already paid for would be the worse failure.
+fn record_earning(v: &VerifiedPayment, signature: &str, day: i64, nonce: &str) {
     use std::io::Write;
-    let path = std::env::var("X402_EARNINGS_LOG")
-        .unwrap_or_else(|_| "x402-earnings.jsonl".to_string());
+    let path = earnings_log_path();
+    // `nonce` is the payment's memo, not a secret: it is already on chain in the
+    // transaction this line settles. It is recorded so the daily ledger can restore
+    // redeemed nonces across a restart, which it previously could not.
     let line = serde_json::json!({
         "day": day,
         "payer": v.payer.to_base58(),
         "amount": v.amount,
         "is_day_pass": v.is_day_pass,
         "settlement": signature,
+        "nonce": nonce,
     })
     .to_string();
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = writeln!(f, "{line}");
     }
 }
@@ -151,17 +205,35 @@ fn main() {
         seller_wallet: env_pubkey("X402_SELLER_WALLET"),
         mint: env_pubkey("X402_MINT"),
         network: env_or("X402_NETWORK", "solana-devnet"),
-        price_single: env_or("X402_PRICE_SINGLE", "1000000").parse().unwrap_or(1_000_000),
-        price_day_pass: env_or("X402_PRICE_DAYPASS", "5000000").parse().unwrap_or(5_000_000),
-        daily_cap: env_or("X402_DAILY_CAP", "20000000").parse().unwrap_or(20_000_000),
+        price_single: env_or("X402_PRICE_SINGLE", "1000000")
+            .parse()
+            .unwrap_or(1_000_000),
+        price_day_pass: env_or("X402_PRICE_DAYPASS", "5000000")
+            .parse()
+            .unwrap_or(5_000_000),
+        daily_cap: env_or("X402_DAILY_CAP", "20000000")
+            .parse()
+            .unwrap_or(20_000_000),
     };
     let feed = env_pubkey("X402_FEED_PDA");
     let rpc_url = env_or("X402_RPC_URL", "https://api.devnet.solana.com");
     let port = env_or("X402_PORT", "4577");
 
-    let rpc = SolanaRpc::new(UreqTransport { url: rpc_url.clone() })
-        .with_commitment(Commitment::Confirmed);
-    let ledger = Mutex::new(DailyLedger::new());
+    let rpc = SolanaRpc::new(UreqTransport {
+        url: rpc_url.clone(),
+    })
+    .with_commitment(Commitment::Confirmed);
+    // Restore the daily ledger before serving anything. The unit is Restart=always,
+    // so until this existed every restart handed each payer a fresh full allowance and
+    // forgot every redeemed nonce. Nothing in the output would have shown that.
+    let mut restored = DailyLedger::new();
+    let (records, skipped) = load_earnings(&earnings_log_path());
+    let applied = restored.rehydrate(records);
+    eprintln!("  ledger: restored {applied} settled sale(s) from the earnings log");
+    if skipped > 0 {
+        eprintln!("  ledger: WARNING {skipped} unparseable line(s) skipped; restored spend is a lower bound");
+    }
+    let ledger = Mutex::new(restored);
     let nonce_counter = AtomicU64::new(0);
 
     let addr = format!("127.0.0.1:{port}");
@@ -171,7 +243,11 @@ fn main() {
     });
     eprintln!("x402-feed-gate listening on http://{addr}");
     eprintln!("  selling feed {}", feed.to_base58());
-    eprintln!("  receiving to ATA {} for mint {}", cfg.receiving_ata().to_base58(), cfg.mint.to_base58());
+    eprintln!(
+        "  receiving to ATA {} for mint {}",
+        cfg.receiving_ata().to_base58(),
+        cfg.mint.to_base58()
+    );
     eprintln!("  GET /reading  |  GET /price  |  GET /health");
 
     for request in server.incoming_requests() {
@@ -189,7 +265,14 @@ fn main() {
                 let nonce = issue_nonce(&nonce_counter);
                 (402, cfg.challenge(&nonce).to_json(), None)
             }
-            "/reading" => handle_reading(&cfg, &rpc, &feed, &ledger, &nonce_counter, x_payment.as_deref()),
+            "/reading" => handle_reading(
+                &cfg,
+                &rpc,
+                &feed,
+                &ledger,
+                &nonce_counter,
+                x_payment.as_deref(),
+            ),
             _ => (404, r#"{"error":"not found"}"#.to_string(), None),
         };
 
@@ -238,7 +321,10 @@ fn handle_health() -> (u16, String, Option<String>) {
     {
         Ok(o) => {
             let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            (o.status.success(), if s.is_empty() { "unknown".into() } else { s })
+            (
+                o.status.success(),
+                if s.is_empty() { "unknown".into() } else { s },
+            )
         }
         // systemctl absent (a non-systemd host, or a dev box) is reported as
         // unknown rather than as a dead shop. Claiming an outage because the
@@ -314,7 +400,8 @@ fn handle_reading<T: RpcTransport>(
     let day = utc_day_now();
     {
         let mut l = ledger.lock().unwrap();
-        if let Err(reject) = l.commit(&verified.payer, &nonce, day, verified.amount, cfg.daily_cap) {
+        if let Err(reject) = l.commit(&verified.payer, &nonce, day, verified.amount, cfg.daily_cap)
+        {
             return reject_to_response(cfg, nonce_counter, reject);
         }
     }
@@ -325,7 +412,7 @@ fn handle_reading<T: RpcTransport>(
             // Append to the earnings ledger (JSON-lines) so the ZeroClaw agent can
             // report "sold N readings, earned X" to the owner's channel. Best-effort:
             // a log-write failure never withholds a paid response.
-            record_earning(&verified, &signature, day);
+            record_earning(&verified, &signature, day, &nonce);
             let body = serde_json::json!({
                 "paid": true,
                 "amount": verified.amount,
@@ -381,7 +468,9 @@ fn extract_memo_nonce(header: &str) -> Option<String> {
         .ok()?;
     let env: serde_json::Value = serde_json::from_slice(&json_bytes).ok()?;
     let tx_b64 = env.get("payload")?.get("transaction")?.as_str()?;
-    let raw = base64::engine::general_purpose::STANDARD.decode(tx_b64.trim()).ok()?;
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(tx_b64.trim())
+        .ok()?;
     let decoded = solana_core::decode_transaction(&raw).ok()?;
     let memo_prog = solana_core::pubkey::memo_program();
     for ix in &decoded.message.instructions {
@@ -437,7 +526,10 @@ mod health_tests {
         // string, because a checker comparing it against a threshold would then
         // silently compare against text.
         let age = &v["shop"]["trace_age_seconds"];
-        assert!(age.is_u64() || age.is_null(), "trace age must be numeric or null: {age}");
+        assert!(
+            age.is_u64() || age.is_null(),
+            "trace age must be numeric or null: {age}"
+        );
 
         assert!(v["proves"].is_string(), "the limit clause must be present");
     }
@@ -453,9 +545,18 @@ mod health_tests {
         // capitalises or not depending on where a sentence break lands. Pinning
         // the case makes the test fail on a rewording that changed nothing.
         let lower = body.to_lowercase();
-        assert!(lower.contains("does not prove"), "limit clause missing: {body}");
-        assert!(lower.contains("channel binding"), "limit is not specific: {body}");
-        assert!(lower.contains("model provider"), "limit is not specific: {body}");
+        assert!(
+            lower.contains("does not prove"),
+            "limit clause missing: {body}"
+        );
+        assert!(
+            lower.contains("channel binding"),
+            "limit is not specific: {body}"
+        );
+        assert!(
+            lower.contains("model provider"),
+            "limit is not specific: {body}"
+        );
     }
 
     /// A missing `systemctl` must read as unknown, never as a dead shop. On a
@@ -467,8 +568,10 @@ mod health_tests {
         let (_, body, _) = handle_health();
         if body.contains("\"state\":\"unavailable\"") {
             assert!(body.contains("\"active\":false"));
-            assert!(!body.contains("\"gate\":\"down\""),
-                "a missing instrument must not be reported as the gate failing");
+            assert!(
+                !body.contains("\"gate\":\"down\""),
+                "a missing instrument must not be reported as the gate failing"
+            );
         }
     }
 }
