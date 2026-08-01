@@ -530,7 +530,19 @@ Scoped non-goals (deliberate):
   deliberate: an unrecognised mint is displayed as a short address, never as a symbol read from the
   mint's own metadata, so a token that calls itself USDC cannot borrow the label.
 - **No reputation-gated signing, privacy spend caps, or Agent Registry integration** (brief-named
-  edges), out of scope for a two-use-case showcase, not overlooked.
+  edges). Named rather than waved at, because "out of scope" reads identically to "did not know it
+  existed" and a reviewer cannot tell those apart. The registry is a Solana Foundation product with
+  a deployed Metaplex program; we verified it executable on both clusters with a positive and a
+  negative control, and checked the role assignment at source rather than treating an executable
+  account as proof of what it is, then probed the four QuantuLabs programs the official page links.
+  Five deployed programs, not one.
+
+  It is not integrated because it answers a different question than this submission does. A registry
+  entry is a claim about WHO the agent is. Every custody guarantee here is a bound on WHAT it can
+  do, enforced by an audited program that does not care about identity, which is the whole reason
+  the bound survives an agent that has been deceived. Integrating it would add a surface without
+  moving the guarantee, and the brief scores depth over breadth. Recorded as a decision with its
+  reasoning rather than as an omission.
 
 **Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC at a stated
 rate source (ECB reference), so a merchant charges "R$120" and the customer pays the USDC
