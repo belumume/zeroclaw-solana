@@ -32,14 +32,18 @@ steps 1-7 below.
 Plugins are not in release binaries, so build the host from source at the pinned release:
 ```
 git clone https://github.com/zeroclaw-labs/zeroclaw && cd zeroclaw
-git checkout bcf1f25        # the exact commit this was verified against
+git checkout b119cc09        # verified against this commit, 2026-08-01
 
-# REQUIRED on this commit, two lines, or no plugin will register. See the wit section
-# below for why. This commit predates upstream restoring the `memory-audit` variant,
-# and this repo's vendored wit/v0 carries it, so the interfaces differ until you add it.
-#   wit/v0/logging.wit                              -> add `memory-audit,` after `note,`
-#   crates/zeroclaw-plugins/src/component_logging.rs -> add the matching arm:
-#       PluginAction::MemoryAudit => Action::Note,
+# Check the interface BEFORE patching anything, because the answer changed upstream
+# and a patch applied blindly now ADDS A DUPLICATE VARIANT and breaks the build:
+grep -c memory-audit wit/v0/logging.wit
+#   1  -> upstream already carries it. Patch NOTHING. This is the case at b119cc09.
+#   0  -> you are on an older commit that predates it. Add it in two places, or no
+#         plugin will register (the component model matches interfaces nominally, so
+#         a missing variant fails at instantiation, not at compile):
+#           wit/v0/logging.wit                               -> add `memory-audit,` after `note,`
+#           crates/zeroclaw-plugins/src/component_logging.rs -> add the matching arm:
+#               PluginAction::MemoryAudit => Action::Note,
 
 cargo build --release --features plugins-wasm,plugins-wasm-cranelift,whatsapp-web
 ```
@@ -65,7 +69,11 @@ cloud-API channel and the config schema compile unconditionally, so that matches
 no web channel at all. And do not grep for `whatsapp_rust`, which we tried first: it is absent
 even from a correct build, so it reports failure on a working host.
 
-**Verified against host commit `bcf1f25` (v0.8.3 line) plus the two-line patch in step 1.**
+**Verified against host commit `b119cc09` (2026-08-01), which needs NO patch because upstream
+now carries `memory-audit` itself. The earlier pin `bcf1f25` was the head of one of this
+project's own PR branches, so it resolved through the GitHub API from here and was
+unreachable in anyone else's clone; that is why step 1 now checks the interface instead of
+prescribing a patch.**
 `wit/v0` is explicitly experimental and unfrozen, so it moves under you, and the failure is
 silent until load time. Before building the plugins, compare your host's plugin-action enum
 against this repo's vendored copy:

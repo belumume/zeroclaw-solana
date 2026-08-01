@@ -157,8 +157,22 @@ else
   # other 5 would read as full confidence, which is the failure this whole script exists
   # to prevent one level up.
   total_dirs=$(find "$REPO/plugins" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
-  checked=$(printf '%s\n' "$REPO"/plugins/*/*.wasm 2>/dev/null \
-            | while read -r w; do [ -f "$w" ] && basename "$w"; done | sort -u | wc -l)
+  # Count the plugin DIRECTORIES that have a built component, globbing BOTH layouts, because
+  # the verification loop above globs both and cargo only ever writes the second
+  # (plugins/<name>/target/wasm32-wasip2/release/<name>.wasm, as QUICKSTART states). This
+  # counter globbed the first layout alone, so it returned 0 on every real build and the
+  # script could never reach COMPATIBLE, while printing PASS lines for individual plugins
+  # directly above. A counter whose job is to stop passing-while-silent from reading as full
+  # confidence must not itself be blind to where the artifacts land. Both the loop and this
+  # count now walk the same directories, so they cannot drift apart again.
+  checked=$(
+    for d in "$REPO"/plugins/*/; do
+      [ -d "$d" ] || continue
+      for w in "$d"*.wasm "$d"target/wasm32-wasip2/release/*.wasm; do
+        if [ -f "$w" ]; then basename "${d%/}"; break; fi
+      done
+    done | sort -u | wc -l
+  )
   echo "  coverage: $checked of $total_dirs plugin directories have a built component"
   if [ "$found_any" -eq 0 ]; then
     bad "no built .wasm found, so NOTHING was actually verified here"
