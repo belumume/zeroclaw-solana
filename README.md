@@ -11,9 +11,12 @@ screen, and the x402 gate answering 402 with its nonce visibly incrementing betw
 file is committed here rather than linked off somewhere, so it does not depend on anyone else's
 retention policy.
 
-**A DePIN node that pays for itself.** An ARM box takes a sensor reading, signs it with a key
-generated on that box, and lands it in a typed account owned by our oracle program, where a
-separate consumer program reads it and acts. A `systemd` timer keeps it publishing with no
+**A DePIN node that pays for itself.** An ARM box takes an ambient temperature reading for
+Madinah, signs it with a key generated on that box, and lands it in a typed account owned by our
+oracle program, where a separate consumer program reads it and acts. The reading comes from a
+keyless public weather API on the current host rather than from a physical probe, which the
+write-up says too; a Raspberry Pi with a DHT11 is the hardware path and the on-chain half is
+identical either way, because what is signed is the value and the device key, not the enclosure. A `systemd` timer keeps it publishing with no
 laptop involved. The same node also sells that reading per request over x402, so the machine
 earns the gas it spends. You can exercise that yourself against the running node:
 `curl https://x402.perfpilot.dev/price` returns an HTTP 402 challenge with two price tiers and a
