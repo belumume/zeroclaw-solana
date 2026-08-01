@@ -351,11 +351,19 @@ either overstate today or need remembering later, which is how this sentence cam
 the verifier had printed four for some time.
 
 **The demo video will show SMALLER numbers than a run today, and that is the point.** It is a
-recording, so it is a snapshot of the moment it was captured: the footage shows two live claims and
-the feed at sequence 80. Running the verifier now returns four live claims and a feed past 500,
-because the node did not stop when the camera did. If the two ever agreed exactly, it would mean
-nothing had been running in between. Do not reconcile them; check the live one, and treat the gap
-between them as the evidence.
+recording, so every frame is a snapshot of the moment it was captured. The verifier beat was
+re-shot on 2026-08-01 and shows ten static claims, four live ones, and the feed at sequence 539.
+The heartbeat beat earlier in the cut is an older take and shows sequence 80. Running the verifier
+now returns a sequence above both, because the node did not stop when the camera did. If any two of
+those agreed exactly it would mean nothing had been running in between. Do not reconcile them;
+check the live one, and treat the gap between them as the evidence.
+
+The CLAIM COUNT is the one number where a gap is not evidence but staleness, because it measures
+what the verifier can check rather than how long the node has run. The beat was re-shot for exactly
+that reason: it showed two live claims against a verifier that derives four, which understated the
+system on the axis this document exists to support. Raising the caption alone was refused, since
+the terminal in frame printed the old count and a caption disagreeing with the output beneath it is
+worse than the understatement.
 
 Prove that gate works rather
 than trusting it: `MAX_FEED_AGE_MIN=0 python3 scripts/verify-proof.py` turns the live check red
