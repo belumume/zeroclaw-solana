@@ -269,7 +269,8 @@ reaching a flag it should not.
 we chose, which makes them strong where we anticipated the failure and silent elsewhere. So
 `differential-fuzz/` mutates real transactions and grades both decoders against `solana-sdk`'s
 deserializer, classifying disagreement instead of asserting an invariant. 220,000 iterations
-across five seeds, no unexplained divergence. Its self-test plants a divergence in every field
+across five seeds, no unexplained divergence, a figure measured from one run that the
+`differential-fuzz/` crate reproduces. Its self-test plants a divergence in every field
 it compares and requires a complaint for each, because zero findings is also what a broken
 detector reports, and the binary refuses to print a result if that control fails.
 
