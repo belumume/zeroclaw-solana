@@ -292,6 +292,36 @@ impl DailyLedger {
         }
         applied
     }
+
+    /// How many single-use nonces have been redeemed.
+    ///
+    /// These three accessors exist so the health endpoint can report that the
+    /// ledger survived a restart. The restart-survival property was previously
+    /// asserted in the write-up and checkable by nobody: the only way to observe
+    /// it was to be the operator reading a startup line on stderr.
+    ///
+    /// They deliberately return COUNTS AND SUMS AND NOTHING ELSE. The keys of the
+    /// two collections are payer addresses and nonces, the endpoint that reads
+    /// this is public and unauthenticated, and an accessor handing out the maps
+    /// would let anyone enumerate who bought from this node and replay-test the
+    /// nonces. A caller that wants the aggregate cannot accidentally get the
+    /// identities, because there is no method that returns them.
+    pub fn redeemed_nonce_count(&self) -> usize {
+        self.used_nonces.len()
+    }
+
+    /// How many distinct (payer, UTC day) pairs carry spend.
+    pub fn tracked_payer_days(&self) -> usize {
+        self.spent.len()
+    }
+
+    /// Total atomic units settled across every payer and day currently tracked.
+    ///
+    /// Saturating, so a corrupt ledger reports a clamped total rather than
+    /// wrapping to a small number that would read as a healthy quiet day.
+    pub fn total_settled(&self) -> u64 {
+        self.spent.values().fold(0u64, |a, b| a.saturating_add(*b))
+    }
 }
 
 /// One settled sale, as the earnings ledger records it. Only the fields the

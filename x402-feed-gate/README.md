@@ -17,7 +17,11 @@ GET /reading                       -> 402 + { accepts: [1 reading, day pass], ex
 GET /reading  (X-PAYMENT: <signed>) -> 200 + { paid, settlement: <sig>, reading: {...} }
                                         + header X-Payment-Response: <base64 receipt>
 GET /price                          -> the 402 challenge alone
-GET /health                         -> {"ok":true}
+GET /health                         -> { gate, shop: {unit, active, state, trace_age_seconds},
+                                          ledger: {daily_cap_atomic_units, restored_sales_at_startup,
+                                                   unparseable_lines_skipped, redeemed_nonces,
+                                                   tracked_payer_days, settled_atomic_units,
+                                                   lock_healthy}, proves }
 ```
 
 The `accepts` array is the x402 tiered price menu, a single reading and a day-pass, in one round trip. The `extra.memo` nonce must be echoed by the payment, binding it to this
@@ -48,7 +52,7 @@ is pure HTTP plus Solana JSON-RPC.
 | Replay a valid payment to read repeatedly | the payment's Memo nonce is single-use in the ledger; a replayed signed transaction is refused `NonceReused` |
 | Reuse one payment against a different request | the Memo nonce binds the payment to the challenge that issued it |
 | Drain via many small buys | per-payer per-day cap enforced in code, independent of the protocol |
-| Restart the gate to reset the cap | the ledger is rebuilt at startup from the earnings log, so spend and redeemed nonces survive a restart. This one mattered: the unit is `Restart=always`, so before the rebuild a crash loop handed every payer a fresh full allowance and nothing in the output would have shown it. Honest scope: the rebuild replays what SETTLED, so a payment that passed the cap check and then failed to broadcast is not restored, which is the accurate direction rather than the lenient one |
+| Restart the gate to reset the cap | the ledger is rebuilt at startup from the earnings log, so spend and redeemed nonces survive a restart. This one mattered: the unit is `Restart=always`, so before the rebuild a crash loop handed every payer a fresh full allowance and nothing in the output would have shown it. Honest scope: the rebuild replays what SETTLED, so a payment that passed the cap check and then failed to broadcast is not restored, which is the accurate direction rather than the lenient one. Checkable without shell access: `/health` serves `ledger.restored_sales_at_startup`, so a non-zero value on a node that has sold something is this process having rebuilt the ledger rather than reopened every allowance. Counts and sums only, never payers or nonces, since that endpoint is public |
 | Malformed / adversarial `X-PAYMENT` bytes | every decode path is bounds-checked and fails closed (no panics); `tx_decode` rejects truncation, trailing bytes, oversized counts, and v0 address-table lookups |
 | Prompt-inject the agent into paying out | **not applicable**: the gate has no key and no spend path; it is receive-only |
 

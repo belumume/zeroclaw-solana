@@ -233,6 +233,7 @@ fn main() {
     if skipped > 0 {
         eprintln!("  ledger: WARNING {skipped} unparseable line(s) skipped; restored spend is a lower bound");
     }
+    let restore_stats = RestoreStats { applied, skipped };
     let ledger = Mutex::new(restored);
     let nonce_counter = AtomicU64::new(0);
 
@@ -260,7 +261,7 @@ fn main() {
 
         let path = url.split('?').next().unwrap_or("/");
         let response_body: (u16, String, Option<String>) = match path {
-            "/health" => handle_health(),
+            "/health" => handle_health(&ledger, &restore_stats, cfg.daily_cap),
             "/price" => {
                 let nonce = issue_nonce(&nonce_counter);
                 (402, cfg.challenge(&nonce).to_json(), None)
@@ -310,7 +311,11 @@ fn main() {
 /// It also separates two failures that were previously indistinguishable: no
 /// answer at all means the box is down, while an answer reporting the shop
 /// inactive means that process died specifically.
-fn handle_health() -> (u16, String, Option<String>) {
+fn handle_health(
+    ledger: &Mutex<DailyLedger>,
+    restore: &RestoreStats,
+    daily_cap: u64,
+) -> (u16, String, Option<String>) {
     let unit = "zc-shop.service";
 
     // `is-active` exits non-zero for anything but active, so the status code is
@@ -345,6 +350,26 @@ fn handle_health() -> (u16, String, Option<String>) {
     // Built with serde_json rather than format!, matching every other response
     // in this file. A hand-built body compiles fine while emitting broken JSON,
     // and the checker reading this endpoint would see a 200 either way.
+    // A poisoned lock means some earlier request panicked while holding the
+    // ledger. Reporting that is strictly better than the two alternatives:
+    // panicking here would take the health endpoint down for a fault that does
+    // not affect it, and silently recovering would hide a real incident behind
+    // numbers that look normal. The data itself is still readable either way.
+    let (lock_ok, guard) = match ledger.lock() {
+        Ok(g) => (true, g),
+        Err(poisoned) => (false, poisoned.into_inner()),
+    };
+    let ledger_json = serde_json::json!({
+        "daily_cap_atomic_units": daily_cap,
+        "restored_sales_at_startup": restore.applied,
+        "unparseable_lines_skipped": restore.skipped,
+        "redeemed_nonces": guard.redeemed_nonce_count(),
+        "tracked_payer_days": guard.tracked_payer_days(),
+        "settled_atomic_units": guard.total_settled(),
+        "lock_healthy": lock_ok,
+    });
+    drop(guard);
+
     let body = serde_json::json!({
         "gate": "ok",
         "shop": {
@@ -353,12 +378,32 @@ fn handle_health() -> (u16, String, Option<String>) {
             "state": state,
             "trace_age_seconds": trace_age,
         },
+        "ledger": ledger_json,
         "proves": "this gate answered, plus the shop unit's state and when it last \
-                   handled traffic. Does NOT prove the channel binding or the model \
-                   provider are working: only a synthetic round-trip proves those.",
+                   handled traffic. The ledger block is the per-payer daily cap made \
+                   externally checkable: a non-zero restored_sales_at_startup is this \
+                   process having rebuilt spend and redeemed nonces from the earnings \
+                   log rather than handing every payer a fresh allowance, which is what \
+                   a Restart=always unit would otherwise do on every restart. Counts and \
+                   sums only, never payers or nonces, because this endpoint is public. \
+                   Does NOT prove the channel binding or the model provider are working: \
+                   only a synthetic round-trip proves those. A restored count of zero is \
+                   also the honest answer on a node that has genuinely sold nothing yet, \
+                   so it is evidence of survival only once sales exist.",
     })
     .to_string();
     (200, body, None)
+}
+
+/// What the startup rebuild found, kept so `/health` can report it.
+///
+/// These are startup facts rather than live ones, so they are captured once and
+/// never recomputed. `skipped` travels with `applied` deliberately: a restored
+/// total built from a log with unreadable lines is a LOWER BOUND on real spend,
+/// and a reader who sees only the applied count would take it as exact.
+struct RestoreStats {
+    applied: usize,
+    skipped: usize,
 }
 
 /// The core request handler: no payment -> 402 challenge; a payment -> verify,
@@ -502,13 +547,59 @@ fn reject_to_response(
 mod health_tests {
     use super::*;
 
+    const TEST_CAP: u64 = 20_000_000;
+
+    /// A payer address and a nonce that are distinctive enough that finding
+    /// either one in the response body is unambiguous. Real base58 payers and
+    /// real nonces both appear in the ledger's keys, so the leak test needs a
+    /// value that cannot occur by chance in surrounding prose.
+    const FIXTURE_PAYER: &str = "PayerLeakCanary11111111111111111111111111111";
+    const FIXTURE_NONCE: &str = "nonce-leak-canary-8f3a";
+
+    /// Drive `/health` against a ledger built from `records`, as the running
+    /// gate does after a restart.
+    fn health_with(records: Vec<EarningRecord>, skipped: usize) -> (u16, String, Option<String>) {
+        let mut l = DailyLedger::new();
+        let applied = l.rehydrate(records);
+        handle_health(&Mutex::new(l), &RestoreStats { applied, skipped }, TEST_CAP)
+    }
+
+    /// The state a node in is before it has ever sold anything.
+    fn health_empty() -> (u16, String, Option<String>) {
+        health_with(vec![], 0)
+    }
+
+    /// Two settled sales from one payer on one day, plus one from another day.
+    fn restored_records() -> Vec<EarningRecord> {
+        vec![
+            EarningRecord {
+                day: 20_300,
+                payer: FIXTURE_PAYER.to_string(),
+                amount: 1_500_000,
+                nonce: Some(FIXTURE_NONCE.to_string()),
+            },
+            EarningRecord {
+                day: 20_300,
+                payer: FIXTURE_PAYER.to_string(),
+                amount: 500_000,
+                nonce: Some(format!("{FIXTURE_NONCE}-b")),
+            },
+            EarningRecord {
+                day: 20_301,
+                payer: FIXTURE_PAYER.to_string(),
+                amount: 250_000,
+                nonce: None,
+            },
+        ]
+    }
+
     /// The route this replaced returned a hardcoded `{"ok":true}` that could not
     /// fail, so it asserted nothing. These assert the replacement actually says
     /// something, and that it stays parseable: the body is built by `format!`
     /// over a `concat!`, which compiles happily while emitting broken JSON.
     #[test]
     fn health_body_is_valid_json_with_the_fields_a_checker_reads() {
-        let (status, body, hdr) = handle_health();
+        let (status, body, hdr) = health_empty();
         assert_eq!(status, 200);
         assert!(hdr.is_none());
 
@@ -540,7 +631,7 @@ mod health_tests {
     /// binding or the model provider.
     #[test]
     fn health_states_its_own_limit() {
-        let (_, body, _) = handle_health();
+        let (_, body, _) = health_empty();
         // Case-insensitive on purpose: the clause is prose and its first word
         // capitalises or not depending on where a sentence break lands. Pinning
         // the case makes the test fail on a rewording that changed nothing.
@@ -565,7 +656,7 @@ mod health_tests {
     /// instrument is absent.
     #[test]
     fn absent_instrument_is_not_reported_as_an_outage() {
-        let (_, body, _) = handle_health();
+        let (_, body, _) = health_empty();
         if body.contains("\"state\":\"unavailable\"") {
             assert!(body.contains("\"active\":false"));
             assert!(
@@ -573,5 +664,93 @@ mod health_tests {
                 "a missing instrument must not be reported as the gate failing"
             );
         }
+    }
+
+    /// The reason this endpoint grew a ledger block. The restart-survival
+    /// property was asserted in the write-up and observable only by the operator
+    /// reading a startup line, so a reader had to take it on trust.
+    ///
+    /// Both directions, because one alone proves nothing. A ledger rebuilt from
+    /// three settled sales must SAY three and must report the spend those sales
+    /// imply, and a genuinely empty node must say zero rather than inheriting a
+    /// number from anywhere. Without the empty case a hardcoded three would pass.
+    #[test]
+    fn the_ledger_block_reports_what_a_restart_actually_restored() {
+        let (_, restored, _) = health_with(restored_records(), 2);
+        let v: serde_json::Value = serde_json::from_str(&restored).unwrap();
+        let l = &v["ledger"];
+        assert_eq!(l["restored_sales_at_startup"], 3);
+        assert_eq!(l["unparseable_lines_skipped"], 2);
+        // Two nonces, because the third record carries none: a line written
+        // before the gate recorded nonces restores its spend but cannot restore
+        // its single-use marker, and the count must show that rather than round up.
+        assert_eq!(l["redeemed_nonces"], 2);
+        // Two payer-days: the same payer on two different UTC days.
+        assert_eq!(l["tracked_payer_days"], 2);
+        assert_eq!(l["settled_atomic_units"], 2_250_000);
+        assert_eq!(l["daily_cap_atomic_units"], TEST_CAP);
+        assert_eq!(l["lock_healthy"], true);
+
+        let (_, empty, _) = health_empty();
+        let e: serde_json::Value = serde_json::from_str(&empty).unwrap();
+        assert_eq!(e["ledger"]["restored_sales_at_startup"], 0);
+        assert_eq!(e["ledger"]["redeemed_nonces"], 0);
+        assert_eq!(e["ledger"]["settled_atomic_units"], 0);
+    }
+
+    /// This endpoint is public and unauthenticated, and the ledger it now reads
+    /// from is keyed by payer address and by nonce. Publishing either would let
+    /// anyone enumerate who buys from this node, and publishing the nonces would
+    /// hand an attacker the exact strings the single-use guard is keyed on.
+    ///
+    /// The fixture values are canaries chosen so a hit cannot be coincidence.
+    /// The accessors are written so that the leak is not merely absent but
+    /// unavailable, and this test is what stops a future field from reaching
+    /// past them.
+    #[test]
+    fn no_payer_address_or_nonce_reaches_the_public_body() {
+        let (_, body, _) = health_with(restored_records(), 0);
+        assert!(
+            !body.contains(FIXTURE_PAYER),
+            "a payer address reached the public health body: {body}"
+        );
+        assert!(
+            !body.contains(FIXTURE_NONCE),
+            "a nonce reached the public health body: {body}"
+        );
+        // The control: the body really was built from that ledger, so the two
+        // assertions above are about redaction rather than about an empty
+        // ledger that never held the canaries in the first place.
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["ledger"]["restored_sales_at_startup"], 3);
+    }
+
+    /// A poisoned ledger must degrade rather than take the endpoint down. The
+    /// health route is what a checker uses to tell "the box is gone" from "one
+    /// component died", and panicking here would collapse that distinction at
+    /// exactly the moment it matters.
+    #[test]
+    fn a_poisoned_ledger_is_reported_rather_than_panicking() {
+        let ledger = Mutex::new(DailyLedger::new());
+        let _ = std::panic::catch_unwind(|| {
+            let _g = ledger.lock().unwrap();
+            panic!("poison the ledger");
+        });
+        assert!(ledger.is_poisoned(), "fixture failed to poison the lock");
+
+        let (status, body, _) = handle_health(
+            &ledger,
+            &RestoreStats {
+                applied: 0,
+                skipped: 0,
+            },
+            TEST_CAP,
+        );
+        assert_eq!(status, 200, "health must still answer");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            v["ledger"]["lock_healthy"], false,
+            "a poisoned lock must be reported, not hidden behind normal-looking numbers"
+        );
     }
 }

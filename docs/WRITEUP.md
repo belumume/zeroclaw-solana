@@ -69,7 +69,11 @@ and under `Restart=always` a crash loop hands every payer a fresh full allowance
 output would reveal it: the gate keeps answering correctly and keeps running every check it
 advertises, against state that was silently zeroed. So the ledger is rebuilt at boot from the
 earnings log, which already carried day, payer and amount, and the boot line reports how many
-settled sales it restored, so a reader can check the property instead of taking it on trust. That
+settled sales it restored. A boot line is visible only to whoever runs the box, though, so the
+same counts are served by the public `/health` endpoint, which is what lets someone who is not the
+operator check the property rather than believe the sentence. It reports counts and sums and
+nothing else, never payers or nonces, because that endpoint is unauthenticated and the ledger it
+reads is keyed by exactly those two things. That
 is the same defect shape this project reported five times in the host it runs on, a control the
 operator sets that no runtime path actually enforces, so it would be poor form to ship it here.
 Proven end to end on devnet: a 402 challenge, a signed
