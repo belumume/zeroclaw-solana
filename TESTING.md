@@ -130,6 +130,30 @@ claim live and exits non-zero if any fails.
 *Cannot catch:* whether the thing is actually deployed and running, which is a
 separate question from whether it works.
 
+**The x402 cap-restart claim, and a control for it.** The write-up states that the gate's
+per-payer daily cap survives a restart, because the ledger is rebuilt from the earnings log at
+boot. Until recently the only evidence was a line on the node's stderr, so the property was
+observable by whoever runs the box and by nobody else. The gate now serves the restore counts on
+its public `/health`, and `verify-proof.py` gates on them as a fourth live claim.
+
+That claim has three outcomes rather than two, for the same reason the RPC corroboration in
+`payment-watch` does. A coherent ledger passes, an incoherent one fails, and an ABSENT ledger
+block means the node is running a build older than the check, which is a true and useful thing to
+report and is not the same statement as the cap being broken. It prints PENDING and does not
+count toward the live total, so a pending claim can never be tallied as a verified one. The total
+is derived from what actually gated rather than hardcoded, so it rises to four by itself on the
+next deploy.
+
+Against the live node today that claim prints PENDING, which means the only branch anyone has
+seen it take is the one that gates nothing, and a verdict nobody has watched go red is not yet
+known to work. So `scripts/verify_proof_ledger_control.py` serves crafted payloads from a
+loopback port and asserts the checker reaches the right verdict on all six branches, including
+every FAIL. Stdlib only, no network, no chain: `python3 scripts/verify_proof_ledger_control.py`.
+
+*Cannot catch:* that the deployed node's ledger matches its own earnings log on disk. The check
+reads what the gate reports about itself, so a gate that miscounted its own restore would be
+believed. Verifying that needs shell access to the box, which is the layer above this one.
+
 **Offline verification of the on-chain claims.** Public devnet RPC retains roughly four
 days, and the deadline and the judging date are two weeks apart, so every explorer link
 here is dead before anyone clicks it. `scripts/capture-proof-bundle.py` pulls the raw

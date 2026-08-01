@@ -499,6 +499,11 @@ def main():
     # gating on trace age would paint it red, which is how a liveness line stops meaning
     # anything to whoever reads it next. The age is printed because it is worth seeing and
     # never asserted on.
+    # Bound before the try so an unreachable endpoint leaves it None rather than undefined.
+    # The x402 ledger check below reads it, and an unbound name there would raise inside the
+    # verifier itself, which is the one place a crash reads as "the claim could not be
+    # checked" when it actually means "the checker is broken".
+    health = None
     try:
         req = urllib.request.Request(
             SHOP_HEALTH_URL, headers={"User-Agent": "Mozilla/5.0 (verify-proof)"}
@@ -533,6 +538,78 @@ def main():
         if is_transport_error(e):
             transport_fails += 1
 
+    # CLAIM: the x402 daily cap survives a restart.
+    #
+    # The gate rebuilds its spend ledger and its redeemed nonces from the earnings log at
+    # boot, because the unit is Restart=always and a counter living only in process memory
+    # would hand every payer a fresh full allowance on every restart. That property was
+    # asserted in the write-up and its only evidence was a line on the node's stderr, which
+    # is readable by the operator and by nobody else.
+    #
+    # THREE OUTCOMES, NOT TWO, following the same reasoning as the RPC corroboration in
+    # payment-watch. A coherent ledger block passes. An incoherent one fails. A block that is
+    # ABSENT means the node is running a build older than this check, which is a true and
+    # useful thing to report and is NOT the same statement as "the cap is broken", so it
+    # prints PENDING and does not gate. Collapsing "not deployed yet" into a red would make
+    # the red mean two different things, and a signal that means two things means neither.
+    ledger_gates = False
+    led = (health or {}).get("ledger")
+    if led is None:
+        print(
+            "PEND  x402 cap-restart not yet observable: the deployed gate predates the "
+            "/health ledger block. Not gating. It becomes a live claim on the next deploy."
+        )
+    else:
+        # .get with no default throughout, so a field the endpoint stops sending reads as
+        # None and fails rather than defaulting into something that passes.
+        restored = led.get("restored_sales_at_startup")
+        nonces = led.get("redeemed_nonces")
+        settled = led.get("settled_atomic_units")
+        cap = led.get("daily_cap_atomic_units")
+        healthy = led.get("lock_healthy")
+        skipped = led.get("unparseable_lines_skipped")
+        shaped = all(
+            isinstance(x, int) for x in (restored, nonces, settled, cap, skipped)
+        )
+        ledger_gates = True
+        if not shaped or healthy is not True:
+            print(
+                f"FAIL  x402 ledger block malformed or lock poisoned: restored={restored!r} "
+                f"nonces={nonces!r} settled={settled!r} cap={cap!r} healthy={healthy!r}"
+            )
+            fails += 1
+        elif settled > 0 and restored == 0:
+            # The one internally contradictory state: the node has settled sales in memory
+            # while claiming it restored none. Either the earnings log is not being written
+            # or it is not being read, and both break the cap across the next restart.
+            print(
+                f"FAIL  x402 ledger inconsistent: {settled} atomic units settled but 0 sales "
+                "restored at startup, so the earnings log is not round-tripping"
+            )
+            fails += 1
+        else:
+            note = (
+                f"restored {restored} sale(s), {nonces} redeemed nonce(s), "
+                f"{settled} atomic units against a {cap} cap"
+            )
+            skip_note = (
+                f"; {skipped} unparseable line(s), restored spend is a lower bound"
+                if skipped
+                else ""
+            )
+            if restored == 0:
+                # Honest: zero restored is also what a node that has genuinely never sold
+                # anything reports, so it is not evidence of survival on its own.
+                print(
+                    f"PASS  x402 ledger block coherent ({note}{skip_note}). Zero restored is "
+                    "consistent with a node that has not sold yet, so this is a shape check "
+                    "until a sale exists."
+                )
+            else:
+                print(
+                    f"PASS  x402 daily cap survived the last restart ({note}{skip_note})"
+                )
+
     # Report the two kinds separately, because collapsing them into one number is exactly
     # how a dead system prints a clean bill of health. An audit put it plainly: of the
     # eleven claims this script used to total, ten were deployed-program state or immutable
@@ -544,7 +621,11 @@ def main():
     # Three, not two, because "Both are running" is a claim about two independent systems and
     # the first two checks only ever observed things outside the shop. The third is the one
     # that can actually go red when the shop dies.
-    live_total = 3
+    # Four once the node serves the ledger block, three until then. The total is derived from
+    # what actually gated rather than hardcoded, so a PENDING x402 claim cannot be counted as
+    # a verified one, and the number rises on its own the moment the deploy lands. A constant
+    # here would either overstate today or need remembering later.
+    live_total = 4 if ledger_gates else 3
     live_fails = fails - static_fails
     print(
         f"\n{static_total - static_fails}/{static_total} static claims verified "
