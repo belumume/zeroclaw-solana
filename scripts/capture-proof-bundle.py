@@ -118,9 +118,39 @@ def main() -> int:
         action="store_true",
         help="overwrite entries that are already CAPTURED (destroys held bytes)",
     )
+    ap.add_argument(
+        "--cluster",
+        default="devnet",
+        help="cluster label recorded in the bundle (default devnet)",
+    )
+    ap.add_argument(
+        "--out",
+        default=None,
+        help="bundle file to write (default docs/proof-bundle/<cluster>-transactions.json)",
+    )
     args = ap.parse_args()
 
-    bundle = json.loads(BUNDLE.read_text(encoding="utf-8"))
+    # Evidence from one cluster must never land in another cluster's bundle, so the path is
+    # derived from the label rather than hardcoded. Default resolves to the original file.
+    bundle_path = (
+        Path(args.out)
+        if args.out
+        else BUNDLE.parent / f"{args.cluster}-transactions.json"
+    )
+    bundle: dict
+    if bundle_path.exists():
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+        if bundle.get("cluster") and bundle["cluster"] != args.cluster:
+            print(
+                f"FATAL: {bundle_path.name} records cluster {bundle['cluster']!r} but "
+                f"--cluster is {args.cluster!r}. Refusing to mix clusters in one bundle."
+            )
+            return 1
+    else:
+        bundle = {
+            "note": f"Raw {args.cluster} transactions, verifiable with no network."
+        }
+        print(f"creating new bundle {bundle_path.name}")
     txs = bundle.setdefault("transactions", {})
 
     targets = list(args.signatures)
@@ -163,7 +193,8 @@ def main() -> int:
 
     bundle["captured_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     bundle["source_rpc"] = args.rpc
-    BUNDLE.write_text(json.dumps(bundle, indent=2) + "\n", encoding="utf-8")
+    bundle["cluster"] = args.cluster
+    bundle_path.write_text(json.dumps(bundle, indent=2) + "\n", encoding="utf-8")
 
     total = len(txs)
     n_cap = sum(1 for e in txs.values() if e.get("status") == "CAPTURED")
