@@ -465,6 +465,14 @@ demonstration reimplementation, which is the only version of this worth having: 
 lookalike would be a claim about the sanitizer rather than the sanitizer. The module is pure
 with no imports, which is why compiling it for the browser is possible at all.
 
+You can also rebuild it rather than trust the committed bytes. `sanitizer-microworld/build.sh`
+runs the host tests first, compiles the crate to `wasm32-unknown-unknown`, inlines the module
+into the page, and structure-checks the result. Regeneration is byte-identical: running it
+against the shipped source reproduces the committed `index.html` exactly, 76,411 bytes, which
+is what lets a reader confirm the wasm embedded in the page is built from the `src/lib.rs`
+sitting next to it rather than from something else. That mattered enough to fix, because a
+self-contained artifact whose generator is missing is one a reader can run and cannot verify.
+
 Six presets, because a blank box does not tell a reader which inputs matter: bidirectional
 override, zero-width split, injection framing with nothing to strip, newline smuggling, an
 overlong field, and all of them at once. The raw panel names every invisible character inline.
