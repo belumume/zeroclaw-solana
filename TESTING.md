@@ -376,6 +376,12 @@ plugins, zero on the x402 gate.** The packages are `rustls-webpki`, `ed25519-dal
 every project in this ecosystem carries and that no simple bump resolves, because `solana-program`
 pins the version.
 
+The two high-severity ones are worth one more line, because "high" reads worse than it is here.
+Both are `rustls-webpki 0.101.7` in the two end-to-end harnesses, and those same lockfiles already
+resolve `rustls-webpki 0.103.13` as well: the old copy is a duplicate pulled in by an older `rustls`
+alongside the patched one, in a graph that never ships. Verified by reading both lockfiles rather
+than by reading the severity label.
+
 That split is the same one described above, seen from the other side. The shipped code decodes the
 wire format by hand and therefore never pulls `solana-sdk`, so it never inherits those advisories.
 The harnesses deliberately DO pull it, because their whole job is to check our hand-decoding against
