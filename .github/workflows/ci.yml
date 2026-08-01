@@ -197,6 +197,18 @@ jobs:
       - name: captured on-chain proofs verify with no network
         run: python3 scripts/verify_proof_offline.py
 
+      # The step above defaults to the DEVNET bundle, which the verifier hardcodes.
+      # So until this line existed, the mainnet custody proof -- three real-USDC
+      # transactions ending in the audited program's 0x12c refusal, the single
+      # strongest custody artifact here -- was asserted by NO ci step at all. It
+      # verified only when a human ran it by hand with the flag, which is exactly
+      # the shape of a claim that rots unnoticed: the suite stays green while the
+      # thing it is supposed to protect is outside its scope. Named as a separate
+      # step rather than folded into the one above, because a combined step that
+      # went red would not say WHICH chain's evidence broke.
+      - name: captured MAINNET custody proofs verify with no network
+        run: python3 scripts/verify_proof_offline.py --bundle docs/proof-bundle/mainnet-transactions.json
+
       # The step above gates itself on its own controls, which is only worth
       # something if those controls can actually fail. This plants three defects in
       # a copy of the verifier and requires each to be refused by the control that
