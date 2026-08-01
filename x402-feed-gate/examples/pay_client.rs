@@ -12,11 +12,16 @@
 //! Then: curl -H "X-PAYMENT: <output>" http://127.0.0.1:4577/reading
 
 use base64::Engine;
-use solana_core::instruction::{memo as memo_ix, set_compute_unit_limit, set_compute_unit_price, AccountMeta, Instruction};
+use solana_core::instruction::{
+    memo as memo_ix, set_compute_unit_limit, set_compute_unit_price, AccountMeta, Instruction,
+};
 use solana_core::pubkey::token_program;
 use solana_core::rpc::RpcTransport;
 use solana_core::token::TRANSFER_CHECKED_TAG;
-use solana_core::{compile, pubkey_from_seed, serialize_transaction, sign_message, Commitment, Pubkey, RpcError, SolanaRpc};
+use solana_core::{
+    compile, pubkey_from_seed, serialize_transaction, sign_message, Commitment, Pubkey, RpcError,
+    SolanaRpc,
+};
 
 struct Ureq {
     url: String,
@@ -62,7 +67,10 @@ fn main() {
     let seller_ata = Pubkey::associated_token_address(&seller, &mint, &token_program());
 
     // Recent blockhash from the cluster.
-    let rpc = SolanaRpc::new(Ureq { url: rpc_url.clone() }).with_commitment(Commitment::Confirmed);
+    let rpc = SolanaRpc::new(Ureq {
+        url: rpc_url.clone(),
+    })
+    .with_commitment(Commitment::Confirmed);
     let bh = rpc.get_latest_blockhash().expect("get blockhash").blockhash;
 
     // TransferChecked: [source, mint, dest, owner]; data = [12, amount(LE), decimals].
