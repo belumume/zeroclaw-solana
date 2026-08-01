@@ -9,10 +9,27 @@ most readers will never run.
 import base64
 import io
 import os
+import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WASM = os.path.join(REPO, "sanitizer-microworld", "sanitizer.wasm")
 OUT = os.path.join(REPO, "sanitizer-microworld", "index.html")
+
+# sanitizer.wasm is a build artifact and is deliberately not committed, so a fresh clone will
+# not have it. Say that plainly instead of raising FileNotFoundError from the read below: this
+# is the script a reader reaches for first, since it is the one that makes the page, and a raw
+# traceback here reads as a broken repo rather than as a skipped step.
+if not os.path.exists(WASM):
+    sys.stderr.write(
+        "sanitizer.wasm is missing, which is expected in a fresh clone: it is a build\n"
+        "artifact and is not committed.\n\n"
+        "Run the full build instead, which compiles it and then calls this script:\n"
+        "    sh sanitizer-microworld/build.sh\n\n"
+        "You do NOT need any of this to USE the microworld. index.html is committed and\n"
+        "self-contained, so opening it needs no build and no server. Rebuilding is only for\n"
+        "confirming the wasm inlined in that page was built from the src next to it.\n"
+    )
+    raise SystemExit(1)
 
 wasm_b64 = base64.b64encode(io.open(WASM, "rb").read()).decode()
 
