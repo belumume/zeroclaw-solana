@@ -109,10 +109,33 @@ PLACEHOLDER = re.compile(
 )
 
 
-def rpc(method, params, attempts=4):
-    """Public devnet RPC rate-limits, and a 429 is our own impatience rather than a dead link.
+CLUSTER_RPC = {
+    "devnet": "https://api.devnet.solana.com",
+    "testnet": "https://api.testnet.solana.com",
+    "mainnet": "https://api.mainnet-beta.solana.com",
+}
+
+
+def rpc_for(url):
+    """The endpoint that can actually answer for THIS link.
+
+    An explorer link carries its own cluster: `?cluster=devnet` says devnet, and no cluster
+    parameter means mainnet, which is the explorer's default. Asking one hardcoded endpoint about
+    every link means asking devnet about a mainnet signature and getting a truthful "no such
+    transaction" that is a false red about the claim. The link is the source of truth for which
+    chain it asserts, so derive from it rather than from a constant.
+    """
+    m = re.search(r"[?&]cluster=([a-z\-]+)", url)
+    if not m:
+        return CLUSTER_RPC["mainnet"]
+    return CLUSTER_RPC.get(m.group(1), RPC)
+
+
+def rpc(method, params, attempts=4, endpoint=None):
+    """Public RPC rate-limits, and a 429 is our own impatience rather than a dead link.
     A checker that reports transport noise as a failure gets muted exactly as fast as one that
     reports a false pass, so back off and retry until the endpoint actually answers."""
+    endpoint = endpoint or RPC
     body = json.dumps(
         {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
     ).encode()
@@ -123,7 +146,7 @@ def rpc(method, params, attempts=4):
             delay *= 2
         try:
             req = urllib.request.Request(
-                RPC, data=body, headers={"Content-Type": "application/json"}
+                endpoint, data=body, headers={"Content-Type": "application/json"}
             )
             with urllib.request.urlopen(req, timeout=25) as r:
                 result = json.load(r).get("result")
@@ -163,12 +186,24 @@ def load_bundle():
     end state for every transaction here rather than a defect. What separates a surviving claim
     from a lost one is whether the raw bytes were captured before that happened, so this is the
     fact the link check has to consult before calling a dead link a failure.
+
+    Reads EVERY bundle, discovered by glob rather than named. Naming devnet-transactions.json here
+    was correct while devnet was the only cluster and became a false red when a second bundle
+    landed: three captured mainnet signatures reported as NOT on chain. That is the same defect as
+    the one fixed in check-proof-links.py, in a second file, which is exactly why it survived that
+    fix and had to be swept as a class rather than an instance.
     """
-    path = REPO / "docs" / "proof-bundle" / "devnet-transactions.json"
-    try:
-        return json.loads(path.read_text(encoding="utf-8")).get("transactions", {})
-    except Exception:
-        return {}
+    merged = {}
+    for path in sorted((REPO / "docs" / "proof-bundle").glob("*-transactions.json")):
+        try:
+            txs = json.loads(path.read_text(encoding="utf-8")).get("transactions", {})
+        except Exception:
+            continue
+        for sig, entry in txs.items():
+            # A CAPTURED entry anywhere wins; the other direction would lose held evidence.
+            if entry.get("status") == "CAPTURED" or sig not in merged:
+                merged[sig] = entry
+    return merged
 
 
 def main():
@@ -211,7 +246,9 @@ def main():
                 sig = tx.group(1)
                 try:
                     got = rpc(
-                        "getTransaction", [sig, {"maxSupportedTransactionVersion": 0}]
+                        "getTransaction",
+                        [sig, {"maxSupportedTransactionVersion": 0}],
+                        endpoint=rpc_for(url),
                     )
                     if got is not None:
                         ok, detail = True, "on chain"
@@ -236,7 +273,11 @@ def main():
             elif ad := EXPLORER_ADDR.search(url):
                 pk = ad.group(1)
                 try:
-                    got = rpc("getAccountInfo", [pk, {"encoding": "base64"}])
+                    got = rpc(
+                        "getAccountInfo",
+                        [pk, {"encoding": "base64"}],
+                        endpoint=rpc_for(url),
+                    )
                     if got and got.get("value"):
                         ok, detail = True, "account exists"
                     else:
@@ -247,7 +288,14 @@ def main():
                         # link would be a false alarm on the mechanism working as designed,
                         # and a checker that cries wolf gets muted. The signature index is
                         # what resolves a reference, and it is what payment-watch polls.
-                        sigs = rpc("getSignaturesForAddress", [pk, {"limit": 1}]) or []
+                        sigs = (
+                            rpc(
+                                "getSignaturesForAddress",
+                                [pk, {"limit": 1}],
+                                endpoint=rpc_for(url),
+                            )
+                            or []
+                        )
                         ok = bool(sigs)
                         detail = (
                             "reference (no account, appears in a tx)"
