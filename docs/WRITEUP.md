@@ -537,6 +537,22 @@ the thing this build validates byte for byte against the reference implementatio
 Blink and the shop behaves identically, which makes it decoration rather than a solution to a
 problem we have.
 
+That was the original reasoning and it rests on judgement, so it was re-checked against the
+surfaces this shop actually runs on, where the answer turns out to be harder than a judgement
+call. A Blink renders as an interactive signable card only in a Blink-aware client. Phantom's
+own documentation scopes its support to rendering on x.com behind an experimental setting, and
+neither WhatsApp nor Telegram has any Blink client, so in both of our channels a Blink URL is an
+ordinary link. Phantom additionally renders only Actions registered in a third-party allowlist
+whose review is a manual email process. So the pattern would add an actions.json, CORS and
+version headers, a base64 transaction endpoint and a human gate on someone else's schedule, in
+exchange for behaviour identical to a plain link on the only two surfaces we ship.
+
+What the brief is reaching for, a payment request the recipient's own wallet builds, previews and
+signs while the agent never holds a key, is what the `solana:` transfer request already does, and
+that is what the pay page emits alongside a QR. The Blink would be a second spelling of a
+mechanism we already have, on clients our customers are not using. If this shop later
+distributed on X, the calculation changes and the endpoint is worth adding then.
+
 **PIX.** Named in the brief and genuinely wanted, and still a non-goal, though not for the
 reason an earlier draft of this document gave. That draft said PIX needs a licensed provider
 and a custodian, and that is wrong: a static BR Code payload is EMV TLV plus a CRC over the
