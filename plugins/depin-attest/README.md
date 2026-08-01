@@ -107,12 +107,14 @@ Attestation landed on devnet:
   `zeroclaw-depin/v1 tamper_triggered dev=sensor-A7 at=1737300000`
 - signed by the scoped operator, `err: None`
 
-That signature no longer resolves and is kept here as history rather than offered as evidence.
-Public devnet stops serving a transaction after roughly four days, and this run predates the
-offline proof bundle, so its raw bytes were never captured and there is nothing to check it
-against. What is checkable today is the reproduce path below, which re-drives the same flow
-against live devnet, and the repo's `docs/proof-bundle/devnet-transactions.json`, which holds the
-raw bytes for the transactions that were captured before they aged out.
+This run predates the offline proof bundle, and for four days the public endpoint would not serve
+it, so it was kept here as history with nothing to check it against. It resolved again on
+2026-08-01 and its raw bytes are now in `docs/proof-bundle/devnet-transactions.json`. Those bytes
+decode to exactly the two instructions listed above, `advanceNonce` followed by the `spl-memo`
+carrying `zeroclaw-depin/v1 tamper_triggered dev=sensor-A7 at=1737300000`, so the claim is
+checkable rather than asserted: run `python scripts/verify_proof_offline.py` from the repo root,
+which needs no network and holds whether or not the endpoint is still serving. The reproduce path
+below re-drives the same flow against live devnet.
 
 Replay proof demonstrated on devnet:
 
