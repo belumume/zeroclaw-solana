@@ -138,6 +138,11 @@ SHOP_PAY_URL = os.environ.get("SHOP_PAY_URL", "https://zeroclaw-shop-pay.pages.d
 # Asserted inside the page body: HTTP 200 only proves a CDN answered, while the pinned
 # merchant address is what makes it this shop's page rather than any page.
 MERCHANT_PIN = "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
+# The shop daemon's own liveness, asked of systemd inside the box and served over the
+# node's named tunnel. This is the signal the pay-page check structurally cannot carry: the
+# page is a CDN asset that answers whether or not the daemon runs, so until this endpoint
+# existed a dead shop and a quiet one were the same observation from outside.
+SHOP_HEALTH_URL = os.environ.get("SHOP_HEALTH_URL", "https://x402.perfpilot.dev/health")
 # DeviceFeed: disc8 + authority32 + device32 + feed_kind1 + value_i64 + scale_i8
 #           + unit[12] + sequence_u64 + observed_at_i64 + published_at_i64 + bump1
 FEED_LEN = 8 + 32 + 32 + 1 + 8 + 1 + 12 + 8 + 8 + 8 + 1
@@ -483,16 +488,63 @@ def main():
         if is_transport_error(e):
             transport_fails += 1
 
+    # The check the two above structurally cannot make. Both of them observe things OUTSIDE
+    # the shop: a feed the node publishes, and a page a CDN serves. Neither can distinguish a
+    # shop that is quiet from one that is stopped, which is the whole reason the 2026-07-26
+    # outage sat unnoticed. This asks systemd, inside the box, and the answer travels out over
+    # the node's named tunnel.
+    #
+    # WHAT IS GATED, and why it is not the obvious field. The gate is the unit's state, not
+    # how recently it handled traffic. A shop nobody has messaged for six hours is healthy and
+    # gating on trace age would paint it red, which is how a liveness line stops meaning
+    # anything to whoever reads it next. The age is printed because it is worth seeing and
+    # never asserted on.
+    try:
+        req = urllib.request.Request(
+            SHOP_HEALTH_URL, headers={"User-Agent": "Mozilla/5.0 (verify-proof)"}
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            health = json.loads(r.read(65536).decode("utf-8", "replace"))
+        shop = health.get("shop") or {}
+        # .get with no default, so a field the endpoint stops sending reads as None and fails
+        # rather than defaulting to something that passes.
+        alive = shop.get("active") is True and shop.get("state") == "active"
+        age_s = shop.get("trace_age_seconds")
+        age_note = (
+            f"last handled traffic {age_s / 60:.0f} min ago"
+            if isinstance(age_s, (int, float))
+            else "traffic age not reported"
+        )
+        if r.status == 200 and alive:
+            print(
+                f"PASS  shop agent process alive per systemd "
+                f"({shop.get('unit')}, {shop.get('state')}; {age_note}, not gating)"
+            )
+        else:
+            print(
+                f"FAIL  shop agent liveness: HTTP {r.status}, unit "
+                f"{shop.get('unit')!r} state {shop.get('state')!r} "
+                f"active={shop.get('active')!r}"
+            )
+            fails += 1
+    except Exception as e:
+        print(f"FAIL  shop agent /health unreachable: {e}")
+        fails += 1
+        if is_transport_error(e):
+            transport_fails += 1
+
     # Report the two kinds separately, because collapsing them into one number is exactly
     # how a dead system prints a clean bill of health. An audit put it plainly: of the
     # eleven claims this script used to total, ten were deployed-program state or immutable
     # transaction history, and one could actually go red. "11/11 verified" therefore read
     # as a liveness proof while being almost entirely a record of the past.
     static_total = len(ACCOUNTS) + len(TXS)
-    # The ARM feed and the shop pay page. The laptop feed is reported but never gates.
-    # Two, not one, because "Both are running" is a claim about two independent systems and
-    # a check that can only see one of them cannot falsify it.
-    live_total = 2
+    # The ARM feed, the shop pay page, and the shop daemon's own systemd state. The laptop
+    # feed is reported but never gates.
+    # Three, not two, because "Both are running" is a claim about two independent systems and
+    # the first two checks only ever observed things outside the shop. The third is the one
+    # that can actually go red when the shop dies.
+    live_total = 3
     live_fails = fails - static_fails
     print(
         f"\n{static_total - static_fails}/{static_total} static claims verified "
@@ -500,20 +552,22 @@ def main():
     )
     print(
         f"{live_total - live_fails}/{live_total} live claims verified "
-        f"(ARM feed publishing now; pay page is the pinned build)"
+        f"(ARM feed publishing now; pay page is the pinned build; shop daemon alive)"
     )
-    # Name the gap rather than letting a count imply cover it does not have. README says two
-    # systems run on that node. This tier sees the feed continuously and the pay page's
-    # integrity; it does NOT see the shop agent's own process, because a channel client has no
-    # inbound port and its trace is traffic-driven, so quiet and dead are identical from
-    # outside. The committed /health asks systemd from inside the box and closes this; until
-    # that is deployed, this line is the honest statement.
+    # Keep naming what this tier still cannot see, because a count that grew is exactly when
+    # a reader starts assuming it covers everything. Both systems in "Both are running" now
+    # have a check that can go red. What none of them prove is that the shop can complete a
+    # job: /health reports the process, not the channel binding to WhatsApp or Telegram and
+    # not the model provider behind it. The endpoint says so itself in its own `proves`
+    # field, and only a synthetic round-trip through a real channel would close that.
     print(
-        "      NOT covered above: the shop agent's own liveness. The /health endpoint in "
-        "x402-feed-gate closes it by asking systemd on the node; see task #19."
+        "      NOT covered above: whether the shop can complete a job end to end. "
+        "/health reports the process, not the channel binding or the model provider."
     )
     if fails == 0:
-        print("\nThe record holds and the feed is live. Shop-agent liveness is asserted, not checked here.")
+        print(
+            "\nThe record holds, the feed is live, and the shop daemon answered for itself."
+        )
         sys.exit(0)
 
     # Three exit codes rather than two, because CI has to tell these apart and was
