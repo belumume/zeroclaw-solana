@@ -348,7 +348,16 @@ restart, which are independent systems rather than one. That count is DERIVED fr
 gated rather than pinned, so it reads 4 once the node serves the ledger block and 3 until then,
 and a claim reporting PENDING is never counted as verified. A number written here instead would
 either overstate today or need remembering later, which is how this sentence came to say two when
-the verifier had printed four for some time. Prove that gate works rather
+the verifier had printed four for some time.
+
+**The demo video will show SMALLER numbers than a run today, and that is the point.** It is a
+recording, so it is a snapshot of the moment it was captured: the footage shows two live claims and
+the feed at sequence 80. Running the verifier now returns four live claims and a feed past 500,
+because the node did not stop when the camera did. If the two ever agreed exactly, it would mean
+nothing had been running in between. Do not reconcile them; check the live one, and treat the gap
+between them as the evidence.
+
+Prove that gate works rather
 than trusting it: `MAX_FEED_AGE_MIN=0 python3 scripts/verify-proof.py` turns the live check red
 and exits 1 while all ten static claims stay green.
 - **By hand:** open any link above with the explorer cluster set to devnet. The programs are
