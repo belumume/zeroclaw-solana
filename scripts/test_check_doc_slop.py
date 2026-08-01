@@ -241,6 +241,30 @@ def main():
             f"expected exit {FIRE} naming VERSIONING.md, got {code}: {out.strip()[:300]}",
         )
 
+    # The em-dash half above was not enough, and the gap it left was a real defect rather than a
+    # hypothetical one. rogue_unicode was the ONLY vendored marker with no over-baseline case, and
+    # it was also the only one whose baseline was wrong: recorded as 4 from the RAW file while the
+    # comparison runs post-exemption, where two of those arrows sit inside a fenced block and are
+    # blanked before counting. So the gate compared 2 against 4 and would have absorbed the first
+    # two rogue characters added to that file, silently. One marker having a case and its sibling
+    # not having one is exactly where a baseline can be wrong without anything going red.
+    vendored_plus_unicode = (REPO / "wit/VERSIONING.md").read_text(encoding="utf-8") + (
+        "\n\nA local addition → beyond the upstream baseline.\n"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        root = make_repo(tmp, {})
+        (root / "wit/VERSIONING.md").write_text(
+            vendored_plus_unicode, encoding="utf-8", newline="\n"
+        )
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+        code, out = run_gate(root, min_docs=1)
+        ok = code == FIRE and "VERSIONING.md" in out
+        record(
+            "17 a rogue unicode char ABOVE the vendored baseline is reported",
+            ok,
+            f"expected exit {FIRE} naming VERSIONING.md, got {code}: {out.strip()[:300]}",
+        )
+
     # ---------------------------------------------------------------- line endings
     # This project has been bitten by line endings repeatedly, and the two sides disagree here:
     # the developer machine carries core.autocrlf=true while the runner checks out LF. If the

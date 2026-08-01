@@ -71,10 +71,18 @@ MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdx")
 # Upstream-authored, vendored verbatim. Values are the marker counts present in the upstream copy
 # at zeroclaw-labs/zeroclaw, measured rather than estimated. Anything above these is local and is
 # reported. Reason is carried beside the path so a reader never has to guess why it is listed.
+#
+# THESE ARE POST-EXEMPTION COUNTS, which is the basis the comparison actually uses, and getting that
+# wrong is not a rounding error, it is slack the gate hands to the next person who adds slop.
+# rogue_unicode here was originally 4, taken from the RAW file, while two of those four arrows sit
+# inside a fenced block that the exemption blanks before counting. The gate therefore compared a
+# post-exemption 2 against a declared 4 and would have absorbed the first TWO rogue characters added
+# to that file in silence. A baseline must be measured through the same pipeline that will later be
+# compared against it, or the difference between the two bases is free slop.
 VENDORED_BASELINE = {
     "wit/VERSIONING.md": {
         "reason": "upstream zeroclaw-labs/zeroclaw wit/VERSIONING.md, vendored in the initial commit",
-        "counts": {"em_dashes": 6, "rogue_unicode": 4},
+        "counts": {"em_dashes": 6, "rogue_unicode": 2},
     },
     "wit/v0/README.md": {
         "reason": "upstream zeroclaw-labs/zeroclaw wit/v0/README.md, vendored in the initial commit",
