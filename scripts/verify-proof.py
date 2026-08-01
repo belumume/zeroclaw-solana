@@ -500,10 +500,20 @@ def main():
     )
     print(
         f"{live_total - live_fails}/{live_total} live claims verified "
-        f"(is the node publishing right now)"
+        f"(ARM feed publishing now; pay page is the pinned build)"
+    )
+    # Name the gap rather than letting a count imply cover it does not have. README says two
+    # systems run on that node. This tier sees the feed continuously and the pay page's
+    # integrity; it does NOT see the shop agent's own process, because a channel client has no
+    # inbound port and its trace is traffic-driven, so quiet and dead are identical from
+    # outside. The committed /health asks systemd from inside the box and closes this; until
+    # that is deployed, this line is the honest statement.
+    print(
+        "      NOT covered above: the shop agent's own liveness. The /health endpoint in "
+        "x402-feed-gate closes it by asking systemd on the node; see task #19."
     )
     if fails == 0:
-        print("\nThe record holds and the node is live.")
+        print("\nThe record holds and the feed is live. Shop-agent liveness is asserted, not checked here.")
         sys.exit(0)
 
     # Three exit codes rather than two, because CI has to tell these apart and was

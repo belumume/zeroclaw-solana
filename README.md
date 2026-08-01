@@ -21,9 +21,18 @@ the reference is an additional optional condition, not the check itself. A payme
 wrong amount, or of a token the payer minted themselves, does not settle an order. Brazilian
 orders are quoted in BRL at a stated rate and settled in USDC.
 
-Both are running. Live on-chain evidence, all clickable, is in
+Both run on the same ARM node under `systemd --user`, and the two are not equally
+observable from outside, so this says which is which rather than leaving you to find out.
+The DePIN feed is continuously checkable: it publishes on a timer and every reading lands
+on chain, so `verify-proof.py` can go red on it. The shop is a Telegram and WhatsApp client
+with no inbound port, and its trace is traffic-driven, so from outside a quiet shop and a
+stopped one look identical. That half is asserted here and machine-checked by a `/health`
+endpoint on the x402 gate, which asks systemd on the node directly.
+
+Live on-chain evidence, all clickable, is in
 [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md), and `python3 scripts/verify-proof.py`
-re-checks every published claim against devnet in one command, stdlib only, nothing to install.
+re-checks every published claim against devnet in one command, stdlib only, nothing to
+install. It reports static and live claims separately, and names what it does not cover.
 
 ## Start here
 
