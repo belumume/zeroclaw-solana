@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Capture raw devnet transactions into the offline proof bundle.
 
-Public devnet RPC retains roughly four days. The bounty deadline and the judging date are two
+Public devnet RPC retention is MEASURED at roughly 7 to 9 days, not the "roughly four" this
+line asserted until 2026-08-01. Two independent readings on that date: the DePIN feed account's
+signature history reached back 7.4 days (521 signatures, oldest 2026-07-25T04:12 UTC, second
+page empty), and three 2026-07-23 transactions still resolved at 8.6 to 8.9 days old with a
+getHealth control passing. The four-day figure was never measured and it made the window look
+tighter than it is, which is the safer direction to be wrong in but still wrong. The conclusion
+below is unchanged and if anything better supported. The bounty deadline and the judging date are two
 weeks apart, so every explorer link in this repo is dead by the time anyone clicks it. This
 script moves the evidence into the repo, where nobody else's retention policy governs it.
 
