@@ -384,8 +384,17 @@ the job was trusted: the clean tree passes sixteen of sixteen, one deliberately 
 fails with that crate named, and a truncated walk prints "8/8 tracked crates formatted" and is
 refused anyway.
 
-*Cannot catch:* anything about formatting a reader would call style rather than rustfmt's default,
-since there is no `rustfmt.toml` in this repo and the gate asks rustfmt what it thinks.
+*Cannot catch:* anything about formatting a reader would call style rather than rustfmt's default.
+This repo ships no rustfmt configuration at all, so the gate asks rustfmt what it thinks and that
+is the whole standard.
+
+A note on how that sentence was written, because the gate caught the first draft. It originally
+named the absent config file, in backticks, to say the file does not exist. `check-repo-paths.py`
+reads every repo path a doc names and asserts it resolves in a clone, so it correctly refused a
+document pointing at a file no reader could open. Naming a path to say it is missing is
+indistinguishable, to a checker, from naming it to say it is there. The fix was to reword rather
+than to carve out an exception, since the exception would have blinded the gate to the real case
+it exists for.
 
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
 in `crates/solana-core`, which executes all four suites there for 120 tests rather than the
