@@ -56,7 +56,16 @@ verifies the payment from the transaction bytes, settles it, and serves the read
 is T0/T1: the gate holds no key but its public receiving address and cannot move funds, only
 recognise a payment made to it, so there is nothing to prompt-inject into paying out. Because
 the client is the fee payer, no facilitator is required and verification is pure Solana RPC. An
-in-code per-payer daily cap bounds it. Proven end to end on devnet: a 402 challenge, a signed
+in-code per-payer daily cap bounds it, and that cap survives a restart, which is the part worth
+stating. A counter held only in process memory stops being a bound the moment the unit restarts,
+and under `Restart=always` a crash loop hands every payer a fresh full allowance. Nothing in the
+output would reveal it: the gate keeps answering correctly and keeps running every check it
+advertises, against state that was silently zeroed. So the ledger is rebuilt at boot from the
+earnings log, which already carried day, payer and amount, and the boot line reports how many
+settled sales it restored, so a reader can check the property instead of taking it on trust. That
+is the same defect shape this project reported five times in the host it runs on, a control the
+operator sets that no runtime path actually enforces, so it would be poor form to ship it here.
+Proven end to end on devnet: a 402 challenge, a signed
 payment, on-chain settlement, the reading served, and a replayed payment refused. A device that
 pays for its own gas.
 
