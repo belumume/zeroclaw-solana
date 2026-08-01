@@ -363,6 +363,24 @@ wire format is decoded by hand. Decoding it by hand was a constraint, and not in
 toolchain's unfixable transitive advisories is what fell out of it. The Anchor workspace
 under `onchain/` is a separate graph and is not part of the shipped plugin surface.
 
+If you open this repository's Security tab you will see open Dependabot alerts, and the honest
+reconciliation is worth stating rather than leaving you to wonder how that sits beside "comes back
+clean". The two tools ask different questions. `cargo deny` runs against the ten graphs that ship.
+Dependabot scans every `Cargo.lock` in the tree, including the ones that exist only to test the
+things that ship.
+
+Counted from the API on 2026-08-01, all nineteen: seven in `e2e-track-a`, seven in `e2e-localnet`,
+four in `differential-fuzz`, one in `onchain`. **Zero on `solana-core`, zero on any of the eight
+plugins, zero on the x402 gate.** The packages are `rustls-webpki`, `ed25519-dalek`,
+`curve25519-dalek`, `rand` and `atty`, which is the standard Solana toolchain transitive set that
+every project in this ecosystem carries and that no simple bump resolves, because `solana-program`
+pins the version.
+
+That split is the same one described above, seen from the other side. The shipped code decodes the
+wire format by hand and therefore never pulls `solana-sdk`, so it never inherits those advisories.
+The harnesses deliberately DO pull it, because their whole job is to check our hand-decoding against
+the real implementation. An oracle that avoided the dependency would not be an oracle.
+
 `proof-check.yml` re-verifies every published on-chain claim twice a day, so "yours,
 running" is continuously auditable rather than a screenshot taken once on a good day. It
 is separate because it depends on public devnet RPC, and a third-party outage must never
