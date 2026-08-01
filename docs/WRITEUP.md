@@ -404,6 +404,16 @@ The tiers in words:
   and this is demonstrated live on devnet: the agent's session key signed an over-cap transfer
   and the program rejected it (custom error 0x12c), while a within-cap transfer settled (see
   DEVNET-PROOF). The program bounds a complying agent, not only a refusing one.
+
+  The same demonstration was then run on **mainnet with real USDC** (see MAINNET-PROOF): a 0.5
+  USDC cap, a 0.4 USDC spend that settled and moved value, and a 1.0 USDC spend refused with the
+  same 0x12c. Real value is a stronger claim than devnet tokens for a guarantee whose whole point
+  is what happens when something is actually at stake. The over-cap amount was sized to stay
+  inside the token balance on purpose, because an attempt that also overdraws can be refused for
+  insufficient funds, and a rejection for the wrong reason would prove nothing about the cap; the
+  harness asserts the error code rather than printing it, and refuses to run when the balance
+  cannot support that separation. The DePIN feed deliberately stays on devnet, since deploying its
+  two programs costs about 2.73 SOL in rent to duplicate a proof that already verifies offline.
 - **The approval prompt is not, on its own, a security boundary.** When an agent asks a human to
   approve a transaction, the sentence that human reads was written by the model. Influence the
   model and you influence the description, so an attacker does not need the signing key, only an

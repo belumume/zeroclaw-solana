@@ -80,6 +80,14 @@ Read the two sentences above together, because they are easy to mistake for a co
 The **use cases** run no fund-signing key at all. The **cap demonstration** uses one on
 purpose, bounded on chain, so the guarantee can be shown failing closed rather than described.
 
+**The same refusal now holds on mainnet with real USDC**, because a rejection that costs nothing
+is a weaker claim than one that does. A 0.5 USDC cap, a 0.4 USDC spend that settled and moved
+value, and a 1.0 USDC spend the audited program refused with the same `0x12c`. Deliberately sized
+so the over-cap amount stays inside the balance, since an attempt that also overdraws can be
+refused for insufficient funds and a rejection for the wrong reason proves nothing. Transactions,
+the reproduce command and the offline bundle are in [`docs/MAINNET-PROOF.md`](docs/MAINNET-PROOF.md).
+The DePIN feed stays on devnet on the merits, and that page says why.
+
 Both transactions are clickable, and one of them opens on a failed transaction on purpose. The
 [within-cap transfer settled](https://explorer.solana.com/tx/5qyr7jJi8zb6SjZjnA2QT5C9nuZYgSw6raAefjmWnDDMf3JRgkQX19zssE57EpFSHVCCPfbj5qyxcYSQcfEq9W3Z?cluster=devnet);
 the [over-cap transfer was refused on chain](https://explorer.solana.com/tx/3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps?cluster=devnet)
