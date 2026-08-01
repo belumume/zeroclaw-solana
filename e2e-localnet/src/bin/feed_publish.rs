@@ -66,7 +66,9 @@ fn main() {
     let device = Pubkey::new_from_array(solana_core::pubkey_from_seed(&device_seed));
     let nonce_kp = read_keypair_file(env("FEED_NONCE")).expect("read nonce keypair");
     let value: i64 = env("FEED_VALUE").parse().expect("FEED_VALUE i64");
-    let observed_at: i64 = env("FEED_OBSERVED_AT").parse().expect("FEED_OBSERVED_AT i64");
+    let observed_at: i64 = env("FEED_OBSERVED_AT")
+        .parse()
+        .expect("FEED_OBSERVED_AT i64");
 
     // 1. durable nonce account (authority = session), create if missing
     if rpc.get_account(&nonce_kp.pubkey()).is_err() {
@@ -80,8 +82,12 @@ fn main() {
             rent,
         );
         let bh = rpc.get_latest_blockhash().unwrap();
-        let tx =
-            Transaction::new_signed_with_payer(&ixs, Some(&session.pubkey()), &[&session, &nonce_kp], bh);
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&session.pubkey()),
+            &[&session, &nonce_kp],
+            bh,
+        );
         rpc.send_and_confirm_transaction(&tx).expect("create nonce");
         eprintln!("created durable nonce account {}", nonce_kp.pubkey());
     }
@@ -102,8 +108,10 @@ fn main() {
             data,
         };
         let bh = rpc.get_latest_blockhash().unwrap();
-        let tx = Transaction::new_signed_with_payer(&[reg], Some(&session.pubkey()), &[&session], bh);
-        rpc.send_and_confirm_transaction(&tx).expect("register device");
+        let tx =
+            Transaction::new_signed_with_payer(&[reg], Some(&session.pubkey()), &[&session], bh);
+        rpc.send_and_confirm_transaction(&tx)
+            .expect("register device");
         eprintln!("registered device feed {feed_pda} (device {device})");
     }
 

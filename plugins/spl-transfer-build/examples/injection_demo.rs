@@ -57,10 +57,19 @@ fn main() {
 
     // Executable proof, not just a print.
     let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
-    assert_eq!(parsed["recipient"], RECIPIENT, "recipient must be unchanged");
-    assert_ne!(parsed["recipient"], ATTACKER, "recipient must not be the attacker");
+    assert_eq!(
+        parsed["recipient"], RECIPIENT,
+        "recipient must be unchanged"
+    );
+    assert_ne!(
+        parsed["recipient"], ATTACKER,
+        "recipient must not be the attacker"
+    );
     let memo_text = v.memo.as_ref().expect("memo present").text.clone();
-    assert!(!memo_text.contains('\u{202E}'), "RLO must be stripped from the memo");
+    assert!(
+        !memo_text.contains('\u{202E}'),
+        "RLO must be stripped from the memo"
+    );
     assert!(
         parsed["summary"]
             .as_str()
@@ -69,7 +78,9 @@ fn main() {
         "summary must label the injection framing untrusted"
     );
     // The attacker key never appears as a 32-byte account in the transaction.
-    let raw = STANDARD.decode(parsed["transaction"].as_str().unwrap()).unwrap();
+    let raw = STANDARD
+        .decode(parsed["transaction"].as_str().unwrap())
+        .unwrap();
     let attacker_bytes = Pubkey::from_base58(ATTACKER).unwrap().to_bytes();
     assert!(
         !raw.windows(32).any(|w| w == attacker_bytes),
@@ -84,7 +95,9 @@ fn main() {
     println!("recipient unchanged ({RECIPIENT})");
     println!("RLO stripped from the on-chain memo bytes");
     println!("injection framing labelled untrusted in the summary");
-    println!("attacker key ({ATTACKER}) never becomes a transaction account: funds cannot route to it");
+    println!(
+        "attacker key ({ATTACKER}) never becomes a transaction account: funds cannot route to it"
+    );
 }
 
 fn account_resp(owner_b58: &str, data: &[u8]) -> String {

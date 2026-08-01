@@ -211,7 +211,9 @@ impl<T: RpcTransport> SolanaRpc<T> {
         // maliciously oversized "signature" from a compromised RPC before it
         // reaches the caller and, via the plugin, the agent's context.
         if sig.len() > 96 {
-            return Err(RpcError::Parse("sendTransaction: oversized signature".into()));
+            return Err(RpcError::Parse(
+                "sendTransaction: oversized signature".into(),
+            ));
         }
         Ok(sig)
     }
@@ -266,9 +268,14 @@ impl<T: RpcTransport> SolanaRpc<T> {
     /// the signature is not yet known to the cluster, or `Ok(Some(status))`
     /// with the confirmation level (`processed` / `confirmed` / `finalized`)
     /// and any execution error.
-    pub fn get_signature_status(&self, signature: &str) -> Result<Option<SignatureStatus>, RpcError> {
+    pub fn get_signature_status(
+        &self,
+        signature: &str,
+    ) -> Result<Option<SignatureStatus>, RpcError> {
         if signature.len() > 96 {
-            return Err(RpcError::Parse("get_signature_status: oversized signature".into()));
+            return Err(RpcError::Parse(
+                "get_signature_status: oversized signature".into(),
+            ));
         }
         let params = serde_json::json!([[signature], { "searchTransactionHistory": true }]);
         let result = self.call("getSignatureStatuses", params)?;
@@ -308,8 +315,7 @@ impl SignatureStatus {
     /// Whether the signature has reached at least `confirmed` (i.e. not merely
     /// `processed`) and carried no execution error.
     pub fn is_settled(&self) -> bool {
-        self.err.is_none()
-            && matches!(self.confirmation.as_str(), "confirmed" | "finalized")
+        self.err.is_none() && matches!(self.confirmation.as_str(), "confirmed" | "finalized")
     }
 }
 

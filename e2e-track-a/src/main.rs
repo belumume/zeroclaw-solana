@@ -298,7 +298,12 @@ fn detect_paid(transport: &CurlTransport, vw: &payment_watch::watch::ValidatedAr
 
 /// Fund `who` with `lamports`. Devnet: transfer from the operator (airdrop is
 /// rate-limited). Localnet: airdrop.
-fn fund(rpc: &RpcClient, funder: &Option<Keypair>, who: &solana_sdk::pubkey::Pubkey, lamports: u64) {
+fn fund(
+    rpc: &RpcClient,
+    funder: &Option<Keypair>,
+    who: &solana_sdk::pubkey::Pubkey,
+    lamports: u64,
+) {
     match funder {
         Some(f) => {
             let ix = system_instruction::transfer(&f.pubkey(), who, lamports);

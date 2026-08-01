@@ -365,6 +365,28 @@ remote since 14:51 UTC, while its push trigger is filtered to `wit/**`, which no
 has touched. So the two workflows that gate this repository's own code are backed by real
 runs, and the one that watches upstream is still true of its steps rather than of a run.
 
+`ci.yml` gained a `fmt` job on 2026-08-01, and how it was found is more useful than the job
+itself. A `cargo fmt --all` run inside the x402 gate reached `crates/solana-core` through a path
+dependency and reformatted it, which read as unwanted churn until it was checked: `cargo fmt
+--check` FAILED on the original, so the flagship crate had been unformatted on main. Measured
+across the tree rather than stopping at the one crate, **12 of 16 tracked crates were
+unformatted**, seven of them among the ten shipped manifests the supply-chain matrix gates. No
+workflow ran fmt at all, while the project's own records listed it among the quality bar. That is
+the shape this project filed ten times against the host it runs on, a control that is claimed and
+enforced by nothing, and it is the one a reader disproves in a single command.
+
+The job's scope is DISCOVERED from `git ls-files` rather than listed, because a hand-written list
+is how the drift happened: a crate added later joins no list by itself. It also refuses any run
+that finds fewer than sixteen crates. That floor matters more than it looks, since a discovery
+step that breaks would otherwise print a flawless result over nothing, which is the failure this
+file records elsewhere as a green gate asserting nothing. All three branches were driven before
+the job was trusted: the clean tree passes sixteen of sixteen, one deliberately misformatted crate
+fails with that crate named, and a truncated walk prints "8/8 tracked crates formatted" and is
+refused anyway.
+
+*Cannot catch:* anything about formatting a reader would call style rather than rustfmt's default,
+since there is no `rustfmt.toml` in this repo and the gate asks rustfmt what it thinks.
+
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
 in `crates/solana-core`, which executes all four suites there for 120 tests rather than the
 89 unit tests and 23 properties this line named until 2026-07-27, clippy with warnings as

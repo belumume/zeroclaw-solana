@@ -121,9 +121,10 @@ pub fn find_payment(
 /// challenge nonce we issued, defeating replay of a payment against a different
 /// request. The Memo program id is passed in so the caller controls it.
 pub fn has_memo(tx: &DecodedTransaction, memo_program: &Pubkey, expected: &[u8]) -> bool {
-    tx.message.instructions.iter().any(|ix| {
-        tx.program_id_of(ix) == Some(memo_program) && ix.data.as_slice() == expected
-    })
+    tx.message
+        .instructions
+        .iter()
+        .any(|ix| tx.program_id_of(ix) == Some(memo_program) && ix.data.as_slice() == expected)
 }
 
 #[cfg(test)]

@@ -20,23 +20,38 @@ fn main() {
 
     println!("== INPUT: hostile on-chain token name ==");
     println!("  bytes:                       {}", hostile.len());
-    println!("  bidi override U+202E present: {}", hostile.contains('\u{202E}'));
-    println!("  zero-width U+200B present:    {}", hostile.contains('\u{200B}'));
+    println!(
+        "  bidi override U+202E present: {}",
+        hostile.contains('\u{202E}')
+    );
+    println!(
+        "  zero-width U+200B present:    {}",
+        hostile.contains('\u{200B}')
+    );
 
     let s = sanitize_onchain(&hostile, DEFAULT_LABEL_MAX);
-    println!("\n== AFTER sanitize_onchain (cap {} chars) ==", DEFAULT_LABEL_MAX);
+    println!(
+        "\n== AFTER sanitize_onchain (cap {} chars) ==",
+        DEFAULT_LABEL_MAX
+    );
     println!("  text:                        {:?}", s.text);
     println!("  chars:                       {}", s.text.chars().count());
     println!("  control/bidi/zero-width cut: {}", s.stripped);
     println!("  truncated (flood capped):    {}", s.truncated);
-    println!("  injection framing flagged:   {} (advisory, not a gate)", s.injection_suspected);
+    println!(
+        "  injection framing flagged:   {} (advisory, not a gate)",
+        s.injection_suspected
+    );
     let residual = s
         .text
         .chars()
         .any(|c| matches!(c, '\u{202E}' | '\u{200B}' | '\u{2066}' | '\u{2069}'));
     println!("  any bidi/zero-width residual: {}", residual);
     assert!(!residual, "no control/bidi/zero-width may survive");
-    assert!(s.text.chars().count() <= DEFAULT_LABEL_MAX, "output honors the cap");
+    assert!(
+        s.text.chars().count() <= DEFAULT_LABEL_MAX,
+        "output honors the cap"
+    );
 
     println!("\n== how a plugin renders it (labeled untrusted) ==");
     println!("  {}", label_untrusted(&s));

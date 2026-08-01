@@ -301,7 +301,9 @@ mod tests {
         use crate::instruction::{AccountMeta, Instruction};
         let ix = Instruction {
             program_id: pk(200),
-            accounts: (0..65_536).map(|_| AccountMeta::readonly(pk(1), false)).collect(),
+            accounts: (0..65_536)
+                .map(|_| AccountMeta::readonly(pk(1), false))
+                .collect(),
             data: vec![],
         };
         let e = compile(&pk(1), &[ix], &[9u8; 32]).unwrap_err();

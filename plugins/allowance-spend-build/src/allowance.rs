@@ -406,7 +406,10 @@ fn validate_amount(raw: &str) -> Result<String, String> {
     if s.is_empty() {
         return Err("amount is empty".to_string());
     }
-    if s.as_bytes().iter().any(|b| !matches!(b, b'0'..=b'9' | b'.')) {
+    if s.as_bytes()
+        .iter()
+        .any(|b| !matches!(b, b'0'..=b'9' | b'.'))
+    {
         return Err(format!(
             "amount must be a plain non-negative decimal (digits and one optional '.'; no sign, no scientific notation): {}",
             sanitize_onchain(s, 32).text
@@ -495,8 +498,12 @@ fn parse_pubkey_cfg(v: Option<String>, field: &str, why: &str) -> Result<Pubkey,
 }
 
 fn parse_pubkey_required(field: &str, s: &str) -> Result<Pubkey, String> {
-    Pubkey::from_base58(s.trim())
-        .map_err(|_| format!("{field} is not valid base58: {}", sanitize_onchain(s, 64).text))
+    Pubkey::from_base58(s.trim()).map_err(|_| {
+        format!(
+            "{field} is not valid base58: {}",
+            sanitize_onchain(s, 64).text
+        )
+    })
 }
 
 fn json_kind(v: &serde_json::Value) -> &'static str {
@@ -747,7 +754,10 @@ pub fn create_ata_idempotent(
 /// Build the spend instruction list, in order:
 /// `[advance_nonce?] [create_receiver_ata?] transfer_fixed/recurring [memo?]`.
 /// The nonce advance MUST be instruction 0 when present (the durable-nonce guard).
-pub fn spend_instructions(v: &ValidatedSpend, r: &SpendResolved) -> Result<Vec<Instruction>, String> {
+pub fn spend_instructions(
+    v: &ValidatedSpend,
+    r: &SpendResolved,
+) -> Result<Vec<Instruction>, String> {
     let mut ixs = Vec::new();
     if let Some(na) = v.nonce_account {
         ixs.push(advance_nonce_account(&na, &nonce_auth(v)?));
@@ -1156,7 +1166,8 @@ mod tests {
             .copy_from_slice(sub_auth.as_bytes());
         d[FIXED_MINT_OFFSET..FIXED_MINT_OFFSET + 32].copy_from_slice(mint.as_bytes());
         d[FIXED_AMOUNT_OFFSET..FIXED_AMOUNT_OFFSET + 8].copy_from_slice(&remaining.to_le_bytes());
-        d[FIXED_EXPIRY_TS_OFFSET..FIXED_EXPIRY_TS_OFFSET + 8].copy_from_slice(&expiry.to_le_bytes());
+        d[FIXED_EXPIRY_TS_OFFSET..FIXED_EXPIRY_TS_OFFSET + 8]
+            .copy_from_slice(&expiry.to_le_bytes());
         d
     }
 
@@ -1352,7 +1363,9 @@ mod tests {
         assert!(to_base_units("18446744073.709551616", 9)
             .unwrap_err()
             .contains("exceeds the u64"));
-        assert!(to_base_units("1", 200).unwrap_err().contains("exceeds the u64"));
+        assert!(to_base_units("1", 200)
+            .unwrap_err()
+            .contains("exceeds the u64"));
     }
 
     // --- delegation decoding: known-answer round-trips ------------------------
@@ -1363,7 +1376,14 @@ mod tests {
         let delegator = pk(RECEIVER);
         let sub = pk(NONCE_ACCT);
         let mint = pk(USDC);
-        let data = fixed_delegation_bytes(&delegatee, &delegator, &sub, &mint, 975_000_000, 1_900_000_000);
+        let data = fixed_delegation_bytes(
+            &delegatee,
+            &delegator,
+            &sub,
+            &mint,
+            975_000_000,
+            1_900_000_000,
+        );
         assert_eq!(data.len(), 187);
         let d = decode_delegation(&subscriptions_program(), &data).unwrap();
         assert_eq!(d.kind, DelegationKind::Fixed);
@@ -1387,7 +1407,14 @@ mod tests {
         let sub = pk(NONCE_ACCT);
         let mint = pk(USDC);
         let data = recurring_delegation_bytes(
-            &delegatee, &delegator, &sub, &mint, 100_000_000, 30_000_000, 1_700_000_000, 2_592_000,
+            &delegatee,
+            &delegator,
+            &sub,
+            &mint,
+            100_000_000,
+            30_000_000,
+            1_700_000_000,
+            2_592_000,
             0,
         );
         assert_eq!(data.len(), 211);
@@ -1409,14 +1436,16 @@ mod tests {
 
     #[test]
     fn decode_rejects_wrong_owner() {
-        let data = fixed_delegation_bytes(&pk(AGENT), &pk(RECEIVER), &pk(NONCE_ACCT), &pk(USDC), 1, 0);
+        let data =
+            fixed_delegation_bytes(&pk(AGENT), &pk(RECEIVER), &pk(NONCE_ACCT), &pk(USDC), 1, 0);
         let e = decode_delegation(&pubkey::token_program(), &data).unwrap_err();
         assert!(e.contains("not owned by the Subscriptions"), "got: {e}");
     }
 
     #[test]
     fn decode_rejects_wrong_discriminator() {
-        let mut data = fixed_delegation_bytes(&pk(AGENT), &pk(RECEIVER), &pk(NONCE_ACCT), &pk(USDC), 1, 0);
+        let mut data =
+            fixed_delegation_bytes(&pk(AGENT), &pk(RECEIVER), &pk(NONCE_ACCT), &pk(USDC), 1, 0);
         data[0] = 0; // AccountDiscriminator::SubscriptionAuthority, not a delegation
         let e = decode_delegation(&subscriptions_program(), &data).unwrap_err();
         assert!(e.contains("not a delegation"), "got: {e}");
@@ -1424,7 +1453,8 @@ mod tests {
 
     #[test]
     fn decode_rejects_truncated_account() {
-        let data = fixed_delegation_bytes(&pk(AGENT), &pk(RECEIVER), &pk(NONCE_ACCT), &pk(USDC), 1, 0);
+        let data =
+            fixed_delegation_bytes(&pk(AGENT), &pk(RECEIVER), &pk(NONCE_ACCT), &pk(USDC), 1, 0);
         let e = decode_delegation(&subscriptions_program(), &data[..150]).unwrap_err();
         assert!(e.contains("shorter than"), "got: {e}");
     }
@@ -1438,7 +1468,10 @@ mod tests {
             expiry_ts: 0,
         };
         let e = check_cap_courtesy(&cap, 10_000_000_000, 6).unwrap_err();
-        assert!(e.contains("exceeds the fixed delegation's remaining cap"), "got: {e}");
+        assert!(
+            e.contains("exceeds the fixed delegation's remaining cap"),
+            "got: {e}"
+        );
         assert!(e.contains("audited on-chain"), "got: {e}");
         // Within cap: fine.
         assert!(check_cap_courtesy(&cap, 25_000_000, 6).is_ok());
@@ -1456,7 +1489,10 @@ mod tests {
             expiry_ts: 0,
         };
         let e = check_cap_courtesy(&cap, 100_000_001, 6).unwrap_err();
-        assert!(e.contains("exceeds the recurring delegation's per-period cap"), "got: {e}");
+        assert!(
+            e.contains("exceeds the recurring delegation's per-period cap"),
+            "got: {e}"
+        );
         // Within the per-period ceiling builds (on-chain decides period accounting),
         // even if it exceeds what is left THIS period (90M pulled of 100M).
         assert!(check_cap_courtesy(&cap, 100_000_000, 6).is_ok());
@@ -1511,7 +1547,8 @@ mod tests {
         assert!(!a[5].is_writable && !a[5].is_signer && a[5].pubkey == r.token_program); // token_program(ro)
         assert!(!a[6].is_writable && a[6].is_signer && a[6].pubkey == v.agent); // delegatee(SIGNER)
         assert!(!a[7].is_writable && !a[7].is_signer && a[7].pubkey == event_authority()); // event_authority
-        assert!(!a[8].is_writable && !a[8].is_signer && a[8].pubkey == subscriptions_program()); // self_program
+        assert!(!a[8].is_writable && !a[8].is_signer && a[8].pubkey == subscriptions_program());
+        // self_program
     }
 
     #[test]
@@ -1521,8 +1558,8 @@ mod tests {
         r.kind = DelegationKind::Recurring;
         let ix = transfer_delegation_ix(&v, &r);
         assert_eq!(ix.data[0], IX_TRANSFER_RECURRING); // 5
-        // The account layout is IDENTICAL for fixed and recurring (per the source
-        // `DelegationTransferAccounts`, shared by both).
+                                                       // The account layout is IDENTICAL for fixed and recurring (per the source
+                                                       // `DelegationTransferAccounts`, shared by both).
         assert_eq!(ix.accounts.len(), 9);
     }
 
@@ -1543,8 +1580,14 @@ mod tests {
         assert_eq!(ix.data, vec![1u8]);
         assert_eq!(ix.program_id, pubkey::associated_token_program());
         assert_eq!(ix.accounts.len(), 6);
-        assert!(ix.accounts[0].is_writable && ix.accounts[0].is_signer && ix.accounts[0].pubkey == funding);
-        assert!(ix.accounts[1].is_writable && !ix.accounts[1].is_signer && ix.accounts[1].pubkey == ata);
+        assert!(
+            ix.accounts[0].is_writable
+                && ix.accounts[0].is_signer
+                && ix.accounts[0].pubkey == funding
+        );
+        assert!(
+            ix.accounts[1].is_writable && !ix.accounts[1].is_signer && ix.accounts[1].pubkey == ata
+        );
         assert_eq!(ix.accounts[4].pubkey, pubkey::system_program());
         assert_eq!(ix.accounts[5].pubkey, tp);
     }
@@ -1655,7 +1698,7 @@ mod tests {
             account_resp(&prog(), &rec),
             account_resp(&pubkey::token_program().to_base58(), &legacy_mint_6dec()),
             account_resp(&pubkey::token_program().to_base58(), &[0u8; 165]), // receiver ATA exists
-            account_resp(&pubkey::system_program().to_base58(), &nonce_data),    // getAccountInfo(nonce)
+            account_resp(&pubkey::system_program().to_base58(), &nonce_data), // getAccountInfo(nonce)
         ]));
         let (_, meta) = build_spend(&rpc, &v).unwrap();
         assert_eq!(meta.kind, DelegationKind::Recurring);
@@ -1669,7 +1712,10 @@ mod tests {
         // THE custody keystone: a delegation whose delegatee is the attacker, not
         // the agent, is refused before any transaction is built.
         let v = v_default("25", "");
-        let rpc = SolanaRpc::new(MockTransport::new([fixed_deleg_resp(975_000_000, ATTACKER)]));
+        let rpc = SolanaRpc::new(MockTransport::new([fixed_deleg_resp(
+            975_000_000,
+            ATTACKER,
+        )]));
         let e = build_spend(&rpc, &v).unwrap_err();
         assert!(e.contains("delegatee"), "got: {e}");
         assert!(
@@ -1687,7 +1733,10 @@ mod tests {
             account_resp(&pubkey::token_program().to_base58(), &legacy_mint_6dec()),
         ]));
         let e = build_spend(&rpc, &v).unwrap_err();
-        assert!(e.contains("exceeds the fixed delegation's remaining cap"), "got: {e}");
+        assert!(
+            e.contains("exceeds the fixed delegation's remaining cap"),
+            "got: {e}"
+        );
         assert!(e.contains("audited on-chain"), "got: {e}");
     }
 
@@ -1695,7 +1744,8 @@ mod tests {
     fn build_spend_wrong_owner_delegation_fails_closed() {
         let v = v_default("25", "");
         // The "delegation" account is actually owned by the token program.
-        let data = fixed_delegation_bytes(&pk(AGENT), &pk(RECEIVER), &pk(NONCE_ACCT), &pk(USDC), 1, 0);
+        let data =
+            fixed_delegation_bytes(&pk(AGENT), &pk(RECEIVER), &pk(NONCE_ACCT), &pk(USDC), 1, 0);
         let rpc = SolanaRpc::new(MockTransport::new([account_resp(
             &pubkey::token_program().to_base58(),
             &data,
@@ -1769,7 +1819,10 @@ mod tests {
         // The distinction that matters on chain: an attacker-supplied memo of
         // pure invisibles must yield NO memo instruction, not a memo
         // instruction carrying an empty payload.
-        assert_eq!(cap_memo("\u{202E}\u{200B}\u{0000}\u{FEFF}\u{2069}", MEMO_MAX), None);
+        assert_eq!(
+            cap_memo("\u{202E}\u{200B}\u{0000}\u{FEFF}\u{2069}", MEMO_MAX),
+            None
+        );
         assert_eq!(cap_memo("", MEMO_MAX), None);
 
         // Control: a memo with any surviving visible content is still kept.

@@ -525,7 +525,10 @@ mod tests {
         };
         let m = clean_mint();
         let out = compose_report("EPjF\u{2026}Dt1v", &m, &a, Some(&rug));
-        assert!(!out.contains('\u{200B}'), "zero-width survived into the agent report");
+        assert!(
+            !out.contains('\u{200B}'),
+            "zero-width survived into the agent report"
+        );
         assert!(
             out.contains("untrusted on-chain data"),
             "untrusted-source marker missing"
@@ -536,6 +539,9 @@ mod tests {
             "worst-case report was {} bytes (expected bounded < 2000)",
             out.len()
         );
-        eprintln!("MEASURED worst-case token-risk-check report: {} bytes", out.len());
+        eprintln!(
+            "MEASURED worst-case token-risk-check report: {} bytes",
+            out.len()
+        );
     }
 }

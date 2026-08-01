@@ -30,8 +30,8 @@ pub mod allowance;
 
 pub use allowance::{
     build_spend, build_unsigned_tx, decode_delegation, parse_and_validate, render_output,
-    to_base_units, BlockhashMode, Cap, DecodedDelegation, DelegationKind, OutputMeta, SpendResolved,
-    ValidatedSpend,
+    to_base_units, BlockhashMode, Cap, DecodedDelegation, DelegationKind, OutputMeta,
+    SpendResolved, ValidatedSpend,
 };
 
 // wit-bindgen generates the C-ABI export glue, which is necessarily `unsafe`.

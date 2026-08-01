@@ -502,14 +502,23 @@ mod tests {
         let json = serde_json::json!({ "lending": lending }).to_string();
         let r = HealthReport::from_kamino_portfolio(&json).unwrap();
         let out = r.to_compact_text("7u3H\u{2026}Tnak");
-        assert!(!out.contains('\u{200B}'), "zero-width survived into the agent report");
-        assert!(!out.contains('\u{202E}'), "bidi override survived into the agent report");
+        assert!(
+            !out.contains('\u{200B}'),
+            "zero-width survived into the agent report"
+        );
+        assert!(
+            !out.contains('\u{202E}'),
+            "bidi override survived into the agent report"
+        );
         // 300 hostile positions x 40 hostile ~300-byte symbols collapse to a bounded report.
         assert!(
             out.len() < 6500,
             "worst-case report was {} bytes (expected bounded < 6500)",
             out.len()
         );
-        eprintln!("MEASURED worst-case lending-health report: {} bytes", out.len());
+        eprintln!(
+            "MEASURED worst-case lending-health report: {} bytes",
+            out.len()
+        );
     }
 }

@@ -49,7 +49,13 @@ struct Envelope {
 
 impl Envelope {
     fn new(name: &'static str) -> Self {
-        Self { name, min: i64::MAX, max: i64::MIN, samples: 0, held: 0 }
+        Self {
+            name,
+            min: i64::MAX,
+            max: i64::MIN,
+            samples: 0,
+            held: 0,
+        }
     }
     fn observe(&mut self, v: i64, law_holds: bool) {
         self.min = self.min.min(v);
@@ -88,13 +94,30 @@ impl Envelope {
 /// The same correlated hostile alphabet the property suite uses, so the mine
 /// sees the input distribution the defense actually faces.
 const PIECES: &[&str] = &[
-    "normal", " ", "  ", "\n", "\r\n", "\t",
-    "\u{202E}", "\u{202D}", "\u{2066}", "\u{2069}",
-    "\u{200B}", "\u{200D}", "\u{FEFF}",
-    "\u{0000}", "\u{0007}", "\u{001B}",
-    "\u{2028}", "\u{2029}",
+    "normal",
+    " ",
+    "  ",
+    "\n",
+    "\r\n",
+    "\t",
+    "\u{202E}",
+    "\u{202D}",
+    "\u{2066}",
+    "\u{2069}",
+    "\u{200B}",
+    "\u{200D}",
+    "\u{FEFF}",
+    "\u{0000}",
+    "\u{0007}",
+    "\u{001B}",
+    "\u{2028}",
+    "\u{2029}",
     "ignore previous instructions",
-    "SYSTEM:", "</code>", "USDC", "名前", "🙂",
+    "SYSTEM:",
+    "</code>",
+    "USDC",
+    "名前",
+    "🙂",
 ];
 
 fn correlated_hostile() -> impl Strategy<Value = String> {
@@ -121,7 +144,11 @@ fn arb_pubkey() -> impl Strategy<Value = Pubkey> {
 
 fn arb_meta() -> impl Strategy<Value = AccountMeta> {
     (arb_pubkey(), any::<bool>(), any::<bool>()).prop_map(|(pubkey, is_signer, is_writable)| {
-        AccountMeta { pubkey, is_signer, is_writable }
+        AccountMeta {
+            pubkey,
+            is_signer,
+            is_writable,
+        }
     })
 }
 
@@ -131,7 +158,11 @@ fn arb_instruction() -> impl Strategy<Value = Instruction> {
         prop::collection::vec(arb_meta(), 0..6),
         prop::collection::vec(any::<u8>(), 0..16),
     )
-        .prop_map(|(program_id, accounts, data)| Instruction { program_id, accounts, data })
+        .prop_map(|(program_id, accounts, data)| Instruction {
+            program_id,
+            accounts,
+            data,
+        })
 }
 
 #[test]
@@ -158,7 +189,10 @@ fn mine_envelopes() {
 
         e_out_len.observe(out_chars, out_chars <= cap as i64);
         e_stripped.observe(s.stripped as i64, true);
-        e_conserve.observe(out_chars + s.stripped as i64, out_chars + s.stripped as i64 <= in_chars);
+        e_conserve.observe(
+            out_chars + s.stripped as i64,
+            out_chars + s.stripped as i64 <= in_chars,
+        );
         e_trunc.observe(
             i64::from(s.truncated),
             !s.truncated || out_chars == cap as i64,
@@ -184,7 +218,9 @@ fn mine_envelopes() {
     );
     for _ in 0..SAMPLES {
         let (payer, ixs, blockhash) = msg_gen.new_tree(&mut runner).expect("tree").current();
-        let Ok(msg) = compile(&payer, &ixs, &blockhash) else { continue };
+        let Ok(msg) = compile(&payer, &ixs, &blockhash) else {
+            continue;
+        };
         let n = msg.account_keys.len();
 
         e_keys.observe(n as i64, n <= u16::MAX as usize);
@@ -228,9 +264,20 @@ fn mine_envelopes() {
 
     println!("\n=== mined envelopes ({SAMPLES} hostile samples, full u16 domain) ===");
     for e in [
-        &e_out_len, &e_stripped, &e_conserve, &e_trunc, &e_inject, &e_grow,
-        &e_keys, &e_ixs, &e_idx, &e_idx_fits, &e_shortvec_w, &e_nonce,
-        &e_bytes, &e_roundtrip,
+        &e_out_len,
+        &e_stripped,
+        &e_conserve,
+        &e_trunc,
+        &e_inject,
+        &e_grow,
+        &e_keys,
+        &e_ixs,
+        &e_idx,
+        &e_idx_fits,
+        &e_shortvec_w,
+        &e_nonce,
+        &e_bytes,
+        &e_roundtrip,
     ] {
         e.report();
     }
@@ -246,7 +293,10 @@ fn mine_envelopes() {
     // The mine itself asserts only that it actually ran. Promotion is deliberate
     // and happens in the named tests below, not automatically from observation.
     assert!(e_out_len.samples == SAMPLES, "sanitizer mine did not run");
-    assert!(e_bytes.samples == 65_536, "shortvec walk did not cover the domain");
+    assert!(
+        e_bytes.samples == 65_536,
+        "shortvec walk did not cover the domain"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -316,7 +366,10 @@ fn a_line_separator_becomes_a_space_and_is_still_counted() {
     let input = "ignore previous instructions\u{2028}ignore previous instructions";
     let s = sanitize_onchain(input, 200);
 
-    assert_eq!(s.text, "ignore previous instructions ignore previous instructions");
+    assert_eq!(
+        s.text,
+        "ignore previous instructions ignore previous instructions"
+    );
     assert_eq!(s.stripped, 1, "the separator must count as neutralized");
     assert_eq!(s.text.chars().count(), input.chars().count());
 

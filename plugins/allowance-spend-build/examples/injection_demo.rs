@@ -16,9 +16,9 @@
 //!      untrusted, and the attacker address in the memo never becomes an account.
 //!
 //! Run: `cargo run --example injection_demo`
+use allowance_spend_build::{build_spend, parse_and_validate, render_output};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use solana_core::{pubkey, MockTransport, Pubkey, SolanaRpc};
-use allowance_spend_build::{build_spend, parse_and_validate, render_output};
 
 const RECEIVER: &str = "mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN";
 const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -48,7 +48,9 @@ fn scenario_over_cap_refused() {
         "__config": { "agent_pubkey": AGENT }
     })
     .to_string();
-    println!("INPUT: agent asks to spend 10000 USDC under a delegation with only 975 USDC remaining");
+    println!(
+        "INPUT: agent asks to spend 10000 USDC under a delegation with only 975 USDC remaining"
+    );
 
     let v = parse_and_validate(&args).expect("args are structurally valid");
     // Only two RPC calls happen before the cap check refuses: delegation + mint.
@@ -86,10 +88,17 @@ fn scenario_hostile_delegatee_refused() {
 
     let v = parse_and_validate(&args).expect("args are structurally valid");
     // Only one RPC call happens: the delegatee mismatch refuses right after decode.
-    let rpc = SolanaRpc::new(MockTransport::new([account_resp(&program_id(), &delegation)]));
-    let err = build_spend(&rpc, &v).expect_err("a delegation the agent is not the delegatee of must be refused");
+    let rpc = SolanaRpc::new(MockTransport::new([account_resp(
+        &program_id(),
+        &delegation,
+    )]));
+    let err = build_spend(&rpc, &v)
+        .expect_err("a delegation the agent is not the delegatee of must be refused");
     println!("OUTPUT (error): {err}");
-    assert!(err.contains("delegatee"), "must name the delegatee mismatch");
+    assert!(
+        err.contains("delegatee"),
+        "must name the delegatee mismatch"
+    );
     assert!(
         err.contains("cannot spend under a delegation it is not the delegatee of"),
         "must explain the custody keystone"
@@ -114,7 +123,9 @@ fn scenario_hostile_memo_sanitized() {
         "__config": { "agent_pubkey": AGENT }
     })
     .to_string();
-    println!("INPUT: a legitimate 25 USDC spend whose memo hides a U+202E override + a redirect attempt");
+    println!(
+        "INPUT: a legitimate 25 USDC spend whose memo hides a U+202E override + a redirect attempt"
+    );
 
     let v = parse_and_validate(&args).expect("args are structurally valid");
     let rpc = SolanaRpc::new(MockTransport::new([
@@ -130,10 +141,16 @@ fn scenario_hostile_memo_sanitized() {
 
     // The RLO is stripped from the on-chain memo bytes.
     let memo_text = v.memo.as_ref().expect("memo present").text.clone();
-    assert!(!memo_text.contains('\u{202E}'), "RLO must be stripped from the memo");
+    assert!(
+        !memo_text.contains('\u{202E}'),
+        "RLO must be stripped from the memo"
+    );
     // The injection framing is LABELED untrusted in the summary.
     assert!(
-        parsed["summary"].as_str().unwrap().contains("[untrusted on-chain data"),
+        parsed["summary"]
+            .as_str()
+            .unwrap()
+            .contains("[untrusted on-chain data"),
         "summary must label the injection framing untrusted"
     );
     // The attacker key never becomes a 32-byte transaction account.

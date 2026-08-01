@@ -334,7 +334,10 @@ fn validate_amount(raw: &str) -> Result<String, String> {
     }
     // Only digits and one '.' -- simultaneously rejects a sign ('-'/'+'), scientific
     // notation ('e'/'E'), and any non-URL/non-numeric character.
-    if s.as_bytes().iter().any(|b| !matches!(b, b'0'..=b'9' | b'.')) {
+    if s.as_bytes()
+        .iter()
+        .any(|b| !matches!(b, b'0'..=b'9' | b'.'))
+    {
         return Err(format!(
             "amount must be a plain non-negative decimal (digits and one optional '.'; no sign, no scientific notation): {}",
             sanitize_onchain(s, 32).text
@@ -465,8 +468,12 @@ fn parse_pubkey_cfg(v: Option<String>, field: &str, why: &str) -> Result<Pubkey,
 }
 
 fn parse_pubkey_required(field: &str, s: &str) -> Result<Pubkey, String> {
-    Pubkey::from_base58(s.trim())
-        .map_err(|_| format!("{field} is not valid base58: {}", sanitize_onchain(s, 64).text))
+    Pubkey::from_base58(s.trim()).map_err(|_| {
+        format!(
+            "{field} is not valid base58: {}",
+            sanitize_onchain(s, 64).text
+        )
+    })
 }
 
 fn json_kind(v: &serde_json::Value) -> &'static str {
@@ -793,7 +800,12 @@ fn build_spl<T: RpcTransport>(
     //    and its decimals size the exact base-unit conversion.
     let mint_acct = match rpc.get_account_info(&mint) {
         Ok(Some(a)) => a,
-        Ok(None) => return Err(format!("mint account not found on chain: {}", mint.to_base58())),
+        Ok(None) => {
+            return Err(format!(
+                "mint account not found on chain: {}",
+                mint.to_base58()
+            ))
+        }
         Err(e) => return Err(format!("rpc error fetching mint: {e:?}")),
     };
     let token_program = mint_acct.owner;
@@ -973,12 +985,18 @@ mod tests {
             r#"{{"recipient":"{RECIPIENT}","amount":"1","mint":"{USDC}",{}}}"#,
             cfg(&format!(r#","nonce_account":"{NONCE_ACCT}""#))
         ));
-        assert!(only_acct.contains("requires nonce_authority"), "got: {only_acct}");
+        assert!(
+            only_acct.contains("requires nonce_authority"),
+            "got: {only_acct}"
+        );
         let only_auth = err(&format!(
             r#"{{"recipient":"{RECIPIENT}","amount":"1","mint":"{USDC}",{}}}"#,
             cfg(&format!(r#","nonce_authority":"{PAYER}""#))
         ));
-        assert!(only_auth.contains("without nonce_account"), "got: {only_auth}");
+        assert!(
+            only_auth.contains("without nonce_account"),
+            "got: {only_auth}"
+        );
     }
 
     #[test]
@@ -1031,7 +1049,10 @@ mod tests {
             r#"{{"recipient":"{RECIPIENT}","amount":"1","mint":"not-a-mint",{}}}"#,
             cfg("")
         ));
-        assert!(e.contains("not 'SOL'/'native' or a valid base58"), "got: {e}");
+        assert!(
+            e.contains("not 'SOL'/'native' or a valid base58"),
+            "got: {e}"
+        );
     }
 
     // --- amount validation + exact base-unit conversion -----------------------
@@ -1073,7 +1094,7 @@ mod tests {
         assert_eq!(to_base_units("1.50", 6).unwrap(), 1_500_000); // trailing zeros kept exact
         assert_eq!(to_base_units("0", 6).unwrap(), 0);
         assert_eq!(to_base_units("0.5", 9).unwrap(), 500_000_000); // SOL
-        // 18446744073709551615 lamports = u64::MAX exactly.
+                                                                   // 18446744073709551615 lamports = u64::MAX exactly.
         assert_eq!(to_base_units("18446744073.709551615", 9).unwrap(), u64::MAX);
     }
 
@@ -1113,10 +1134,22 @@ mod tests {
         // accounts = [source(w,!s), mint(ro,!s), dest(w,!s), owner(ro,s)].
         assert_eq!(ix.program_id, tp);
         assert_eq!(ix.accounts.len(), 4);
-        assert!(ix.accounts[0].is_writable && !ix.accounts[0].is_signer && ix.accounts[0].pubkey == src);
-        assert!(!ix.accounts[1].is_writable && !ix.accounts[1].is_signer && ix.accounts[1].pubkey == mint);
-        assert!(ix.accounts[2].is_writable && !ix.accounts[2].is_signer && ix.accounts[2].pubkey == dst);
-        assert!(!ix.accounts[3].is_writable && ix.accounts[3].is_signer && ix.accounts[3].pubkey == owner);
+        assert!(
+            ix.accounts[0].is_writable && !ix.accounts[0].is_signer && ix.accounts[0].pubkey == src
+        );
+        assert!(
+            !ix.accounts[1].is_writable
+                && !ix.accounts[1].is_signer
+                && ix.accounts[1].pubkey == mint
+        );
+        assert!(
+            ix.accounts[2].is_writable && !ix.accounts[2].is_signer && ix.accounts[2].pubkey == dst
+        );
+        assert!(
+            !ix.accounts[3].is_writable
+                && ix.accounts[3].is_signer
+                && ix.accounts[3].pubkey == owner
+        );
     }
 
     #[test]
@@ -1132,10 +1165,24 @@ mod tests {
         assert_eq!(ix.program_id, pubkey::associated_token_program());
         // accounts = [funding(w,s), ata(w,!s), wallet(ro), mint(ro), system(ro), token_program(ro)].
         assert_eq!(ix.accounts.len(), 6);
-        assert!(ix.accounts[0].is_writable && ix.accounts[0].is_signer && ix.accounts[0].pubkey == funding);
-        assert!(ix.accounts[1].is_writable && !ix.accounts[1].is_signer && ix.accounts[1].pubkey == ata);
-        assert!(!ix.accounts[2].is_writable && !ix.accounts[2].is_signer && ix.accounts[2].pubkey == wallet);
-        assert!(!ix.accounts[3].is_writable && !ix.accounts[3].is_signer && ix.accounts[3].pubkey == mint);
+        assert!(
+            ix.accounts[0].is_writable
+                && ix.accounts[0].is_signer
+                && ix.accounts[0].pubkey == funding
+        );
+        assert!(
+            ix.accounts[1].is_writable && !ix.accounts[1].is_signer && ix.accounts[1].pubkey == ata
+        );
+        assert!(
+            !ix.accounts[2].is_writable
+                && !ix.accounts[2].is_signer
+                && ix.accounts[2].pubkey == wallet
+        );
+        assert!(
+            !ix.accounts[3].is_writable
+                && !ix.accounts[3].is_signer
+                && ix.accounts[3].pubkey == mint
+        );
         assert_eq!(ix.accounts[4].pubkey, pubkey::system_program());
         assert_eq!(ix.accounts[5].pubkey, tp);
         assert!(!ix.accounts[4].is_signer && !ix.accounts[5].is_signer);
@@ -1233,9 +1280,13 @@ mod tests {
         let ixs = spl_instructions(&v, &resolved(&v, true), 25_000_000).unwrap();
         let tx = build_unsigned_tx(&v.payer, &ixs, &[9u8; 32]).unwrap();
         assert_eq!(tx.signatures_required, 1); // payer only
-        // wire = [1][64 zero bytes][0x80 ... v0 message].
+                                               // wire = [1][64 zero bytes][0x80 ... v0 message].
         assert_eq!(tx.wire[0], 1, "one signature");
-        assert_eq!(&tx.wire[1..65], &[0u8; 64], "signature slot is empty (unsigned)");
+        assert_eq!(
+            &tx.wire[1..65],
+            &[0u8; 64],
+            "signature slot is empty (unsigned)"
+        );
         assert_eq!(tx.wire[65], 0x80, "v0 message version prefix");
     }
 
@@ -1327,7 +1378,10 @@ mod tests {
         assert_eq!(v.recipient.to_base58(), RECIPIENT);
         // (2) The on-chain memo BYTES are sanitized: the bidi override is stripped.
         let memo_text = &v.memo.as_ref().unwrap().text;
-        assert!(!memo_text.contains('\u{202E}'), "bidi override reached memo bytes");
+        assert!(
+            !memo_text.contains('\u{202E}'),
+            "bidi override reached memo bytes"
+        );
         let ixs = spl_instructions(&v, &resolved(&v, false), 25_000_000).unwrap();
         let memo_bytes = &ixs.last().unwrap().data;
         // The U+202E right-to-left override (UTF-8 E2 80 AE) is gone from the bytes.
@@ -1367,9 +1421,7 @@ mod tests {
         .unwrap();
         assert!(v.memo.is_none());
         let ixs = spl_instructions(&v, &resolved(&v, false), 1_000_000).unwrap();
-        assert!(ixs
-            .iter()
-            .all(|ix| ix.program_id != pubkey::memo_program()));
+        assert!(ixs.iter().all(|ix| ix.program_id != pubkey::memo_program()));
     }
 
     #[test]
@@ -1517,8 +1569,8 @@ mod tests {
         let (tx, meta) = build_transfer(&rpc, &v).unwrap();
         assert_eq!(meta.mode, BlockhashMode::DurableNonce);
         assert_eq!(meta.signatures_required, 1); // payer == nonce authority
-        // The stored durable nonce ([7;32]) is the message's recent_blockhash: it
-        // must appear verbatim in the wire bytes (advance-nonce is instruction 0).
+                                                 // The stored durable nonce ([7;32]) is the message's recent_blockhash: it
+                                                 // must appear verbatim in the wire bytes (advance-nonce is instruction 0).
         assert!(
             tx.wire.windows(32).any(|w| w == [7u8; 32]),
             "stored durable nonce not used as recent_blockhash"

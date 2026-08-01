@@ -139,7 +139,10 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedRequest, String> {
     // Free-text fields: strip control/bidi/zero-width + cap. Percent-encoding at
     // URL-build time is the second, structural half of the injection defense.
     let label = args.label.as_deref().and_then(|s| cap_field(s, LABEL_MAX));
-    let message = args.message.as_deref().and_then(|s| cap_field(s, MESSAGE_MAX));
+    let message = args
+        .message
+        .as_deref()
+        .and_then(|s| cap_field(s, MESSAGE_MAX));
     let memo = args.memo.as_deref().and_then(|s| cap_field(s, MEMO_MAX));
 
     Ok(ValidatedRequest {
@@ -174,7 +177,10 @@ fn validate_amount(raw: &str) -> Result<String, String> {
     }
     // Only digits and one '.' — this simultaneously rejects a sign ('-'/'+'),
     // scientific notation ('e'/'E'), and any character that is not URL-safe.
-    if s.as_bytes().iter().any(|b| !matches!(b, b'0'..=b'9' | b'.')) {
+    if s.as_bytes()
+        .iter()
+        .any(|b| !matches!(b, b'0'..=b'9' | b'.'))
+    {
         return Err(format!(
             "amount must be a plain non-negative decimal (digits and one optional '.'; no sign, no scientific notation): {}",
             sanitize_onchain(s, 32).text
@@ -445,9 +451,10 @@ mod tests {
 
     #[test]
     fn qr_payload_equals_url() {
-        let out: serde_json::Value =
-            serde_json::from_str(&render_output(&v(&format!(r#"{{"recipient":"{RECIPIENT}"}}"#))))
-                .unwrap();
+        let out: serde_json::Value = serde_json::from_str(&render_output(&v(&format!(
+            r#"{{"recipient":"{RECIPIENT}"}}"#
+        ))))
+        .unwrap();
         assert_eq!(out["url"], out["qr_payload"]);
     }
 
@@ -532,7 +539,10 @@ mod tests {
         ));
         let url = build_transfer_url(&req);
         // & = ? # / % + space  ->  %26 %3D %3F %23 %2F %25 %2B %20
-        assert!(url.contains("memo=a%26b%3Dc%3Fd%23e%2Ff%25g%2Bh%20i"), "url: {url}");
+        assert!(
+            url.contains("memo=a%26b%3Dc%3Fd%23e%2Ff%25g%2Bh%20i"),
+            "url: {url}"
+        );
     }
 
     #[test]
@@ -582,7 +592,9 @@ mod tests {
             .unwrap()
             .contains("[untrusted on-chain data"));
         // A benign memo is NOT labeled.
-        let benign = v(&format!(r#"{{"recipient":"{RECIPIENT}","memo":"table 4"}}"#));
+        let benign = v(&format!(
+            r#"{{"recipient":"{RECIPIENT}","memo":"table 4"}}"#
+        ));
         let out2: serde_json::Value = serde_json::from_str(&render_output(&benign)).unwrap();
         assert!(!out2["summary"].as_str().unwrap().contains("untrusted"));
     }
@@ -599,8 +611,10 @@ mod tests {
 
     #[test]
     fn unknown_field_fails_closed() {
-        assert!(err(&format!(r#"{{"recipient":"{RECIPIENT}","drain_to":"x"}}"#))
-            .contains("invalid arguments"));
+        assert!(
+            err(&format!(r#"{{"recipient":"{RECIPIENT}","drain_to":"x"}}"#))
+                .contains("invalid arguments")
+        );
     }
 
     #[test]
@@ -618,10 +632,10 @@ mod tests {
 
     #[test]
     fn bad_spl_token_is_rejected() {
-        assert!(
-            err(&format!(r#"{{"recipient":"{RECIPIENT}","spl_token":"not-a-mint"}}"#))
-                .contains("spl_token mint is not a valid")
-        );
+        assert!(err(&format!(
+            r#"{{"recipient":"{RECIPIENT}","spl_token":"not-a-mint"}}"#
+        ))
+        .contains("spl_token mint is not a valid"));
     }
 
     #[test]
@@ -645,38 +659,50 @@ mod tests {
 
     #[test]
     fn negative_amount_rejected() {
-        assert!(err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"-5"}}"#))
-            .contains("non-negative decimal"));
+        assert!(
+            err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"-5"}}"#))
+                .contains("non-negative decimal")
+        );
     }
 
     #[test]
     fn scientific_notation_amount_rejected() {
-        assert!(err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"1e9"}}"#))
-            .contains("non-negative decimal"));
+        assert!(
+            err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"1e9"}}"#))
+                .contains("non-negative decimal")
+        );
     }
 
     #[test]
     fn leading_dot_amount_rejected() {
-        assert!(err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":".5"}}"#))
-            .contains("before the decimal point"));
+        assert!(
+            err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":".5"}}"#))
+                .contains("before the decimal point")
+        );
     }
 
     #[test]
     fn leading_zeros_amount_rejected() {
-        assert!(err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"025"}}"#))
-            .contains("leading zeros"));
+        assert!(
+            err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"025"}}"#))
+                .contains("leading zeros")
+        );
     }
 
     #[test]
     fn trailing_dot_amount_rejected() {
-        assert!(err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"5."}}"#))
-            .contains("trailing decimal point"));
+        assert!(
+            err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"5."}}"#))
+                .contains("trailing decimal point")
+        );
     }
 
     #[test]
     fn double_dot_amount_rejected() {
-        assert!(err(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"1.2.3"}}"#))
-            .contains("more than one decimal point"));
+        assert!(err(&format!(
+            r#"{{"recipient":"{RECIPIENT}","amount":"1.2.3"}}"#
+        ))
+        .contains("more than one decimal point"));
     }
 
     #[test]
@@ -690,7 +716,9 @@ mod tests {
     #[test]
     fn zero_amount_is_spec_valid() {
         // The spec states "0 is a valid value".
-        let url = build_transfer_url(&v(&format!(r#"{{"recipient":"{RECIPIENT}","amount":"0"}}"#)));
+        let url = build_transfer_url(&v(&format!(
+            r#"{{"recipient":"{RECIPIENT}","amount":"0"}}"#
+        )));
         assert!(url.contains("amount=0"));
     }
 
@@ -711,9 +739,10 @@ mod tests {
 
     #[test]
     fn no_amount_summary_says_payer_entered() {
-        let out: serde_json::Value =
-            serde_json::from_str(&render_output(&v(&format!(r#"{{"recipient":"{RECIPIENT}"}}"#))))
-                .unwrap();
+        let out: serde_json::Value = serde_json::from_str(&render_output(&v(&format!(
+            r#"{{"recipient":"{RECIPIENT}"}}"#
+        ))))
+        .unwrap();
         assert!(out["summary"]
             .as_str()
             .unwrap()
@@ -734,7 +763,10 @@ mod tests {
     fn debug_is_available_and_holds_no_secret() {
         // The whole plugin is T1: there is no key material to leak. This just
         // confirms ValidatedRequest is Debug-formattable for error/test paths.
-        let dbg = format!("{:?}", v(&format!(r#"{{"recipient":"{RECIPIENT}","memo":"x"}}"#)));
+        let dbg = format!(
+            "{:?}",
+            v(&format!(r#"{{"recipient":"{RECIPIENT}","memo":"x"}}"#))
+        );
         assert!(dbg.contains("ValidatedRequest"));
     }
 }

@@ -317,7 +317,10 @@ mod tests {
             "worst-case report was {} bytes (expected bounded < 400)",
             out.len()
         );
-        eprintln!("MEASURED worst-case depin-attest report: {} bytes", out.len());
+        eprintln!(
+            "MEASURED worst-case depin-attest report: {} bytes",
+            out.len()
+        );
     }
 
     #[test]

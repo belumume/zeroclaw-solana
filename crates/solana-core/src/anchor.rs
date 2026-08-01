@@ -64,6 +64,9 @@ mod tests {
     /// PascalCase struct name. Distinct namespace ⇒ distinct value.
     #[test]
     fn account_and_instruction_namespaces_differ() {
-        assert_ne!(account_sighash("DeviceFeed"), instruction_sighash("DeviceFeed"));
+        assert_ne!(
+            account_sighash("DeviceFeed"),
+            instruction_sighash("DeviceFeed")
+        );
     }
 }

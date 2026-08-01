@@ -115,7 +115,8 @@ mod component {
             }
 
             // Device-co-sign; the fee-payer slot is left empty for the host.
-            let partial_tx = match publish::compile_and_device_sign(&v, &nonce_state.durable_nonce) {
+            let partial_tx = match publish::compile_and_device_sign(&v, &nonce_state.durable_nonce)
+            {
                 Ok(tx) => tx,
                 Err(e) => return Ok(fail(e)),
             };

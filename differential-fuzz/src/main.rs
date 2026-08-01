@@ -135,7 +135,12 @@ fn semantic_diff(mine: &DecodedTransaction, theirs: &VersionedTransaction) -> Op
             theirs.signatures.len()
         ));
     }
-    for (i, (a, b)) in mine.signatures.iter().zip(theirs.signatures.iter()).enumerate() {
+    for (i, (a, b)) in mine
+        .signatures
+        .iter()
+        .zip(theirs.signatures.iter())
+        .enumerate()
+    {
         if a.as_slice() != b.as_ref() {
             return Some(format!("signature {i} bytes differ"));
         }

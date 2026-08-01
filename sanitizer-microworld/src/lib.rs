@@ -109,7 +109,10 @@ mod tests {
             let body = std::slice::from_raw_parts(out.add(4), len as usize);
             let json = std::str::from_utf8(body).expect("encoder emits utf-8");
 
-            assert!(json.contains("\"stripped\":2"), "both invisibles removed: {json}");
+            assert!(
+                json.contains("\"stripped\":2"),
+                "both invisibles removed: {json}"
+            );
             assert!(!json.contains('\u{202E}'), "bidi override must not survive");
             assert!(!json.contains('\u{200B}'), "zero width must not survive");
             assert!(

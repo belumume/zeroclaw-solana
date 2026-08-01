@@ -163,7 +163,9 @@ pub struct ReadingPublished {
 pub enum OracleError {
     #[msg("device signer does not match the registered feed device")]
     WrongDevice,
-    #[msg("sequence must be strictly greater than the stored sequence (stale or replayed reading)")]
+    #[msg(
+        "sequence must be strictly greater than the stored sequence (stale or replayed reading)"
+    )]
     StaleSequence,
     #[msg("feed_kind does not match the registered feed kind")]
     FeedKindMismatch,

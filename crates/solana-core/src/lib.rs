@@ -31,9 +31,9 @@ pub mod sanitize;
 pub mod shortvec;
 pub mod signing;
 pub mod token;
-pub mod tx_decode;
 #[cfg(target_family = "wasm")]
 pub mod transport;
+pub mod tx_decode;
 
 pub use anchor::{account_sighash, instruction_sighash};
 pub use instruction::{AccountMeta, Instruction};
@@ -49,9 +49,9 @@ pub use signing::{
     pubkey_from_seed, serialize_transaction, sign_message, verify_signature, SigningError,
 };
 pub use token::{find_payment, has_memo, FoundPayment, PaymentError};
-pub use tx_decode::{decode_transaction, DecodeError, DecodedTransaction};
 #[cfg(target_family = "wasm")]
 pub use transport::WakiTransport;
+pub use tx_decode::{decode_transaction, DecodeError, DecodedTransaction};
 
 /// Shorten a base58 identifier for display: `AAAA…ZZZZ`. Operates on CHARS, not
 /// bytes, so an untrusted non-ASCII input (a Kamino `market` label read straight

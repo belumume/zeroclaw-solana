@@ -12,12 +12,12 @@
 //! total (never panics), bounded, control-free, collapsed, and idempotent.
 
 use proptest::prelude::*;
-use solana_core::sanitize::{sanitize_onchain, Sanitized, DEFAULT_LABEL_MAX};
-use solana_core::shortvec::{decode_len, encode_len};
 use solana_core::instruction::{AccountMeta, Instruction};
 use solana_core::message::compile;
 use solana_core::nonce::{decode_nonce_account, NonceError, NONCE_ACCOUNT_LEN};
 use solana_core::pubkey::Pubkey;
+use solana_core::sanitize::{sanitize_onchain, Sanitized, DEFAULT_LABEL_MAX};
+use solana_core::shortvec::{decode_len, encode_len};
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -45,13 +45,30 @@ fn is_forbidden_in_output(c: char) -> bool {
 /// The alphabet both hostile generators draw from: ordinary text mixed with the
 /// exact characters an attacker reaches for.
 const HOSTILE_PIECES: &[&str] = &[
-    "normal", " ", "  ", "\n", "\r\n", "\t",
-    "\u{202E}", "\u{202D}", "\u{2066}", "\u{2069}", // bidi
-    "\u{200B}", "\u{200D}", "\u{FEFF}",             // zero-width
-    "\u{0000}", "\u{0007}", "\u{001B}",             // control
-    "\u{2028}", "\u{2029}",                         // line/para separators
+    "normal",
+    " ",
+    "  ",
+    "\n",
+    "\r\n",
+    "\t",
+    "\u{202E}",
+    "\u{202D}",
+    "\u{2066}",
+    "\u{2069}", // bidi
+    "\u{200B}",
+    "\u{200D}",
+    "\u{FEFF}", // zero-width
+    "\u{0000}",
+    "\u{0007}",
+    "\u{001B}", // control
+    "\u{2028}",
+    "\u{2029}", // line/para separators
     "ignore previous instructions",
-    "SYSTEM:", "</code>", "USDC", "名前", "🙂",
+    "SYSTEM:",
+    "</code>",
+    "USDC",
+    "名前",
+    "🙂",
 ];
 
 /// A generator that mixes ordinary text with the exact characters an attacker
@@ -289,7 +306,11 @@ fn arb_pubkey() -> impl Strategy<Value = Pubkey> {
 
 fn arb_meta() -> impl Strategy<Value = AccountMeta> {
     (arb_pubkey(), any::<bool>(), any::<bool>()).prop_map(|(pubkey, is_signer, is_writable)| {
-        AccountMeta { pubkey, is_signer, is_writable }
+        AccountMeta {
+            pubkey,
+            is_signer,
+            is_writable,
+        }
     })
 }
 
@@ -299,7 +320,11 @@ fn arb_instruction() -> impl Strategy<Value = Instruction> {
         prop::collection::vec(arb_meta(), 0..6),
         prop::collection::vec(any::<u8>(), 0..16),
     )
-        .prop_map(|(program_id, accounts, data)| Instruction { program_id, accounts, data })
+        .prop_map(|(program_id, accounts, data)| Instruction {
+            program_id,
+            accounts,
+            data,
+        })
 }
 
 /// A syntactically valid 80-byte Current/Initialized nonce account.
@@ -509,7 +534,10 @@ fn stateful_generator_reaches_runs_the_iid_generator_cannot() {
         let a = iid.new_tree(&mut runner).expect("iid tree").current();
         iid_longest = iid_longest.max(longest_forbidden_run(&a));
 
-        let b = stateful.new_tree(&mut runner).expect("stateful tree").current();
+        let b = stateful
+            .new_tree(&mut runner)
+            .expect("stateful tree")
+            .current();
         stateful_longest = stateful_longest.max(longest_forbidden_run(&b));
     }
 

@@ -168,9 +168,7 @@ pub fn decode_transaction(bytes: &[u8]) -> Result<DecodedTransaction, DecodeErro
 impl DecodedTransaction {
     /// Resolve an instruction's program id via its `program_id_index`.
     pub fn program_id_of(&self, ix: &CompiledInstruction) -> Option<&Pubkey> {
-        self.message
-            .account_keys
-            .get(ix.program_id_index as usize)
+        self.message.account_keys.get(ix.program_id_index as usize)
     }
 
     /// Resolve the Nth account of an instruction to a pubkey.
@@ -234,7 +232,10 @@ mod tests {
         let (_, a) = kp(6);
         let (_, b) = kp(7);
         let bh = [3u8; 32];
-        let ixs = vec![system_transfer(&payer, &a, 10), system_transfer(&payer, &b, 20)];
+        let ixs = vec![
+            system_transfer(&payer, &a, 10),
+            system_transfer(&payer, &b, 20),
+        ];
         let msg = compile(&payer, &ixs, &bh).unwrap();
         let body = msg.serialize_legacy();
         let sig = sign_message(&payer_seed, &body);
