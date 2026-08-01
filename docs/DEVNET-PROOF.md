@@ -340,10 +340,15 @@ after the links expire, so it is listed first deliberately:
 - **One command, no install:** `python3 scripts/verify-proof.py` (stdlib only) queries devnet and
   prints PASS/FAIL for every claim above (programs executable, feed PDA owner, and each tx's exact
   success or rejection), exiting non-zero if any fails. A clean run prints `10/10 static claims`
-and `2/2 live claims`, split deliberately: the static ten are deployed program state and
-immutable devnet history, so they stay green whether or not anything of ours is switched on.
-Only the live two answer "is the node publishing right now" and "is the pay page reachable",
-which are two independent systems rather than one. Prove that gate works rather
+and every live claim it could gate, split deliberately: the static ten are deployed program state
+and immutable devnet history, so they stay green whether or not anything of ours is switched on.
+The live ones answer whether the node is publishing right now, whether the pay page is reachable,
+whether the shop daemon is alive, and whether the x402 gate rebuilt its spend ledger across a
+restart, which are independent systems rather than one. That count is DERIVED from what actually
+gated rather than pinned, so it reads 4 once the node serves the ledger block and 3 until then,
+and a claim reporting PENDING is never counted as verified. A number written here instead would
+either overstate today or need remembering later, which is how this sentence came to say two when
+the verifier had printed four for some time. Prove that gate works rather
 than trusting it: `MAX_FEED_AGE_MIN=0 python3 scripts/verify-proof.py` turns the live check red
 and exits 1 while all ten static claims stay green.
 - **By hand:** open any link above with the explorer cluster set to devnet. The programs are

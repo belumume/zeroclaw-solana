@@ -17,8 +17,10 @@ the `x402-feed-gate` node, and the `webshop-pay` pay page. Steps 2-7 run from a 
 no network), then `zeroclaw sop validate`. The `cd` is required rather than stylistic: there
 is no cargo manifest at the repo root, for the reason given in step 2. To confirm the live chain instead of rebuilding, run
 `python3 scripts/verify-proof.py` (stdlib only, no install): it queries devnet and prints
-PASS/FAIL for every on-chain claim, ending in `10/10 static claims` plus `2/2 live claims`
-(the split matters: only the live ones can go red). Or open any explorer link
+PASS/FAIL for every on-chain claim, ending in `10/10 static claims` plus every live claim it
+could gate (the split matters: only the live ones can go red). The live count is derived from
+what actually gated rather than pinned, so it reads 4 once the node serves the x402 ledger block
+and 3 until then, and a claim reporting PENDING is never tallied as verified. Or open any explorer link
 in `docs/DEVNET-PROOF.md`; the programs, the feed sequence history, and the x402 settlement
 are all public devnet. The full evening path (host + plugins + a wired bot + a live turn) is
 steps 1-7 below.
