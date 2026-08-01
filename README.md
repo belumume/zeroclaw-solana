@@ -3,6 +3,14 @@
 Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents doing real Solana work,
 and the plugins, on-chain programs, skills and SOPs they run on.
 
+**Watch it first:** [`.demo-assets/cut/demo-roughcut-v2.mp4`](.demo-assets/cut/demo-roughcut-v2.mp4),
+2 minutes 55 seconds, five beats, no slides. Four of the five are live terminal runs rather than
+recordings of a result: the injection attack refused with zero tool calls, the feed publishing on
+schedule, the claim verifier at 10 of 10 static and 3 of 3 live with the over-cap rejection on
+screen, and the x402 gate answering 402 with its nonce visibly incrementing between requests. The
+file is committed here rather than linked off somewhere, so it does not depend on anyone else's
+retention policy.
+
 **A DePIN node that pays for itself.** An ARM box takes a sensor reading, signs it with a key
 generated on that box, and lands it in a typed account owned by our oracle program, where a
 separate consumer program reads it and acts. A `systemd` timer keeps it publishing with no
