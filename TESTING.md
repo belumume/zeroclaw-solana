@@ -311,18 +311,45 @@ tracked side all exit 2 rather than 0. `scripts/mutation-check-shadowed-scripts.
 half of the old scope back and requires the suite to go red, which is what separates ten green
 cases from ten cases that can fail.
 
-Three of these now run in CI, in the `publish-gates` job: `check-repo-paths.py`,
-`check-shadowed-scripts.py` and `check-proof-links.py`, the last with its own control suite as a
-separate step. All three are pure git plus filesystem, so they give the same answer on any
-machine, which is what makes them meaningful on a runner. The other two stay manual on purpose.
-`check-doc-links.py` exits non-zero on the unfilled repo-URL placeholders, and wiring a known-red
-check into CI teaches a reader to ignore a red badge, so it goes in at publish.
+Four of these now run in CI: `check-repo-paths.py`, `check-shadowed-scripts.py` and
+`check-proof-links.py` in the `publish-gates` job, the last with its own control suite as a
+separate step, plus `check-doc-slop.py`. All four are pure git plus filesystem, so they give the
+same answer on any machine, which is what makes them meaningful on a runner. The other two stay
+manual on purpose.
+
+`check-doc-links.py` stays manual, and the reason this file gave for it was stale rather than
+merely imprecise. It said the gate goes red on unfilled repo-URL placeholders. There are none:
+those were filled once it was established that a repository URL derives from owner and name, so
+visibility never gated them, and grepping the three prose documents for them returns nothing. The
+real residual is narrower and clears on one event. An anonymous request for a private repository
+returns 404, and the checker cannot distinguish that from a URL that was never valid, so the gate
+reports one problem until the repository is public and none afterward. Wiring a known-red check in
+would still teach a reader to ignore a red badge, so it still goes in at publish, for that reason
+rather than the stale one.
+
+A second red on that gate was retired rather than deferred, because no event could ever clear it.
+QUICKSTART illustrates an SSH tunnel with `127.0.0.1:8899`, and fetching a loopback address
+measures whoever runs the checker: red on a runner, and GREEN on a reader who started the local
+validator that QUICKSTART tells them to start. A result that turns on unrelated local state is not
+a check. Loopback is now a skip class beside the two illustration classes that already existed,
+and `scripts/test_check_doc_links.py` drives it in both directions, since must-skip alone would
+pass for a classifier that skipped every URL and quietly stopped checking real links. Sixteen
+cases: the incident URL verbatim, five more loopback spellings, five near-misses that must still be
+CHECKED and differ only in the discriminating feature (`127.0.0.1.example.com`,
+`localhost.attacker.test`, a loopback string in the path), the two pre-existing classes, a mutation
+control that breaks the pattern and requires the incident to stop being skipped, and one that
+re-reads QUICKSTART to confirm the case is still guarding a shape the repository actually has.
+This gate had been the only one of the six with no suite, which is how a permanently-red job was
+scheduled onto the judging window and read as a known residual rather than as a bug.
+
 `check-config-drift.py` compares against a config on the operator's machine, which a runner does
 not have, so running it there would assert nothing while looking like coverage.
 
-The five `check-*` lines are pre-publish gates rather than tests. That count read four until
-2026-07-27, one short of the list directly above it, which is the same class of defect these
-gates exist to close: a number nobody recounts after the list it describes grows.
+The six `check-*` lines are pre-publish gates rather than tests. That count read four until
+2026-07-27 and five until 2026-08-01, each time one short of the list directly above it, which is
+the same class of defect these gates exist to close: a number nobody recounts after the list it
+describes grows. It has now been wrong twice in the paragraph that documents it being wrong, so
+the honest reading is that prose counts drift by default and the list is the authority.
 `check-doc-links.py` deliberately
 does not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
 signature that does not exist, so a status-code checker would report a confident pass on a dead
@@ -387,6 +414,28 @@ refused anyway.
 *Cannot catch:* anything about formatting a reader would call style rather than rustfmt's default.
 This repo ships no rustfmt configuration at all, so the gate asks rustfmt what it thinks and that
 is the whole standard.
+
+`ci.yml` runs a second documentation gate on every push, `check-doc-slop.py`, and it was applied
+before it was ever recorded. It shipped the same day as the `fmt` job above and had three
+paragraphs there and none here, so a reader of this file would have concluded the repository does
+not check its own prose. It reads every tracked markdown document, currently thirty-one, against
+fourteen patterns: em-dashes, rogue unicode, flagged vocabulary, templated and reflex openers,
+defensive hedging, unverifiable certainty, negative-contrast framing, empty closers, and the
+editorial-bloat classes that leak internal process into a public document, which are decision
+identifiers, internal task numbers, file-and-line citations and session references. A judge reads
+these documents as the submission, so prose the repository would not defend is a defect in the
+deliverable rather than a matter of taste.
+
+Two scoping decisions in it are worth stating, because both were failures first. Fenced code
+blocks and blockquote lines are exempt throughout: a code sample or a quoted upstream comment is
+evidence, and normalising it would falsify the artifact rather than improve it. Two vendored paths
+are bounded by their upstream marker counts rather than by zero, so the gate notices if our own
+edits add markers to a file we did not write while never demanding we restyle someone else's.
+
+*Cannot catch:* whether a sentence is TRUE. It scores how prose reads, so a retracted claim scans
+exactly like a live one. That is not hypothetical here: a draft justified the wasm demotion with a
+reason this project had already overturned, and it was clean on all fourteen patterns. The
+fact-check is a separate pass and this gate is not it.
 
 A note on how that sentence was written, because the gate caught the first draft. It originally
 named the absent config file, in backticks, to say the file does not exist. `check-repo-paths.py`

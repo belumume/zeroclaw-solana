@@ -63,14 +63,24 @@ CANARY = (
     "docs/DECISIONS.md",
 )
 
-# Two shapes that are ILLUSTRATIONS of a URL rather than URLs, and both only became reachable when
-# the scope widened past the six prose documents. Fetching either is meaningless: the first cannot
-# be encoded at all, and the second is a documented shape whose secret was deliberately removed.
+# Three shapes that are ILLUSTRATIONS of a URL rather than URLs. Fetching any of them is
+# meaningless: the first cannot be encoded at all, the second is a documented shape whose secret was
+# deliberately removed, and the third names a service on the READER's machine.
 # They are reported as skipped rather than dropped, because a link nobody checked should say so.
 ABBREVIATED = re.compile(
     r"[^\x00-\x7f]"
 )  # a prose ellipsis, so the URL is a display fragment
 REDACTED_QUERY = re.compile(r"REDACTED|YOUR[_-]|xxxxx", re.I)
+
+# A loopback address resolves to whoever runs the checker, so fetching it measures the runner and
+# not the documentation. It is worse than permanently red: QUICKSTART's `ssh -L 8899:127.0.0.1:8899`
+# illustration went red on CI and would go GREEN on a reader's machine running the local validator
+# or `scripts/qr_live_server.py`, both of which QUICKSTART tells them to start. A check whose result
+# depends on unrelated local state is not a check, so this class is skipped on both outcomes rather
+# than being left to flip.
+LOOPBACK = re.compile(
+    r"^https?://(?:127\.0\.0\.1|localhost|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:[/?#]|$)", re.I
+)
 
 
 def tracked_markdown():
@@ -231,13 +241,18 @@ def main():
 
         for url in dict.fromkeys(URL_RE.findall(text)):
             url = url.rstrip(".,;")
-            if ABBREVIATED.search(url) or REDACTED_QUERY.search(url):
-                why = (
-                    "shortened in prose"
-                    if ABBREVIATED.search(url)
-                    else "secret removed on purpose"
-                )
-                print(f"SKIP  {why:<18} {url[:96]}")
+            if (
+                ABBREVIATED.search(url)
+                or REDACTED_QUERY.search(url)
+                or LOOPBACK.search(url)
+            ):
+                if ABBREVIATED.search(url):
+                    why = "shortened in prose"
+                elif REDACTED_QUERY.search(url):
+                    why = "secret removed on purpose"
+                else:
+                    why = "loopback illustration"
+                print(f"SKIP  {why:<22} {url[:96]}")
                 continue
             checked += 1
             if url in cache:

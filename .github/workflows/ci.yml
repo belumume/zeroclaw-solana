@@ -134,10 +134,28 @@ jobs:
       # runner is the only place they run at all, since a gate that fires only
       # when someone remembers to type it is close to no gate.
       #
-      # check-doc-links.py is NOT here on purpose. It exits non-zero on the
-      # unfilled repo-URL placeholders, which is intended behaviour until the
-      # repository is public, and wiring a known-red check into CI would train
-      # a reader to ignore a red badge. It goes in at publish.
+      # check-doc-links.py is NOT here on purpose, and the reason is no longer the
+      # one this comment gave for weeks. It said the gate goes red on unfilled
+      # repo-URL placeholders. There are none: the placeholders were filled once
+      # it was established that a repository URL derives from owner and name, so
+      # visibility never gated it. Grepping the three prose docs for them returns
+      # nothing.
+      #
+      # The real residual is narrower and clears on one event. An anonymous
+      # request for a PRIVATE repository returns 404, and the checker cannot tell
+      # that from a URL that was never valid, so the gate reports one problem
+      # until the repository is public and then reports none. Wiring a known-red
+      # check in would train a reader to ignore a red badge, so it still goes in
+      # at publish, but for that reason rather than the stale one.
+      #
+      # A second red was retired rather than deferred, because it could never
+      # clear on any event. QUICKSTART illustrates an SSH tunnel with
+      # 127.0.0.1:8899, and fetching a loopback address measures whoever runs the
+      # checker: red on a runner, GREEN on a reader who started the local
+      # validator that QUICKSTART tells them to start. A result that depends on
+      # unrelated local state is not a check, so loopback is now a skip class
+      # beside the two that already existed, with both-direction controls in
+      # scripts/test_check_doc_links.py.
       #
       # check-config-drift.py is NOT here because it compares the documented
       # posture against a config on the operator's machine. A runner has no such
@@ -186,6 +204,17 @@ jobs:
       # shipped, so if it stops firing the gate is blind again.
       - name: the proof-link gate's controls actually gate
         run: python3 scripts/test_check_proof_links.py
+
+      # check-doc-links.py itself stays manual because it needs the network and reports one
+      # problem while the repository is private. Its SKIP classifier does not: it is pure regex
+      # over strings, so it belongs on a runner, and a suite that only runs when someone
+      # remembers to type it is how the loopback defect survived in the first place. Sixteen
+      # cases in both directions, because must-skip alone would pass for a classifier that
+      # skipped every URL and quietly stopped checking real links. Case 1 is the QUICKSTART URL
+      # verbatim, and one case re-reads QUICKSTART so the suite fails rather than passes quietly
+      # if it is ever guarding a shape the repository no longer has.
+      - name: the link gate still skips illustrations and still checks real links
+        run: python3 scripts/test_check_doc_links.py
 
       # The on-chain evidence outlives the links to it. Public devnet RPC prunes
       # after about four days, so every explorer link in DEVNET-PROOF is dead well
