@@ -53,7 +53,7 @@ blast radius of a hacked agent capped by on-chain math, not vibes.
 publish its feed, it SELLS it. A client asks for a reading; the node answers HTTP 402 with a
 price menu; the client pays a stablecoin transfer on Solana and signs it themselves; the node
 verifies the payment from the transaction bytes, settles it, and serves the reading. Custody
-is T0/T1: the node holds no key but its public receiving address and cannot move funds, only
+is T0/T1: the gate holds no key but its public receiving address and cannot move funds, only
 recognise a payment made to it, so there is nothing to prompt-inject into paying out. Because
 the client is the fee payer, no facilitator is required and verification is pure Solana RPC. An
 in-code per-payer daily cap bounds it. Proven end to end on devnet: a 402 challenge, a signed

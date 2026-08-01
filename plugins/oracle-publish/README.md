@@ -36,9 +36,11 @@ forges a reading.
 
 Both rejections are demonstrated live on devnet below.
 
-## Custody tier: T1 (fund-less partial signing)
+## Custody tier: T1 (fund-less partial signing). Secrets held: one fund-less device seed.
 
-This plugin holds **no wallet and moves no funds**:
+Its sibling builders declare "Secrets held: None" and this one cannot, so the heading says so
+rather than leaving a reader to notice the omission. This plugin holds **no wallet and moves
+no funds**:
 
 - The only key it touches is the **device seed**, a scoped identity key that signs
   readings and nothing else. It arrives through jailed config (`signer_seed_hex`),

@@ -50,9 +50,12 @@ install. It reports static and live claims separately, and names what it does no
 
 ## Custody, which is the part that matters
 
-No plugin here holds a key that can move funds. Each emits an **unsigned** transaction for a
-human to approve. Spends are additionally bounded on chain by the audited Solana Foundation
-Allowances program.
+No plugin here holds a key that can move funds. Every plugin that builds a spend emits it
+**unsigned**, for a human to approve. One component signs, and naming it is more honest than
+the blanket claim: `oracle-publish` holds a fund-less device seed and emits a device-**signed**
+transaction with the fee-payer slot left empty, so a reading is attributable to the device
+while the signature that actually pays is still the operator's. Spends are additionally
+bounded on chain by the audited Solana Foundation Allowances program.
 
 That bound is demonstrated rather than asserted, and the demonstration deliberately does the
 opposite of avoiding a key, because avoiding one proves nothing about what happens when an
@@ -90,8 +93,16 @@ through it. Where intent is variable, a spend, the on-chain cap above is what ho
 holds whether or not the operator was fooled.
 
 The two use cases run **no T2 fund-signer**. Everything they touch sits at T0 (read-only) or
-T1 (builds an unsigned transaction, holds no key), which the brief calls the sweet spot and
+T1 (builds a transaction the operator must sign), which the brief calls the sweet spot and
 which is the honest place for an LLM-driven system to stop.
+
+One T1 component departs from the ladder's "secrets held: none" wording, and it is worth
+naming rather than glossing. `oracle-publish` holds a 32-byte device seed. It is fund-less by
+construction, and the code asserts that rather than asking to be trusted: the device is added
+as a **readonly** signer, and a hard check rejects any message whose fee payer is not signer
+index zero. So the device key can attest that a reading came from that device, and it can
+never pay a fee or source value. That is a narrower deviation than the ladder's wording
+allows for, and a wider capability than "holds no key" would have implied.
 
 ## What the two use cases run on
 
