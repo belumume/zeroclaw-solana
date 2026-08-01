@@ -17,7 +17,7 @@ instruction. An appended transfer, a swapped program, or a spoofed feed is refus
 check trusts neither the model, nor the plugin, nor the wire.
 
 Where intent is variable (a spend), this shape does not apply, and the bound is the audited
-Allowances program on chain instead. See docs/WRITEUP-DRAFT.md.
+Allowances program on chain instead. See docs/WRITEUP.md.
 
 Takes the plugin's base64 partial tx (fee-payer slot 0 EMPTY, device signature at slot 1),
 signs slot 0 with the agent session keypair, broadcasts, then reads the feed PDA back and

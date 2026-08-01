@@ -8,7 +8,7 @@ create your own.
 
 **Repo map (two repos):** the ZeroClaw **host** is upstream, `github.com/zeroclaw-labs/zeroclaw`
 (cloned in step 1). Everything this submission adds is in **THIS repo**
-(`<repo URL, filled at publish>`): the plugins, the `solana-pay` skill, the on-chain
+(`github.com/belumume/zeroclaw-solana`): the plugins, the `solana-pay` skill, the on-chain
 `zeroclaw_oracle` + `consumer_example` programs (`onchain/`), the `e2e-*` reproducibility harnesses,
 the `x402-feed-gate` node, and the `webshop-pay` pay page. Steps 2-7 run from a clone of this repo.
 

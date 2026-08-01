@@ -560,7 +560,7 @@ Secrets are the operator's own; no secret of ours is needed at any step.
 
 ## Links
 Repo (plugins + solana-core + onchain programs + skills + e2e harnesses + x402-feed-gate):
-`<repo URL, filled at publish>`
+https://github.com/belumume/zeroclaw-solana
 
 Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`):
 - oracle program `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn`, consumer

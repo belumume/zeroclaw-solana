@@ -49,7 +49,7 @@ install. It reports static and live claims separately, and names what it does no
 
 | If you want | Read |
 |---|---|
-| What this is and why it is built this way | [`docs/WRITEUP-DRAFT.md`](docs/WRITEUP-DRAFT.md) |
+| What this is and why it is built this way | [`docs/WRITEUP.md`](docs/WRITEUP.md) |
 | To run it yourself | [`QUICKSTART.md`](QUICKSTART.md) |
 | Proof it is real, on chain | [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md) |
 | Why each design call went the way it did, including what was rejected | [`docs/DECISIONS.md`](docs/DECISIONS.md) |

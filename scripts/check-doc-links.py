@@ -58,7 +58,7 @@ CANARY = (
     "README.md",
     "QUICKSTART.md",
     "TESTING.md",
-    "docs/WRITEUP-DRAFT.md",
+    "docs/WRITEUP.md",
     "docs/DEVNET-PROOF.md",
     "docs/DECISIONS.md",
 )

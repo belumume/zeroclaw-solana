@@ -309,9 +309,20 @@ derived from `git ls-files` rather than enumerated, because the enumerated versi
 documents and the plugin READMEs were not among them, which is how a dead link survived every
 green run of a checker built to find exactly that.
 
-It currently exits non-zero on two unfilled `<repo URL>` placeholders, which is the intended
-behaviour: those are the one thing that cannot be filled before the repository is public, and a
-gate that goes green before the submission is complete would be worse than no gate.
+It exited non-zero for weeks on two unfilled repo-URL placeholders, recorded right here as
+intended behaviour on the grounds that a repository URL cannot be known before the repository is
+public. That reasoning was wrong, and it is worth writing down because the gate itself was what
+kept the error alive. A repository URL derives from the owner and the name, and visibility does
+not touch either, so `gh repo view` returned the real URL while this repo was still private.
+Both placeholders are filled now. The instinct was sound and was pointed at the wrong thing: a
+gate should go red on something genuinely incomplete, and this URL was knowable the whole time.
+
+It still exits non-zero, for a reason that is now true rather than assumed. An anonymous request
+for a private repository returns 404, and the checker cannot tell that apart from a URL that
+does not exist, which is the correct thing for it to do. So the remaining red is the repository
+not being public yet, and it clears itself the moment that changes, with no edit to any
+document. If you are reading this from a public clone and that check is still red, the URL is
+genuinely wrong and worth reporting.
 
 The devnet harnesses need a funded operator keypair and are documented in
 `QUICKSTART.md`.
