@@ -1,5 +1,5 @@
 {
-  "captured_utc": "2026-07-27T22:04:36Z",
+  "captured_utc": "2026-08-01T03:38:35Z",
   "cluster": "devnet",
   "source_rpc": "https://api.devnet.solana.com",
   "note": "Raw base64 transactions captured before public devnet RPC prunes them (~4 day retention). Each entry is verifiable offline: the signature is ed25519 over the serialized message.",
@@ -14,12 +14,22 @@
       "raw_len": 451
     },
     "2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E": {
-      "status": "ALREADY_PRUNED",
-      "detail": "endpoint no longer serves this transaction"
+      "status": "CAPTURED",
+      "slot": 478285648,
+      "blockTime": 1784796264,
+      "err": null,
+      "raw_base64": "AlZdZaFUip3Flq37UkYsQ11x5G2OINxQsb0/sQbuIqJBKwGGWD6pfAzLZYpdN71nU3P7b1RtNOFY1bu9+0QOwg27vJfVS1tIjxmL0rz+yg3jCRRbBl+Kmqdc4OZ5wdcyqDx80izwt7AhqyHZn5Cy+1lAm4yMH5BWP6USm6s17aQKAgEDBxSot74YoOJg/Q04WfXY4ejSfTa6K4UtH2bs9ucjaq6611qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo4GOUxXDZ1XPomNHN5QRb/+KjndqJaW0z+D/O1JZQLNq1OEkySdDQLzXfWPxOxzBDErxxWWOjlVzmkQjbC3D2HAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGp9UXGSxWjuCKhF9z0peIzwNcMUWyGrNE2AYuqUAAAMTK+1qh86f1lPzb3osk0lCoAhbIs4SGKCKd7b+aTq51Q4WR+aWXTUeB6nLH37JTR845XnGLZLhjM9tMDo1/JCYCBAMCBQAEBAAAAAYCAwEusn9eEHWn50gOEAAAAAAAAP5DAAAAAAAAAAAAAAANAAAAAAAAAFXUYWoAAAAAAA==",
+      "raw_sha256": "124775d0eabf14d27c18bc4955a92679b6535dc4bc806407044578b905eb17f1",
+      "raw_len": 451
     },
     "2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH": {
-      "status": "ALREADY_PRUNED",
-      "detail": "endpoint no longer serves this transaction"
+      "status": "CAPTURED",
+      "slot": 478226471,
+      "blockTime": 1784774555,
+      "err": null,
+      "raw_base64": "AgGSQsxUI2DY/czvsbzdfVHdgUd2zuOAxyy4vg0292eZV/8WsNXctVQPitXQ4vwylaqPn90dSS9nQ+O1Yi574wiveg0fNRwlLZ9boekyb4tgHKbtDCqAf6vcKtW1sdV9jY24PRywBdErpVDxaGg+HgOtSxBRg07lizYrCwY+eqEPAgEDBxSot74YoOJg/Q04WfXY4ejSfTa6K4UtH2bs9ucjaq6611qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo4GOUxXDZ1XPomNHN5QRb/+KjndqJaW0z+D/O1JZQLNq1OEkySdDQLzXfWPxOxzBDErxxWWOjlVzmkQjbC3D2HAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGp9UXGSxWjuCKhF9z0peIzwNcMUWyGrNE2AYuqUAAAMTK+1qh86f1lPzb3osk0lCoAhbIs4SGKCKd7b+aTq513DDHTkT4ceryrr4DgaQ5c6M+7bCXnsPr1Kl3a+1tp4QCBAMCBQAEBAAAAAYCAwEusn9eEHWn50hUCwAAAAAAAP5DAAAAAAAAAAAAAAAKAAAAAAAAAIh/YWoAAAAAAA==",
+      "raw_sha256": "b6e92c1025134d7d5af0e11e171db82fa4ddd75df2b970c113187e5e1b157eea",
+      "raw_len": 451
     },
     "3MhyEGJo4AgCMoRtsM5nGspF5wXnDVQjRyzzmffKvztHg2Adu5fLnfpF4cP9ZmQumkWnA4xxxFGEnPZTATXZY3KD": {
       "status": "CAPTURED",
@@ -110,8 +120,13 @@
       "raw_len": 571
     },
     "5ss8wKQo5rqXeLTdQGoWjz6jLNgycT9vCKzj7iZs4viXsexeN573gy9oZ6fgNGrBjfahQ9Zcc84fz9nF4F6Gpudc": {
-      "status": "ALREADY_PRUNED",
-      "detail": "endpoint no longer serves this transaction"
+      "status": "CAPTURED",
+      "slot": 478350917,
+      "blockTime": 1784820208,
+      "err": null,
+      "raw_base64": "AfPuecbgiW2SruED0kc04b2pkQ9F3rTyRYvVtRePmkyJBcXtVetXwgM06MtkJ5YPNMHlspqpbh4yMZ2ShfQXsAMBAAQHxFP1Z36DPTjC0tzGA6CK3gooYDw3gxGzeQ5WFLu+uFUKLLZWPz4Eh62ebDd4TavanH2vdNtl4CMuPDHL9URh/e/+WkED6B3tDQXUZQrAC/Zw0HnJ0ELM+pwzhfGp/vTXAVL5clwCE9+9nLh6yMDIRG0byPRmVJ8CSuLOWNVYVPwDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAAAVKU1qZKSEGTSTocWDaOHx8NbXdvJK7geQfqEBBBUSNBt324ddloZPZy+FGzut5rBy0he1fWzeROoz1hX7/AKn+kKc25/ctsBW47Xe0qhG12fVzXBGkstt+EGoIZySk/AQEAAUCUMMAAAQACQMBAAAAAAAAAAYEAgMBAAoMQEIPAAAAAAAGBQEAF3g0MDItMThjNGY0ODVhOTAxMTczNy0w",
+      "raw_sha256": "237ff3167d5734c9af5b6ac90fa082253bc9b34cbbcb785b1fbb0878575229b9",
+      "raw_len": 390
     },
     "agHTsrz1Z6XhFjKN2g9DxFjJP363He2rHByvDN7r6KUDurzxxxcdj4LcfTA6AQpNsFk4cYqjk9k4kHfwgxWRFQd": {
       "status": "CAPTURED",
@@ -132,8 +147,13 @@
       "raw_len": 390
     },
     "cHvDQsPXk8EfFuiyRPuT1S3jCVag3RozQ5vpGtNzyQeEGrL9bfoHj7NmGzFDqK34ZCbFza5pkAKbiKoBNwUGVJr": {
-      "status": "ALREADY_PRUNED",
-      "detail": "endpoint no longer serves this transaction"
+      "status": "CAPTURED",
+      "slot": 477682171,
+      "blockTime": 1784575019,
+      "err": null,
+      "raw_base64": "AR5vKB0JREGNM0WB8is1zHyq48pQzxgjC9mkLfxZDsYUEzc85QQxD1Uj31FA9OQXqDGXZdLxPA2abry+lVnxjwMBAAMFo/X9RAed5hW9ySQkUBqYIWCciS6hZBLdQmrJUZD4NFVSuwLITZ8ZQdGR2jaYt59BrIoalNzQ7cYfPuRCdDdxtwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABUpTWpkpIQZNJOhxYNo4fHw1td28kruB5B+oQEEFRI0Gp9UXGSxWjuCKhF9z0peIzwNcMUWyGrNE2AYuqUAAADFoxvhITiups6rnI3DtECcMzjpiCyg8TsX7svdW9eCoAgIDAQQABAQAAAADAQA+emVyb2NsYXctZGVwaW4vdjEgdGFtcGVyX3RyaWdnZXJlZCBkZXY9c2Vuc29yLUE3IGF0PTE3MzczMDAwMDA=",
+      "raw_sha256": "076fc1b276bbc68f5675d3d300602bfde99ed5ae47fa637ce03e896ccc685280",
+      "raw_len": 338
     }
   }
 }

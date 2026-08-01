@@ -66,11 +66,20 @@ Read the two sentences above together, because they are easy to mistake for a co
 The **use cases** run no fund-signing key at all. The **cap demonstration** uses one on
 purpose, bounded on chain, so the guarantee can be shown failing closed rather than described.
 
-Both transactions predate devnet's retention window, so their explorer links no longer
-resolve. Their raw bytes are captured in [`docs/proof-bundle/`](docs/proof-bundle), and
-`python3 scripts/verify_proof_offline.py` re-checks the ed25519 signature over the exact
-serialized message with no network at all. That is the stronger artifact anyway: an explorer
-link is someone else's retention policy, and this one expires about four days after the fact.
+Both transactions are clickable, and one of them opens on a failed transaction on purpose. The
+[within-cap transfer settled](https://explorer.solana.com/tx/5qyr7jJi8zb6SjZjnA2QT5C9nuZYgSw6raAefjmWnDDMf3JRgkQX19zssE57EpFSHVCCPfbj5qyxcYSQcfEq9W3Z?cluster=devnet);
+the [over-cap transfer was refused on chain](https://explorer.solana.com/tx/3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps?cluster=devnet)
+with `custom program error 0x12c`. The red error page is the evidence rather than a defect: the
+audited program refused a transfer the agent's own delegated key had already signed, and the
+transfer that settled is the control that stops the refusal being read as a key that does not
+work. Both were served by `api.devnet.solana.com` on 2026-08-01, eight days after they landed.
+
+Retention on public devnet is set by whoever runs the endpoint and has moved before, so the
+captured bytes are what this rests on rather than the links. They are in
+[`docs/proof-bundle/`](docs/proof-bundle), and `python3 scripts/verify_proof_offline.py`
+re-checks the ed25519 signature over the exact serialized message with no network at all. If a
+link above has stopped resolving by the time you click it, that command still proves the same
+thing.
 
 Human approval is a weak boundary on its own, because the sentence the human reads is one the
 model wrote. So the paths with a fixed intent never ask: `scripts/broadcast_certified.py`

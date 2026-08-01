@@ -3,17 +3,22 @@
 Every claim below is a public Solana **devnet** transaction or account. Nothing here is a secret;
 operator keypairs stay local. Set the explorer cluster to **devnet**.
 
-## Read this before clicking: the explorer links expire, the proof does not
+## Read this before clicking: the links are a convenience, the bundle is the proof
 
-Public devnet RPC retains roughly **four days** of transaction history. Measured against the
-signatures in this file on 2026-07-27: the oldest one still served had a block time of
-2026-07-23 22:59, and everything before that boundary already returns nothing, including via
-`getSignatureStatuses` with `searchTransactionHistory`. Those transactions are real. The signatures
-are well-formed and decode to exactly 64 bytes. The public endpoint simply stops serving them.
+Public devnet retention is not a window you can plan against, and this file has now measured it
+twice and got two different answers. On 2026-07-27 the oldest signature here still being served
+had a block time of 2026-07-23 22:59, and everything older returned nothing, including via
+`getSignatureStatuses` with `searchTransactionHistory`. On 2026-08-01 all **sixteen** signatures
+in the bundle were served again, including four the earlier pass had been unable to reach and
+had recorded as pruned, and the oldest of the sixteen had landed **11.4 days** earlier.
 
-We are stating that rather than shipping links that rot quietly, because the arithmetic matters:
-anything published by the deadline is pruned well before judging, so an explorer link is a
-convenience with an expiry date set by a third party, not evidence.
+Both measurements were taken the same way, against `api.devnet.solana.com`, and the second one
+was gated on controls: three well-formed signatures that were never broadcast returned nothing on
+the same run, so the endpoint was answering rather than agreeing with everything it was asked.
+
+Read that as the endpoint currently serving more history than it did, not as a durability
+guarantee. Whoever runs it sets the policy, they have changed it once inside a week, and they can
+change it back without telling anyone. That is why nothing here depends on a link.
 
 **The evidence lives in this repo instead.** `docs/proof-bundle/devnet-transactions.json` carries,
 for every transaction still retrievable at capture time, the raw base64 bytes, slot, block time,
@@ -38,8 +43,11 @@ as unrecognized rather than receiving a plausible label.
 
 **Current result: every captured transaction verifies, controls pass, exit 0.** The script prints
 the count it verified rather than this page asserting one; at the capture in this bundle it reports
-12. Three further signatures were pruned by the endpoint before capture could reach them; they are
-recorded as `ALREADY_PRUNED` rather than dropped, and are deliberately not counted as verified.
+16. The bundle previously held 12, with four signatures recorded as `ALREADY_PRUNED` because the
+endpoint would not serve them when the bundle was built. On 2026-08-01 it served all four, so they
+were captured and now verify like the rest. Nothing was overwritten to do it: the capture refuses
+to replace bytes it already holds, which is what keeps a later retry from turning real evidence
+into a pruned marker.
 
 The script gates itself on negative controls and refuses to report anything unless each behaves: a
 flipped message byte, a flipped signature byte and a flipped transaction byte must each be rejected,
@@ -160,25 +168,28 @@ longer publishing.
 
 | UTC | seq | value | Settlement tx | Offline status |
 |---|---|---|---|---|
-| 2026-07-23T02:42Z | 10 | 29.0C | `2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH` | pruned before capture, no bytes held |
-| 2026-07-23T08:44Z | 13 | 41.1C | `2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E` | pruned before capture, no bytes held |
+| 2026-07-23T02:42Z | 10 | 29.0C | [2pgdXYAS…](https://explorer.solana.com/tx/2pgdXYASpLxcSKuBBzxWnHRWKVZiJbdzpu4SCrjeznL1ptJc1iNcT8ste79Goti14MadKZHvo1rsNMVemmAbEBH?cluster=devnet) | captured, verifies |
+| 2026-07-23T08:44Z | 13 | 41.1C | [2j9emSvs…](https://explorer.solana.com/tx/2j9emSvsWHKyTEGVT3iLik9XGxpQkLLqAhLLQqjgkVEQx2QPHJQnxqzKLMqxCtCjnsdne276aFH4z76Z3CdJah5E?cluster=devnet) | captured, verifies |
 | 2026-07-24T05:56Z | 17 | 33.0C | [agHTsrz1…](https://explorer.solana.com/tx/agHTsrz1Z6XhFjKN2g9DxFjJP363He2rHByvDN7r6KUDurzxxxcdj4LcfTA6AQpNsFk4cYqjk9k4kHfwgxWRFQd?cluster=devnet) | captured, verifies |
 
-**Two of those three are the honest loss, and they are labelled rather than quietly dropped.**
-The bundle was built after they had already aged out, so no bytes exist for them and no offline
-check can prove them. They are recorded as `ALREADY_PRUNED` in the bundle and deliberately not
-counted anywhere as verified. The third was captured in time and decodes to seq 17 at 33.00C,
-which is exactly what its row claims, so the row can be checked rather than believed.
+**All three decode to exactly what their rows claim**, so every row here can be checked rather
+than believed: seq 10 at 29.00C, seq 13 at 41.10C, seq 17 at 33.00C, each read out of the signed
+bytes by `scripts/verify_proof_offline.py` rather than copied from a note.
 
-The first two signatures are printed here as plain text rather than as explorer links, and that
-difference is the whole point of the last column. A link is an offer of evidence, so offering one
-to a transaction whose bytes nobody holds hands a reader a dead end dressed as a proof. Only the
-third is linked, because only the third can be checked. `scripts/check-proof-links.py` enforces
-that rule mechanically across every tracked document, so the distinction cannot quietly erode the
-next time a row is added.
+The first two spent four days recorded as lost. The bundle was built after the endpoint had
+stopped serving them, so they carried `ALREADY_PRUNED`, no offline check could prove them, and
+they were printed as plain text rather than as links, because a link to a transaction whose bytes
+nobody holds hands a reader a dead end dressed as a proof. On 2026-08-01 a retry found the
+endpoint serving both, captured them, and they are linked here now under the same rule that kept
+them unlinked before: a signature is offered as a link only once its bytes are held.
+`scripts/check-proof-links.py` enforces that rule mechanically across every tracked document, so
+the distinction cannot quietly erode the next time a row is added.
 
-That two-out-of-three ratio is the argument for capturing early. Nothing about those transactions
-changed; only our ability to prove them did, and it expired on a schedule set by someone else.
+The recovery is the part worth keeping. A transport failure and a permanent loss land in the same
+column and are indistinguishable afterwards, so a row saying a transaction is gone is really
+saying nobody has asked again lately. Asking again costs one command:
+`scripts/capture-proof-bundle.py --refresh` re-requests everything not yet captured and refuses to
+overwrite bytes it already holds, so running it can only add evidence.
 
 ## The x402 earning-node settled a real paid read (machine commerce)
 The node sold one reading over x402: a 402 challenge, a client-signed stablecoin payment, and
@@ -290,7 +301,10 @@ the over-cap transfer was rejected on-chain.
 - WITHIN cap (5 tokens) SUCCEEDED:
   https://explorer.solana.com/tx/5qyr7jJi8zb6SjZjnA2QT5C9nuZYgSw6raAefjmWnDDMf3JRgkQX19zssE57EpFSHVCCPfbj5qyxcYSQcfEq9W3Z?cluster=devnet
 - OVER cap (10 tokens) REJECTED by the SF Allowances program, landed as a failed tx with
-  `custom program error 0x12c` (InstructionError Custom 300):
+  `custom program error 0x12c` (InstructionError Custom 300). This one opens on a red failed
+  transaction, and that is the result to look for: the agent's own key signed it and the audited
+  program still refused it. The bullet above is the control that tells a refusal apart from a key
+  that simply does not work:
   https://explorer.solana.com/tx/3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps?cluster=devnet
 - Reproduce: `cd e2e-allowance && npm install && E2E_FUNDER=<operator.json> node demo.js` (devnet)
   reruns the whole create-delegation then within-cap-then-over-cap flow.
