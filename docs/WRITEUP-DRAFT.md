@@ -15,6 +15,13 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
    publisher runs the durable feed on a schedule so the on-chain sequence never gaps. You can
    message the node on Telegram to ask what it saw and why a reading was refused.
+   It also SELLS that feed rather than only publishing it, which is the half worth reading
+   twice: another agent asks for a reading, gets an HTTP 402 with a price menu, signs its own
+   stablecoin transfer, and is served. No human is in that loop at any point and no facilitator
+   sits in the middle, because the buyer is the fee payer. The gate holds no key beyond its own
+   receiving address, so its entire power is recognising a payment made to it. A replay against a
+   spent nonce is refused, and the per-payer daily cap is rebuilt from the earnings log at boot so
+   a restart cannot quietly reopen it. The node earns the gas it spends.
 2. **The shop terminal**: a merchant's ZeroClaw on Telegram and WhatsApp. It builds a Solana Pay
    request (skill) and hands the customer a tappable pay page (the channels are text-only, so a
    hosted page renders the QR and a wallet picker), then confirms settlement on-chain by matching
