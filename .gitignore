@@ -107,3 +107,10 @@ docs/PROMPT-COMPLIANCE-LEDGER.md
 docs/TRUTH-SWEEP.md
 docs/research/
 notes/
+
+# Ad-hoc backups written by maintenance scripts before they edit a file in place.
+# The handoff and its archive are themselves gitignored, so a byte backup is the ONLY
+# recovery path when a block moves between them -- there is no git trail to fall back on.
+# They are kept on disk deliberately and must never be committed.
+*.bak
+*.bak-*
