@@ -103,6 +103,9 @@ def tracked_markdown():
 
 
 URL_RE = re.compile(r'https?://[^\s)\]<>"`]+')
+# Markdown links whose target is NOT http(s) or mailto: the relative paths a reader
+# actually clicks. Checked on disk; a broken one is a dead end in the corpus a judge walks.
+REL_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 EXPLORER_TX = re.compile(r"explorer\.solana\.com/tx/([1-9A-HJ-NP-Za-km-z]+)")
 EXPLORER_ADDR = re.compile(r"explorer\.solana\.com/address/([1-9A-HJ-NP-Za-km-z]+)")
 # A placeholder nobody has filled in is a dead link with extra steps. Scoped to the promise this
@@ -285,6 +288,17 @@ def main():
 
         for m in PLACEHOLDER.finditer(text):
             findings.append(f"{doc}: unfilled placeholder {m.group(0)!r}")
+
+        for target in dict.fromkeys(REL_LINK.findall(text)):
+            target = target.strip()
+            if target.startswith(("http://", "https://", "mailto:")):
+                continue  # the URL pass below owns these
+            file_part = target.split("#")[0].strip()
+            if not file_part:
+                continue  # a bare #anchor is intra-document; there is no file to resolve
+            checked += 1
+            if not (path.parent / file_part).resolve().exists():
+                findings.append(f"{doc}: relative link does not resolve -> {file_part}")
 
         for url in dict.fromkeys(URL_RE.findall(text)):
             url = url.rstrip(".,;")
