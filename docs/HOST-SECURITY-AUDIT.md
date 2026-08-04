@@ -92,10 +92,11 @@ candidates died.
 
 Each survivor then went to a verifier told to **refute** it, and to treat a paraphrased quote as a
 refutation on its own. Nothing was refuted outright, which is expected downstream of an 84%
-pre-screen, but eleven came back partial: six had their severity lowered, eight had at least one
-named exploit step falsified, and two were reclassified as documented-by-design. Those eleven are
-not reported here, because a corrected finding still needs its correction verified before it is worth
-a maintainer's time.
+pre-screen, but eleven came back partial, and one finding could be corrected in more than one of
+these ways: six had their severity lowered, eight had at least one named exploit step falsified,
+and two were reclassified as documented-by-design. The three counts therefore overlap rather than
+partitioning the eleven. Those eleven are not reported here, because a corrected finding still
+needs its correction verified before it is worth a maintainer's time.
 
 Concretely, verification killed claims like these:
 
