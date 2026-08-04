@@ -518,7 +518,7 @@ The tiers in words:
   tracker will find it, and finding it here first is the better outcome.
 
 ## Custody design space (mapped to the brief's named patterns)
-The brief names three experimental-edge custody patterns; we built all three and name them in
+The brief names six experimental-edge custody patterns; we built three of them and name them in
 its own vocabulary so the mechanisms are legible, not buried:
 - **Policy wallets / on-chain spend caps.** Spends run under the audited Solana Foundation
   Allowances program, so the on-chain program (not the plugin, not the LLM) bounds every

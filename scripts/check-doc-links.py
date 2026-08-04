@@ -171,13 +171,41 @@ def rpc(method, params, attempts=4, endpoint=None):
     raise RuntimeError(f"RPC still rate-limited after {attempts} attempts: {last}")
 
 
-def check_url(url):
-    """(ok, detail) for a non-explorer link."""
+def check_url(url, attempts=3):
+    """(ok, detail) for a non-explorer link.
+
+    RETRIES TRANSPORT FAILURES, and the asymmetry it fixes is the point. `rpc()` above
+    already backs off because a rate-limited endpoint reports a false answer; this path
+    had no retry and folded every exception into one False, so a TIMEOUT was scored
+    exactly like a 404. Those are opposite findings: a 404 is a fact about the link, a
+    timeout is a fact about the network, and only one of them is a defect in this repo.
+
+    Measured 2026-08-04: the gate reported api.frankfurter.dev dead while three
+    consecutive probes returned HTTP 200 in about 0.3s each. That is a false red on the
+    gate the flip-sitting order runs LAST, which is the worst possible moment for one.
+
+    An HTTPError is NOT retried: the server answered, so it is a real verdict. Only a
+    transport failure gets another attempt, and a link that never answers is reported as
+    UNREACHABLE rather than as broken, so the two stay distinguishable downstream.
+    """
+    last = None
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(1.5 * attempt)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA}, method="GET")
+            with urllib.request.urlopen(req, timeout=25) as r:
+                return (200 <= r.status < 400), f"HTTP {r.status}"
+        except urllib.error.HTTPError as e:
+            return _http_verdict(e)
+        except Exception as e:
+            last = f"{type(e).__name__}: {e}"
+    return False, f"UNREACHABLE after {attempts} attempts ({last})"
+
+
+def _http_verdict(e):
+    """A server that ANSWERED is a real verdict, never a retry."""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": UA}, method="GET")
-        with urllib.request.urlopen(req, timeout=25) as r:
-            return (200 <= r.status < 400), f"HTTP {r.status}"
-    except urllib.error.HTTPError as e:
         # 402 is this repo's own x402 gate answering correctly. The question here is whether a
         # link points at something that exists, and a payment challenge is the endpoint doing
         # exactly what README describes one line above the link. Reading it as dead would have
@@ -185,8 +213,8 @@ def check_url(url):
         if e.code == 402:
             return True, "HTTP 402 (x402 challenge)"
         return False, f"HTTP {e.code}"
-    except Exception as e:
-        return False, f"{type(e).__name__}: {e}"
+    finally:
+        pass
 
 
 def load_bundle():
