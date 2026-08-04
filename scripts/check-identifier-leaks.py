@@ -30,6 +30,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# A DETECTOR AND ITS FIXTURES NECESSARILY CONTAIN THE SHAPES THEY DETECT, so scanning them
+# reports this gate's own pattern list and its own synthetic test data as leaks. Left in, the
+# gate is red on a clean tree forever, which is how a gate stops being read.
+#
+# Self-exclusion IS a hole, so it is bounded to exactly two paths and earns it two ways:
+#   1. the fixtures are provably SYNTHETIC -- verified against the live values rather than by
+#      eye: the file contains neither the real git-email local-part nor the real OS username;
+#   2. `test_check_identifier_leaks.py` drives the detectors directly, so a pattern that stopped
+#      working fails there loudly rather than being hidden by this skip.
+# Anything beyond these two files is scanned, including any future detector added elsewhere.
+SELF_PATHS = frozenset(
+    {
+        "scripts/check-identifier-leaks.py",
+        "scripts/test_check_identifier_leaks.py",
+    }
+)
+
 # Floors, same reasoning as the sibling gates: a discovery step that breaks returns an
 # empty set, every loop below is skipped, and the result is a PASS line byte-identical to
 # a clean run. A gate that reports success because it found nothing to check is worse than
@@ -141,7 +158,7 @@ def scan_line(line):
 
 
 def scan_tracked(findings):
-    files = [f for f in git("ls-files").split("\n") if f]
+    files = [f for f in git("ls-files").split("\n") if f and f not in SELF_PATHS]
     if len(files) < MIN_TRACKED:
         raise SystemExit(
             f"discovery found {len(files)} tracked file(s), expected at least "
