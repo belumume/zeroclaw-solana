@@ -80,8 +80,9 @@ settlement path is exercised against the token a real buyer would hold rather th
 stand-in. The gate reads the mint from `X402_MINT` and hardcodes nothing, so the same binary
 points at mainnet USDC by config.
 
-Public devnet stops serving a transaction after roughly four days, so the explorer link above is
-the perishable half of this proof and not the durable one. The raw bytes are captured in
+Whoever runs public devnet sets its retention and has changed it once inside a week (measured
+twice in `../docs/DEVNET-PROOF.md`), so the explorer link above is the perishable half of this
+proof and not the durable one. The raw bytes are captured in
 `../docs/proof-bundle/devnet-transactions.json`, and `python ../scripts/verify_proof_offline.py`
 re-verifies the signature and decodes the payment with no network at all. The HTTP half has no
 on-chain representation, because a refusal is a response rather than a transaction, so the full
