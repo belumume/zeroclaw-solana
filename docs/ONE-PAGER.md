@@ -125,7 +125,8 @@ happens. Scripting it instead? Send a browser `User-Agent`, because Cloudflare a
 
 **Repo:** https://github.com/belumume/zeroclaw-solana
 **Write-up:** [docs/WRITEUP.md](WRITEUP.md) &nbsp;&nbsp; **Run it:** [QUICKSTART.md](../QUICKSTART.md)
-**Demo (under 3 min, plays in the browser):**
-https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/demo-roughcut-v2.mp4
+**Demo (2:55, plays in the browser):**
+https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/zeroclaw-solana-demo.mp4
+(also committed at [.demo-assets/cut/zeroclaw-solana-demo.mp4](../.demo-assets/cut/zeroclaw-solana-demo.mp4), so a clone carries it)
 **Injection transcript:** [docs/transcripts/injection-refund-redirect.md](transcripts/injection-refund-redirect.md)
 **Mainnet custody proof:** [docs/MAINNET-PROOF.md](MAINNET-PROOF.md)
