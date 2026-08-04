@@ -12,23 +12,105 @@ create your own.
 `zeroclaw_oracle` + `consumer_example` programs (`onchain/`), the `e2e-*` reproducibility harnesses,
 the `x402-feed-gate` node, and the `webshop-pay` pay page. Steps 2-7 run from a clone of this repo.
 
-**Fastest path to "seeing it work" (5 min, after the one-time build in step 1):** run
-`(cd crates/solana-core && cargo test)` and `(cd x402-feed-gate && cargo test)` (all green,
-no network), then `zeroclaw sop validate`. The `cd` is required rather than stylistic: there
-is no cargo manifest at the repo root, for the reason given in step 2. To confirm the live chain instead of rebuilding, run
-`python3 scripts/verify-proof.py` (stdlib only, no install): it queries devnet and prints
-PASS/FAIL for every on-chain claim, ending in `10/10 static claims` plus every live claim it
-could gate (the split matters: only the live ones can go red). The live count is derived from
-what actually gated rather than pinned, so it reads 4 once the node serves the x402 ledger block
-and 3 until then, and a claim reporting PENDING is never tallied as verified. Or open any explorer link
-in `docs/DEVNET-PROOF.md`; the programs, the feed sequence history, and the x402 settlement
-are all public devnet. The full evening path (host + plugins + a wired bot + a live turn) is
-steps 1-7 below.
+## Fastest path: three checks, nothing installed, about thirteen seconds
+
+Start here. These three need **stdlib Python 3 and nothing else**: no `pip install`, no
+virtualenv, no Rust, no Solana CLI, no API key, no config file, no account anywhere. Clone
+this repo and run them. Two of the three never touch the network.
+
+```
+python3 scripts/verify_proof_offline.py     # 0.8s, no network at all
+python3 scripts/certify_publish_tx.py       # 0.2s, no network at all
+python3 scripts/verify-proof.py             # about 10s, queries public devnet
+```
+
+Measured at 13.1 seconds for all three together, exit 0. Re-derive with
+`time bash -c 'python3 scripts/verify_proof_offline.py && python3 scripts/certify_publish_tx.py && python3 scripts/verify-proof.py'`.
+The first two import no network library at all, which is checkable without running them:
+`grep -c urllib scripts/verify_proof_offline.py scripts/certify_publish_tx.py` prints a count
+of zero for each file. Only the third can be slower than its figure, since it waits on a
+public RPC.
+
+**`verify_proof_offline.py` re-verifies the on-chain record from bytes committed in this
+repo.** For every captured transaction it checks the ed25519 signature against the exact
+serialized message and decodes the instructions, so you read what was actually signed rather
+than what a document says was signed. It runs five self-tests first, one positive control and
+four negative, and refuses to report if any of them stops behaving, so a broken verifier
+cannot print a pass. Last line:
+
+```
+PASS  all 2 bundles verified offline: devnet-transactions.json, mainnet-transactions.json
+```
+
+That covers 28 devnet and 3 mainnet transactions, and it holds whether or not any RPC still
+serves them. Among them you can read the durable-nonce replay guard on every publish, and the
+over-cap transfer the on-chain allowance program refused, on both chains.
+
+**`certify_publish_tx.py` drives the fail-closed action certifier** over one good publish
+transaction and four injected shapes, and prints `5/5 cases correct`. The four refusals are
+an injected third-instruction SOL transfer, a token-program instruction swapped in for the
+publish, a plain System transfer where the nonce advance belongs, and a publish aimed at a
+spoofed feed account.
+
+**`verify-proof.py` is the only one that needs the network,** and it needs no credential for
+it. It queries public devnet and prints PASS or FAIL per claim, ending in `10/10 static
+claims` plus every live claim it could gate. The split matters: only the live ones can go red.
+The live count is derived from what actually gated rather than pinned, so it reads 4 once the
+node serves the x402 ledger block and 3 until then, and a claim reporting PENDING is never
+tallied as verified.
+
+Or open any explorer link in `docs/DEVNET-PROOF.md`; the programs, the feed sequence history,
+and the x402 settlement are all public devnet.
+
+## Three more demos, each under a minute
+
+Still no host build, and none of these needs a key.
+
+| Demo | Runtime | What it proves |
+|---|---|---|
+| `cd crates/solana-core && cargo run --example injection_demo` | 51s cold, 2s warm (needs Rust) | Feeds a 40,077-byte hostile token name carrying a bidi override, a zero-width space and injection framing through the real sanitizer. Prints it capped to 96 chars with 4 control characters cut, `any bidi/zero-width residual: false`, and the same neutralization on the error path. |
+| Open `sanitizer-microworld/index.html` in a browser | instant, no build | The same sanitizer, compiled to wasm and embedded in the page as base64, running on whatever you type. Six presets, or paste your own. A bidi override plus a zero-width space reports `invisible characters removed: 2` and renders the result under `WHAT REACHES THE MODEL` carrying the untrusted label. The page requests nothing over the network; the only fetch a browser makes on it is its own automatic `favicon.ico` lookup. `python3 sanitizer-microworld/check_page.py` confirms the blob is present and the script parses. |
+| `curl -s https://x402.perfpilot.dev/price` | under 2s | The earning node answering live. Returns HTTP 402 with two price tiers, the devnet USDC mint, the pay-to address, and a single-use memo nonce that changes on every request (`x402-18c8ab1db58445d3-6e` then `x402-18c8ab1e3b3e35a2-6f` on two consecutive calls). This one is a live demonstration rather than evidence: if the node is down you get a gateway error, whereas the two offline checks above verify from committed bytes. |
+
+## Building from source is a separate, optional path
+
+Everything below this line needs a toolchain, and step 0 lists what. Once step 1 has built the
+host you can also run `(cd crates/solana-core && cargo test)` and `(cd x402-feed-gate && cargo
+test)` (all green, no network), then `zeroclaw sop validate`. The `cd` is required rather than
+stylistic: there is no cargo manifest at the repo root, for the reason given in step 2. The
+full evening path (host + plugins + a wired bot + a live turn) is steps 1-7 below.
 
 ## 0. Prerequisites (10 min)
-- Rust stable ≥ 1.96 (`rustup update stable`), plus `rustup target add wasm32-wasip2`
-- A Telegram bot token (@BotFather then `/newbot`, 2 minutes)
-- A funded **devnet** keypair for the operator (`solana-keygen new`, `solana airdrop 2 --url devnet`)
+
+**For verification: none of the below.** The three checks at the top of this page and the
+three demos under them need stdlib Python 3, plus Rust for the one that says so and a browser
+for the one that says so. Everything listed here is for steps 1-7, which build and run the
+agents.
+
+Needed for steps 1-6, the full evening path:
+
+- **Rust stable >= 1.96** (`rustup update stable`), plus `rustup target add wasm32-wasip2`
+- **The Solana CLI** (`solana`, `solana-keygen`). The reference environment runs
+  `solana-cli 2.1.19` from the Agave client. Used from step 0 onward for keys and airdrops.
+- **A funded devnet keypair for the operator**: `solana-keygen new`, then
+  `solana airdrop 2 --url devnet`
+- **A Telegram bot token** (@BotFather then `/newbot`, 2 minutes)
+- **An Anthropic API key with credit on it.** Step 3 wires it as the agent's model provider,
+  and without it the agent parses config and answers nothing. Only the live agent turns need
+  it; none of the verification above does.
+- **`zeroclaw` resolvable on your PATH.** Step 1 builds the host inside its own clone, so the
+  binary lands at `<host-clone>/target/release/zeroclaw` and steps 2 onward call a bare
+  `zeroclaw`. Symlink it, copy it into `~/.local/bin`, or add that directory to PATH before
+  step 2, or every command from step 2 down fails with "command not found" and the cause is
+  one directory away from where you are reading.
+
+Needed **only for step 7**, which is optional because our programs are already deployed:
+
+- **Anchor CLI 0.31.0**, the version `onchain/Anchor.toml` pins. Check with `anchor --version`;
+  a different minor version changes the generated IDL and the deploy flow.
+- **Several more devnet SOL than the 2 above.** Measured on chain: the two deployed programs
+  hold 1.4983 and 1.3649 SOL of rent-exempt reserve, so deploying your own pair costs about
+  2.87 SOL against a 2 SOL airdrop. Step 7 says why you almost certainly do not want to.
 
 ## 1. Build the host with plugin support (15–20 min, one-time)
 Plugins are not in release binaries, so build the host from source at the pinned release:
@@ -335,8 +417,22 @@ If you paired WhatsApp, sanity-check that the channel is actually live before tr
 the daemon's startup banner must list `whatsapp.<alias>`. If it lists only Telegram, you
 built the host without `whatsapp-web` (step 1).
 
-## 7. The DePIN node (15 min)
-The devnet programs live in `onchain/` (an isolated Anchor 0.31 workspace). Deploy your own copy:
+## 7. The DePIN node (15 min, and the deploy half is optional)
+
+**Ours are already live on devnet, and you do not need to deploy anything to check any claim
+on this page.** `zeroclaw_oracle` is `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn` and
+`consumer_example` is `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`, both public devnet, both
+verified as executable by `verify-proof.py` in the first section of this page. Every reading
+the node has published is readable from the chain by anyone, and the offline verifier checks
+the signatures on 20 captured publishes without a network connection at all. Re-derive that
+count with `python3 scripts/verify_proof_offline.py | grep -c publish_reading`.
+
+Deploying your own copy is worth doing if you want to change the programs, and it costs real
+devnet SOL: the two deployed programs hold 1.4983 and 1.3649 SOL of rent-exempt reserve, so a
+fresh pair runs about 2.87 SOL against the 2 SOL that step 0 airdrops. Budget more airdrops,
+or skip this block and read from ours.
+
+The programs live in `onchain/`, an isolated Anchor 0.31 workspace:
 ```
 cd onchain
 anchor keys sync                              # generate program keypairs, sync declare_id! + Anchor.toml
@@ -347,7 +443,7 @@ anchor idl init --provider.cluster devnet \
 ```
 `anchor idl init` publishes the IDL on-chain so the explorer decodes instruction names instead of
 "Unknown"; it ignores the ANCHOR_* env vars, so pass `--provider.cluster devnet` and keep the payer
-at the default `~/.config/solana/id.json`. Ours are already live (addresses in the write-up's Links).
+at the default `~/.config/solana/id.json`.
 Then register a device feed and schedule the publisher:
 - the agent turn calls `oracle_publish_reading` (device key signs inside the sandbox, durable nonce,
   range/kind/sequence gates)
