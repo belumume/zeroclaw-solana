@@ -11,7 +11,12 @@ export const meta = {
 
 // paced-ok: waves of 3, awaited sequentially, retry-once per agent, dead agents logged not dropped
 
-const ROOT = '../zeroclaw-host'
+// Relative by default, env-overridable. This was an absolute path carrying the author's
+// Windows username until 2026-08-04, in a TRACKED file, in a repo that goes public before
+// judging -- and it propagated into five prompt strings below. Nothing here needs an
+// absolute path: line ~320 already builds a sibling off this value, so a relative root
+// resolves to the same place from a clone.
+const ROOT = process.env.ZEROCLAW_HOST_ROOT || '../zeroclaw-host'
 
 const KNOWN = `ALREADY REPORTED BY US — do NOT re-report these, but DO look for SIBLINGS of the same shape elsewhere:
 - zeroclaw-labs/zeroclaw#9348: WhatsApp Web answers every DM and every group under mode="business"; chat policies were personal-mode only, and an empty allowed_groups permitted ALL groups (fail-open on empty collection).
