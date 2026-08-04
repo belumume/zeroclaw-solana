@@ -15,7 +15,7 @@ and one `getSignaturesForAddress` against
 sent, which is the complete history because the oldest of them is the account's own creation.
 
 **Watch it first, it plays in the browser:**
-[2 minutes 55 seconds, five beats, no slides](https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/demo-roughcut-v2.mp4).
+[2 minutes 55 seconds, five beats, no slides](https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/zeroclaw-solana-demo.mp4).
 Four of the five beats are live terminal runs rather than recordings of a result: the injection
 attack refused with zero tool calls, the feed publishing on schedule, the claim verifier at 10 of
 10 static and 4 of 4 live with the over-cap rejection on screen, and the x402 gate answering 402
@@ -23,7 +23,7 @@ with its nonce visibly incrementing between requests.
 
 That link is this repository's own GitHub Pages, which serves the file as `video/mp4` so it opens
 in a player on one click. The same bytes are committed at
-[`.demo-assets/cut/demo-roughcut-v2.mp4`](.demo-assets/cut/demo-roughcut-v2.mp4) and that copy is
+[`.demo-assets/cut/zeroclaw-solana-demo.mp4`](.demo-assets/cut/zeroclaw-solana-demo.mp4) and that copy is
 the one a clone receives, so the demo still does not depend on anyone else's retention policy.
 Click the first link to watch it; take the second if you want the file itself. The raw
 `githubusercontent` path is deliberately not offered, because it serves
