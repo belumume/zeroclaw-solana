@@ -153,6 +153,17 @@ cargo build --target wasm32-wasip2 --release
 cargo test --lib          # host tests, no wasm toolchain, no network
 ```
 
+## Running it on the hardware it is for
+
+[REFERENCE-DEPLOYMENT.md](REFERENCE-DEPLOYMENT.md) covers the ARM node this plugin is meant to
+run on: how the host and the plugin are built from source on aarch64, and how the device key is
+scoped so the node signs its own readings.
+
+Linked here because until 2026-08-04 that file was tracked and reachable from nothing. A clone
+received it and no path led to it, which on the reproducibility axis is the same as not shipping
+it. Reachability was checked with a positive control, so the zero was about the file rather than
+about the search.
+
 ## License
 
 MIT. See `LICENSE`.
