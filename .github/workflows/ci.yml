@@ -242,7 +242,8 @@ jobs:
 
       # The step above defaults to the DEVNET bundle, which the verifier hardcodes.
       # So until this line existed, the mainnet custody proof -- three real-USDC
-      # transactions ending in the audited program's 0x12c refusal, the single
+      # transactions ending in the audited program's 0x12c refusal (300, AmountExceedsLimit,
+      # sourced to the upstream program in docs/MAINNET-PROOF.md), the single
       # strongest custody artifact here -- was asserted by NO ci step at all. It
       # verified only when a human ran it by hand with the flag, which is exactly
       # the shape of a claim that rots unnoticed: the suite stays green while the
@@ -263,6 +264,19 @@ jobs:
       # function.
       - name: the offline verifier's controls actually gate
         run: bash scripts/mutation-check-offline-proof.sh
+
+      # A judge checking the custody claim the obvious way -- re-send the captured
+      # over-cap message with a different amount -- gets custom error 300 back at every
+      # amount they try, including the one that settled. That looks exactly like a stale
+      # proof, and the answer is that a fixed delegation carries a REMAINING balance which
+      # the settled transfer already debited. scripts/replay_allowance_probe.py measures
+      # where the refusal actually starts instead of asserting it. This step gates the
+      # probe's own two-directional control: the load-bearing case makes the program refuse
+      # EVERY amount, which a naive probe would still call a pass, since a genuinely broken
+      # program refuses everything too. Offline by construction -- every case substitutes
+      # the rpc function -- so it needs no cluster and cannot flake on one.
+      - name: the allowance-boundary probe can fail
+        run: python3 scripts/test_replay_allowance_probe.py
 
       # The deployed checkout page and the generator that produces it drifted once, and
       # the drift was silent: index.html had gained the pinned merchant address, the

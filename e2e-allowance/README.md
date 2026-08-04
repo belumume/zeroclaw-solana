@@ -14,6 +14,10 @@ program (`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`, deployed on devnet) enf
    - over the cap (10 tokens) -> **rejected on-chain** by the program (`custom program error 0x12c`),
      landed as a failed transaction so it is clickable on the explorer.
 
+`0x12c` is 300, `AmountExceedsLimit`, declared in the upstream program's own source and IDL. That
+citation, and why re-sending a captured message at a different amount returns 300 whatever amount
+you pick, are in [`../docs/MAINNET-PROOF.md`](../docs/MAINNET-PROOF.md).
+
 ## Run
 ```
 npm install

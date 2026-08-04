@@ -82,7 +82,8 @@ it predicts where the sixth will be: any setting whose only test asserts that it
 
 The custody model in this project is built on the opposite principle. The spending bound is a
 Solana Foundation Allowances delegation, so the rejection of an over-cap transfer is produced by an
-audited on-chain program and is visible as a failed transaction with `custom program error 0x12c`.
+audited on-chain program and is visible as a failed transaction with `custom program error 0x12c`
+(300, `AmountExceedsLimit`, sourced in [`MAINNET-PROOF.md`](MAINNET-PROOF.md)).
 It cannot be inert, because the chain either rejected the transfer or it did not.
 
 ## How the findings were verified

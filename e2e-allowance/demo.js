@@ -29,7 +29,7 @@
 // token balance it can be refused for insufficient funds, and a rejection for the wrong reason
 // proves nothing about the cap. This script therefore ASSERTS the failure is custom error 300
 // and exits non-zero on any other error, so a wrong-reason rejection cannot be published as
-// evidence.
+// evidence. What 300 means is sourced to the upstream program in docs/MAINNET-PROOF.md.
 const web3 = require('@solana/web3.js');
 const spl = require('@solana/spl-token');
 const fs = require('fs');
@@ -45,7 +45,11 @@ if (!OP) { console.error('set E2E_FUNDER=<path to a funded keypair json>'); proc
 const CAP = BigInt(process.env.E2E_CAP || 5_000000);
 const WITHIN = BigInt(process.env.E2E_WITHIN || 5_000000);
 const OVER = BigInt(process.env.E2E_OVER || 10_000000);
-const CAP_ERROR = 300; // 0x12c, the program's over-cap rejection
+// 0x12c. Named AmountExceedsLimit ("Transfer amount exceeds delegation limit") in the
+// solana-foundation program's own errors.rs and IDL, not in anything we wrote. That citation, and
+// why replaying a captured message at any amount returns 300 once the delegation has been partly
+// spent, are in docs/MAINNET-PROOF.md.
+const CAP_ERROR = 300;
 
 const u64le = n => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
 const i64le = n => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };

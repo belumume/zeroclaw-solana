@@ -452,7 +452,11 @@ The tiers in words:
   on that path is two. Neither path lets the model move funds on its own,
   and this is demonstrated live on devnet: the agent's session key signed an over-cap transfer
   and the program rejected it (custom error 0x12c), while a within-cap transfer settled (see
-  DEVNET-PROOF). The program bounds a complying agent, not only a refusing one.
+  DEVNET-PROOF). The program bounds a complying agent, not only a refusing one. That code is 300,
+  `AmountExceedsLimit`, and it is the solana-foundation program's own definition rather than our
+  reading of it: MAINNET-PROOF quotes the upstream enum at a pinned commit, quotes the matching
+  IDL entry, and explains why a reader who re-sends the captured message at a different amount
+  gets 300 back whichever amount they choose.
 
   The same demonstration was then run on **mainnet with real USDC** (see MAINNET-PROOF): a 0.5
   USDC cap, a 0.4 USDC spend that settled and moved value, and a 1.0 USDC spend refused with the
@@ -610,7 +614,8 @@ remaining gap was thin: one vault combining a period cap, a payee allowlist and 
 allowlist. Competing with audited wallet infrastructure on its own ground for a thin difference
 fails the obvious question, which is why not just use Swig. So the custody story rests on the
 audited Allowances program instead, and an over-cap transfer signed by the agent's own session
-key is rejected on chain with custom error 0x12c. That is demonstrated rather than asserted.
+key is rejected on chain with custom error 0x12c (300, `AmountExceedsLimit`, sourced to the
+upstream program in MAINNET-PROOF). That is demonstrated rather than asserted.
 
 **A Blink for the shop payment.** Sponsor-endorsed and a cheap extra bullet. The brief
 recommends routing through a Blink specifically where building the transaction yourself is the
