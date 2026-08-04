@@ -7,6 +7,23 @@ Ten defects were found, verified, and reported upstream. All ten are public issu
 This document is a summary and a pattern analysis; the issues carry the code, the exploit paths and
 the suggested fixes.
 
+**Ten is this audit's count, not the project's total, and the two are easy to read as a
+contradiction.** This was ONE structured pass over one commit, and its ten confirmed findings are
+the number quoted here and in the README. The project's total upstream contribution is larger and
+counts different things: issues filed while BUILDING against the host, which is how the WhatsApp
+policy bug, the inert approval timeout, the vendored-WIT drift and the Cloud approval-token leak
+were all found, plus the pull requests that followed. Read live from the API rather than restated
+here, since both figures move as maintainers triage:
+
+```
+gh search issues --repo zeroclaw-labs/zeroclaw --author @me --limit 100 --json labels,state
+gh search prs    --repo zeroclaw-labs/zeroclaw --author @me --limit 50  --json state,title
+```
+
+At the last read that returned eighteen issues, fourteen carrying `status:accepted`, sixteen rated
+`priority:p1`, and five pull requests of which one is merged. If a figure elsewhere disagrees with
+what those commands print, the commands are right.
+
 Audited at `zeroclaw-labs/zeroclaw` commit `63f432da` (v0.8.3-182), a Rust workspace of 1064 source
 files across 31 crates.
 
