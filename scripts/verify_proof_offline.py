@@ -455,15 +455,8 @@ def self_test(raw: bytes, recorded_digest: str) -> tuple[bool, list[str]]:
     return True, notes
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    ap.add_argument("--bundle", default=str(BUNDLE))
-    ap.add_argument("--verbose", action="store_true")
-    args = ap.parse_args()
-
-    path = Path(args.bundle)
+def verify_one(path: Path, verbose: bool) -> int:
+    """Verify ONE bundle. 0 pass, 1 failures, 2 unusable, 3 self-test failed."""
     if not path.exists():
         print(f"FAIL  bundle not found: {path}")
         return 2
@@ -534,7 +527,7 @@ def main() -> int:
                 f"        ix{j}  {describe_program(prog)}: "
                 f"{decode_instruction(prog, ix['data'], len(ix['accounts']))}"
             )
-            if args.verbose:
+            if verbose:
                 # The account list matters for more than completeness. A Solana Pay reference is
                 # an unfunded read-only marker that appears here and nowhere else, so this is
                 # where an invoice is tied to its settlement without asking any RPC.
@@ -543,7 +536,7 @@ def main() -> int:
                         print(
                             f"              account  {b58encode(parsed['account_keys'][a])}"
                         )
-        if args.verbose:
+        if verbose:
             print(f"        fee payer      {b58encode(parsed['account_keys'][0])}")
             for i in range(min(n_required, len(sigs))):
                 print(
@@ -572,6 +565,57 @@ def main() -> int:
     )
     print("      which holds whether or not any RPC still serves these transactions.")
     return 0
+
+
+def main() -> int:
+    """Check EVERY captured bundle by default, and name each one it checked.
+
+    The default used to be the devnet bundle alone. Nothing about that was dishonest:
+    every run prints the source RPC it captured from, and MAINNET-PROOF.md passes
+    --bundle explicitly, so the command printed beside the mainnet claim was always
+    correct. But a BARE invocation covered one chain of two and said nothing about the
+    other, so its green could be read as broader than it was. Covering every bundle
+    removes that ambiguity by construction rather than by remembering a flag.
+    """
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--bundle",
+        default=None,
+        help="verify ONE bundle; default verifies every bundle in docs/proof-bundle/",
+    )
+    ap.add_argument("--verbose", action="store_true")
+    args = ap.parse_args()
+
+    if args.bundle:
+        return verify_one(Path(args.bundle), args.verbose)
+
+    bundles = sorted(BUNDLE.parent.glob("*-transactions.json"))
+    # A floor, so a broken glob cannot print a clean result over nothing. Discovering
+    # fewer bundles than exist is exactly how a sweep reports green while checking less
+    # than it claims.
+    if len(bundles) < 2:
+        print(f"FAIL  found {len(bundles)} bundle(s) in {BUNDLE.parent}; expected at least 2")
+        return 2
+
+    worst = 0
+    for i, b in enumerate(bundles):
+        if i:
+            print()
+            print("=" * 72)
+            print()
+        print(f"### {b.name}")
+        worst = max(worst, verify_one(b, args.verbose))
+
+    print()
+    print("=" * 72)
+    names = ", ".join(b.name for b in bundles)
+    if worst:
+        print(f"FAIL  at least one of {len(bundles)} bundles did not verify: {names}")
+    else:
+        print(f"PASS  all {len(bundles)} bundles verified offline: {names}")
+    return worst
 
 
 if __name__ == "__main__":
