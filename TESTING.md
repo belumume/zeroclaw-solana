@@ -23,10 +23,12 @@ code and the expectation.
 about behaviour over time. A KAT is one point.
 
 **Unit tests.** 89 in `solana-core`, plus 19 in `oracle-publish`, 41 in
-`payment-watch`, 10 in `x402-feed-gate`. These cover branches, error variants, and
+`payment-watch`, 21 in `x402-feed-gate`. These cover branches, error variants, and
 the specific adversarial cases we thought of. The middle two read 17 and 29 until
-2026-07-27, having been written before those suites grew; all four figures are counted
-off the sources rather than carried forward.
+2026-07-27, having been written before those suites grew; the last read 10 until
+2026-08-04, correct when it was counted and outgrown by the ledger-restart and
+`/health` tests added after. All four figures are counted off the sources rather
+than carried forward.
 
 *Cannot catch:* the case nobody thought of. Every unit test is a hypothesis about
 how the code fails, so the suite is bounded by imagination. This is the layer that
@@ -154,12 +156,14 @@ every FAIL. Stdlib only, no network, no chain: `python3 scripts/verify_proof_led
 reads what the gate reports about itself, so a gate that miscounted its own restore would be
 believed. Verifying that needs shell access to the box, which is the layer above this one.
 
-**Offline verification of the on-chain claims.** Public devnet RPC retains roughly four
-days, and the deadline and the judging date are two weeks apart, so every explorer link
-here is dead before anyone clicks it. `scripts/capture-proof-bundle.py` pulls the raw
-transaction bytes into `docs/proof-bundle/` while they are still served, and
-`scripts/verify_proof_offline.py` checks the signatures and decodes the instructions with
-no network at all, so a fresh clone confirms every claim unaided.
+**Offline verification of the on-chain claims.** Whoever runs public devnet sets its
+retention and has changed it once inside a week: `docs/DEVNET-PROOF.md` measured roughly
+four days on 2026-07-27 and 11.4 days on 2026-08-01. The deadline and the judging date are
+two weeks apart, so no explorer link here can be relied on to resolve.
+`scripts/capture-proof-bundle.py` pulls the raw transaction bytes into
+`docs/proof-bundle/` while they are still served, and `scripts/verify_proof_offline.py`
+checks the signatures and decodes the instructions with no network at all, so a fresh
+clone confirms every claim unaided.
 
 The capture tool refuses to overwrite an entry it already holds. Re-running it after a
 transaction ages out would replace real captured bytes with a pruned marker, which would
@@ -266,9 +270,9 @@ pre-fix copy of the gate as well, because a control that has never failed has no
 to work.
 
 `check-proof-links.py` closes a different gap again, and it is the one the other two could not
-see. A clickable explorer link is an offer of evidence, but public devnet stops serving a
-transaction after about four days, so the only durable backing is the raw bytes in
-`docs/proof-bundle/`. A link to a signature nobody captured renders exactly like one that is
+see. A clickable explorer link is an offer of evidence, but whoever runs public devnet sets its
+retention and has changed it once inside a week, so the only durable backing is the raw bytes
+in `docs/proof-bundle/`. A link to a signature nobody captured renders exactly like one that is
 fully backed, and decays into a dead end on a schedule this repo does not control. So the rule is
 that any `explorer.solana.com/tx/` link in a tracked document must resolve to a `CAPTURED` entry
 in the bundle. There is no prose escape hatch, because two rows in `DEVNET-PROOF.md` carried one:

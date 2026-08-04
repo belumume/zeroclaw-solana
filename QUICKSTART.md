@@ -88,9 +88,10 @@ need opposite fixes, which is worth stating plainly because getting it backwards
 
 - **Host has a variant this repo lacks.** Add it to `wit/v0/logging.wit` here and rebuild all
   plugins.
-- **This repo has a variant the host lacks.** This is what happens on the pinned commit, which
-  predates upstream restoring `memory-audit` on 2026-07-23. Patch the **host**: add the variant
-  to its `wit/v0/logging.wit`, and add the one arm the compiler will then demand,
+- **This repo has a variant the host lacks.** This happens on any host commit predating
+  upstream restoring `memory-audit` on 2026-07-23, which the current pin postdates. Patch
+  the **host**: add the variant to its `wit/v0/logging.wit`, and add the one arm the
+  compiler will then demand,
   `PluginAction::MemoryAudit => Action::Note,` in
   `crates/zeroclaw-plugins/src/component_logging.rs`. Do not delete the variant from this repo
   instead; the shipped components carry it and would all need rebuilding.
