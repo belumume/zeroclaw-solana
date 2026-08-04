@@ -21,9 +21,16 @@ use solana_core::{decode_transaction, find_payment, has_memo, Pubkey};
 /// A single purchasable option, rendered into the `accepts` array of the 402
 /// body. Several of these in one response IS the x402 tiered price menu:
 /// the client picks in a single round trip, no negotiation protocol needed.
+///
+/// Field names and types are the x402 v2 `PaymentRequirements` shape
+/// (`specs/x402-specification-v2.md` section 5.1.2). Note `amount` rather than
+/// v1's `maxAmountRequired`: the two versions differ here and we declare v2.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PriceOption {
     pub scheme: String,
+    /// CAIP-2 network identifier. v2 REQUIRES the `namespace:reference` form
+    /// (`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` for devnet); the friendly
+    /// `solana-devnet` spelling is v1-only and fails v2 validation.
     pub network: String,
     /// SPL mint (base58) the payment must be denominated in.
     pub asset: String,
@@ -34,31 +41,84 @@ pub struct PriceOption {
     pub amount: String,
     #[serde(rename = "maxTimeoutSeconds")]
     pub max_timeout_seconds: u64,
+    /// Scheme-specific data. For `exact` on Solana this is where the memo the
+    /// payer must echo belongs, per `specs/schemes/exact/scheme_exact_svm.md`:
+    /// "When present, the client MUST use this value as the Memo instruction
+    /// data instead of a random nonce."
+    pub extra: PriceExtra,
     /// What this option buys, for a human/agent reading the menu.
+    ///
+    /// NOT a v2 `PaymentRequirements` field (v2 moved the human-readable text up
+    /// to `resource.description`). Kept because this gate serves a two-tier menu
+    /// and a per-tier label is the only thing distinguishing the rows to a human.
+    /// It is additive: the reference validator's schemas declare no `.strict()`,
+    /// so unknown keys are stripped rather than rejected, verified by parsing a
+    /// live challenge through the published `@x402/core` validator.
     pub description: String,
 }
 
-/// The 402 response body (x402 `PaymentRequirements`). `extra.memo` carries the
-/// per-request nonce the payment MUST echo, binding the payment to this exact
-/// challenge and defeating replay against a different request.
+/// Scheme-specific `extra` for the `exact` scheme on Solana.
+///
+/// The SVM scheme also defines `extra.feePayer`, the SPONSOR that adds the final
+/// signature. This gate has no sponsor: the client is its own fee payer and signs
+/// the transaction completely, and we hold no key with which to co-sign. Naming a
+/// `feePayer` we do not sign with would be a false claim about custody AND would
+/// break honest clients, which would then submit a partially-signed transaction
+/// waiting for a signature that never comes. Omitted deliberately, documented in
+/// the README, rather than fabricated to satisfy a field.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PriceExtra {
+    /// The nonce the payer must include as a Memo instruction.
+    pub memo: String,
+}
+
+/// Describes the resource being sold. REQUIRED at the top level in x402 v2
+/// (`resource: ResourceInfo`), and the field a discovery registry indexes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResourceInfo {
+    pub url: String,
+    pub description: String,
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    /// Printable ASCII, max 32 chars (spec-enforced).
+    #[serde(rename = "serviceName")]
+    pub service_name: String,
+    /// Max 5 entries, each printable ASCII max 32 chars (spec-enforced).
+    pub tags: Vec<String>,
+}
+
+/// The 402 response body (x402 v2 `PaymentRequired`). `accepts[].extra.memo`
+/// carries the per-request nonce the payment MUST echo, binding the payment to
+/// this exact challenge and defeating replay against a different request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Challenge {
     #[serde(rename = "x402Version")]
     pub x402_version: u8,
     pub error: String,
+    pub resource: ResourceInfo,
     pub accepts: Vec<PriceOption>,
-    pub extra: ChallengeExtra,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChallengeExtra {
-    /// The nonce the payer must include as a Memo instruction.
-    pub memo: String,
+    /// Retained at the top level for clients written against this gate before
+    /// the nonce moved into `accepts[].extra`. It is NOT a v2 field, so a spec
+    /// client ignores it; removing it would break existing payers for no
+    /// compliance gain, since unknown keys are stripped rather than rejected.
+    pub extra: PriceExtra,
 }
 
 impl Challenge {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).expect("Challenge serializes")
+    }
+
+    /// Base64 of the JSON body, for the `PAYMENT-REQUIRED` response header.
+    ///
+    /// v2's HTTP transport makes the header the canonical wire location
+    /// (`specs/transports-v2/http.md`: "All x402 protocol information is
+    /// communicated through headers"), and the reference client reads ONLY the
+    /// header. The JSON body is kept alongside it because the same spec says
+    /// "Response bodies are a server implementation concern", so serving both
+    /// costs no compliance and keeps the endpoint readable by a human with curl.
+    pub fn to_payment_required_header(&self) -> String {
+        base64::engine::general_purpose::STANDARD.encode(self.to_json())
     }
 }
 
@@ -69,8 +129,14 @@ pub struct GateConfig {
     pub seller_wallet: Pubkey,
     /// The stablecoin mint we price in (e.g. devnet USDC).
     pub mint: Pubkey,
-    /// CAIP-2 / x402 network string (e.g. "solana-devnet").
+    /// CAIP-2 network identifier. x402 v2 requires `namespace:reference`, e.g.
+    /// `solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` (devnet) or
+    /// `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp` (mainnet).
     pub network: String,
+    /// Absolute URL of the resource being sold, for the required `resource`
+    /// object. Configured rather than derived, because the gate sits behind a
+    /// proxy and cannot see its own public origin from the request.
+    pub resource_url: String,
     /// Price of a single reading, atomic base units.
     pub price_single: u64,
     /// Price of a day-pass (unlimited reads that UTC day), atomic base units.
@@ -95,11 +161,30 @@ impl GateConfig {
             pay_to: self.seller_wallet.to_base58(),
             amount: amount.to_string(),
             max_timeout_seconds: 60,
+            extra: PriceExtra { memo: nonce.into() },
             description: desc.into(),
         };
         Challenge {
             x402_version: 2,
             error: "payment required to read this feed".into(),
+            resource: ResourceInfo {
+                url: self.resource_url.clone(),
+                description: "One device-signed reading from a ZeroClaw DePIN feed on Solana"
+                    .into(),
+                mime_type: "application/json".into(),
+                // Both of the below are length- and charset-constrained by the
+                // spec (serviceName <= 32 printable ASCII; <= 5 tags, each <= 32).
+                // A test asserts the shipped values stay inside those bounds, so
+                // a future rename cannot silently produce a challenge that a
+                // discovery registry rejects.
+                service_name: "ZeroClaw DePIN feed".into(),
+                tags: vec![
+                    "depin".into(),
+                    "solana".into(),
+                    "oracle".into(),
+                    "telemetry".into(),
+                ],
+            },
             accepts: vec![
                 opt(self.price_single, "one feed reading"),
                 opt(
@@ -107,7 +192,7 @@ impl GateConfig {
                     "day pass: unlimited reads this UTC day",
                 ),
             ],
-            extra: ChallengeExtra { memo: nonce.into() },
+            extra: PriceExtra { memo: nonce.into() },
         }
     }
 }
@@ -374,7 +459,8 @@ mod tests {
         GateConfig {
             seller_wallet: seller,
             mint,
-            network: "solana-devnet".into(),
+            network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1".into(),
+            resource_url: "https://x402.perfpilot.dev/reading".into(),
             price_single: 1_000_000,   // 1 USDC (6 decimals)
             price_day_pass: 5_000_000, // 5 USDC
             daily_cap: 10_000_000,     // 10 USDC/day
@@ -428,6 +514,100 @@ mod tests {
         assert_eq!(c.accepts[0].scheme, "exact");
         // round-trips as JSON
         assert!(c.to_json().contains("payTo"));
+    }
+
+    // ---- x402 v2 wire compliance ---------------------------------------------
+    //
+    // The gate declared `x402Version: 2` while serving a v1-shaped body: a
+    // friendly `solana-devnet` network and no `resource` object. Both are HARD
+    // failures against the published reference validator (`@x402/core`
+    // PaymentRequiredV2Schema), not stylistic drift, so a spec client could not
+    // read our price menu at all. These pin the two fields that failed, plus the
+    // spec's length limits on the discovery metadata.
+
+    #[test]
+    fn every_accepts_row_carries_a_caip2_network() {
+        // v2's NetworkSchemaV2 is `.min(3).refine(v => v.includes(":"))`, so the
+        // colon is the whole test the reference validator applies.
+        let c = cfg().challenge("n");
+        assert_eq!(c.accepts.len(), 2, "menu should still have both tiers");
+        for row in &c.accepts {
+            assert!(
+                row.network.contains(':'),
+                "network {:?} is not CAIP-2; v2 rejects the v1 friendly form",
+                row.network
+            );
+            assert!(row.network.len() >= 3);
+        }
+    }
+
+    #[test]
+    fn the_friendly_v1_network_name_would_fail_the_same_check() {
+        // Over-correction control. Without this, the assertion above passes just
+        // as happily against a gate that stopped emitting a network at all, or
+        // one whose check cannot distinguish the form it exists to reject.
+        let mut c = cfg();
+        c.network = "solana-devnet".into();
+        let ch = c.challenge("n");
+        assert!(
+            !ch.accepts[0].network.contains(':'),
+            "the v1 spelling must still be recognisable as non-CAIP-2"
+        );
+    }
+
+    #[test]
+    fn the_required_resource_object_is_present_and_within_spec_limits() {
+        let c = cfg().challenge("n");
+        assert!(
+            !c.resource.url.is_empty(),
+            "resource.url is required non-empty"
+        );
+        assert_eq!(c.resource.mime_type, "application/json");
+        // ResourceInfoSchema: serviceName min 1, max 32, printable ASCII.
+        let sn = &c.resource.service_name;
+        assert!(
+            (1..=32).contains(&sn.len()),
+            "serviceName length {}",
+            sn.len()
+        );
+        assert!(
+            sn.chars().all(|ch| ('\x20'..='\x7e').contains(&ch)),
+            "serviceName must be printable ASCII"
+        );
+        // tags: max 5 entries, each min 1 / max 32 printable ASCII.
+        assert!(c.resource.tags.len() <= 5, "max 5 tags");
+        for t in &c.resource.tags {
+            assert!((1..=32).contains(&t.len()), "tag {t:?} length");
+            assert!(t.chars().all(|ch| ('\x20'..='\x7e').contains(&ch)));
+        }
+    }
+
+    #[test]
+    fn the_memo_is_in_the_scheme_defined_place_as_well_as_the_legacy_one() {
+        // scheme_exact_svm.md puts the seller-defined memo at accepts[].extra.memo
+        // and says the client MUST use it as the Memo data. Top-level `extra` is
+        // retained for older clients, so BOTH must carry the same nonce.
+        let c = cfg().challenge("bind-me");
+        assert_eq!(c.extra.memo, "bind-me", "legacy top-level location");
+        for row in &c.accepts {
+            assert_eq!(row.extra.memo, "bind-me", "v2 scheme location");
+        }
+    }
+
+    #[test]
+    fn the_payment_required_header_decodes_back_to_the_body() {
+        // v2's HTTP transport carries PaymentRequired in a base64 header, and the
+        // reference client reads only that. Serving a header that disagrees with
+        // the body would be worse than serving none.
+        let c = cfg().challenge("hdr-nonce");
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(c.to_payment_required_header())
+            .expect("header is valid base64");
+        let s = String::from_utf8(decoded).expect("header decodes to UTF-8");
+        assert_eq!(s, c.to_json(), "header and body must not diverge");
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["x402Version"], 2);
+        assert!(v["resource"]["url"].is_string());
     }
 
     #[test]
@@ -538,7 +718,9 @@ mod tests {
     #[test]
     fn settlement_header_is_base64_json_receipt() {
         let payer = Pubkey::new(pubkey_from_seed(&[7; 32]));
-        let h = settlement_header("5xSig", "solana-devnet", &payer);
+        // CAIP-2, matching what the gate now puts in a real receipt: the SVM
+        // `exact` scheme's SettlementResponse carries the same network form.
+        let h = settlement_header("5xSig", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", &payer);
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&h)
             .unwrap();

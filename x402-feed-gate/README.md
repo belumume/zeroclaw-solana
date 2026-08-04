@@ -13,9 +13,11 @@ buyer can consume with no human in the loop, and no trusted intermediary.
 ## What it does, concretely
 
 ```
-GET /reading                       -> 402 + { accepts: [1 reading, day pass], extra.memo: <nonce> }
-GET /reading  (X-PAYMENT: <signed>) -> 200 + { paid, settlement: <sig>, reading: {...} }
-                                        + header X-Payment-Response: <base64 receipt>
+GET /reading                       -> 402 + { x402Version: 2, resource: {...},
+                                              accepts: [1 reading, day pass] }
+                                        + header PAYMENT-REQUIRED: <base64 of that body>
+GET /reading  (PAYMENT-SIGNATURE: <signed>) -> 200 + { paid, settlement: <sig>, reading: {...} }
+                                        + headers PAYMENT-RESPONSE / X-Payment-Response
 GET /price                          -> the 402 challenge alone
 GET /health                         -> { gate, shop: {unit, active, state, trace_age_seconds},
                                           ledger: {daily_cap_atomic_units, restored_sales_at_startup,
@@ -24,8 +26,35 @@ GET /health                         -> { gate, shop: {unit, active, state, trace
                                                    lock_healthy}, proves }
 ```
 
-The `accepts` array is the x402 tiered price menu, a single reading and a day-pass, in one round trip. The `extra.memo` nonce must be echoed by the payment, binding it to this
-exact challenge.
+The `accepts` array is the x402 tiered price menu, a single reading and a day-pass, in one round trip. Each row's `extra.memo` nonce must be echoed by the payment as a Memo
+instruction, binding it to this exact challenge.
+
+### Spec conformance, and the one place we knowingly diverge
+
+The challenge is
+[x402 **v2**](https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md).
+Both wire-name generations are accepted on the request side
+(`PAYMENT-SIGNATURE`, and v1's `X-PAYMENT`) so a spec-current client and every existing payer of
+this gate both work. Verified by parsing a live challenge with the published reference validator
+rather than by reading the spec:
+
+```bash
+npm i @x402/core
+node -e "const {PaymentRequiredV2Schema}=require('@x402/core/schemas'); \
+  fetch('http://127.0.0.1:4577/price').then(r=>r.json()).then(b=> \
+  console.log(PaymentRequiredV2Schema.safeParse(b).success))"
+```
+
+The nonce is also still mirrored at the top level as `extra.memo`. That is not a v2 field and a
+spec client ignores it; it stays because clients written against this gate read it there, and the
+reference schemas declare no `.strict()`, so unknown keys are stripped rather than rejected.
+
+**Divergence, stated rather than papered over:** the upstream
+[SVM `exact` scheme](https://github.com/x402-foundation/x402/blob/main/specs/schemes/exact/scheme_exact_svm.md) also
+lists `extra.feePayer`, the sponsor that adds the transaction's final signature. This gate has no
+sponsor. The client is its own fee payer and signs completely; we hold no key to co-sign with,
+which is the same property the custody section below rests on. Naming a `feePayer` we cannot sign
+as would be false, and would strand an honest client waiting for a signature that never arrives.
 
 ## Custody tier: **T0 / T1, no keys held, cannot move funds**
 
@@ -98,7 +127,13 @@ X402_SELLER_WALLET   base58 wallet that receives payment (required)
 X402_MINT            base58 stablecoin mint (required)
 X402_FEED_PDA        base58 feed account to read + serve (required)
 X402_RPC_URL         Solana RPC (default https://api.devnet.solana.com)
-X402_NETWORK         x402 network string (default solana-devnet)
+X402_NETWORK         CAIP-2 network id, which x402 v2 requires
+                     (default solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1 = devnet;
+                      mainnet is solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp)
+X402_RESOURCE_URL    absolute URL of the resource sold, for the required
+                     `resource` object. Defaults to the loopback bind, path
+                     /reading on X402_PORT. Set this on a deployment: behind a
+                     proxy the gate cannot see its own public origin.
 X402_PORT            listen port (default 4577)
 X402_PRICE_SINGLE    atomic units for one reading (default 1000000 = 1 USDC)
 X402_PRICE_DAYPASS   atomic units for a day pass (default 5000000)
@@ -108,7 +143,9 @@ X402_DAILY_CAP       per-payer atomic-unit daily cap (default 20000000)
 ## Build & test
 
 ```
-cargo test                         # 21 gate tests (verification, cap logic, ledger restart, /health)
+cargo test                         # 26 gate tests (verification, cap logic, ledger restart,
+                                   #   /health, x402 v2 wire conformance)
+                                   # re-derive: cargo test 2>&1 | grep '^test result'
 cargo clippy --all-targets -- -D warnings
 cargo build --release
 cargo build --release --example pay_client
