@@ -117,3 +117,4 @@ notes/
 
 # Internal node runbook: carries OCIDs, private IPs and absolute paths. Never publish.
 docs/ops/
+node_modules/
