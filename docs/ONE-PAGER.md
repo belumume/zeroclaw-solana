@@ -11,8 +11,8 @@ or one link. Nothing here is a screenshot of something that used to work.
 
 **A device that earns.** An ARM node publishes device-signed readings to a Solana feed on a
 schedule, and gates the same feed behind x402: a machine that wants the reading pays for it,
-per request, and the node covers its own gas. That is the whole loop — the hardware is not
-subsidised by anyone.
+per request, and the node covers its own gas. That is the whole loop. Nobody subsidises the
+hardware.
 
 **A shop that takes money without holding keys.** A merchant agent on Telegram and WhatsApp
 quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and marks it paid only
@@ -26,7 +26,7 @@ Built for a small operator who wants an agent touching money without handing it 
 ## The custody argument, which is the part that does not depend on trusting us
 
 An approval prompt is not a boundary. The sentence a human reads before approving was written
-by the model, so influencing the model influences the description — an attacker needs no key,
+by the model, so influencing the model influences the description. An attacker needs no key,
 only an operator who reads one plausible sentence and says yes.
 
 Two answers, and neither requires the operator to read correctly:
