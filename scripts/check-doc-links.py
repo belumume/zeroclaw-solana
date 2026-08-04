@@ -184,9 +184,11 @@ def check_url(url, attempts=3):
     consecutive probes returned HTTP 200 in about 0.3s each. That is a false red on the
     gate the flip-sitting order runs LAST, which is the worst possible moment for one.
 
-    An HTTPError is NOT retried: the server answered, so it is a real verdict. Only a
-    transport failure gets another attempt, and a link that never answers is reported as
-    UNREACHABLE rather than as broken, so the two stay distinguishable downstream.
+    A 4xx HTTPError is NOT retried: the server understood and answered, so it is a real
+    verdict about the link. A 5xx or 429 IS retried, because `_http_verdict` returns None for
+    those to mean "the server had a bad day, ask again" rather than "this does not exist".
+    A transport failure is retried for the same reason, and a link that never answers is
+    reported as UNREACHABLE rather than as broken, so the two stay distinguishable downstream.
     """
     last = None
     for attempt in range(attempts):
@@ -197,24 +199,40 @@ def check_url(url, attempts=3):
             with urllib.request.urlopen(req, timeout=25) as r:
                 return (200 <= r.status < 400), f"HTTP {r.status}"
         except urllib.error.HTTPError as e:
-            return _http_verdict(e)
+            ok, note = _http_verdict(e)
+            if ok is not None:
+                return ok, note
+            last = note  # server-side; fall through to the next attempt
         except Exception as e:
             last = f"{type(e).__name__}: {e}"
     return False, f"UNREACHABLE after {attempts} attempts ({last})"
 
 
 def _http_verdict(e):
-    """A server that ANSWERED is a real verdict, never a retry."""
-    try:
-        # 402 is this repo's own x402 gate answering correctly. The question here is whether a
-        # link points at something that exists, and a payment challenge is the endpoint doing
-        # exactly what README describes one line above the link. Reading it as dead would have
-        # the gate contradict the sentence the link sits in, which is how a gate gets muted.
-        if e.code == 402:
-            return True, "HTTP 402 (x402 challenge)"
-        return False, f"HTTP {e.code}"
-    finally:
-        pass
+    """Which HTTP answers are VERDICTS about the link, and which are the server having a bad day.
+
+    A 4xx is a verdict: the server understood, and 404 means the thing is not there.
+
+    A 5xx IS NOT, and this gate reported one as a defect before 2026-08-04. Cloudflare's 522 is
+    an origin timeout, so it says the upstream failed to answer, which is a fact about the server
+    rather than about the link. Measured on the run that prompted this: the flagged endpoint
+    timed out once and then returned HTTP 200 on the next two probes, seconds apart. A false red
+    on a healthy link is exactly how a gate gets ignored, and an ignored gate is worse than none.
+
+    So this is the same rule the transport-retry fix established, one layer further in. That fix
+    already said a timeout is not a verdict; a 5xx is a timeout that happens to arrive with a
+    status code attached. 429 joins them, since a rate limit is a request about timing, not an
+    answer about existence.
+    """
+    # 402 is this repo's own x402 gate answering correctly. The question here is whether a link
+    # points at something that exists, and a payment challenge is the endpoint doing exactly what
+    # the README describes one line above the link. Reading it as dead would have the gate
+    # contradict the sentence the link sits in, which is how a gate gets muted.
+    if e.code == 402:
+        return True, "HTTP 402 (x402 challenge)"
+    if e.code == 429 or 500 <= e.code <= 599:
+        return None, f"HTTP {e.code} (server-side, retry)"
+    return False, f"HTTP {e.code}"
 
 
 def load_bundle():
@@ -246,6 +264,7 @@ def load_bundle():
 
 def main():
     findings = []
+    unverified = []  # the server never answered; not a verdict about the link
     checked = 0
     cache = {}
     bundle = load_bundle()
@@ -350,18 +369,43 @@ def main():
             else:
                 ok, detail = check_url(url)
             cache[url] = (ok, detail)
-            print(f"{'PASS' if ok else 'FAIL'}  {detail:<18} {url[:96]}")
-            if not ok:
+            # THREE OUTCOMES, NOT TWO, and the third is the considered one. A link the server
+            # never answered for is UNVERIFIED: nothing was learned about it, which is a
+            # different claim from "it is broken". Folding the two together makes a red mean two
+            # things, and this gate produced exactly that false red on 2026-08-04, when
+            # frankfurter.dev went through a brief 522 window during a run and answered 200 on
+            # six probes minutes later. A publish gate that goes red because a third party
+            # hiccupped is a gate people learn to ignore, and an ignored gate is worse than none.
+            #
+            # It is REPORTED LOUDLY rather than passed silently, because the opposite failure is
+            # real too: a genuinely dead host would otherwise hide here forever. So an unverified
+            # link is visible in the summary every run, and a reader can tell the difference at a
+            # glance, which is the whole point of not collapsing them.
+            unverified_here = (not ok) and detail.startswith("UNREACHABLE")
+            mark = "PASS" if ok else ("UNVR" if unverified_here else "FAIL")
+            print(f"{mark}  {detail:<18} {url[:96]}")
+            if unverified_here:
+                unverified.append(f"{doc}: {url}  ({detail})")
+            elif not ok:
                 findings.append(f"{doc}: {url}  ({detail})")
 
     print()
     print(f"{checked} link(s) checked across {len(docs)} tracked documents")
+    if unverified:
+        print(
+            f"\n{len(unverified)} link(s) UNVERIFIED (the server never answered; not a verdict):"
+        )
+        for u in unverified:
+            print("  ?", u)
+        print(
+            "  Re-run to settle these. They do not fail this gate, and they are not silent."
+        )
     if findings:
         print(f"\n{len(findings)} problem(s):")
         for f in findings:
             print("  -", f)
         return 1
-    print("Every link points at something that exists.")
+    print("Every link that answered points at something that exists.")
     return 0
 
 
