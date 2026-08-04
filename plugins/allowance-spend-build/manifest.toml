@@ -20,3 +20,32 @@ capabilities = ["tool"]
 # SECOND time by the audited on-chain Subscriptions & Allowances program: even a
 # fully prompt-injected agent cannot exceed the allowance's cap, period, or expiry.
 permissions = ["http_client", "config_read"]
+
+[custody]
+# MACHINE-CHECKED by scripts/check-custody-tier.py, which reads these back out of the
+# shipped .wasm's import table. They are properties of the compiled artifact rather than
+# of this comment: a capability absent from that table has no host function to be called
+# through, whatever the source says. Re-derive from this directory with
+#   cargo build --target wasm32-wasip2 --release
+#   python3 ../../scripts/check-custody-tier.py
+tier = "T1"
+network_reachable = true
+filesystem = false
+host_capabilities = [
+    "clock",
+    "environment",
+    "host-logging",
+    "host-types",
+    "io-streams",
+    "network-http",
+    "process-exit",
+    "random-insecure",
+    "stdio",
+]
+# DECLARED, NOT CHECKED, and labelled rather than dropped. Neither is decidable from an
+# import table: signing is pure computation that imports nothing, and operator config
+# arrives as a `__config` field inside the tool arguments, crossing no import boundary.
+# `config_injected` is cross-checked against `permissions` above, which is a
+# manifest-internal consistency check and not a claim about the binary.
+signs = false
+config_injected = true

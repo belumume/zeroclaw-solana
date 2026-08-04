@@ -53,7 +53,12 @@ spec says wallets decode with `decodeURIComponent`, under which `+` would decode
 a literal plus, not a space, so `%20` is the only encoding that round-trips (and it
 matches the spec's own examples).
 
-## Custody tier: T0/T1 (zero secrets, zero network)
+## Custody tier: T0 (zero secrets, zero network)
+
+This heading read `T0/T1` until a gate on the tier declaration flagged it. Two tiers is
+not a declaration, and the brief asks each showcase for one. T0 is the correct answer:
+the plugin reads, computes and returns, and it never builds a transaction, which is what
+T1 means elsewhere in this suite.
 
 This plugin is the safest tier in the suite:
 
@@ -62,7 +67,11 @@ This plugin is the safest tier in the suite:
 - It makes NO network call and reads NO config. `permissions = []` in the
   manifest is the honest declaration: a compromised copy of this plugin has zero
   I/O surface. It cannot move funds, sign anything, fetch anything, or leak a key,
-  because it has none of those capabilities.
+  because it has none of those capabilities. That last sentence used to rest on
+  reading the source. It is now read out of the compiled component instead: the
+  shipped `.wasm` imports no `wasi:http`, no `wasi:sockets` and no
+  `wasi:filesystem`, so there is no host function through which it could reach any
+  of them. Re-derive with `python3 ../../scripts/check-custody-tier.py`.
 - The output is a payment REQUEST, not a signed transaction. Nothing it emits can
   authorize a transfer; the payer's own wallet builds, signs, and sends the
   transaction after scanning the QR.
