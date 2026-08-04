@@ -39,11 +39,17 @@ this gate both work. Verified by parsing a live challenge with the published ref
 rather than by reading the spec:
 
 ```bash
-npm i @x402/core
-node -e "const {PaymentRequiredV2Schema}=require('@x402/core/schemas'); \
-  fetch('http://127.0.0.1:4577/price').then(r=>r.json()).then(b=> \
-  console.log(PaymentRequiredV2Schema.safeParse(b).success))"
+cd ../scripts/x402-validator && npm ci --silent && node validate-challenge.mjs
 ```
+
+That replaced a one-liner which fetched `127.0.0.1:4577` and printed a bare `true`. Two
+things were wrong with it and both matter more than the brevity it bought. It never
+exercised the PUBLIC endpoint, so it could not tell you what a payer receives. And it had
+no failing case, so a `true` proved only that the code ran: a validator never shown to
+reject anything has not been shown to work. The tracked version pins the grader, ships the
+pre-cutover body as a control that MUST be rejected, and reads `resource.url` on its own
+because the schema accepts a `localhost` value and therefore cannot tell you that field is
+reachable.
 
 The nonce is also still mirrored at the top level as `extra.memo`. That is not a v2 field and a
 spec client ignores it; it stays because clients written against this gate read it there, and the

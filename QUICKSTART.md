@@ -75,7 +75,7 @@ Still no host build, and none of these needs a key.
 |---|---|---|
 | `cd crates/solana-core && cargo run --example injection_demo` | 51-105s cold, 2s warm (needs Rust; the cold figure is dominated by your machine, and both ends of that range are measured) | Feeds a 40,077-byte hostile token name carrying a bidi override, a zero-width space and injection framing through the real sanitizer. Prints it capped to 96 chars with 4 control characters cut, `any bidi/zero-width residual: false`, and the same neutralization on the error path. |
 | Open `sanitizer-microworld/index.html` in a browser | instant, no build | The same sanitizer, compiled to wasm and embedded in the page as base64, running on whatever you type. Six presets, or paste your own. A bidi override plus a zero-width space reports `invisible characters removed: 2` and renders the result under `WHAT REACHES THE MODEL` carrying the untrusted label. The page requests nothing over the network; the only fetch a browser makes on it is its own automatic `favicon.ico` lookup. `python3 sanitizer-microworld/check_page.py` confirms the blob is present and the script parses. |
-| `curl -s https://x402.perfpilot.dev/price` | under 2s (on Windows see the note below this table) | The earning node answering live. Returns HTTP 402 with two price tiers, the devnet USDC mint, the pay-to address, and a single-use memo nonce that changes on every request (`x402-18c8ab1db58445d3-6e` then `x402-18c8ab1e3b3e35a2-6f` on two consecutive calls). This one is a live demonstration rather than evidence: if the node is down you get a gateway error, whereas the two offline checks above verify from committed bytes. |
+| `curl -s https://x402.perfpilot.dev/price` | under 2s (on Windows see the note below this table) | The earning node answering live. Returns HTTP 402 with two price tiers, the devnet USDC mint, the pay-to address, and a single-use memo nonce that changes on every request (`x402-18c8ab1db58445d3-6e` then `x402-18c8ab1e3b3e35a2-6f` on two consecutive calls). This one is a live demonstration rather than evidence: if the node is down you get a gateway error, whereas the two offline checks above verify from committed bytes. Its SHAPE is checkable though, by a grader that is not ours: `cd scripts/x402-validator && npm ci --silent && node validate-challenge.mjs` runs it past `@x402/core`'s own `PaymentRequiredV2Schema`, with the pre-cutover body as a control that must be rejected. |
 
 On Windows, that last `curl` can hang for about a minute and exit 35 without printing anything.
 That is schannel refusing the handshake because it cannot reach the CA's revocation responder,
@@ -504,8 +504,24 @@ Turn the feed into a per-request revenue stream. Build and run the gate:
 ```
 cd x402-feed-gate && cargo build --release --example pay_client
 X402_SELLER_WALLET=<your wallet> X402_MINT=<usdc mint> X402_FEED_PDA=<your feed> \
-  X402_EARNINGS_LOG=~/.zeroclaw/agents/demo/workspace/x402-earnings.jsonl cargo run --release
+  X402_EARNINGS_LOG=~/.zeroclaw/agents/demo/workspace/x402-earnings.jsonl \
+  X402_NETWORK=solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1 \
+  X402_RESOURCE_URL=https://<your public host>/reading cargo run --release
 ```
+Those last two are not optional decoration, and the recipe omitted them until 2026-08-05.
+Without `X402_NETWORK` the gate advertises `solana-devnet`, the v1 friendly form, which the
+published v2 schema rejects. Without `X402_RESOURCE_URL` it falls back to
+`http://localhost:{port}/reading`, and that is the trap: the schema **accepts** a localhost
+resource url, so the challenge validates while advertising an address no payer can reach.
+Check both rather than assuming, with the pinned reference grader:
+```
+cd scripts/x402-validator && npm ci --silent
+node validate-challenge.mjs                 # the live reference node
+node validate-challenge.mjs ../../body.json # or a challenge you captured from your own
+```
+It ships the pre-cutover body as a control that must be REJECTED, so a pass carries
+information rather than just printing green, and it reads `resource.url` separately
+because the schema alone cannot tell you that value is public.
 `GET /price` returns the 402 menu; a client pays with `pay_client` (builds + signs a
 TransferChecked + Memo) and retries `GET /reading` with the `X-PAYMENT` header. The gate
 verifies the bytes, settles on-chain, and serves the reading. No facilitator, no key custody.

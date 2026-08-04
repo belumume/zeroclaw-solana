@@ -10,7 +10,16 @@ on-chain representation: a refusal is a response, not a transaction.
 
 ## 1. The challenge
 
-`GET /price` with no payment returns HTTP 402 and the terms, including a single-use memo nonce:
+**This is a capture, not a description of the current endpoint.** Every body quoted below was
+recorded on 2026-07-27 and is preserved verbatim, because a proof bundle that gets edited to
+track the live service stops being evidence of what happened. Two fields have moved since: the
+gate now emits a top-level `resource` object, and `network` is now the CAIP-2
+`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1` rather than the `solana-devnet` friendly form below.
+The purchase and the refused replay are unaffected, which is what this file is evidence of.
+For the current shape, fetch it yourself, or run `scripts/x402-validator`, which carries this
+same pre-cutover body as a control that must be rejected.
+
+`GET /price` with no payment returned HTTP 402 and the terms, including a single-use memo nonce:
 
 ```json
 {

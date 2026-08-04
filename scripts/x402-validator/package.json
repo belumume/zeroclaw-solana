@@ -1,0 +1,12 @@
+{
+  "name": "zeroclaw-x402-validator",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Validates this project's live x402 challenge against the published @x402/core reference schema, with a control that must fail.",
+  "scripts": {
+    "validate": "node validate-challenge.mjs"
+  },
+  "dependencies": {
+    "@x402/core": "2.21.0"
+  }
+}
