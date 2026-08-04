@@ -1,46 +1,20 @@
 # zeroclaw-solana
 
-Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents doing real Solana work,
-and the plugins, on-chain programs, skills and SOPs they run on.
-
-**The DePIN feed has been publishing to devnet since 2026-07-25, and as of 2026-08-04 it had
-landed 738 device-signed readings with not one failure among them.** It publishes on a
-roughly 20-minute timer and the whole of that history is on chain: the feed account holds 739
-transactions, the `RegisterDevice` call that created it plus one per reading, which is why the
-sequence number it carries had reached 738. Those figures only grow, so each ships with the
-command that re-derives it rather than as a number typed into a README.
-`python3 scripts/verify-proof.py` reports the live sequence and how long ago it last moved,
-and one `getSignaturesForAddress` against
-`JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every transaction the device has ever
-sent, which is the complete history because the oldest of them is the account's own creation.
-
-**Watch it first, it plays in the browser:**
-[2 minutes 55 seconds, five beats, no slides](https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/zeroclaw-solana-demo.mp4).
-Four of the five beats are live terminal runs rather than recordings of a result: the injection
-attack refused with zero tool calls, the feed publishing on schedule, the claim verifier at 10 of
-10 static and 4 of 4 live with the over-cap rejection on screen, and the x402 gate answering 402
-with its nonce visibly incrementing between requests.
-
-That link is this repository's own GitHub Pages, which serves the file as `video/mp4` so it opens
-in a player on one click. The same bytes are committed at
-[`.demo-assets/cut/zeroclaw-solana-demo.mp4`](.demo-assets/cut/zeroclaw-solana-demo.mp4) and that copy is
-the one a clone receives, so the demo still does not depend on anyone else's retention policy.
-Click the first link to watch it; take the second if you want the file itself. The raw
-`githubusercontent` path is deliberately not offered, because it serves
-`application/octet-stream` and a judge clicking it gets a 4.5 MB download instead of a video.
+Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents, both running now, and the
+plugins, on-chain programs, skills and SOPs they run on.
 
 **A DePIN node that pays for itself.** An ARM box takes an ambient temperature reading for
 Madinah, signs it with a key generated on that box, and lands it in a typed account owned by our
-oracle program, where a separate consumer program reads it and acts. The reading comes from a
-keyless public weather API on the current host rather than from a physical probe, which the
-write-up says too; a Raspberry Pi with a DHT11 is the hardware path and the on-chain half is
-identical either way, because what is signed is the value and the device key, not the enclosure. A `systemd` timer keeps it publishing with no
-laptop involved. The same node also sells that reading per request over x402, so the machine
-earns the gas it spends. You can exercise that yourself against the running node:
-`curl https://x402.perfpilot.dev/price` returns an HTTP 402 challenge with two price tiers and a
-single-use nonce, and the nonce changes on every request. That endpoint is a live demonstration
-rather than evidence: if the node is down you get a gateway error, whereas the on-chain claims
-below verify from captured bytes with no network at all.
+oracle program, where a separate consumer program reads it and acts. A `systemd` timer keeps it
+publishing with no laptop involved. The same node also sells that reading per request over x402,
+so the machine earns the gas it spends: `curl https://x402.perfpilot.dev/price` returns an HTTP
+402 challenge with two price tiers and a single-use nonce, and the nonce changes on every request.
+Two limits are worth stating here rather than leaving you to find them. The reading comes from a
+keyless public weather API on the current host rather than from a physical probe; a Raspberry Pi
+with a DHT11 is the hardware path, and the on-chain half is identical either way, because what is
+signed is the value and the device key, not the enclosure. And that x402 endpoint is a live
+demonstration rather than evidence: if the node is down you get a gateway error, whereas the
+on-chain claims below verify from captured bytes with no network at all.
 
 **A shop terminal that takes payments.** A merchant agent on WhatsApp and Telegram quotes an
 order, hands the customer a tappable payment link, and confirms settlement only from the
@@ -50,7 +24,33 @@ the reference is an additional optional condition, not the check itself. A payme
 wrong amount, or of a token the payer minted themselves, does not settle an order. Brazilian
 orders are quoted in BRL at a stated rate and settled in USDC.
 
-Both run on the same ARM node under `systemd --user`, and the two are not equally
+**Watch it first, it plays in the browser:**
+[2 minutes 55 seconds, five beats, no slides](https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/zeroclaw-solana-demo.mp4).
+Four of the five beats are live terminal runs rather than recordings of a result: the injection
+attack refused with zero tool calls, the feed publishing on schedule, the claim verifier at 10 of
+10 static and 4 of 4 live with the over-cap rejection on screen, and the x402 gate answering 402
+with its nonce visibly incrementing between requests. That link is this repository's own GitHub
+Pages, which serves the file as `video/mp4` so it opens in a player on one click; the same bytes
+are committed at [`.demo-assets/cut/zeroclaw-solana-demo.mp4`](.demo-assets/cut/zeroclaw-solana-demo.mp4),
+so a clone carries the demo and it does not rest on anyone else's retention policy.
+
+**The feed has published to devnet every 20 minutes since 2026-07-25, and not one of its
+transactions has failed.** The account holds the `RegisterDevice` call that created it plus one
+per reading, so the transaction count and the sequence number move together and both only climb.
+They read 746 and 745 on 2026-08-04, and are higher by the time you run the commands below. One
+`getSignaturesForAddress` against `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every
+transaction the device has ever sent, which is the complete history because the oldest of them is
+the account's own creation.
+
+```bash
+# the live sequence, and how long ago it last moved
+FEED_PDA=JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg python3 scripts/feed_heartbeat.py
+
+# re-checks every published claim against devnet. Stdlib only, nothing to install.
+python3 scripts/verify-proof.py
+```
+
+Both use cases run on the same ARM node under `systemd --user`, and the two are not equally
 observable from outside, so this says which is which rather than leaving you to find out.
 The DePIN feed is continuously checkable: it publishes on a timer and every reading lands
 on chain, so `verify-proof.py` can go red on it. The shop is a Telegram and WhatsApp client
@@ -59,9 +59,8 @@ stopped one look identical. That half is asserted here and machine-checked by a 
 endpoint on the x402 gate, which asks systemd on the node directly.
 
 Live on-chain evidence, all clickable, is in
-[`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md), and `python3 scripts/verify-proof.py`
-re-checks every published claim against devnet in one command, stdlib only, nothing to
-install. It reports static and live claims separately, and names what it does not cover.
+[`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md). The verifier above reports static and live
+claims separately, and names what it does not cover.
 
 ## Start here
 
