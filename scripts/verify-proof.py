@@ -9,7 +9,15 @@ landed with the exact success/rejection this submission claims.
     python3 scripts/verify-proof.py            # checks devnet, prints PASS/FAIL per claim
     RPC_URL=https://your-rpc python3 scripts/verify-proof.py
 
-Exit 0 = every claim verified; exit 1 = at least one FAIL (or the RPC was unreachable).
+Exit 0 = every claim verified. Exit 1 = at least one claim FAILED, meaning a thing this
+repo asserts is no longer true. Exit 2 = TRANSPORT, meaning the network would not answer,
+so this run has no opinion and a retry is the right response.
+
+That third code is the point, and this docstring claimed only two of them until 2026-08-04
+while the code had carried three since 2026-07-26. Folding "the RPC was unreachable" into
+exit 1 tells a stranger a claim broke when nothing broke except the connection. The sibling
+`feed_heartbeat.py` had the same defect, and it got the fix when this one got only the code
+change, which is the instance-fixed-class-missed shape this project keeps re-finding.
 """
 
 import base64
