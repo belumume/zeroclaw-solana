@@ -3,7 +3,8 @@
 //! Turns a ZeroClaw DePIN node into a machine that SELLS its own device-signed
 //! on-chain feed. A client (agent or human) GETs `/reading`; if it presents no
 //! valid payment it gets HTTP 402 with a price menu and a per-request nonce; it
-//! pays us a stablecoin transfer on Solana, retries with an `X-PAYMENT` header
+//! pays us a stablecoin transfer on Solana, retries with a `PAYMENT-SIGNATURE`
+//! header (v1's `X-PAYMENT` is still accepted)
 //! carrying the signed transaction; we verify the bytes, simulate, broadcast,
 //! confirm, and only then serve the latest feed reading plus a settlement
 //! receipt. We hold no keys but our public receiving address — this process
@@ -14,7 +15,10 @@
 //!   X402_MINT            base58 stablecoin mint (required)
 //!   X402_FEED_PDA        base58 feed account to read + serve (required)
 //!   X402_RPC_URL         Solana RPC (default https://api.devnet.solana.com)
-//!   X402_NETWORK         x402 network string (default solana-devnet)
+//!   X402_NETWORK         CAIP-2 network id (x402 v2 requires this form;
+//!                        default solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1)
+//!   X402_RESOURCE_URL    absolute URL of the resource sold, for v2's required
+//!                        `resource` object (default http://localhost:$PORT/reading)
 //!   X402_PORT            listen port (default 4577)
 //!   X402_PRICE_SINGLE    atomic units for one reading (default 1000000 = 1 USDC)
 //!   X402_PRICE_DAYPASS   atomic units for a day pass (default 5000000)
@@ -201,10 +205,22 @@ fn json_response(status: u16, body: String) -> Response<std::io::Cursor<Vec<u8>>
 }
 
 fn main() {
+    let port = env_or("X402_PORT", "4577");
     let cfg = GateConfig {
         seller_wallet: env_pubkey("X402_SELLER_WALLET"),
         mint: env_pubkey("X402_MINT"),
-        network: env_or("X402_NETWORK", "solana-devnet"),
+        // CAIP-2, which x402 v2 requires. The v1 friendly form ("solana-devnet")
+        // fails the reference validator's NetworkSchemaV2 while we declare v2.
+        // Mainnet is solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp.
+        network: env_or("X402_NETWORK", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"),
+        // v2 requires a non-empty `resource.url`. Defaulted to the local bind so
+        // a fresh clone serves a valid challenge with no configuration; a
+        // deployment behind a proxy sets its public URL, which the gate cannot
+        // discover for itself.
+        resource_url: env_or(
+            "X402_RESOURCE_URL",
+            &format!("http://localhost:{port}/reading"),
+        ),
         price_single: env_or("X402_PRICE_SINGLE", "1000000")
             .parse()
             .unwrap_or(1_000_000),
@@ -217,7 +233,6 @@ fn main() {
     };
     let feed = env_pubkey("X402_FEED_PDA");
     let rpc_url = env_or("X402_RPC_URL", "https://api.devnet.solana.com");
-    let port = env_or("X402_PORT", "4577");
 
     let rpc = SolanaRpc::new(UreqTransport {
         url: rpc_url.clone(),
@@ -253,10 +268,20 @@ fn main() {
 
     for request in server.incoming_requests() {
         let url = request.url().to_string();
+        // v2 renamed the client's payment header to PAYMENT-SIGNATURE; v1 called
+        // it X-PAYMENT and the reference v2 server reads only the former. Both
+        // are accepted so a spec-current client and every existing payer of this
+        // gate work, with the v2 name preferred when a client sends both.
         let x_payment = request
             .headers()
             .iter()
-            .find(|h| h.field.equiv("X-Payment"))
+            .find(|h| h.field.equiv("PAYMENT-SIGNATURE"))
+            .or_else(|| {
+                request
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.equiv("X-Payment"))
+            })
             .map(|h| h.value.as_str().to_string());
 
         let path = url.split('?').next().unwrap_or("/");
@@ -278,8 +303,29 @@ fn main() {
         };
 
         let (status, body, settle_hdr) = response_body;
+        // v2's HTTP transport carries PaymentRequired in a base64 PAYMENT-REQUIRED
+        // header and treats the body as an implementation concern; the reference
+        // client reads only the header. Derived from the body that actually ships
+        // rather than rebuilt, so the two cannot diverge (the reject path splices
+        // a `rejected` key in, and the header must reflect that too).
+        let payment_required_hdr = if status == 402 {
+            Some(base64::engine::general_purpose::STANDARD.encode(&body))
+        } else {
+            None
+        };
         let mut resp = json_response(status, body);
+        if let Some(h) = payment_required_hdr {
+            if let Ok(header) = Header::from_bytes(&b"PAYMENT-REQUIRED"[..], h.as_bytes()) {
+                resp.add_header(header);
+            }
+        }
         if let Some(h) = settle_hdr {
+            // PAYMENT-RESPONSE is the v2 name for the settlement receipt;
+            // X-Payment-Response is v1's. Both are sent for the same reason the
+            // request side accepts both names.
+            if let Ok(header) = Header::from_bytes(&b"PAYMENT-RESPONSE"[..], h.as_bytes()) {
+                resp.add_header(header);
+            }
             if let Ok(header) = Header::from_bytes(&b"X-Payment-Response"[..], h.as_bytes()) {
                 resp.add_header(header);
             }

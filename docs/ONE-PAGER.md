@@ -105,12 +105,27 @@ trusting either number here:
 curl -i https://x402.perfpilot.dev/price
 ```
 
-A live node answering `HTTP/1.1 402 Payment Required` with a single-use nonce, which is the whole
-machine-commerce claim in one request. Note the verifier's LIVE claims can legitimately go red if
-that node is down; the static and offline ones cannot, which is why they are separated.
+A live node answering `HTTP/1.1 402 Payment Required` with a single-use nonce that changes on every
+request, which is the whole machine-commerce claim in one request. Note the verifier's LIVE claims
+can legitimately go red if that node is down; the static and offline ones cannot, which is why they
+are separated.
+
+If that fails on Windows with `curl: (35) schannel: ... CRYPT_E_REVOCATION_OFFLINE`, the node is
+fine and the fault is on the client: Schannel could not reach a certificate-revocation responder,
+which it treats as fatal for every HTTPS host, not just this one. Add one flag:
+
+```bash
+curl -i --ssl-revoke-best-effort https://x402.perfpilot.dev/price
+```
+
+That downgrades an unreachable revocation responder from fatal to non-fatal. It is not
+`--ssl-no-revoke`, which switches revocation checking off altogether; certificate validation still
+happens. Scripting it instead? Send a browser `User-Agent`, because Cloudflare answers a bare
+`python-urllib` with a 403 that looks nothing like a payment challenge.
 
 **Repo:** https://github.com/belumume/zeroclaw-solana
 **Write-up:** [docs/WRITEUP.md](WRITEUP.md) &nbsp;&nbsp; **Run it:** [QUICKSTART.md](../QUICKSTART.md)
-**Demo (under 3 min):** [.demo-assets/cut/demo-roughcut-v2.mp4](../.demo-assets/cut/demo-roughcut-v2.mp4)
+**Demo (under 3 min, plays in the browser):**
+https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/demo-roughcut-v2.mp4
 **Injection transcript:** [docs/transcripts/injection-refund-redirect.md](transcripts/injection-refund-redirect.md)
 **Mainnet custody proof:** [docs/MAINNET-PROOF.md](MAINNET-PROOF.md)
