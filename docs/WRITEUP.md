@@ -383,6 +383,18 @@ PAID, labelled SINGLE SOURCE. That default is deliberate, because silently requi
 endpoint would break every existing config, but it does mean the guard protects operators who
 switch it on rather than everyone.
 
+Fourth, and it is the same shape one directory over. `x402-feed-gate` reads a single RPC and has
+no corroboration option at all. It simulates, broadcasts and confirms the buyer's payment through
+one endpoint, and on success it serves the reading and writes the sale to its earnings ledger, so
+an endpoint that fabricates a confirmation is believed exactly as `payment-watch` would have
+believed one before the fix above. The fix went to the plugin and the class was left un-swept,
+which is stated here rather than quietly closed, because the component that actually takes money
+is where a residual is worth the most. Two things bound it and neither removes it. The gate holds
+no key and has no spend path, so the worst case is a reading served free and a wrong line in the
+ledger rather than funds leaving. And the buyer signs their own transfer, so a forged confirmation
+moves nobody's money either way. Corroboration is the fix and it is not built here yet; until it
+is, the operator's choice of endpoint is the boundary.
+
 | Component (the two use cases run on these) | Tier | Why it sits there |
 |---|---|---|
 | `solana-pay` (skill) | T0 | builds a `solana:` URL; no key. The recipient is a hardcoded invariant checked before the link is emitted, not a value the agent supplies |
