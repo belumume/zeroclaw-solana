@@ -141,9 +141,17 @@ in one file, and each was reported with source citations rather than described. 
 the whole of it: a later audit of the host found ten more, and that is a separate section
 lower down.
 
-States are as of 2026-07-25 and every row links to the live thread, so click through rather
-than trusting this table. If #9354 has merged by the time you read it, that is the outcome we
-were after and this snapshot simply aged.
+Every row links to the live thread, so click through rather than trusting this table. The
+counts below were re-read from the GitHub API on 2026-08-04 rather than recalled, and they
+move in both directions as the maintainers triage: **eighteen issues filed, fourteen carrying
+`status:accepted`, sixteen rated `priority:p1`**, plus five pull requests of which **#9354 is
+MERGED**. Re-derive rather than trusting the sentence:
+`gh search issues --repo zeroclaw-labs/zeroclaw --author @me --limit 100 --json labels,state`.
+
+This paragraph previously read "if #9354 has merged by the time you read it, that is the
+outcome we were after". That was a conditional about something which had already happened,
+so it understated the strongest fact available here. A hedge is not free, because it reads
+as uncertainty about the one claim that is settled.
 
 | Upstream | What it is | State |
 |---|---|---|
