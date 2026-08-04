@@ -96,4 +96,5 @@ MIT. See `LICENSE`.
 ## Output size (context-flooding defence)
 
 The brief's trap #3 warns "judges will call execute and count tokens." RugCheck metadata is attacker-influenceable, so it passes the response-path sanitizer, is capped at 96 chars per field, and only the top 3 risks (by score) plus 6 on-chain reasons reach the agent. Measured worst case (a 200-entry RugCheck flood of max-length injection strings, ~240 KB raw): the agent-facing report is **1,355 bytes**, hard-bounded and control-char-free (test `worst_case_output_is_bounded_under_hostile_metadata_flood`). A typical response
-is well under ~200 tokens; the number above is the adversarial ceiling, not the common case.
+targets well under ~200 tokens, which is a design goal rather than a measured figure; the number
+above is the adversarial ceiling, not the common case.
