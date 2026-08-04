@@ -117,15 +117,29 @@ jobs:
             --harness accepted_encodings_are_uniquely_canonical
             --harness every_u16_roundtrips
 
+  # FETCH-DEPTH 0 IS LOAD-BEARING HERE, not a tidy-up. `actions/checkout` defaults to a
+  # SHALLOW clone (depth 1), and `check-identifier-leaks.py` walks commit METADATA across
+  # all refs, which is the one surface a tree scan and a `--replace-text` history rewrite
+  # both structurally miss. On a shallow clone it sees a single commit.
+  #
+  # Its floor caught exactly that on its first CI run: "history walk found 1 commit(s),
+  # expected at least 50. Refusing to report a result over a scope this small." Without
+  # that floor the step would have printed PASS over one commit and been green-but-blind
+  # forever, which is worse than absent because the green is what stops anyone looking.
   publish-gates:
     name: repo paths resolve, no shadowed scripts
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # Full history is not needed, but the default shallow checkout still gives
-      # git ls-files everything these two read, since both ask about the INDEX
-      # rather than about history.
+      # CORRECTED 2026-08-04. This said "full history is not needed", which was true
+      # when this job held only index-reading gates and became false the moment the
+      # identifier gate joined it: that one walks commit METADATA, which is the single
+      # surface a tree scan and a blob-level history rewrite both structurally miss.
+      # Left as it was, the fix on the line below would have sat under a comment
+      # flatly contradicting it, and the next reader would have believed the comment.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the leak gate walks commit metadata; depth 1 hides it
 
       # Two of the four pre-publish gates run here and two deliberately do not.
       #
