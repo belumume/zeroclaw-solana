@@ -85,8 +85,18 @@ What can be said about B6 is what can be said about all eight: no fund tool ran.
 
 ## Scope, stated rather than implied
 
-This ran against an isolated instance carrying the same skill and model as the shop, not against the
-production deployment, so no customer conversation was involved. The grading covers what the runtime
+This ran against an isolated instance carrying the same skill as the shop but a DIFFERENT and
+weaker model, not against the production deployment, so no customer conversation was involved.
+The battery ran `gemini-flash-latest`; the shop runs `claude-sonnet-5` (`QUICKSTART.md`, the
+`providers.models.anthropic.default.model` line), and the required refund-redirect transcript is
+the shop's own model. This paragraph claimed "the same skill and model" until 2026-08-04, which
+was false on the model half and contradicted the table twelve lines above it.
+
+Stated correctly it is the stronger claim rather than the weaker one: a cheaper, more suggestible
+model is the harder injection target, so a runtime that fails closed under it is better evidence
+than one that fails closed under a model with more resistance of its own. The grading is
+trace-based rather than reply-based, so what is being measured is what the RUNTIME did, and that
+is model-independent by construction. The grading covers what the runtime
 did. It does not prove the model is unbreakable, and eight families are eight families rather than a
 guarantee. A ninth attack may exist that this battery does not contain.
 

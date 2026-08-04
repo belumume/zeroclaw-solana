@@ -169,6 +169,42 @@ create a scheduled job while taking an order, and a cron entry is persistence th
 the turn it was planted in. `cron_list` is a read and stays. The DePIN publisher uses an OS
 scheduler rather than `zeroclaw cron`, so nothing loses a capability.
 
+### Point the payment watcher at devnet, or your order never marks paid
+
+**This step is not optional and this page omitted it until 2026-08-04.** `payment_watch`
+compiles with mainnet defaults on purpose, because a real merchant runs on mainnet: its
+`DEFAULT_RPC` is `api.mainnet-beta.solana.com` and its default mint is mainnet USDC
+(`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). This shop settles on **devnet** in devnet
+USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`). Follow the rest of this page without
+this block and the watcher polls the wrong chain for the wrong token, so a payment you can
+see in the explorer is never matched and the order sits at NOT_YET forever. Nothing errors,
+which is what makes it expensive.
+
+```
+zeroclaw config set --no-interactive tools.payment_watch.config.rpc_url \
+  "https://api.devnet.solana.com"
+```
+
+Then pass the devnet mint explicitly on every call. The `mint` argument is optional and
+omitting it falls back to mainnet USDC, so on devnet it has to be supplied:
+
+```
+mint = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+```
+
+Optional and recommended, since the plugin asks a second independent endpoint to re-derive
+a settle-worthy payment from its own copy of the chain (a corroborator sharing the primary's
+host is refused, because the same party answering twice is not corroboration):
+
+```
+zeroclaw config set --no-interactive tools.payment_watch.config.corroborating_rpc_urls \
+  '["https://devnet.helius-rpc.com/?api-key=YOUR_KEY"]'
+```
+
+Re-derive the mismatch yourself rather than trusting this paragraph:
+`grep -n DEFAULT_RPC plugins/payment-watch/src/watch.rs` against
+`grep -n "api.devnet" webshop-pay/src/app.js`.
+
 The second profile the node uses, documented here because an undocumented security profile
 is not a reviewable one:
 ```

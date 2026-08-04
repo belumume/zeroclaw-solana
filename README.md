@@ -95,7 +95,14 @@ refused for insufficient funds and a rejection for the wrong reason proves nothi
 the reproduce command and the offline bundle are in [`docs/MAINNET-PROOF.md`](docs/MAINNET-PROOF.md).
 The DePIN feed stays on devnet on the merits, and that page says why.
 
-Both transactions are clickable, and one of them opens on a failed transaction on purpose. The
+The two links below are the **devnet** pair, not the mainnet trio just described, and they are
+served by an endpoint that keeps roughly four days of history, so by the time you read this they
+have probably expired. That is why the mainnet evidence is bytes in the repo rather than a link:
+`python3 scripts/verify_proof_offline.py` verifies both bundles offline with no network and cannot
+rot. Until 2026-08-04 this paragraph opened "Both transactions are clickable" directly under the
+mainnet claim, so the nearest antecedent was the mainnet trio and the links were devnet.
+
+Kept because one of them opens on a failed transaction on purpose. The
 [within-cap transfer settled](https://explorer.solana.com/tx/5qyr7jJi8zb6SjZjnA2QT5C9nuZYgSw6raAefjmWnDDMf3JRgkQX19zssE57EpFSHVCCPfbj5qyxcYSQcfEq9W3Z?cluster=devnet);
 the [over-cap transfer was refused on chain](https://explorer.solana.com/tx/3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps?cluster=devnet)
 with `custom program error 0x12c`. The red error page is the evidence rather than a defect: the
