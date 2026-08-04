@@ -83,8 +83,9 @@ not the node being down. Add `--ssl-revoke-best-effort`, or read the endpoint wi
 ships its own TLS stack:
 
 ```bash
-curl -s --ssl-revoke-best-effort https://x402.perfpilot.dev/price
-python3 -c "import urllib.request as u;print(u.urlopen(u.Request('https://x402.perfpilot.dev/price',headers={'User-Agent':'Mozilla/5.0'})).read().decode())"
+U=https://x402.perfpilot.dev/price
+curl -s --ssl-revoke-best-effort "$U"
+python3 -c "import urllib.request as u,sys;print(u.urlopen(u.Request(sys.argv[1],headers={'User-Agent':'Mozilla/5.0'})).read().decode())" "$U"
 ```
 
 Do not reach for `--ssl-no-revoke`, which disables revocation checking globally to work around
