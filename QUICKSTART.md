@@ -30,7 +30,7 @@ with
 `time bash -c 'python3 scripts/verify_proof_offline.py && python3 scripts/certify_publish_tx.py && python3 scripts/verify-proof.py'`.
 
 Nearly all of that variance is the third command, which waits on a public RPC you do not
-control. The two offline figures are stable — an independent run from a clean clone measured
+control. The two offline figures are stable: an independent run from a clean clone measured
 0.63s and 0.58s against the 0.8s and 0.2s quoted above. Those two import no network library at
 all, which is checkable without running them:
 `grep -c urllib scripts/verify_proof_offline.py scripts/certify_publish_tx.py` prints a count
@@ -81,7 +81,12 @@ On Windows, that last `curl` can hang for about a minute and exit 35 without pri
 That is schannel refusing the handshake because it cannot reach the CA's revocation responder,
 not the node being down. Add `--ssl-revoke-best-effort`, or read the endpoint with Python, which
 ships its own TLS stack:
-`python3 -c "import urllib.request as u;print(u.urlopen(u.Request('https://x402.perfpilot.dev/price',headers={'User-Agent':'Mozilla/5.0'})).read().decode())"`.
+
+```bash
+curl -s --ssl-revoke-best-effort https://x402.perfpilot.dev/price
+python3 -c "import urllib.request as u;print(u.urlopen(u.Request('https://x402.perfpilot.dev/price',headers={'User-Agent':'Mozilla/5.0'})).read().decode())"
+```
+
 Do not reach for `--ssl-no-revoke`, which disables revocation checking globally to work around
 one host.
 
