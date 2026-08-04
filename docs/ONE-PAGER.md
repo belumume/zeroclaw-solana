@@ -15,9 +15,10 @@ per request, and the node covers its own gas. That is the whole loop. Nobody sub
 hardware.
 
 **A shop that takes money without holding keys.** A merchant agent on Telegram and WhatsApp
-quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and marks it paid only
-when four things agree: the reference, the exact amount, the exact mint, and the watched
-destination. A payment in a token the payer minted themselves does not qualify.
+quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in devnet
+USDC. It marks an order paid only when four things agree: the reference, the exact amount, the
+exact mint, and the watched destination. A payment in a token the payer minted themselves does
+not qualify.
 
 Built for a small operator who wants an agent touching money without handing it a signing key.
 
@@ -42,11 +43,13 @@ transfer by the same key settled normally. Both are captured as raw bytes in the
 **offline, with no network and no dependencies**.
 
 Custody tier is declared per component: T0 reads run automatically, T1 emits an unsigned
-transaction a human approves. **No component holds a fund-signing key.**
+transaction a human approves. **No component holds a fund-signing key.** The delegated key in the
+proof above is not one: it can move only up to a cap the on-chain program enforces, from an
+account it does not own, which is why the chain could refuse it. A fund key has no such ceiling.
 
 ---
 
-## Reproduce every claim above, in three commands
+## Reproduce every claim above: clone, then three commands
 
 ```bash
 git clone https://github.com/belumume/zeroclaw-solana && cd zeroclaw-solana
@@ -78,9 +81,36 @@ one lets you believe you are protected.
 
 Sixteen crates, formatted and clippy-clean at `-D warnings` on host and wasm. Two Kani proofs on
 the shortvec decoder, one covering all 16,777,216 three-byte inputs. A differential fuzzer graded
-against solana-sdk's own deserializer rather than invariants we chose. Ten security defects found
-in the host and reported upstream, one escalated to a private advisory. Every gate ships a control
+against solana-sdk's own deserializer rather than invariants we chose. Every gate ships a control
 proving it can fail, because zero findings is also what a broken detector prints.
 
+Those four are the numbers, and this page promised each one is checkable, so here is how:
+
+```bash
+git ls-files '*Cargo.toml' | xargs grep -l '^\[package\]' | wc -l   # 16 crates
+grep -rn 'kani::proof' crates/solana-core/src/ | wc -l              # 2 proofs
+python3 scripts/check-all.py                                        # every gate, one command
+```
+
+Upstream, [ten host defects](HOST-SECURITY-AUDIT.md) were confirmed by one audit and reported,
+one of them escalated to a private advisory. That page states its own scope in its first lines,
+because the project total is larger and reported elsewhere as eighteen filed; the two count
+different populations and the audit doc says which is which. Re-derive the live total rather than
+trusting either number here:
+`gh search issues --repo zeroclaw-labs/zeroclaw --author @me --limit 100 --json state`
+
+## The five-second version
+
+```bash
+curl -i https://x402.perfpilot.dev/price
+```
+
+A live node answering `HTTP/1.1 402 Payment Required` with a single-use nonce, which is the whole
+machine-commerce claim in one request. Note the verifier's LIVE claims can legitimately go red if
+that node is down; the static and offline ones cannot, which is why they are separated.
+
 **Repo:** https://github.com/belumume/zeroclaw-solana
-**Write-up:** https://github.com/belumume/zeroclaw-solana/blob/main/docs/WRITEUP.md
+**Write-up:** [docs/WRITEUP.md](WRITEUP.md) &nbsp;&nbsp; **Run it:** [QUICKSTART.md](../QUICKSTART.md)
+**Demo (under 3 min):** [.demo-assets/cut/demo-roughcut-v2.mp4](../.demo-assets/cut/demo-roughcut-v2.mp4)
+**Injection transcript:** [docs/transcripts/injection-refund-redirect.md](transcripts/injection-refund-redirect.md)
+**Mainnet custody proof:** [docs/MAINNET-PROOF.md](MAINNET-PROOF.md)

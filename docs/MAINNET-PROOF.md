@@ -46,8 +46,12 @@ no network at all:
 python3 scripts/verify_proof_offline.py --bundle docs/proof-bundle/mainnet-transactions.json
 ```
 
-The `--bundle` argument is required. Without it the verifier reads the devnet bundle, which is a
-different set of claims, so a run with no argument tells you nothing about this page. Expect
+The `--bundle` argument narrows the run to this page's claims. It is no longer required: with no
+argument the verifier reads EVERY bundle and prints `all 2 bundles verified offline`, which covers
+this page and the devnet one together. This paragraph said the argument was required and that a
+bare run "tells you nothing about this page" until 2026-08-04, which was true of an earlier
+default and had become the opposite of the truth: a reader following the one-pager's bare command
+would have been told their run proved nothing, about the very claims it had just verified. Expect
 `all 3 captured transactions verify offline`, with the over-cap entry reported as
 `FAILED ON CHAIN: {"InstructionError": [0, {"Custom": 300}]}` rather than as a verification
 failure. Its signatures are valid; the program refused it, which is the point. The verifier also
