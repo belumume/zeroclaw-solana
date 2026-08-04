@@ -24,12 +24,17 @@ python3 scripts/certify_publish_tx.py       # 0.2s, no network at all
 python3 scripts/verify-proof.py             # about 10s, queries public devnet
 ```
 
-Measured at 13.1 seconds for all three together, exit 0. Re-derive with
+All three together take between 13 and 35 seconds, exit 0. That spread is real and measured,
+not a hedge: four independent runs gave 13.1s, 22.8s, 24.1s and 34.1s on two machines. Re-derive
+with
 `time bash -c 'python3 scripts/verify_proof_offline.py && python3 scripts/certify_publish_tx.py && python3 scripts/verify-proof.py'`.
-The first two import no network library at all, which is checkable without running them:
+
+Nearly all of that variance is the third command, which waits on a public RPC you do not
+control. The two offline figures are stable — an independent run from a clean clone measured
+0.63s and 0.58s against the 0.8s and 0.2s quoted above. Those two import no network library at
+all, which is checkable without running them:
 `grep -c urllib scripts/verify_proof_offline.py scripts/certify_publish_tx.py` prints a count
-of zero for each file. Only the third can be slower than its figure, since it waits on a
-public RPC.
+of zero for each file.
 
 **`verify_proof_offline.py` re-verifies the on-chain record from bytes committed in this
 repo.** For every captured transaction it checks the ed25519 signature against the exact
@@ -68,17 +73,35 @@ Still no host build, and none of these needs a key.
 
 | Demo | Runtime | What it proves |
 |---|---|---|
-| `cd crates/solana-core && cargo run --example injection_demo` | 51s cold, 2s warm (needs Rust) | Feeds a 40,077-byte hostile token name carrying a bidi override, a zero-width space and injection framing through the real sanitizer. Prints it capped to 96 chars with 4 control characters cut, `any bidi/zero-width residual: false`, and the same neutralization on the error path. |
+| `cd crates/solana-core && cargo run --example injection_demo` | 51-105s cold, 2s warm (needs Rust; the cold figure is dominated by your machine, and both ends of that range are measured) | Feeds a 40,077-byte hostile token name carrying a bidi override, a zero-width space and injection framing through the real sanitizer. Prints it capped to 96 chars with 4 control characters cut, `any bidi/zero-width residual: false`, and the same neutralization on the error path. |
 | Open `sanitizer-microworld/index.html` in a browser | instant, no build | The same sanitizer, compiled to wasm and embedded in the page as base64, running on whatever you type. Six presets, or paste your own. A bidi override plus a zero-width space reports `invisible characters removed: 2` and renders the result under `WHAT REACHES THE MODEL` carrying the untrusted label. The page requests nothing over the network; the only fetch a browser makes on it is its own automatic `favicon.ico` lookup. `python3 sanitizer-microworld/check_page.py` confirms the blob is present and the script parses. |
-| `curl -s https://x402.perfpilot.dev/price` | under 2s | The earning node answering live. Returns HTTP 402 with two price tiers, the devnet USDC mint, the pay-to address, and a single-use memo nonce that changes on every request (`x402-18c8ab1db58445d3-6e` then `x402-18c8ab1e3b3e35a2-6f` on two consecutive calls). This one is a live demonstration rather than evidence: if the node is down you get a gateway error, whereas the two offline checks above verify from committed bytes. |
+| `curl -s https://x402.perfpilot.dev/price` | under 2s (on Windows see the note below this table) | The earning node answering live. Returns HTTP 402 with two price tiers, the devnet USDC mint, the pay-to address, and a single-use memo nonce that changes on every request (`x402-18c8ab1db58445d3-6e` then `x402-18c8ab1e3b3e35a2-6f` on two consecutive calls). This one is a live demonstration rather than evidence: if the node is down you get a gateway error, whereas the two offline checks above verify from committed bytes. |
+
+On Windows, that last `curl` can hang for about a minute and exit 35 without printing anything.
+That is schannel refusing the handshake because it cannot reach the CA's revocation responder,
+not the node being down. Add `--ssl-revoke-best-effort`, or read the endpoint with Python, which
+ships its own TLS stack:
+`python3 -c "import urllib.request as u;print(u.urlopen(u.Request('https://x402.perfpilot.dev/price',headers={'User-Agent':'Mozilla/5.0'})).read().decode())"`.
+Do not reach for `--ssl-no-revoke`, which disables revocation checking globally to work around
+one host.
+
+**The two test suites also need no host build**, which is worth saying plainly because the
+build section below reads as though they do:
+
+```
+(cd crates/solana-core && cargo test)     # 120 tests, ~30s, no network
+(cd x402-feed-gate && cargo test)         # 26 tests, ~100s, no network
+```
+
+146 green, from a clean clone, with Rust and nothing else. Re-derive the counts by summing the
+`test result:` lines rather than trusting these figures. The `cd` is required rather than
+stylistic: there is no cargo manifest at the repo root, for the reason given in step 2.
 
 ## Building from source is a separate, optional path
 
-Everything below this line needs a toolchain, and step 0 lists what. Once step 1 has built the
-host you can also run `(cd crates/solana-core && cargo test)` and `(cd x402-feed-gate && cargo
-test)` (all green, no network), then `zeroclaw sop validate`. The `cd` is required rather than
-stylistic: there is no cargo manifest at the repo root, for the reason given in step 2. The
-full evening path (host + plugins + a wired bot + a live turn) is steps 1-7 below.
+Everything below this line needs a toolchain, and step 0 lists what. After step 1 you can also
+run `zeroclaw sop validate`. The full evening path (host + plugins + a wired bot + a live turn)
+is steps 1-7 below.
 
 ## 0. Prerequisites (10 min)
 
