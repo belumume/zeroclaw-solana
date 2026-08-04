@@ -246,7 +246,17 @@ fn parse_seed_hex(s: &str) -> Result<[u8; 32], String> {
     Ok(out)
 }
 
-/// The agent-facing report for a landed attestation.
+/// The agent-facing report for a BROADCAST attestation, which is a weaker claim than a landed
+/// one and is the accurate one.
+///
+/// The verb matters because this string is what the owner reads in their channel. `execute`
+/// calls `send_transaction` and reports, and a signature returned from `sendTransaction` means
+/// the RPC accepted and forwarded the bytes, never that they landed. This plugin polls no
+/// status, so it cannot know. It said "on-chain" until the settlement path was re-read against
+/// the code; the README's own verb for this plugin was already "broadcasts", so the report was
+/// the outlier. Confirming would mean blocking inside a wasm `execute` for as long as the
+/// cluster takes, which the guest cannot bound (the client we build on exposes only a connect
+/// timeout), so the signature is handed over for the reader to check instead.
 ///
 /// Lifted out of the WIT `execute` body so its size can be asserted in a host test. A report
 /// built inline inside `execute` is one nobody can measure without a wasm harness, and the
@@ -259,8 +269,8 @@ fn parse_seed_hex(s: &str) -> Result<[u8; 32], String> {
 /// through a plugin into the agent's context.
 pub fn compose_report(v: &ValidatedAttestation, signature: &str) -> String {
     format!(
-        "attested {} (device {}) on-chain: {}
-replay-proof via durable nonce {}",
+        "broadcast {} (device {}): {}
+accepted by the RPC, not confirmed landed. replay-proof via durable nonce {}",
         v.reading.as_str(),
         v.device_id,
         signature,
