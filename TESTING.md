@@ -23,10 +23,12 @@ code and the expectation.
 about behaviour over time. A KAT is one point.
 
 **Unit tests.** 89 in `solana-core`, plus 19 in `oracle-publish`, 41 in
-`payment-watch`, 10 in `x402-feed-gate`. These cover branches, error variants, and
+`payment-watch`, 21 in `x402-feed-gate`. These cover branches, error variants, and
 the specific adversarial cases we thought of. The middle two read 17 and 29 until
-2026-07-27, having been written before those suites grew; all four figures are counted
-off the sources rather than carried forward.
+2026-07-27, having been written before those suites grew; the last read 10 until
+2026-08-04, correct when it was counted and outgrown by the ledger-restart and
+`/health` tests added after. All four figures are counted off the sources rather
+than carried forward.
 
 *Cannot catch:* the case nobody thought of. Every unit test is a hypothesis about
 how the code fails, so the suite is bounded by imagination. This is the layer that
