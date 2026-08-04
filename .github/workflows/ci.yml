@@ -349,6 +349,22 @@ jobs:
       - name: the TLV controls can fail
         run: bash scripts/mutation-check-tlv.sh
 
+      # WIRED 2026-08-04. This gate flags a script that a document credits with a RUNTIME
+      # role where nothing invokes it, because a control which is claimed and enforced by no
+      # runtime path is worse than an absent one: an absent control is visible, an inert one
+      # lets the reader believe they are protected. It shipped earlier the same day and was
+      # wired into nothing, making it an instance of its own finding.
+      - name: every runtime claim in a doc has a runtime path
+        run: python3 scripts/check-claim-coherence.py
+
+      # Its controls, which every sibling gate in scripts/ already had and this one did not.
+      # Case 1 is the motivating incident verbatim: a certifier credited with a runtime role
+      # sitting in the same paragraph as a self-test the reader is told to run. The first
+      # version of the gate exempted the whole paragraph and so could not catch the case it
+      # was built for, while passing its live corpus.
+      - name: the claim-coherence controls actually gate
+        run: python3 scripts/test_check_claim_coherence.py
+
   supply-chain:
     name: advisories, licenses, sources
     runs-on: ubuntu-latest
