@@ -43,7 +43,7 @@ The raw transaction bytes are captured in
 no network at all:
 
 ```
-python scripts/verify_proof_offline.py --bundle docs/proof-bundle/mainnet-transactions.json
+python3 scripts/verify_proof_offline.py --bundle docs/proof-bundle/mainnet-transactions.json
 ```
 
 The `--bundle` argument is required. Without it the verifier reads the devnet bundle, which is a

@@ -25,7 +25,7 @@ for every transaction still retrievable at capture time, the raw base64 bytes, s
 sha256 digest and length. Verify all of it with no network at all:
 
 ```
-python scripts/verify_proof_offline.py --verbose
+python3 scripts/verify_proof_offline.py --verbose
 ```
 
 It recomputes each digest, splits the signatures from the serialized message, verifies every
@@ -217,7 +217,7 @@ path is exercised end to end against the asset a real buyer would hold.
 - The buyer signed on a separate machine from the node, so the settlement is a genuine remote
   purchase rather than the seller paying itself.
 - These bytes are captured in `docs/proof-bundle/devnet-transactions.json`, so the claim survives
-  the explorer link expiring. `python scripts/verify_proof_offline.py` re-verifies the ed25519
+  the explorer link expiring. `python3 scripts/verify_proof_offline.py` re-verifies the ed25519
   signature and decodes the payment with no network at all:
 
   ```
@@ -286,7 +286,7 @@ PASS  4kDo6NCcAxSe3BST..  slot=478425564  sigs 1/1 verified  succeeded
 The transfer instruction carries three accounts: sender, recipient, and
 `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`, the reference. That third account is read-only and
 never funded, which is why the explorer shows nothing for it while the transaction that mentions it
-is exactly the one `payment-watch` finds. `python scripts/verify_proof_offline.py --verbose` prints
+is exactly the one `payment-watch` finds. `python3 scripts/verify_proof_offline.py --verbose` prints
 the account list so the marker can be checked against the invoice without any RPC.
 
 ## The on-chain allowance cap rejects an over-cap agent spend (custody)
@@ -325,13 +325,13 @@ PASS  3TLSrfWVYdC3hSiA..  slot=478432696  sigs 2/2 verified  FAILED ON CHAIN: {"
 Read it in order: a cap of 5,000,000 base units was set, a transfer of exactly that settled, and a
 transfer of twice that was refused by the program with `Custom: 300`. The delegatee signed all
 three, so the rejection came from the audited program rather than from our plugin declining to
-build the transaction. Reproduce with `python scripts/verify_proof_offline.py`.
+build the transaction. Reproduce with `python3 scripts/verify_proof_offline.py`.
 
 ## How to re-verify
 Three ways, no account of ours needed. The first needs no network and is the one that still works
 after the links expire, so it is listed first deliberately:
 
-- **Offline, from the repo alone:** `python scripts/verify_proof_offline.py --verbose` recomputes
+- **Offline, from the repo alone:** `python3 scripts/verify_proof_offline.py --verbose` recomputes
   every digest, verifies every ed25519 signature against the exact serialized message, and decodes
   every instruction. Standard library only, no RPC, no install. Prove its controls can fail with
   `bash scripts/mutation-check-offline-proof.sh`, which plants three defects in a copy and requires

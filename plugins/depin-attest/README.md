@@ -112,7 +112,7 @@ it, so it was kept here as history with nothing to check it against. It resolved
 2026-08-01 and its raw bytes are now in `docs/proof-bundle/devnet-transactions.json`. Those bytes
 decode to exactly the two instructions listed above, `advanceNonce` followed by the `spl-memo`
 carrying `zeroclaw-depin/v1 tamper_triggered dev=sensor-A7 at=1737300000`, so the claim is
-checkable rather than asserted: run `python scripts/verify_proof_offline.py` from the repo root,
+checkable rather than asserted: run `python3 scripts/verify_proof_offline.py` from the repo root,
 which needs no network and holds whether or not the endpoint is still serving. The reproduce path
 below re-drives the same flow against live devnet.
 

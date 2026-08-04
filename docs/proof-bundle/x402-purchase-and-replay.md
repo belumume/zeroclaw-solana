@@ -5,7 +5,7 @@ The buyer signed on a separate machine, so this is a remote purchase rather than
 paying itself.
 
 The on-chain half of this record lives in `devnet-transactions.json` and is verifiable with no
-network by `python scripts/verify_proof_offline.py`. This file holds the HTTP half, which has no
+network by `python3 scripts/verify_proof_offline.py`. This file holds the HTTP half, which has no
 on-chain representation: a refusal is a response, not a transaction.
 
 ## 1. The challenge
