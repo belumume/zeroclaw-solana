@@ -365,6 +365,15 @@ jobs:
       - name: the claim-coherence controls actually gate
         run: python3 scripts/test_check_claim_coherence.py
 
+      # WIRED 2026-08-04, after this check found a real requirement gap rather than a tidiness
+      # one. The write-up's section titled "Reproducibility (links)" contained no links, against
+      # a brief that asks that section for links to config, SOPs, skills and code; both SOP files
+      # were tracked, shipped in every clone, and reachable from nowhere. A missing file errors,
+      # an unreachable one does not: it exists, reads correctly, and passes every check that looks
+      # AT it rather than FOR it.
+      - name: every tracked document is reachable by a reader
+        run: python3 scripts/check-doc-reachability.py
+
   supply-chain:
     name: advisories, licenses, sources
     runs-on: ubuntu-latest
