@@ -255,6 +255,31 @@ def audit(
     if not tier:
         fails.append(f"{name}: [custody] declares no tier")
 
+    # The README is the THIRD place a tier was declared, and prose drifting from the
+    # manifest is the same defect one surface out. Checked here so the block can be the
+    # single source of truth in practice rather than by assertion. An AMBIGUOUS heading
+    # fails too: `T0/T1` is not a declared tier, it is two, and the brief asks each
+    # showcase to declare one.
+    readme = manifest_path.parent / "README.md"
+    if readme.is_file():
+        m = re.search(
+            r"^#+\s*Custody tier:\s*(T\d(?:\s*/\s*T\d)*)",
+            readme.read_text(encoding="utf-8"),
+            re.M,
+        )
+        if m is None:
+            fails.append(f"{name}: README.md declares no custody tier heading")
+        else:
+            stated = [t.strip() for t in m.group(1).split("/")]
+            if len(stated) > 1:
+                fails.append(
+                    f"{name}: README.md declares {'/'.join(stated)}, which is two tiers, not one"
+                )
+            elif tier and stated[0] != tier:
+                fails.append(
+                    f"{name}: README.md says {stated[0]} but the manifest declares {tier}"
+                )
+
     imports = component_imports(wasm_path.read_bytes())
     if not imports:
         fails.append(

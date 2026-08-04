@@ -334,6 +334,55 @@ check(
     cct.audit(mp_x, wp_x)[0],
 )
 
+print("\n-- README tier agreement, both directions --")
+
+# This detector found a real defect on its first run: solana-pay-request's README declared
+# `T0/T1` while its manifest declared T0. Two tiers is not a declaration, and the brief
+# asks each showcase for one, so ambiguity is a finding rather than something to tolerate.
+mp_r0, wp_r0 = write_case("readme_ok", HONEST, component(*TYPICAL))
+(mp_r0.parent / "README.md").write_text(
+    "# x\n\n## Custody tier: T0 (read-only)\n", encoding="utf-8"
+)
+check(
+    "a README whose tier matches the manifest passes (must-not-fire control)",
+    cct.audit(mp_r0, wp_r0)[0] == [],
+    cct.audit(mp_r0, wp_r0)[0],
+)
+
+(mp_r0.parent / "README.md").write_text(
+    "# x\n\n## Custody tier: T2 (scoped key)\n", encoding="utf-8"
+)
+check(
+    "a README contradicting the manifest's tier FAILS",
+    any("README.md says T2" in f for f in cct.audit(mp_r0, wp_r0)[0]),
+    cct.audit(mp_r0, wp_r0)[0],
+)
+
+# The incident verbatim.
+(mp_r0.parent / "README.md").write_text(
+    "# x\n\n## Custody tier: T0/T1 (zero secrets)\n", encoding="utf-8"
+)
+check(
+    "INCIDENT: a README declaring two tiers FAILS even though one of them matches",
+    any("two tiers, not one" in f for f in cct.audit(mp_r0, wp_r0)[0]),
+    cct.audit(mp_r0, wp_r0)[0],
+)
+
+(mp_r0.parent / "README.md").write_text(
+    "# x\n\nno tier heading anywhere\n", encoding="utf-8"
+)
+check(
+    "a README with no tier heading FAILS rather than being treated as agreement",
+    any("declares no custody tier heading" in f for f in cct.audit(mp_r0, wp_r0)[0]),
+)
+
+(mp_r0.parent / "README.md").unlink()
+check(
+    "a plugin with NO README is not penalised (over-correction control)",
+    cct.audit(mp_r0, wp_r0)[0] == [],
+    cct.audit(mp_r0, wp_r0)[0],
+)
+
 print("\n-- signing scan (HEURISTIC; asserted to be non-gating) --")
 
 check("markers are found when present", cct.SIGNING_MARKERS[0] in b"...ed25519_sign...")
