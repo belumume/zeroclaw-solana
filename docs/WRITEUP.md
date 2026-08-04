@@ -317,9 +317,9 @@ Declared per component. Each funds-touching plugin ships a prompt-injection tran
 on host-side controls, pushing the real spending bound onto an audited on-chain program instead.
 That is only an honest argument if someone checked whether the host-side controls hold, so the
 host was audited: ten defects found, verified, and reported upstream, six of them host-side
-authorization or audit gaps. Five of the ten are one shape, a control the operator sets that the
-config validates and no runtime path reads, which is exactly the failure mode a custody claim
-cannot afford to depend on. Findings and issue links are in
+authorization or audit gaps. Four of the ten are one shape, joined by a fifth from earlier work
+on the same host: a control the operator sets that the config validates and no runtime path
+reads, which is exactly the failure mode a custody claim cannot afford to depend on. Findings and issue links are in
 [`HOST-SECURITY-AUDIT.md`](HOST-SECURITY-AUDIT.md). An over-cap spend here cannot fail that way,
 because the rejection is produced by the chain and shows up as a failed transaction.
 
