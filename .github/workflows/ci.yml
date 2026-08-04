@@ -338,6 +338,16 @@ jobs:
       - name: the identifier controls can fail
         run: bash scripts/mutation-check-identifier-leaks.sh
 
+      # The custody gate's own controls. They are here rather than in the `plugins` job
+      # because they are stdlib-only and need no Rust toolchain: the component fixtures are
+      # synthesized from the encoding measured off a real build, so the parser, the
+      # capability map and the audit are all exercised on a runner with nothing compiled.
+      # The gate that reads the REAL components runs in the `plugins` matrix, where they
+      # exist. Splitting it this way means a red here says the checker broke, and a red
+      # there says a component's declaration stopped being true.
+      - name: the custody gate's controls actually gate
+        run: python3 scripts/test_check_custody_tier.py
+
       # WIRED 2026-08-04 because a coherence gate found them credited and uninvoked.
       # TESTING.md describes both as proving their suites are load-bearing, and nothing
       # ran either one, so the description was of a library rather than a control. Both
@@ -453,3 +463,14 @@ jobs:
       - name: Build the wasm component
         working-directory: plugins/${{ matrix.plugin }}
         run: cargo build --target wasm32-wasip2 --release --locked
+
+      # The declared custody tier, checked against the component that was just compiled
+      # rather than against the comment above it. This runs AFTER the build on purpose:
+      # with nothing built the gate returns 2 and reports that it cannot check, which is
+      # honest on a fresh clone and would be a silent pass anywhere it mattered. Here the
+      # artifact exists, so a green means the manifest's capability set, its
+      # network_reachable claim and its filesystem claim were all read back out of the
+      # binary's import table. `scripts/mutation-check-custody-tier.py` is the control
+      # proving this can fail; it is not run here because it edits a tracked source file.
+      - name: Declared custody tier matches the compiled component
+        run: python3 scripts/check-custody-tier.py
