@@ -172,6 +172,8 @@ TXS = [
         "5qyr7jJi8zb6SjZjnA2QT5C9nuZYgSw6raAefjmWnDDMf3JRgkQX19zssE57EpFSHVCCPfbj5qyxcYSQcfEq9W3Z",
         None,
     ),
+    # 300 is AmountExceedsLimit in the solana-foundation program's own errors.rs and IDL;
+    # the citation is in docs/MAINNET-PROOF.md rather than assumed here.
     (
         "allowance OVER-cap transfer (rejected 0x12c)",
         "3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps",

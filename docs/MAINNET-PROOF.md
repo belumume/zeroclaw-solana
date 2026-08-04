@@ -36,6 +36,96 @@ below within-plus-over, and it asserts the failure is custom error 300 before re
 exiting non-zero on any other error. A run that failed for the wrong reason cannot be published
 from it.
 
+## What `0x12c` is, sourced to the program rather than asserted here
+
+The program is not ours, so its error codes are not ours to define. `De1egAFMk...` is the
+solana-foundation subscriptions and allowances delegation program, and its source is public at
+[solana-foundation/subscriptions](https://github.com/solana-foundation/subscriptions). Error 300
+decimal is `0x12c`. Its name and message are declared in that repository's `program/src/errors.rs`,
+quoted here from [pinned commit `debb4f7`](https://github.com/solana-foundation/subscriptions/blob/debb4f75ff7571218b39de3b633074dd843e70db/program/src/errors.rs)
+so the quotation cannot drift when upstream moves:
+
+```rust
+// --- Fixed delegation errors (300--399) ---
+#[error("Transfer amount exceeds delegation limit")]
+AmountExceedsLimit = 300,
+```
+
+The same file converts that enum to the number seen on chain, with no offset arithmetic in between:
+
+```rust
+impl From<SubscriptionsError> for ProgramError {
+    fn from(e: SubscriptionsError) -> Self {
+        ProgramError::Custom(e as u32)
+    }
+}
+```
+
+That is why the code reads 300 rather than the 6000-and-above a reader used to Anchor might expect.
+Anchor reserves user error codes from `ERROR_CODE_OFFSET = 6000`, and this program is not an Anchor
+program at all: it imports `pinocchio::error::ProgramError` and generates its IDL with Codama, so
+its error values are plain enum discriminants handed straight to `ProgramError::Custom` with no
+offset added. The published IDL carries the identical entry, and one command prints it:
+
+```
+python3 -c 'import json,urllib.request as u; print([e for e in json.load(u.urlopen("https://raw.githubusercontent.com/solana-foundation/subscriptions/main/idl/subscriptions.json"))["program"]["errors"] if e["code"]==300])'
+```
+
+```
+[{'code': 300, 'kind': 'errorNode', 'message': 'Transfer amount exceeds delegation limit', 'name': 'amountExceedsLimit'}]
+```
+
+One scope note, because 300 is narrower than a general over-the-allowance code: it sits in the
+fixed-delegation band, 300 to 399. A recurring delegation that overdraws its period raises 400,
+`amountExceedsPeriodLimit`. The refusal captured above is a `transferFixed` pull against a fixed
+delegation, which is the case 300 covers.
+
+## Why replaying the captured message returns 300 at every amount you try
+
+Checking this page the obvious way, by taking the captured over-cap transaction, changing the
+amount and simulating it, returns `Custom: 300` for every amount you are likely to pick, including
+the 0.4 USDC that settled here on 2026-08-01. That reads as a program refusing everything, or as a
+capture gone stale. It is neither, and the commands below settle it.
+
+A fixed delegation carries a remaining balance, and the settled transfer already debited it. The
+cap was 500,000 base units, the within-cap spend took 400,000, and 100,000 remain. Every replay
+above 100,000 exceeds the remaining limit and earns the same refusal, for the same reason, as the
+original. The delegation account is still live, still program-owned, and does not expire until
+2026-08-31:
+
+```
+solana account HVVeimGq8VD4CuBgrvqWsgQV1GRVhfVNYQxJxTocUNY9 --url https://api.mainnet-beta.solana.com
+```
+
+Its data ends in two little-endian u64 fields, the remaining allowance then the expiry:
+`a086010000000000` is 100,000 base units, and `9e9e956a00000000` is 1788190366, which is
+2026-08-31T15:32:46Z.
+
+Where the refusal starts is measurable, so this repository measures it instead of arguing it:
+
+```
+python3 scripts/replay_allowance_probe.py
+```
+
+The probe reads the remaining allowance off the account, then replays the captured message either
+side of it with `sigVerify` off. Nothing is signed and nothing is broadcast, and the discarded
+agent session key is not needed. Its output on 2026-08-04:
+
+| replayed amount | simulated result |
+|---|---|
+| 1,000,000, the captured over-cap amount | refused 300 |
+| 100,001 | refused 300 |
+| 100,000, exactly the remaining allowance | accepted |
+| 1 | accepted |
+
+A program that had stopped working would refuse all four. A check that had stopped checking would
+accept all four. The probe requires both outcomes to appear before it reports a boundary and exits
+non-zero otherwise, and `scripts/test_replay_allowance_probe.py` plants each of those wrong worlds
+to confirm it can fail. Run the same probe with
+`--bundle docs/proof-bundle/devnet-transactions.json` and it reports a remaining allowance of zero,
+because that run spent its whole 5,000,000 cap in one within-cap transfer, so every non-zero replay
+there is refused. That is the same arithmetic seen at its other end.
+
 ## Verify it without trusting this page
 
 The raw transaction bytes are captured in

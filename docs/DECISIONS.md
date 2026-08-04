@@ -32,7 +32,9 @@ program allowlist, and competing with audited wallet infrastructure on their own
 thin difference fails the obvious reviewer question: why not just use Swig.
 
 **Consequence.** The custody story is demonstrated rather than asserted: an over-cap transfer
-signed by the agent's own session key is rejected on chain with custom error 0x12c. The cost
+signed by the agent's own session key is rejected on chain with custom error 0x12c, which is 300,
+`AmountExceedsLimit`, cited to the upstream program's source in
+[`MAINNET-PROOF.md`](MAINNET-PROOF.md). The cost
 is that the agent cannot spend unattended, which is the correct trade for money.
 
 ## 2. A plugin was demoted to a skill, and the reasoning is the point

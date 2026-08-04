@@ -38,7 +38,8 @@ run four ways, on every push.
 
 **Where intent varies, the chain refuses.** Spends are bounded by an audited on-chain program, not
 by the plugin and not by the model. Demonstrated on **mainnet**, not asserted: a delegated session
-key signed an over-cap transfer and the program rejected it with custom error `0x12c`; a within-cap
+key signed an over-cap transfer and the program rejected it with custom error `0x12c` (300,
+`AmountExceedsLimit`, sourced to the upstream program in [`MAINNET-PROOF.md`](MAINNET-PROOF.md)); a within-cap
 transfer by the same key settled normally. Both are captured as raw bytes in the repo and verify
 **offline, with no network and no dependencies**.
 

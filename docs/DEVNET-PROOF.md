@@ -327,6 +327,20 @@ transfer of twice that was refused by the program with `Custom: 300`. The delega
 three, so the rejection came from the audited program rather than from our plugin declining to
 build the transaction. Reproduce with `python3 scripts/verify_proof_offline.py`.
 
+**What `0x12c` means, and why a replay today returns it at any amount.** Custom error 300 is
+`AmountExceedsLimit`, "Transfer amount exceeds delegation limit", declared in the
+solana-foundation program's own `program/src/errors.rs` and in its published IDL. The full
+citation, the pinned upstream quote and the reason the code is 300 rather than an Anchor 6000-range
+value are in [`MAINNET-PROOF.md`](MAINNET-PROOF.md), which is the canonical explanation for both
+clusters. It also covers the trap a reader hits when re-sending this captured message with a
+different amount: a fixed delegation carries a remaining balance, this devnet run spent its entire
+5,000,000 cap in the within-cap transfer, so the delegation's remaining allowance is now zero and
+every non-zero replay is refused with the same 300. Check that here rather than taking it on trust:
+
+```
+python3 scripts/replay_allowance_probe.py --bundle docs/proof-bundle/devnet-transactions.json
+```
+
 ## How to re-verify
 Three ways, no account of ours needed. The first needs no network and is the one that still works
 after the links expire, so it is listed first deliberately:

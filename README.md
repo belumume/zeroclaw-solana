@@ -89,7 +89,9 @@ bounded on chain by the audited Solana Foundation Allowances program.
 That bound is demonstrated rather than asserted, and the demonstration deliberately does the
 opposite of avoiding a key, because avoiding one proves nothing about what happens when an
 agent has one. A delegated session key, held by the agent, **signs** an over-cap transfer, and
-the audited program rejects it with custom error `0x12c`. The chain refused the transfer; no
+the audited program rejects it with custom error `0x12c` (300, `AmountExceedsLimit`, defined in the
+upstream program's own source and IDL, cited in [`docs/MAINNET-PROOF.md`](docs/MAINNET-PROOF.md)).
+The chain refused the transfer; no
 plugin, no prompt and no operator had to be right for that to happen. A within-cap transfer
 signed by the same key settles normally, which is the control that stops the rejection being
 read as the key simply not working.
@@ -116,7 +118,9 @@ mainnet claim, so the nearest antecedent was the mainnet trio and the links were
 Kept because one of them opens on a failed transaction on purpose. The
 [within-cap transfer settled](https://explorer.solana.com/tx/5qyr7jJi8zb6SjZjnA2QT5C9nuZYgSw6raAefjmWnDDMf3JRgkQX19zssE57EpFSHVCCPfbj5qyxcYSQcfEq9W3Z?cluster=devnet);
 the [over-cap transfer was refused on chain](https://explorer.solana.com/tx/3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps?cluster=devnet)
-with `custom program error 0x12c`. The red error page is the evidence rather than a defect: the
+with `custom program error 0x12c`. That code is sourced, and the trap of re-sending the captured
+message at a different amount is explained, in [`docs/MAINNET-PROOF.md`](docs/MAINNET-PROOF.md).
+The red error page is the evidence rather than a defect: the
 audited program refused a transfer the agent's own delegated key had already signed, and the
 transfer that settled is the control that stops the refusal being read as a key that does not
 work. Both were served by `api.devnet.solana.com` on 2026-08-01, eight days after they landed.
