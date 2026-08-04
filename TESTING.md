@@ -232,6 +232,9 @@ python3 scripts/check-shadowed-scripts.py    # no ignored copy shadows a tracked
 python3 scripts/test_check_shadowed_scripts.py  # that gate's controls, in three directions
 ./scripts/mutation-check-shadowed-scripts.sh    # proves those controls can fail
 python3 scripts/check-repo-paths.py          # every repo path a doc names is itself tracked
+python3 scripts/check-identifier-leaks.py    # no personal identifier on any surface a clone gets
+python3 scripts/test_check_identifier_leaks.py  # that gate's controls, in both directions
+./scripts/mutation-check-identifier-leaks.sh    # proves those controls can fail
 ```
 
 The two cargo lines carry a `cd` because there is no manifest at the repo root, so the
@@ -239,8 +242,31 @@ The two cargo lines carry a `cd` because there is no manifest at the repo root, 
 find `Cargo.toml`" before running a single test. Every crate here is its own workspace so
 that `solana-sdk`, which the devnet harnesses need and which does not compile for
 `wasm32-wasip2` inside a WIT component, stays out of the components' dependency graphs. The
-same applies to the build step in `QUICKSTART.md`. The remaining nine lines run from the repo
+same applies to the build step in `QUICKSTART.md`. The remaining twelve lines run from the repo
 root as written.
+
+`check-identifier-leaks.py` is the newest of these and it exists because the one incident in
+this class was caught by a hand audit rather than by anything that runs. An absolute home path
+carrying the author's account name sat in a tracked script, and fixing it meant two operations,
+one on the working tree and one on the history. Nothing was added afterwards to notice the next
+one, and the surfaces are wider than the file that was fixed: tracked text, printable strings
+inside committed binaries, and the identity recorded on every commit. That third one is the
+reason this gate reads history at all. A content scrub rewrites blobs and leaves author and
+committer fields alone, so an identity configured before the repo adopted its noreply posture
+survives every tree-level fix and appears in `git log` on the day the repo goes public.
+
+It keys on the shape an identifier leaves rather than on any name. A sweep keyed on a name
+finds only the person it was told about, and misses a file that identifies the same person
+through a different address, which is how the second instance here stayed invisible. The gate
+also carries no identifier of its own, because a list that names what it protects publishes it
+the moment the repo is public.
+
+Its controls run in both directions for a reason visible in this tree: a container image home
+path, WhatsApp group JIDs shaped exactly like addresses, and 218 commits under a noreply
+identity are all legitimate, and a gate that flagged them would be ignored inside a day. Cases
+1 and 2 are the two real incident shapes. `mutation-check-identifier-leaks.sh` removes each
+detector in turn and requires the suite to go red, so a green result means the detectors carry
+weight rather than that the cases agree with them.
 
 `check-repo-paths.py` covers the gap next to `check-doc-links.py`: that one resolves links,
 this one resolves file references, and a reference is the case that looks fine locally and
