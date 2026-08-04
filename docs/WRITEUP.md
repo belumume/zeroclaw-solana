@@ -653,12 +653,46 @@ the honest way to show that discipline is to apply it to our own work when it co
 component.
 
 ## Reproducibility (links)
-`QUICKSTART.md` reproduces both use cases from a clean machine in an evening: source-build
-features, plugin install layout, agent/risk-profile config, channel wiring including the
-pairing gates, the config posture (auto-approve set, multi_message, the leak-detection knob and
-why, workspace tools/, source-build features), skill + SOP install, cron, and the x402 node.
-It ends with a sharp-edges troubleshooting table where every row is a real cost we paid.
-Secrets are the operator's own; no secret of ours is needed at any step.
+
+The brief asks for links to config, SOPs, skills and code so another operator can reproduce
+this. Here they are, every one a path in this repository that a clone receives.
+
+**Start here.** [`QUICKSTART.md`](../QUICKSTART.md) reproduces both use cases from a clean
+machine in an evening: source-build features, plugin install layout, agent and risk-profile
+config, channel wiring including the pairing gates, the config posture (the auto-approve set,
+`multi_message`, the leak-detection knob and why it is set that way, workspace `tools/`), skill
+and SOP install, cron, and the x402 node. It ends with a sharp-edges troubleshooting table
+where every row is a real cost we paid. Secrets are the operator's own; no secret of ours is
+needed at any step.
+
+**Config.** The running posture is documented rather than described, and
+[`scripts/check-config-drift.py`](../scripts/check-config-drift.py) compares the documented
+set against the live one by machine, because the two had silently diverged once before.
+
+**SOPs.** [`evening-reconciliation`](../sops/evening-reconciliation/SOP.md) reconciles the
+shop's open payment requests against on-chain settlement daily.
+[`node-earnings-report`](../sops/node-earnings-report/SOP.md) reports the DePIN node's x402
+earnings. Each ships its `SOP.toml` beside the prose, so what you read is what runs.
+
+**Skills.** [`skills/solana-pay`](../skills/solana-pay) is the payment skill, and it is the
+worked example of the layering argument above: it is a skill rather than a plugin because the
+tier test said so.
+
+**Code.** [`crates/solana-core`](../crates/solana-core) is the pure core with the 120 host
+tests. [`plugins/`](../plugins) holds the eight components. [`x402-feed-gate`](../x402-feed-gate)
+is the earning node.
+
+**Check it rather than believing it.** [`scripts/verify-proof.py`](../scripts/verify-proof.py)
+checks ten static and four live claims with stdlib only.
+[`scripts/verify_proof_offline.py`](../scripts/verify_proof_offline.py) verifies the captured
+custody proofs with no network at all. [`docs/transcripts/`](transcripts/) holds the agent
+refusing a live attack, verbatim. [`sanitizer-microworld/index.html`](../sanitizer-microworld/index.html)
+lets you poke the sanitizer with no build.
+
+This section was titled "Reproducibility (links)" and contained no links until 2026-08-04. It
+described the reproduction accurately in prose, which is why nothing looked wrong: the words
+were true and the one thing the requirement actually asks for was absent. A reader could learn
+that SOPs exist and still not reach one.
 
 ## Links
 Repo (plugins + solana-core + onchain programs + skills + e2e harnesses + x402-feed-gate):

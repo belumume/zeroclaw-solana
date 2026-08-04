@@ -55,6 +55,7 @@ install. It reports static and live claims separately, and names what it does no
 
 | If you want | Read |
 |---|---|
+| The whole thing on one page, in about three minutes | [`docs/ONE-PAGER.md`](docs/ONE-PAGER.md) |
 | What this is and why it is built this way | [`docs/WRITEUP.md`](docs/WRITEUP.md) |
 | To run it yourself | [`QUICKSTART.md`](QUICKSTART.md) |
 | Proof it is real, on chain | [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md) |
