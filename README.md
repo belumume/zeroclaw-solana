@@ -3,13 +3,31 @@
 Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents doing real Solana work,
 and the plugins, on-chain programs, skills and SOPs they run on.
 
-**Watch it first:** [`.demo-assets/cut/demo-roughcut-v2.mp4`](.demo-assets/cut/demo-roughcut-v2.mp4),
-2 minutes 55 seconds, five beats, no slides. Four of the five are live terminal runs rather than
-recordings of a result: the injection attack refused with zero tool calls, the feed publishing on
-schedule, the claim verifier at 10 of 10 static and 4 of 4 live with the over-cap rejection on
-screen, and the x402 gate answering 402 with its nonce visibly incrementing between requests. The
-file is committed here rather than linked off somewhere, so it does not depend on anyone else's
-retention policy.
+**The DePIN feed has been publishing to devnet since 2026-07-25, and as of 2026-08-04 it had
+landed 738 device-signed readings with not one failure among them.** It publishes on a
+roughly 20-minute timer and the whole of that history is on chain: the feed account holds 739
+transactions, the `RegisterDevice` call that created it plus one per reading, which is why the
+sequence number it carries had reached 738. Those figures only grow, so each ships with the
+command that re-derives it rather than as a number typed into a README.
+`python3 scripts/verify-proof.py` reports the live sequence and how long ago it last moved,
+and one `getSignaturesForAddress` against
+`JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every transaction the device has ever
+sent, which is the complete history because the oldest of them is the account's own creation.
+
+**Watch it first, it plays in the browser:**
+[2 minutes 55 seconds, five beats, no slides](https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/demo-roughcut-v2.mp4).
+Four of the five beats are live terminal runs rather than recordings of a result: the injection
+attack refused with zero tool calls, the feed publishing on schedule, the claim verifier at 10 of
+10 static and 4 of 4 live with the over-cap rejection on screen, and the x402 gate answering 402
+with its nonce visibly incrementing between requests.
+
+That link is this repository's own GitHub Pages, which serves the file as `video/mp4` so it opens
+in a player on one click. The same bytes are committed at
+[`.demo-assets/cut/demo-roughcut-v2.mp4`](.demo-assets/cut/demo-roughcut-v2.mp4) and that copy is
+the one a clone receives, so the demo still does not depend on anyone else's retention policy.
+Click the first link to watch it; take the second if you want the file itself. The raw
+`githubusercontent` path is deliberately not offered, because it serves
+`application/octet-stream` and a judge clicking it gets a 4.5 MB download instead of a video.
 
 **A DePIN node that pays for itself.** An ARM box takes an ambient temperature reading for
 Madinah, signs it with a key generated on that box, and lands it in a typed account owned by our
@@ -35,13 +53,7 @@ orders are quoted in BRL at a stated rate and settled in USDC.
 Both run on the same ARM node under `systemd --user`, and the two are not equally
 observable from outside, so this says which is which rather than leaving you to find out.
 The DePIN feed is continuously checkable: it publishes on a timer and every reading lands
-on chain, so `verify-proof.py` can go red on it. It has been publishing on a roughly
-20-minute timer since the device registered itself at `2026-07-25T04:12:01Z`, and that
-duration is not something you have to take on trust. The oldest transaction on the feed
-account is the `RegisterDevice` call that created it, so the history on chain is the
-complete history, and one `getSignaturesForAddress` against
-`JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns all of it. A count is deliberately
-not quoted here, because it would be wrong within the hour. The shop is a Telegram and WhatsApp client
+on chain, so `verify-proof.py` can go red on it. The shop is a Telegram and WhatsApp client
 with no inbound port, and its trace is traffic-driven, so from outside a quiet shop and a
 stopped one look identical. That half is asserted here and machine-checked by a `/health`
 endpoint on the x402 gate, which asks systemd on the node directly.
