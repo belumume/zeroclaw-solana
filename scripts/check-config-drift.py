@@ -85,7 +85,16 @@ def main():
         print(
             "Set ZC_CONFIG if yours lives elsewhere. Nothing to compare, so nothing is claimed."
         )
-        return 1
+        # EXIT 2 IS "CANNOT CHECK", NOT "FOUND A PROBLEM", and this returned 1 until
+        # 2026-08-04. The message already said nothing is claimed while the exit code said a
+        # defect was found, so the two disagreed and every caller believed the code. That is
+        # the same collapse the link gate carried: an absent input and a real finding are
+        # different claims, and folding them together makes a red mean two things.
+        #
+        # This machine legitimately has no config, because the shop runs on the ARM node
+        # rather than here, so the honest answer is "not checkable from where you are
+        # standing" rather than "your config has drifted".
+        return 2
     live = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
     doc = QUICKSTART.read_text(encoding="utf-8")
     print(f"comparing {cfg_path}\n     against {QUICKSTART.name}\n")

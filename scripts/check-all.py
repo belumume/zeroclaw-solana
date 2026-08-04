@@ -31,10 +31,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 MIN_GATES = 7  # below this the discovery walk is broken; see the docstring
 
 # Declared exclusions, each with the reason it cannot run unattended on a clean machine.
+# Only what CANNOT self-report. A gate that can tell us it is unrunnable does so with exit 2,
+# which is read below, so it does not belong in a hand-maintained list. check-config-drift was
+# listed here until 2026-08-04 on a reason I asserted without testing; the reason turned out to
+# be true, and the listing was still the wrong mechanism.
 EXCLUDED = {
-    "check-config-drift.py": "compares against the LIVE host config; needs the running node",
-    "check-host-compat.sh": "clones upstream; belongs in host-drift.yml on a schedule",
+    "check-host-compat.sh": "not a .py gate; clones upstream, belongs in host-drift.yml on a schedule",
 }
+CANNOT_CHECK = 2  # the gate ran and reported it had nothing to compare; not a finding
 
 
 def discover():
@@ -74,6 +78,12 @@ def main() -> int:
             cwd=str(ROOT),
         )
         dt = time.time() - t0
+        if r.returncode == CANNOT_CHECK:
+            # The gate ran and said it had nothing to compare. That is not a finding, and
+            # treating it as one is how a suite trains people to ignore reds.
+            why = (r.stdout or "").strip().split("\n")[0][:74] or "reported it cannot check"
+            print(f"  n/a  {g:<28} {why}")
+            continue
         mark = "ok  " if r.returncode == 0 else "FAIL"
         print(f"  {mark} {g:<28} rc={r.returncode}  {dt:5.1f}s")
         if r.returncode != 0:
