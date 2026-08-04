@@ -127,6 +127,19 @@ EM_DASH = "—"
 # need its own controls plus a re-measurement of every document, so it is deliberately not done
 # here. One known looseness is recorded rather than silently fixed: `\benhance\b` does not match
 # "enhanced", because the trailing letter removes the word boundary.
+#
+# A SECOND looseness, recorded 2026-08-04 because a clean run on this check is easy to read as
+# more than it is. `negative_contrast` matches ONE form, "not just X but Y". It does NOT match
+# the two commoner ones, "X, not Y" and "X rather than Y", so a document reported clean here may
+# still carry them, and a blind review of ONE-PAGER.md found three that this gate passed.
+#
+# That is deliberate rather than pending. Both missing forms are ordinary technical English and
+# carry real information most of the time: this very file says "recorded rather than silently
+# fixed" and "REFUSED rather than tolerated", and the corpus is full of "verified rather than
+# assumed". A pattern broad enough to catch the slop would flag all of those, and a gate that
+# cries wolf gets routed around, which is worse than no gate. Whether a contrast carries
+# information or manufactures emphasis is a judgement, and judgement is the one thing a
+# deterministic check must not be asked for. Read the prose; do not widen this.
 CHECKS = [
     ("em_dashes", re.escape(EM_DASH), 0),
     ("rogue_unicode", "[" + "".join(re.escape(c) for c in ROGUE_UNICODE) + "]", 0),
