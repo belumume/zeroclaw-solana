@@ -338,6 +338,17 @@ jobs:
       - name: the identifier controls can fail
         run: bash scripts/mutation-check-identifier-leaks.sh
 
+      # WIRED 2026-08-04 because a coherence gate found them credited and uninvoked.
+      # TESTING.md describes both as proving their suites are load-bearing, and nothing
+      # ran either one, so the description was of a library rather than a control. Both
+      # are offline and deterministic, which is why they belong on a runner: a control
+      # that fires only when someone remembers to type it is close to no control.
+      - name: the shadowed-script controls can fail
+        run: bash scripts/mutation-check-shadowed-scripts.sh
+
+      - name: the TLV controls can fail
+        run: bash scripts/mutation-check-tlv.sh
+
   supply-chain:
     name: advisories, licenses, sources
     runs-on: ubuntu-latest

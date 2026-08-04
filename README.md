@@ -112,9 +112,14 @@ thing.
 Human approval is a weak boundary on its own, because the sentence the human reads is one the
 model wrote. So the paths with a fixed intent never ask: `scripts/broadcast_certified.py`
 re-derives the intent from the exact serialized bytes and refuses an appended transfer, a
-swapped program or a spoofed feed before anything leaves the machine. Run that check as a
-self-test with `python3 scripts/certify_publish_tx.py`, which puts four injection shapes
-through it. Where intent is variable, a spend, the on-chain cap above is what holds, and it
+swapped program or a spoofed feed. Run that check as a self-test with
+`python3 scripts/certify_publish_tx.py`, which puts four injection shapes through it, and
+CI runs it on every push. Stated precisely, because this project's own argument is that a
+control which is claimed and enforced by no runtime path is worse than an absent one: what
+this repo proves is the MECHANISM, not the wiring. The scheduler driving the live node is
+operator-side configuration rather than a file in this tree, so a reader cannot confirm from
+the repo alone that the running timer invokes it. The bound that does not depend on this is
+the on-chain one below. Where intent is variable, a spend, the on-chain cap above is what holds, and it
 holds whether or not the operator was fooled.
 
 The two use cases run **no T2 fund-signer**. Everything they touch sits at T0 (read-only) or

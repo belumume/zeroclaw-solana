@@ -463,9 +463,20 @@ The tiers in words:
 
   *Where the intent is fixed, nothing asks a human.* The DePIN publish path may express exactly
   one intent, so `scripts/broadcast_certified.py` re-derives that intent from the exact
-  serialized bytes before anything leaves the machine, and refuses everything else. It trusts
-  neither the model, nor the plugin, nor the wire. Its self-test is the attack, run four ways
-  (`python3 scripts/certify_publish_tx.py`):
+  serialized bytes and refuses everything else, trusting neither the model, nor the plugin, nor
+  the wire. Its self-test is the attack, run four ways (`python3 scripts/certify_publish_tx.py`),
+  and CI runs that self-test on every push.
+
+  **Stated precisely, because this project's whole argument is that a control which is claimed
+  and enforced by no runtime path is worse than an absent one, and that standard has to apply
+  here first.** What this repository proves is the mechanism: the certifier is tracked, its
+  refusals are driven four ways, and the gate runs on a clean machine. What it does NOT prove is
+  the wiring, because the scheduler that drives the live node is operator-side configuration
+  rather than a file in this tree, so a reader cannot confirm from the repo alone that the
+  running timer invokes it. Treat the certification as a demonstrated mechanism plus an
+  unverified deployment, not as a runtime guarantee. The bound that does not depend on this is
+  the on-chain one: the audited program refuses an over-cap spend whatever the host does, and
+  that refusal is a failed transaction anyone can fetch.
 
   ```
   [OK ] good publish tx: PASS(certified)
