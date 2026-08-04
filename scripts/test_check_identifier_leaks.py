@@ -158,6 +158,26 @@ case(
     CLEAN,
     {"docs/API.md": "the prefix is `sk-ant-` followed by the key body\n"},
 )
+# INCIDENT 3: the gate failed on the repo's FIRST pull request, and would have failed on
+# every one after it. GitHub commits the synthetic `Merge <head> into <base>` object as
+# `GitHub <noreply@github.com>`; that object is reachable from `git log --all` in an
+# Actions checkout, belongs to no branch here, and cannot be rewritten by anyone. The
+# defect hid because work had gone straight to main until then.
+case(
+    "GitHub's own machine identity on the synthetic pull-request merge commit",
+    CLEAN,
+    {"README.md": "ordinary content\n"},
+    author="noreply@github.com",
+)
+# OVER-CORRECTION CONTROL for the case above. The fix is an exact-address allowlist and
+# NOT a `github.com` domain entry, so a real person at that domain must still fire. If
+# this ever goes CLEAN, the allowlist was widened into a hole.
+case(
+    "a real person's address at the same domain still fires",
+    FIRE,
+    {"README.md": "ordinary content\n"},
+    author="someone_real@github.com",
+)
 
 # --------------------------------------------------------------------- the FLOORS
 # These deliberately do NOT lower the floors. Without them the floor itself is untested,

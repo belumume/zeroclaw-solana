@@ -16,6 +16,16 @@ signed is the value and the device key, not the enclosure. And that x402 endpoin
 demonstration rather than evidence: if the node is down you get a gateway error, whereas the
 on-chain claims below verify from captured bytes with no network at all.
 
+One thing about it is checkable rather than demonstrated, and the grader is not ours. The
+challenge conforms to the x402 v2 spec as published, which you can confirm against
+`@x402/core`'s own `PaymentRequiredV2Schema` in one command:
+`cd scripts/x402-validator && npm ci --silent && node validate-challenge.mjs`. It carries
+the pre-cutover body as a control that must be REJECTED, so a green result carries
+information instead of only being green, and it reads `resource.url` separately because the
+schema accepts a `localhost` value and so cannot tell you the advertised address is
+reachable. Conformance is a claim about the response shape; it says nothing about uptime,
+and the caveat above still stands.
+
 **A shop terminal that takes payments.** A merchant agent on WhatsApp and Telegram quotes an
 order, hands the customer a tappable payment link, and confirms settlement only from the
 chain, never from the customer saying so. Confirmation requires the exact amount in base

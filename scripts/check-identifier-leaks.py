@@ -117,6 +117,17 @@ IMPERSONAL_EMAIL = re.compile(
     re.IGNORECASE,
 )
 
+# Exact addresses, matched WHOLE rather than by domain suffix. `github.com` must never
+# join the regex above: that would clear `realperson@github.com` too, and the local part
+# is the entire difference between a machine identity and a person.
+#
+# `noreply@github.com` is GitHub's own committer on web-UI edits AND on the synthetic
+# merge commit it builds for every pull request. That merge commit is reachable from
+# `git log --all` in an Actions checkout, is not part of this repo's history, and cannot
+# be rewritten by anyone here, so without this the gate fails on EVERY pull request by
+# construction. It went unnoticed only because work had been pushed straight to main.
+IMPERSONAL_EXACT = frozenset({"noreply@github.com"})
+
 
 def git(*args, check=True):
     out = subprocess.run(
@@ -213,7 +224,11 @@ def scan_commit_metadata(findings):
             continue
         sha, an, ae, cn, ce = parts
         for _role, addr in (("author", ae), ("committer", ce)):
-            if not addr or IMPERSONAL_EMAIL.search(addr):
+            if (
+                not addr
+                or addr.lower() in IMPERSONAL_EXACT
+                or IMPERSONAL_EMAIL.search(addr)
+            ):
                 continue
             # Keyed on SHA, not appended per role: one commit carries BOTH an author and
             # a committer identity, so appending each would report twice the number of
