@@ -260,6 +260,23 @@ jobs:
       - name: the deployed pay page matches its sources
         run: python3 webshop-pay/build.py --check
 
+      # The step above was the only gate in this job without a paired control, while its six
+      # siblings all had one. It had been shown to fail by hand, once, which is not something a
+      # later reader can re-run. Case 1 is the money shape: the page's pinned merchant address
+      # swapped for 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM, the wallet a real wrong-recipient
+      # link on this project actually pointed at. If case 1 stops firing, the control that stops a
+      # customer paying a wallet this shop does not own is being checked by nothing.
+      #
+      # Both swap directions are covered because drift has no preferred one, and every must-fire
+      # edit is length-preserving on purpose: build.py's FAIL message prints the two character
+      # counts, so a comparison "simplified" to those counts is the plausible weakening, and only a
+      # same-length bucket detects it. That property is machine-asserted rather than left to a
+      # comment. Nothing writes to webshop-pay/: each case builds a byte-for-byte fixture in a temp
+      # directory, and the suite digests the eight real files before and after and refuses to
+      # report a result if any moved.
+      - name: the pay-page gate's controls actually gate
+        run: python3 scripts/test_check_build_py.py
+
       # The compliance ledger claims slop-cleanliness across the judge-facing documents, and until
       # now the only checker for it lived in .tools/, which .gitignore ignores wholesale. A clone
       # received the claim and no way to check it, and nothing here ran it: this file gated rustfmt
