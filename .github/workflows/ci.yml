@@ -300,6 +300,30 @@ jobs:
       - name: the doc-slop gate's controls actually gate
         run: python3 scripts/test_check_doc_slop.py
 
+      # An absolute home path carrying the author's account name shipped in a tracked script
+      # and was found by a hand audit, not by anything that runs. It was scrubbed from the
+      # tree and from the history, and no check was added, so the same class could arrive
+      # again silently on any of the surfaces a clone receives.
+      #
+      # Keyed on SHAPE rather than on a name, because a name-keyed sweep is blind to a file
+      # that identifies the same person through a different address. Walks three surfaces:
+      # tracked text, printable strings inside committed binaries, and COMMIT METADATA --
+      # the last of which no working-tree check can reach, and which a content scrub leaves
+      # untouched because rewriting blobs does not rewrite identities.
+      - name: no personal identifier on any surface a clone receives
+        run: python3 scripts/check-identifier-leaks.py
+
+      # Both directions, because this repo's tree legitimately contains a container-image
+      # home path, WhatsApp group JIDs shaped exactly like addresses, and 218 commits under
+      # a noreply identity. A gate that flagged those would be ignored within a day. Cases 1
+      # and 2 are the two real incident shapes; the mutation script proves the suite goes red
+      # when each detector is removed, so green means load-bearing rather than agreeable.
+      - name: the identifier gate's controls actually gate
+        run: python3 scripts/test_check_identifier_leaks.py
+
+      - name: the identifier controls can fail
+        run: bash scripts/mutation-check-identifier-leaks.sh
+
   supply-chain:
     name: advisories, licenses, sources
     runs-on: ubuntu-latest
