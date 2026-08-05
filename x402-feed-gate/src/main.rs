@@ -15,6 +15,10 @@
 //!   X402_MINT            base58 stablecoin mint (required)
 //!   X402_FEED_PDA        base58 feed account to read + serve (required)
 //!   X402_RPC_URL         Solana RPC (default https://api.devnet.solana.com)
+//!   X402_READ_RPC_URL    RPC used ONLY to read the feed account being sold
+//!                        (default: X402_RPC_URL)
+//!   X402_SETTLE_RPC_URL  RPC used ONLY to simulate/broadcast/confirm the buyer's
+//!                        payment (default: X402_RPC_URL)
 //!   X402_NETWORK         CAIP-2 network id (x402 v2 requires this form;
 //!                        default solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1)
 //!   X402_RESOURCE_URL    absolute URL of the resource sold, for v2's required
@@ -233,9 +237,19 @@ fn main() {
     };
     let feed = env_pubkey("X402_FEED_PDA");
     let rpc_url = env_or("X402_RPC_URL", "https://api.devnet.solana.com");
+    // READING the feed and SETTLING the payment are separate concerns that were
+    // forced through one client. They can legitimately live on different clusters:
+    // the goods may be a devnet feed account while the money is real. Both default
+    // to X402_RPC_URL, so an existing deployment that sets only that is unchanged.
+    let read_rpc_url = env_or("X402_READ_RPC_URL", &rpc_url);
+    let settle_rpc_url = env_or("X402_SETTLE_RPC_URL", &rpc_url);
 
-    let rpc = SolanaRpc::new(UreqTransport {
-        url: rpc_url.clone(),
+    let read_rpc = SolanaRpc::new(UreqTransport {
+        url: read_rpc_url.clone(),
+    })
+    .with_commitment(Commitment::Confirmed);
+    let settle_rpc = SolanaRpc::new(UreqTransport {
+        url: settle_rpc_url.clone(),
     })
     .with_commitment(Commitment::Confirmed);
     // Restore the daily ledger before serving anything. The unit is Restart=always,
@@ -259,6 +273,11 @@ fn main() {
     });
     eprintln!("x402-feed-gate listening on http://{addr}");
     eprintln!("  selling feed {}", feed.to_base58());
+    // Printed separately even when identical: an operator who has split them needs to
+    // see WHICH cluster settles money, and an operator who has not needs to see that
+    // nothing changed. A silent default is the shape that hides a misconfiguration.
+    eprintln!("  read  RPC {read_rpc_url}");
+    eprintln!("  settle RPC {settle_rpc_url}  <- real money moves here");
     eprintln!(
         "  receiving to ATA {} for mint {}",
         cfg.receiving_ata().to_base58(),
@@ -293,7 +312,8 @@ fn main() {
             }
             "/reading" => handle_reading(
                 &cfg,
-                &rpc,
+                &read_rpc,
+                &settle_rpc,
                 &feed,
                 &ledger,
                 &nonce_counter,
@@ -454,9 +474,10 @@ struct RestoreStats {
 
 /// The core request handler: no payment -> 402 challenge; a payment -> verify,
 /// enforce the cap, simulate, broadcast, confirm, serve the reading.
-fn handle_reading<T: RpcTransport>(
+fn handle_reading<T: RpcTransport, S: RpcTransport>(
     cfg: &GateConfig,
-    rpc: &SolanaRpc<T>,
+    read_rpc: &SolanaRpc<T>,
+    settle_rpc: &SolanaRpc<S>,
     feed: &Pubkey,
     ledger: &Mutex<DailyLedger>,
     nonce_counter: &AtomicU64,
@@ -498,7 +519,7 @@ fn handle_reading<T: RpcTransport>(
     }
 
     // Simulate, then broadcast, then confirm.
-    match settle(rpc, &verified) {
+    match settle(settle_rpc, &verified) {
         Ok(signature) => {
             // Append to the earnings ledger (JSON-lines) so the ZeroClaw agent can
             // report "sold N readings, earned X" to the owner's channel. Best-effort:
@@ -508,7 +529,7 @@ fn handle_reading<T: RpcTransport>(
                 "paid": true,
                 "amount": verified.amount,
                 "settlement": signature,
-                "reading": serde_json::from_str::<serde_json::Value>(&feed_reading_json(rpc, feed))
+                "reading": serde_json::from_str::<serde_json::Value>(&feed_reading_json(read_rpc, feed))
                     .unwrap_or(serde_json::Value::Null),
             })
             .to_string();

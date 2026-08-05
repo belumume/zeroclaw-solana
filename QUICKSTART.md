@@ -65,7 +65,18 @@ node serves the x402 ledger block and 3 until then, and a claim reporting PENDIN
 tallied as verified.
 
 Or open any explorer link in `docs/DEVNET-PROOF.md`; the programs, the feed sequence history,
-and the x402 settlement are all public devnet.
+and the devnet x402 settlements are all public devnet. The gate has also settled once on
+**mainnet-beta**, for 1.000000 USDC, while serving a reading from that same devnet feed. The
+settlement is
+`3gSg3mQE9vA5X9CmFBxGEY2EFSAMXGhaC1HrUDbH8uA3MQhuaVjCdHjb1kshyzTqWKRALa9EQPeKja2Hk2rWcF2f`.
+Settlement and feed-read now take separate RPC endpoints, which is what makes that split possible
+(see the run block below).
+
+That settlement came from a locally-run gate with the split configured. **The hosted endpoint at
+`x402.perfpilot.dev` still runs the devnet default on both endpoints**, so the challenge you get
+from the `curl` below quotes the devnet mint and a payment against it settles on devnet. Both
+statements are true at once and the distinction is the point: the capability is real and proven on
+mainnet, and the box you can poke is not currently pointed there.
 
 ## Three more demos, each under a minute
 
@@ -528,6 +539,19 @@ X402_SELLER_WALLET=<your wallet> X402_MINT=<usdc mint> X402_FEED_PDA=<your feed>
   X402_NETWORK=solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1 \
   X402_RESOURCE_URL=https://<your public host>/reading cargo run --release
 ```
+**To settle in real money while selling a devnet feed**, add the two split RPC variables. Both
+default to `X402_RPC_URL`, so a run that omits them is unchanged:
+```
+  X402_READ_RPC_URL=https://api.devnet.solana.com \
+  X402_SETTLE_RPC_URL=https://api.mainnet-beta.solana.com \
+  X402_NETWORK=solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp \
+  X402_MINT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+```
+The gate prints both endpoints at startup, labelling which one moves money, so a half-applied
+split is visible rather than silent. Reading and settling were one client until 2026-08-05; they
+are separate because they are separate concerns and can honestly live on different clusters. The
+mint must match the settle cluster: the devnet USDC mint does not exist on mainnet-beta.
+
 Those last two are not optional decoration, and the recipe omitted them until 2026-08-05.
 Without `X402_NETWORK` the gate advertises `solana-devnet`, the v1 friendly form, which the
 published v2 schema rejects. Without `X402_RESOURCE_URL` it falls back to

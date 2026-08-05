@@ -124,6 +124,14 @@ curl -s https://x402.perfpilot.dev/health | jq '.ledger'
 
 `restored_sales_at_startup` is non-zero because the ledger really was rebuilt from disk at boot.
 
+**That paywall has taken real money, and the precise claim is a split one.** Reading the feed and
+settling the payment are separate concerns on separate RPC endpoints, so the gate settled a genuine
+mainnet payment of 1.000000 USDC while serving a reading from our devnet feed. The settlement is
+`3gSg3mQE9vA5X9CmFBxGEY2EFSAMXGhaC1HrUDbH8uA3MQhuaVjCdHjb1kshyzTqWKRALa9EQPeKja2Hk2rWcF2f`,
+finalized on mainnet-beta. The goods stay on devnet because a `DeviceFeed` account is owned by our
+`zeroclaw_oracle` program, which is deployed on devnet only. A mainnet feed is therefore a program
+deployment rather than a config flag. The hosted endpoint above runs the devnet default.
+
 And where the cap's boundary sits *today* is locatable rather than assertable, on mainnet, with no
 key and no funds. The captured refusal proves the program said no once; this reads the remaining
 allowance off the delegation account and replays the captured message either side of it, requiring

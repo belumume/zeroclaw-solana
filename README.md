@@ -34,16 +34,6 @@ the reference is an additional optional condition, not the check itself. A payme
 wrong amount, or of a token the payer minted themselves, does not settle an order. Brazilian
 orders are quoted in BRL at a stated rate and settled in USDC.
 
-**Watch it first, it plays in the browser:**
-[2 minutes 55 seconds, five beats, no slides](https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/zeroclaw-solana-demo.mp4).
-Four of the five beats are live terminal runs rather than recordings of a result: the injection
-attack refused with zero tool calls, the feed publishing on schedule, the claim verifier at 10 of
-10 static and 4 of 4 live with the over-cap rejection on screen, and the x402 gate answering 402
-with its nonce visibly incrementing between requests. That link is this repository's own GitHub
-Pages, which serves the file as `video/mp4` so it opens in a player on one click; the same bytes
-are committed at [`.demo-assets/cut/zeroclaw-solana-demo.mp4`](.demo-assets/cut/zeroclaw-solana-demo.mp4),
-so a clone carries the demo and it does not rest on anyone else's retention policy.
-
 **The feed has published to devnet every 20 minutes since 2026-07-25, and not one of its
 transactions has failed.** The account holds the `RegisterDevice` call that created it plus one
 per reading, so the transaction count and the sequence number move together and both only climb.
@@ -177,7 +167,7 @@ allows for, and a wider capability than "holds no key" would have implied.
 | [`allowance-spend-build`](plugins/allowance-spend-build) | Spends bounded by the audited SF Allowances program | T1 build | **mainnet**, and its three real mainnet transactions are the custody proof |
 | [`solana-core`](crates/solana-core) | Shared wasm32-wasip2 core: transactions, PDAs, Token-2022, response-path sanitizer | library | none, it makes no network call |
 | [`onchain/`](onchain) | `zeroclaw_oracle` and `consumer_example`, Anchor, live on devnet | on-chain | devnet |
-| [`x402-feed-gate`](x402-feed-gate) | Sells one signed reading per paid request | T0/T1, holds no key | devnet, it settles against the feed |
+| [`x402-feed-gate`](x402-feed-gate) | Sells one signed reading per paid request | T0/T1, holds no key | **split**: settlement is whatever `X402_SETTLE_RPC_URL` names and has settled on **mainnet** (`3gSg3mQE…`, 1.000000 USDC); the reading stays devnet, because the program owning the feed account is deployed there. The hosted endpoint runs the devnet default |
 | [`skills/solana-pay`](skills/solana-pay) | Builds the payment URL. A skill, not a plugin, on purpose | skill | none, it builds a string |
 
 Read that last column as the compiled default with no config override, which is what a
