@@ -111,6 +111,20 @@ request, which is the whole machine-commerce claim in one request. Note the veri
 can legitimately go red if that node is down; the static and offline ones cannot, which is why they
 are separated.
 
+That challenge is also graded by someone other than us, which is the difference between claiming
+conformance and letting you check it:
+
+```bash
+cd scripts/x402-validator && npm ci --silent && node validate-challenge.mjs
+```
+
+It runs the live body past `PaymentRequiredV2Schema` from `@x402/core`, pinned with a committed
+lockfile. What makes a green result worth anything is the control shipped beside it: the body this
+endpoint served before the spec-conformance fix, which the run must REJECT. It does, naming both
+reasons, a missing `resource` and a `network` that is not CAIP-2. A validator never shown to reject
+anything has not been shown to work. It also reads `resource.url` itself, because the schema accepts
+a `localhost` value and so cannot tell you the advertised address is one a payer could reach.
+
 If that fails on Windows with `curl: (35) schannel: ... CRYPT_E_REVOCATION_OFFLINE`, the node is
 fine and the fault is on the client: Schannel could not reach a certificate-revocation responder,
 which it treats as fatal for every HTTPS host, not just this one. Add one flag:
