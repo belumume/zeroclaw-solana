@@ -84,6 +84,21 @@ Proven end to end on devnet: a 402 challenge, a signed
 payment, on-chain settlement, the reading served, and a replayed payment refused. A device that
 pays for its own gas.
 
+**And proven once with real money, which is worth stating precisely rather than rounding up.**
+Reading the feed and settling the payment are separate concerns, so they take separate RPC
+endpoints (`X402_READ_RPC_URL`, `X402_SETTLE_RPC_URL`, both defaulting to `X402_RPC_URL`). Pointed
+at mainnet-beta, the gate accepted a genuine payment and broadcast it:
+`3gSg3mQE9vA5X9CmFBxGEY2EFSAMXGhaC1HrUDbH8uA3MQhuaVjCdHjb1kshyzTqWKRALa9EQPeKja2Hk2rWcF2f`.
+That is 1.000000 mainnet USDC, memo `x402-18c905bdbdf70730-0`, finalized, `err: None`. Re-derive
+with `getSignatureStatuses` against `api.mainnet-beta.solana.com`.
+
+**The honest shape of that: the paywall settles on mainnet, the goods are devnet.** The reading it
+served in that same response came from feed `JEtuZkcR…` on devnet at sequence 818, because a
+`DeviceFeed` account is owned by `zeroclaw_oracle` and that program is deployed on devnet only.
+Putting the feed on mainnet is a program deployment we have not paid for, not a configuration
+change. The hosted endpoint at `x402.perfpilot.dev` runs the devnet default for both, so anything
+you exercise there settles devnet.
+
 The challenge itself is protocol-conformant, and that is checkable by someone who does not trust
 us, which is the only version of the claim worth making. It validates against
 `PaymentRequiredV2Schema` from `@x402/core`, the spec's own published schema, pinned with a
