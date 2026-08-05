@@ -274,7 +274,17 @@ def is_transport_error(e):
     it had and the workflow branches on a number instead of on a sentence.
     """
     if isinstance(e, urllib.error.HTTPError):
-        return e.code >= 500
+        # 429 and 408 are TRANSPORT, and reading them as claim failures was a real defect
+        # rather than a theoretical one. A public Solana RPC rate-limits routinely, so a
+        # reader on a shared endpoint got a red verdict reported as "this claim stopped
+        # holding" when the chain had not been consulted at all. That is the worst possible
+        # direction for this script to be wrong in: it is the artifact whose whole job is
+        # letting a stranger re-verify, and it was telling some of them the proofs broke.
+        #
+        # Both are safe to retry for the same reason the docstring above gives: a claim
+        # that stopped holding arrives as a SUCCESSFUL response carrying a different value,
+        # so it never reaches this function and can never be retried into looking healthy.
+        return e.code >= 500 or e.code in (408, 429)
     if isinstance(e, urllib.error.URLError):
         return True
     return isinstance(e, (TimeoutError, ConnectionError))

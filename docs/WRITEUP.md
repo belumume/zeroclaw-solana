@@ -84,6 +84,26 @@ Proven end to end on devnet: a 402 challenge, a signed
 payment, on-chain settlement, the reading served, and a replayed payment refused. A device that
 pays for its own gas.
 
+The challenge itself is protocol-conformant, and that is checkable by someone who does not trust
+us, which is the only version of the claim worth making. It validates against
+`PaymentRequiredV2Schema` from `@x402/core`, the spec's own published schema, pinned with a
+committed lockfile: `cd scripts/x402-validator && npm ci --silent && node validate-challenge.mjs`.
+The grader is theirs rather than ours, so a pass is a statement about the protocol instead of about
+a test written here to suit the answer.
+
+Two details in that check matter more than the green result. It carries the pre-cutover body as a
+control that must be REJECTED, because a validator never shown to reject anything has not been shown
+to work, and without the control a pass would carry no information at all. And it reads
+`resource.url` separately, because the schema accepts `http://localhost:4577/reading`: a conformant
+challenge can still advertise an address no payer on earth can reach, so schema conformance and
+reachability are two claims and only one of them is a schema question.
+
+Getting there produced the sharper finding. The obvious deploy sets `X402_RESOURCE_URL` and stops,
+and that configuration still fails, because `X402_NETWORK` is defined in the environment file and
+overrides the code's CAIP-2 default with the v1 friendly form. Running the validator against each
+candidate configuration BEFORE the deploy is what caught it; running it after would have shipped a
+half-fix that looked deliberate.
+
 The honest limit, stated here rather than left for a reviewer to derive from the addresses:
 buyer and seller are distinct wallets but both are ours, so what is proven is the mechanism, not
 demand. The asset is not a stand-in, though. The payment settles in Circle's devnet USDC
