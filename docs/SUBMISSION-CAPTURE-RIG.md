@@ -109,3 +109,34 @@ scrcpy mirrors the device losslessly at native resolution over USB and appears a
 that OBS captures cleanly. The resolution: **mirror the screen for anything the judge must READ, and
 film the physical handset only for a beat whose job is to prove a real human is holding a real
 phone.** They are different shots with different purposes and the demo can afford both.
+
+## scrcpy is installed and verified, and it is NOT on PATH
+
+Checked because a shoot is the wrong moment to discover a missing tool. `scrcpy` and `adb` both
+return "not found" from a shell, which reads as absent and is not: the package is installed and
+simply not on PATH.
+
+    winget list --id Genymobile.scrcpy     ->  scrcpy 4.1, source winget
+
+Both binaries live together, and adb ships bundled so there is no separate Android SDK to install:
+
+    %LOCALAPPDATA%\Microsoft\WinGet\Packages\Genymobile.scrcpy_*\scrcpy-win64-v4.1\
+
+Verified by running them from that directory rather than by trusting the package listing:
+
+    scrcpy 4.1
+    Android Debug Bridge version 1.0.41, Version 37.0.0-14910828
+    adb devices  ->  empty list, which is correct with no handset plugged in
+
+A prior `winget install scrcpy` without `--source` had exited 0 and installed nothing, which is why
+the tool was recorded as missing. Pinning `--source winget` reported the package as already present
+instead, and that report is what led to the path above. **A tool reported absent by `which` is a
+claim about PATH, never about the machine.**
+
+### The phone shot does not depend on any of this
+
+Worth stating so a scrcpy problem on the night never blocks the shoot: there are two handsets, so
+one can film the other's screen with zero software involved, and that is the more authentic version
+of the beat whose job is proving a human is holding a real phone. scrcpy is the better instrument
+for anything the judge must READ off the device, because it mirrors losslessly at native
+resolution. Two shots, two purposes, and only one of them has a software dependency.
