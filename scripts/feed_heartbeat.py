@@ -56,11 +56,9 @@ ATTEMPTS = 3
 def is_transport_error(e):
     """True when the network refused, rather than the feed having a real problem.
 
-    408 and 429 are the endpoint declining to answer, not an answer: a devnet rate limit
-    during a take would otherwise render on camera as the feed being broken. Mirrors the
-    boundary fixed in verify-proof.py (its test suite carries the reasoning per code); the
-    duplication this file's header admits to is exactly how one of the two copies stayed
-    wrong after the other was fixed.
+    429 and 408 belong here for the same reason they do in `verify-proof.py`: a public
+    Solana RPC rate-limits routinely, and reading that as the feed having a real problem
+    reports a healthy feed as broken without ever having consulted the chain.
     """
     if isinstance(e, urllib.error.HTTPError):
         return e.code >= 500 or e.code in (408, 429)

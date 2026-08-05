@@ -97,7 +97,7 @@ LABEL = {
     CLAIM: "A CLAIM (exit 1, never retry)",
 }
 
-PRE_FIX = "return e.code >= 500 or e.code in TRANSPORT_HTTP_CODES"
+PRE_FIX = "return e.code >= 500 or e.code in (408, 429)"
 MUTANT = "return e.code >= 500"
 
 

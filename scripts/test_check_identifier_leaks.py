@@ -87,6 +87,39 @@ case(
     FIRE,
     {"BUILD.md": f"    cd /mnt/c/Users/{_ACCT}/DEV/zeroclaw-solana\n"},
 )
+# INCIDENT 4, verbatim shape: this shipped to the public raw URL inside a module docstring
+# and sat there behind a green gate. It carries no username and no credential, so every
+# other shape in this file misses it by construction. That is the whole reason it needs its
+# own pattern rather than being assumed covered.
+case(
+    "INCIDENT 4: a path into the authoring agent's own config, no username anywhere",
+    FIRE,
+    {
+        "webshop-pay/build.py": (
+            '"""The general form is in `~/.claude/rules/'
+            'skill-consolidation-extract-diff-first.md`."""\n'
+        )
+    },
+)
+case(
+    "the same shape without the tilde, as a bare relative path",
+    FIRE,
+    {"docs/NOTES.md": "cross-checked against .claude/solutions/some-note.md\n"},
+)
+# MUST-NOT-FIRE control. The pattern is anchored on `.claude/<subdir>/` precisely so it does
+# NOT match this repo's own tracked `.claude/` project directory, which is mentioned
+# legitimately in real docs. If this ever goes FIRE the pattern was widened into noise, and a
+# gate that cries wolf gets routed around, which is worse than not having it.
+case(
+    "the repo's own .claude project directory, mentioned legitimately",
+    CLEAN,
+    {
+        "README.md": (
+            "Project config lives in `.claude/` and the goal file is `.claude/GOAL.md`.\n"
+            "Agent worktrees land under `.claude/worktrees/` and are gitignored.\n"
+        )
+    },
+)
 case(
     "WSL UNC path",
     FIRE,

@@ -194,12 +194,6 @@ RPC_ATTEMPTS = 3
 RETRY_BUDGET_S = 25.0
 _retry_spent = 0.0
 
-# 4xx codes that mean "the endpoint declined to answer", not "your claim is false".
-# Enumerated rather than expressed as a range, because the rest of 4xx IS a real answer
-# and must keep exiting 1. Reasoning per code is in is_transport_error's docstring;
-# controls in scripts/test_verify_proof_transport.py.
-TRANSPORT_HTTP_CODES = frozenset({408, 429})
-
 
 def rpc(method, params):
     """One JSON-RPC call, retrying only a TRANSPORT failure.
@@ -278,32 +272,19 @@ def is_transport_error(e):
 
     An exit code cannot be misread that way, so the script now says which kind of failure
     it had and the workflow branches on a number instead of on a sentence.
-
-    The 4xx boundary is deliberate and is NOT "all 4xx are transport". A status code is
-    transport here when the endpoint declined to ANSWER THE QUESTION, so the run has no
-    opinion and a retry can change the outcome:
-
-      429  rate limited. Public devnet returns this routinely under no unusual load. It
-           says nothing whatsoever about whether a claim still holds, and until
-           2026-08-05 it fell through to `>= 500` as False and rendered a routine
-           rate-limit as a claim that stopped holding -- exit 1, the finding code, on a
-           run where nothing was found. That is the worst available failure for a
-           verifier whose whole job is telling those two apart.
-      408  the server timing out the request is the HTTP spelling of the TimeoutError
-           the last line of this function already calls transport.
-
-    Everything else in 4xx stays a real answer and must keep exiting 1:
-
-      404  on a JSON-RPC endpoint this means the URL is wrong, which a retry cannot fix
-           and which exit 2 would wrongly invite CI to retry three times. Note the
-           tempting misreading: a PRUNED transaction never arrives here as a 404. Solana
-           answers HTTP 200 with `result: null`, so pruning is handled by the caller's
-           `if not t:` bundle fallback, not by this predicate.
-      400/401/403  malformed request, or credentials the operator must fix. A real
-           response, deterministic on retry.
     """
     if isinstance(e, urllib.error.HTTPError):
-        return e.code >= 500 or e.code in TRANSPORT_HTTP_CODES
+        # 429 and 408 are TRANSPORT, and reading them as claim failures was a real defect
+        # rather than a theoretical one. A public Solana RPC rate-limits routinely, so a
+        # reader on a shared endpoint got a red verdict reported as "this claim stopped
+        # holding" when the chain had not been consulted at all. That is the worst possible
+        # direction for this script to be wrong in: it is the artifact whose whole job is
+        # letting a stranger re-verify, and it was telling some of them the proofs broke.
+        #
+        # Both are safe to retry for the same reason the docstring above gives: a claim
+        # that stopped holding arrives as a SUCCESSFUL response carrying a different value,
+        # so it never reaches this function and can never be retried into looking healthy.
+        return e.code >= 500 or e.code in (408, 429)
     if isinstance(e, urllib.error.URLError):
         return True
     return isinstance(e, (TimeoutError, ConnectionError))
