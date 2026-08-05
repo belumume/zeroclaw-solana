@@ -180,8 +180,16 @@ python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</
   its own positive control stops passing, so a green result cannot come from a broken checker.
 </p>
 
-<h2><span class="n">05</span>Watch it</h2>
-<video controls preload="metadata" src=".demo-assets/cut/zeroclaw-solana-demo.mp4"></video>
+<h2><span class="n">05</span>Try it yourself</h2>
+<p>
+  Open a payment link and change one character of the recipient address. The page refuses, names
+  both addresses in full rather than truncating them, and never shows a pay button. Truncation is
+  what lets a swapped address survive a glance, so it shows the whole thing.
+</p>
+<pre><code>python demo/verify-merchant-invariant.py</code></pre>
+<p>
+  The walkthrough video is being re-recorded and will be linked here when it lands.
+</p>
 
 <h2><span class="n">06</span>Everything else</h2>
 <ul class="links">

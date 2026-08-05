@@ -128,11 +128,20 @@ BEATS = [
         # What the frame shows now is cmd running git and python, and nothing else.
         "cd /d %TEMP% && rmdir /s /q zcx-fresh 2>nul & "
         "git clone -q https://github.com/belumume/zeroclaw-solana zcx-fresh && cd zcx-fresh && "
+        # git prints its own origin URL. The plan wanted "repo URL printed by the
+        # terminal", but @echo off means the typed command is never visible, so the only
+        # honest way to get the URL on screen is a command that genuinely emits it.
+        "git remote -v && "
         "python scripts/verify-proof.py && python scripts/verify_proof_offline.py && "
         "python scripts/certify_publish_tx.py",
         # The three tools' own summary lines. Nothing here was printed by a wrapper, because there
         # is no wrapper left to print it.
-        ["static claims verified", "verify offline", "cases correct"],
+        [
+            "zeroclaw-solana",
+            "static claims verified",
+            "verify offline",
+            "cases correct",
+        ],
         24.0,
         "The closing beat: a real clone into a directory the command deletes first, then the three "
         "commands chained so a failure anywhere stops the chain and the frame shows exactly where. "
@@ -203,7 +212,8 @@ BEATS = [
         "The reproducibility axis made visible, and the fourth of the four uncontested beats. One "
         "command, no install, no key, and fourteen checks go green: 10/10 static and 4/4 live on "
         "the measured run. TWO SHOOT CONSTRAINTS. It is 31 lines, which is near the console's row "
-        "budget at the 30px font, so verify the summary has not scrolled off before keeping a take. "
+        "budget at the shipped console font, so verify the summary has not scrolled off before "
+        "keeping a take. "
         "And at 9.67s it is by far the longest beat here, roughly 6% of a three-minute cut, so it "
         "wants narration over it rather than silence, or a speed ramp in the edit. It also hits the "
         "network, so it carries the same warm-up requirement as the other live beats.",
@@ -531,13 +541,47 @@ def main():
         return 1
 
     mean, sd = frame_stats(png)
-    text = ocr(png)
-    missing = [e for e in beat.expect if e.lower() not in (text or "").lower()]
+
+    # A chained beat SCROLLS. `git remote -v` and the first tool's summary are gone from the
+    # screen by the time the last tool prints, so a single frame can only ever carry the tail
+    # and the gate fails a take that was completely real. Measured on clean-clone: the end
+    # frame held only the offline verifier's self-test, and two true markers read as missing.
+    # Sample across the capture and gate on the UNION -- "this text was on screen during the
+    # take" is the claim the beat actually makes. Loosening the marker list instead would have
+    # blinded the gate to the first two thirds of its own beat.
+    frames = sorted(png.parent.glob(f"{png.stem}-u*.png"))
+    for f in frames:
+        f.unlink()
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(mp4),
+            "-vf",
+            "fps=2",
+            "-frames:v",
+            "40",
+            str(png.parent / f"{png.stem}-u%03d.png"),
+        ],
+        capture_output=True,
+    )
+    frames = sorted(png.parent.glob(f"{png.stem}-u*.png"))
+    seen = [ocr(png) or ""]
+    for f in frames:
+        seen.append(ocr(f) or "")
+    text = "\n".join(seen)
+    scanned = len(frames) + 1
+    missing = [e for e in beat.expect if e.lower() not in text.lower()]
 
     w, h = frame_size(png)
     print(f"beat    : {beat.name}")
     print(f"capture : {mp4.name}  {mp4.stat().st_size:,} bytes")
     print(f"frame   : {w}x{h}  mean={mean} sd={sd}")
+    print(f"gated on: {scanned} frames (union OCR)")
     upscale = max(1920 / w, 1080 / h) if w > 0 and h > 0 else 99.0
     if upscale > 1.15:
         # Not fatal, but say it every time. The cut this rebuild replaces shipped at 1280x720 and
