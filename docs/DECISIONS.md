@@ -79,6 +79,16 @@ program proves the feed is consumable. The device key was generated on the node 
 `openssl rand -hex 32` and has never left that box, so the claim that the device signs its own
 readings is literal rather than a figure of speech.
 
+That second sentence was an argument about a deployed program until 2026-08-05, when it became
+a transaction:
+`4CRapo3AEFBFLh7Y7byJR9XDYZEa95MEioUQMzUhJVxTB9HaDTRtX2X47pVgxaSu8KNfYsPyugeQ6FjN8hBzi54L`
+read this node's feed and emitted `ActionTaken … crossed=true`. Worth recording why it took so
+long to notice: the consumer had been deployed and exercised since 2026-07-21, so every surface
+that checks whether it EXISTS and WORKS was green, and none of them asks which feed it read. It
+had read the historical feed four days before this one was created. A capability that is
+demonstrated once against a fixture and then cited about production is the same shape as a
+control nobody wired up, which is the defect this project filed ten times upstream.
+
 ## 4. The response path is sanitized, not just the request path
 
 **Chosen.** On-chain data is sanitized before it reaches the model's context, treating token
