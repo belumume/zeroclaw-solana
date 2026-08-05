@@ -15,7 +15,7 @@ per request, and the node covers its own gas. That is the whole loop. Nobody sub
 hardware.
 
 **A shop that takes money without holding keys.** A merchant agent on Telegram and WhatsApp
-quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in devnet
+quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in mainnet
 USDC. It marks an order paid only when four things agree: the reference, the exact amount, the
 exact mint, and the watched destination. A payment in a token the payer minted themselves does
 not qualify.

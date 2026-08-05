@@ -287,27 +287,25 @@ create a scheduled job while taking an order, and a cron entry is persistence th
 the turn it was planted in. `cron_list` is a read and stays. The DePIN publisher uses an OS
 scheduler rather than `zeroclaw cron`, so nothing loses a capability.
 
-### Point the payment watcher at devnet, or your order never marks paid
+### The payment watcher needs no network override, and this page used to say it did
 
-**This step is not optional and this page omitted it until 2026-08-04.** `payment_watch`
-compiles with mainnet defaults on purpose, because a real merchant runs on mainnet: its
-`DEFAULT_RPC` is `api.mainnet-beta.solana.com` and its default mint is mainnet USDC
-(`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). This shop settles on **devnet** in devnet
-USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`). Follow the rest of this page without
-this block and the watcher polls the wrong chain for the wrong token, so a payment you can
-see in the explorer is never matched and the order sits at NOT_YET forever. Nothing errors,
-which is what makes it expensive.
+**Read this if you followed an earlier copy of this page.** Until 2026-08-05 this section
+told you to point `payment_watch` at devnet and to pass a devnet mint on every call. Both
+instructions are now wrong, and following them is the exact failure the old text warned
+about, with the chain the other way round: the watcher would poll devnet for a payment that
+settled on mainnet, the order would sit at NOT_YET forever, and nothing would error.
 
-```
-zeroclaw config set --no-interactive tools.payment_watch.config.rpc_url \
-  "https://api.devnet.solana.com"
-```
+The shop moved to mainnet, so the two sides now agree by default. `payment_watch` compiles
+with `DEFAULT_RPC = https://api.mainnet-beta.solana.com` and defaults its mint to mainnet
+USDC (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`); the pay page settles on mainnet in
+that same real USDC. **No `rpc_url` override and no explicit `mint` argument are needed.**
 
-Then pass the devnet mint explicitly on every call. The `mint` argument is optional and
-omitting it falls back to mainnet USDC, so on devnet it has to be supplied:
+Re-derive both halves rather than trusting this paragraph:
 
 ```
-mint = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+grep -n DEFAULT_RPC plugins/payment-watch/src/watch.rs     # api.mainnet-beta.solana.com
+grep -c "api.devnet" webshop-pay/src/app.js                # 0
+grep -n "api.mainnet-beta" webshop-pay/src/app.js          # the page's own RPC
 ```
 
 Optional and recommended, since the plugin asks a second independent endpoint to re-derive
@@ -316,12 +314,14 @@ host is refused, because the same party answering twice is not corroboration):
 
 ```
 zeroclaw config set --no-interactive tools.payment_watch.config.corroborating_rpc_urls \
-  '["https://devnet.helius-rpc.com/?api-key=YOUR_KEY"]'
+  '["https://mainnet.helius-rpc.com/?api-key=YOUR_KEY"]'
 ```
 
-Re-derive the mismatch yourself rather than trusting this paragraph:
-`grep -n DEFAULT_RPC plugins/payment-watch/src/watch.rs` against
-`grep -n "api.devnet" webshop-pay/src/app.js`.
+If you point the shop at your own devnet deployment instead, the override still exists and
+it is now two settings rather than one: set `tools.payment_watch.config.rpc_url` to
+`https://api.devnet.solana.com` and pass the devnet USDC mint
+(`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`) on every call, because omitting `mint`
+falls back to the mainnet one.
 
 The second profile the node uses, documented here because an undocumented security profile
 is not a reviewable one:
@@ -441,13 +441,26 @@ ssh -L 8899:127.0.0.1:8899 <your-node>   # then open http://127.0.0.1:8899 local
 
 Stop the server once the session is linked. It has no reason to keep running afterwards.
 
-**Fund the paying wallet before you open the link.** The shop quotes in **devnet USDC**
-(mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, Circle's devnet USDC), so devnet SOL
-alone cannot settle a payment: SOL covers the transaction fee, the transfer itself is the
-SPL token. Get free devnet USDC at `faucet.circle.com` (choose Solana Devnet) for whichever
-wallet you will pay from, and fund it for at least the order amount. Without it the wallet
-returns an opaque internal error; the pay page pre-checks the balance and tells you the
-shortfall instead, but the fix is still the faucet.
+**Fund the paying wallet before you open the link.** The hosted pay page at
+`zeroclaw-shop-pay.pages.dev` settles in **mainnet USDC**
+(mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). SOL alone cannot settle a payment
+whichever network you are on: SOL covers the transaction fee, the transfer itself is the
+SPL token, so the paying wallet needs both.
+
+Two ways to run it, and the second costs nothing:
+
+1. **Against the hosted page, on mainnet.** Real USDC, and the demo order is 0.25 USDC plus a
+   fee under a tenth of a cent. Fund the wallet you will pay from with at least the order
+   amount.
+2. **Against your own devnet deployment, free.** Apply the two-setting devnet override
+   documented above (`tools.payment_watch.config.rpc_url` to `https://api.devnet.solana.com`,
+   and pass the devnet USDC mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` on every call),
+   serve `webshop-pay/` yourself, and take free devnet USDC from `faucet.circle.com`
+   (choose Solana Devnet). Every claim in this document is checkable this way without spending.
+
+Get the network wrong and the wallet returns an opaque internal error. The pay page pre-checks
+the balance and names the shortfall instead, which is the faster signal, but the underlying fix
+is funding the wallet on the network the page is actually using.
 
 If you paired WhatsApp, sanity-check that the channel is actually live before trusting it:
 the daemon's startup banner must list `whatsapp.<alias>`. If it lists only Telegram, you

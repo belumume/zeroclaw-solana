@@ -617,7 +617,7 @@ Scoped non-goals (deliberate):
 
 **Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC at a stated
 rate source (ECB reference), so a merchant charges "R$120" and the customer pays the USDC
-equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches a public USD/BRL rate (frankfurter.dev, ECB-based), computes the USDC amount, and states the conversion (for example R$120 at 5.0797 = 23.62 USDC); the on-chain settlement is the same shop flow proven in DEVNET-PROOF, confirmed on an exact amount, mint and destination match rather than on the reference alone.
+equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches a public USD/BRL rate (frankfurter.dev, ECB-based), computes the USDC amount, and states the conversion (for example R$120 at 5.0797 = 23.62 USDC). **The live pay page settles in mainnet USDC** (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`); the recorded transaction bundle in DEVNET-PROOF is devnet, because it predates the move and its signatures cannot be migrated. The settlement rule is unchanged either way: an order marks paid only on an exact amount, mint and destination match, never on the reference alone.
 
 ## What we turned down, and why
 
