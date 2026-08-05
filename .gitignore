@@ -123,3 +123,17 @@ docs/SUBMISSION-HANDOFF.md
 node_modules/
 docs/SUBMISSION-TAKE-*.md
 docs/SUBMISSION-FORM-FIELDS.txt
+
+# Internal submission tooling and strategy. These carry an `audience: internal` marker, which is
+# a comment git does not read, so the enforcement lives here and is checked by
+# .tools/check-internal-not-tracked.py. Three of these were one `git add -A` from a public repo.
+docs/MANDATE-LEDGER.md
+docs/COMPLIANCE-LEDGER.md
+docs/SUBMISSION-PLAN.md
+docs/TASK-MIRROR.md
+docs/SYNTHESIS-2026-08-05.md
+docs/RIVALS-LIVE-2026-08-05.md
+docs/FIELD-SWEEP-2026-08-05.md
+docs/NETWORK-SPLIT.md
+docs/MAINNET-COSTING.md
+docs/OCI-AND-NETWORKS.md

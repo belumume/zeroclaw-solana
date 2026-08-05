@@ -85,8 +85,15 @@ ships its own TLS stack:
 ```bash
 U=https://x402.perfpilot.dev/price
 curl -s --ssl-revoke-best-effort "$U"
-python3 -c "import urllib.request as u,sys;print(u.urlopen(u.Request(sys.argv[1],headers={'User-Agent':'Mozilla/5.0'})).read().decode())" "$U"
+python3 -c "import urllib.request as u,sys
+r=u.Request(sys.argv[1],headers={'User-Agent':'Mozilla/5.0'})
+try: x=u.urlopen(r); print(x.status); print(x.read().decode())
+except u.HTTPError as e: print(e.code); print(e.read().decode())" "$U"
 ```
+
+The `try/except` is load-bearing rather than defensive: `urlopen` raises on any 4xx, and 402 is
+the whole point of this endpoint, so the obvious one-liner tracebacks on a perfectly healthy
+response. Catching `HTTPError` and reading `e.code` / `e.read()` is how you see the challenge.
 
 Do not reach for `--ssl-no-revoke`, which disables revocation checking globally to work around
 one host.
