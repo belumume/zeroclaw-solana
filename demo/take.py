@@ -25,6 +25,7 @@ Durations below were measured by agents that ran each command, not estimated.
 from __future__ import annotations
 
 import argparse
+import atexit
 import os
 import shutil
 import subprocess
@@ -41,7 +42,7 @@ TITLE = "ZCXTAKE"
 
 # >=130 columns: the replay probe's output wraps below that and wrapped terminal text reads as
 # noise on video. 34 rows keeps the tallest beat (the offline verifier, 20 lines) off the scroll.
-COLS, ROWS = 140, 34
+COLS, ROWS = 130, 34
 
 
 class Beat:
@@ -140,6 +141,51 @@ def launch(beat, hold):
     return script
 
 
+# The console font is a per-user GLOBAL, and it is read when conhost CREATES the window. A
+# per-title key (HKCU\Console\<title>) is never consulted here, because the .cmd sets the title
+# AFTER launch, which is why an earlier attempt silently did nothing. So set the default, shoot,
+# and put it back.
+#
+# Measured: default (__DefaultTTFont__, height 16) gives a 1260x680 window with 20px glyphs.
+# Consolas at height 30 gives 1900x1026 with 30px glyphs, 2.2x the pixel area, still inside the
+# 1920x1080 panel at 130 columns.
+FONT_KEY = r"HKCU:\Console"
+SHOOT_FONT = {
+    "FaceName": "Consolas",
+    "FontFamily": 54,
+    "FontWeight": 400,
+    "FontSize": 0x001E0000,
+}
+
+
+def _ps(cmd):
+    return subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", cmd],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def font_snapshot():
+    r = _ps(
+        f'$p = Get-ItemProperty "{FONT_KEY}"; '
+        '"{0}|{1}|{2}|{3}" -f $p.FaceName, [int]$p.FontSize, [int]$p.FontFamily, [int]$p.FontWeight'
+    )
+    parts = (r.stdout or "").strip().split("|")
+    return parts if len(parts) == 4 else None
+
+
+def font_apply(face, size, family, weight):
+    _ps(
+        f'Set-ItemProperty "{FONT_KEY}" -Name FaceName -Value "{face}"; '
+        f'Set-ItemProperty "{FONT_KEY}" -Name FontSize -Value {int(size)} -Type DWord; '
+        f'Set-ItemProperty "{FONT_KEY}" -Name FontFamily -Value {int(family)} -Type DWord; '
+        f'Set-ItemProperty "{FONT_KEY}" -Name FontWeight -Value {int(weight)} -Type DWord'
+    )
+
+
 def window_title():
     r = subprocess.run(
         [
@@ -194,7 +240,8 @@ def frame_stats(png):
 def frame_size(png):
     r = subprocess.run(
         ["magick", str(png), "-format", "%w %h", "info:"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     try:
         w, h = r.stdout.split()
@@ -277,6 +324,19 @@ def main():
     # Hold the window open well past the command so the finished output is what gets captured.
     hold = int(beat.seconds) + 30
     kill()
+    saved = font_snapshot()
+    font_apply(
+        SHOOT_FONT["FaceName"],
+        SHOOT_FONT["FontSize"],
+        SHOOT_FONT["FontFamily"],
+        SHOOT_FONT["FontWeight"],
+    )
+    # Restore on ANY exit path, including an early return or an exception. A try/finally wrapping
+    # the whole capture would also work and is easy to get subtly wrong; atexit cannot be. The font
+    # is a per-user global, so leaving it changed would silently alter every console the operator
+    # opens afterwards.
+    if saved:
+        atexit.register(font_apply, saved[0], saved[1], saved[2], saved[3])
     launch(beat, hold)
 
     # Let the command actually finish before rolling, or the capture films a half-drawn screen.
@@ -360,7 +420,8 @@ def main():
     print(f"beat    : {beat.name}")
     print(f"capture : {mp4.name}  {mp4.stat().st_size:,} bytes")
     print(f"frame   : {w}x{h}  mean={mean} sd={sd}")
-    if w < 1920 or h < 1080:
+    upscale = max(1920 / w, 1080 / h) if w > 0 and h > 0 else 99.0
+    if upscale > 1.15:
         # Not fatal, but say it every time. The cut this rebuild replaces shipped at 1280x720 and
         # its terminal text was soft for exactly this reason. A console window's pixel size is
         # font size x columns, so the fix is a LARGER CONSOLE FONT rather than more columns:
