@@ -176,6 +176,16 @@
   boot, which is a cap in name only, and the fix is the part worth checking:
 </p>
 <pre><code>curl -s https://x402.perfpilot.dev/health | jq '.ledger'</code></pre>
+<p>
+  <strong>That paywall has taken real money, and the precise claim is a split one.</strong>
+  Reading the feed and settling the payment are separate concerns on separate RPC endpoints, so the
+  gate settled a genuine <strong>mainnet</strong> payment of 1.000000 USDC while serving a reading
+  from our <strong>devnet</strong> feed. The settlement is
+  <code>3gSg3mQE9vA5X9CmFBxGEY2EFSAMXGhaC1HrUDbH8uA3MQhuaVjCdHjb1kshyzTqWKRALa9EQPeKja2Hk2rWcF2f</code>,
+  finalized on mainnet-beta. The goods stay on devnet because a <code>DeviceFeed</code> account is
+  owned by our <code>zeroclaw_oracle</code> program, deployed on devnet only, so a mainnet feed is a
+  program deployment rather than a config flag. The hosted endpoint above runs the devnet default.
+</p>
 
 <h2><span class="n">03</span>The customer's own page refuses, in their language</h2>
 <p>
@@ -210,18 +220,7 @@ python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</
   its own positive control stops passing, so a green result cannot come from a broken checker.
 </p>
 
-<h2><span class="n">05</span>Try it yourself</h2>
-<p>
-  Open a payment link and change one character of the recipient address. The page refuses, names
-  both addresses in full rather than truncating them, and never shows a pay button. Truncation is
-  what lets a swapped address survive a glance, so it shows the whole thing.
-</p>
-<pre><code>python demo/verify-merchant-invariant.py</code></pre>
-<p>
-  The walkthrough video is being re-recorded and will be linked here when it lands.
-</p>
-
-<h2><span class="n">06</span>Four things in the repo worth a minute each</h2>
+<h2><span class="n">05</span>Four things in the repo worth a minute each</h2>
 <p>
   These are not extras bolted on for a demo. Each one exists because a specific claim elsewhere on
   this page would otherwise rest on our word, and each is exercisable by a stranger.
@@ -266,7 +265,7 @@ python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</
   shipped crates.
 </p>
 
-<h2><span class="n">07</span>Everything else</h2>
+<h2><span class="n">06</span>Everything else</h2>
 <ul class="links">
   <li><b><a href="https://github.com/belumume/zeroclaw-solana">Repository</a></b>
       <span>sixteen crates, clippy-clean at <code>-D warnings</code> on host and wasm</span></li>
@@ -279,7 +278,7 @@ python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</
   <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/MAINNET-PROOF.md">Mainnet custody proof</a></b>
       <span>the <code>0x12c</code> refusal, byte-for-byte</span></li>
   <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/transcripts/injection-refund-redirect.md">Injection transcript</a></b>
-      <span>refused with zero tool calls; the model never reached for one</span></li>
+      <span>refused without reaching for a fund tool; it escalated to the operator, who denied it</span></li>
   <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/HOST-SECURITY-AUDIT.md">Upstream audit</a></b>
       <span>ten host defects confirmed and reported, one escalated to a private advisory</span></li>
 </ul>

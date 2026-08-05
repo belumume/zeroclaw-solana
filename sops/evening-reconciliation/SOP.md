@@ -1,12 +1,12 @@
 # Evening reconciliation
 
-Reconciles the demo shop's open payment requests against on-chain settlement daily and
+Reconciles the shop's open payment requests against on-chain settlement daily and
 reports to the owner's channel. No funds move here; the only fund-touching path (a refund)
 sits behind an explicit human checkpoint.
 
 ## Steps
 
-1. **Recall open references**: Use memory_recall to list every payment reference logged today for the demo shop (order number, amount, mint, reference key). If none, report "no open orders today" and stop.
+1. **Recall open references**: Use memory_recall to list every payment reference logged today for the shop (order number, amount, mint, reference key). If none, report "no open orders today" and stop.
    - tools: memory_recall
 2. **Verify settlement on-chain**: For each open reference from step 1, call payment_watch to check whether a payment carrying that reference key has settled. Collect the paid set and the still-open set.
    - tools: payment_watch
