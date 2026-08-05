@@ -495,14 +495,30 @@ def main():
     # this: a default cmd prompt rendered the full home path into a take, and the posture guard
     # prints the home path when run bare. Derived from the environment and never written down,
     # because hardcoding the name here would publish it in the very file that screens for it.
+    # Timezone strings are the third identifier class, found by the postmortem and missed by the
+    # first version of this gate: explorer pages render timestamps in the OPERATOR'S timezone, so
+    # every settlement frame quietly discloses where he lives ("West Africa Time" on the shipped
+    # cut). These are literals rather than env-derived because the leak is what a THIRD PARTY'S
+    # page prints about this machine, not what this machine knows about itself. Word-shaped
+    # patterns only; a bare "WAT" would fire on WATCH.
+    tz_markers = (
+        "west africa",
+        "africa/lagos",
+        "utc+1",
+        "utc+01",
+        "gmt+1",
+        "gmt+01",
+        " wat ",
+    )
+    body = (text or "").lower()
     leaked = [
         label
         for label, value in (
             ("windows username", os.environ.get("USERNAME", "")),
             ("home directory", os.environ.get("USERPROFILE", "")),
         )
-        if value and value.lower() in (text or "").lower()
-    ]
+        if value and value.lower() in body
+    ] + [f"timezone marker {m.strip()!r}" for m in tz_markers if m in body]
     if leaked:
         print(
             f"\nFAIL  the frame carries {leaked}. This take cannot ship. Set a bare prompt, cd to "

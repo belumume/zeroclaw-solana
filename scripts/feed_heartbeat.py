@@ -54,9 +54,16 @@ ATTEMPTS = 3
 
 
 def is_transport_error(e):
-    """True when the network refused, rather than the feed having a real problem."""
+    """True when the network refused, rather than the feed having a real problem.
+
+    408 and 429 are the endpoint declining to answer, not an answer: a devnet rate limit
+    during a take would otherwise render on camera as the feed being broken. Mirrors the
+    boundary fixed in verify-proof.py (its test suite carries the reasoning per code); the
+    duplication this file's header admits to is exactly how one of the two copies stayed
+    wrong after the other was fixed.
+    """
     if isinstance(e, urllib.error.HTTPError):
-        return e.code >= 500
+        return e.code >= 500 or e.code in (408, 429)
     if isinstance(e, urllib.error.URLError):
         return True
     return isinstance(e, (TimeoutError, ConnectionError))
