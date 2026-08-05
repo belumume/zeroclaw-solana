@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZeroClaw on Solana: an agent bounded by the chain</title>
+<meta name="description" content="A DePIN node that sells its own signed readings, and a shop that takes money without holding keys. Every claim checkable with one command.">
+<style>
+  :root{
+    --bg:#fbfaf8; --fg:#1a1815; --muted:#615c54; --rule:#e2ddd4;
+    --card:#ffffff; --accent:#b34a1a; --ok:#1f6f43; --code-bg:#f4f1ec;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#14130f; --fg:#eae5db; --muted:#9b948a; --rule:#2c2a25;
+      --card:#1c1a16; --accent:#e0824f; --ok:#5fb98a; --code-bg:#211f1a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:16px/1.65 ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:760px; margin:0 auto; padding:0 20px}
+  header{padding:72px 0 12px}
+  h1{font-size:clamp(28px,5vw,40px); line-height:1.15; margin:0 0 16px; letter-spacing:-.02em}
+  h2{font-size:clamp(19px,3vw,23px); margin:56px 0 14px; letter-spacing:-.01em}
+  h2 .n{color:var(--muted); font-variant-numeric:tabular-nums; font-weight:400; margin-right:.5em}
+  .lede{font-size:clamp(17px,2.4vw,19px); color:var(--muted); margin:0 0 28px}
+  p{margin:0 0 16px}
+  a{color:var(--accent); text-underline-offset:3px}
+  code,pre{font-family:ui-monospace,"Cascadia Code",Consolas,"SF Mono",Menlo,monospace}
+  /* inline code carries base58 addresses, which have no break opportunity and would push the
+     page sideways on a phone. pre keeps its own horizontal scroll, so it is excluded below. */
+  code{
+    background:var(--code-bg); padding:.12em .38em; border-radius:4px; font-size:.9em;
+    overflow-wrap:anywhere;
+  }
+  pre{
+    background:var(--code-bg); border:1px solid var(--rule); border-radius:8px;
+    padding:14px 16px; overflow-x:auto; font-size:14px; line-height:1.55; margin:0 0 16px;
+  }
+  pre code{background:none; padding:0; font-size:inherit}
+  .stats{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(132px,1fr)); gap:1px;
+    background:var(--rule); border:1px solid var(--rule); border-radius:10px; overflow:hidden;
+    margin:0 0 18px;
+  }
+  .stat{background:var(--card); padding:16px 18px}
+  .stat b{display:block; font-size:26px; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .stat span{display:block; font-size:12.5px; color:var(--muted); margin-top:3px}
+  .stat.good b{color:var(--ok)}
+  .note{
+    border-left:3px solid var(--accent); padding:2px 0 2px 16px; margin:0 0 18px;
+    color:var(--muted); font-size:15px;
+  }
+  .note strong{color:var(--fg)}
+  video{width:100%; border:1px solid var(--rule); border-radius:10px; display:block; background:#000}
+  .links{list-style:none; padding:0; margin:0}
+  .links li{padding:11px 0; border-top:1px solid var(--rule); display:flex; gap:14px; flex-wrap:wrap}
+  .links li:last-child{border-bottom:1px solid var(--rule)}
+  .links b{min-width:150px; font-weight:600}
+  .links span{color:var(--muted); font-size:14.5px}
+  footer{margin:64px 0 40px; padding-top:22px; border-top:1px solid var(--rule); color:var(--muted); font-size:14px}
+  .tag{
+    display:inline-block; font-size:12px; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--muted); border:1px solid var(--rule); border-radius:20px; padding:4px 11px; margin-bottom:20px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <span class="tag">Superteam · ZeroClaw on Solana</span>
+  <h1>An agent bounded by the chain, and a node that pays its own gas</h1>
+  <p class="lede">
+    Two things run, both self-hosted, both auditable by a stranger in an evening. A DePIN node that
+    signs its own sensor readings on-chain and <em>sells</em> them per request, and a merchant
+    terminal that takes an order in Portuguese and settles in USDC.
+  </p>
+  <p>
+    Every claim on this page is checkable with one command or one link. Nothing here is a
+    screenshot of something that used to work. Start with the shortest one:
+  </p>
+<pre><code>curl -i https://x402.perfpilot.dev/price</code></pre>
+  <p class="note">
+    A live node answering <code>HTTP/1.1 402 Payment Required</code> with a single-use nonce that
+    changes on every request. That is the whole machine-commerce claim, in one request, against
+    hardware that is running right now.
+  </p>
+  <p class="lede" style="font-size:15px">
+    On Windows that can fail with <code>curl: (35) schannel: … CRYPT_E_REVOCATION_OFFLINE</code>.
+    The node is fine; Schannel could not reach a certificate-revocation responder and treats that
+    as fatal for every HTTPS host. Add <code>--ssl-revoke-best-effort</code>, which downgrades an
+    unreachable responder from fatal to non-fatal and still validates the certificate.
+  </p>
+</header>
+
+<h2><span class="n">01</span>It has been running, not demoed</h2>
+<div class="stats">
+  <div class="stat"><b>762</b><span>feed transactions</span></div>
+  <div class="stat good"><b>0</b><span>failed</span></div>
+  <div class="stat"><b>10.9</b><span>days continuous</span></div>
+  <div class="stat"><b>20.5<small>m</small></b><span>median gap</span></div>
+</div>
+<p>
+  Read at 2026-08-05T01:28Z, first publish 2026-07-25T04:12:01Z. The count moves every twenty
+  minutes, so re-derive it rather than believing this page. It is an unauthenticated call against
+  a public devnet RPC, no key and no account:
+</p>
+<pre><code>python3 scripts/verify-proof.py    # stdlib only, no install, no key</code></pre>
+<p>
+  To count the history directly, the underlying call is <code>getSignaturesForAddress</code> on the
+  feed account <code>JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg</code>.
+</p>
+<p class="note">
+  <strong>The honest part, stated here rather than left for you to find: the largest gap is 61.5
+  minutes,</strong> so the cadence is not unbroken. Zero failures is exact: no transaction has
+  ever errored. "Every twenty minutes" is true at the median, with one hour-long interruption
+  across eleven days. The command above would have shown you that anyway, which is the only reason
+  it is worth writing down: a number you can check beats a rounder one you cannot.
+</p>
+
+<h2><span class="n">02</span>The custody argument does not depend on trusting us</h2>
+<p>
+  An approval prompt is not a boundary. The sentence a human reads before approving was written by
+  the model, so influencing the model influences the description. An attacker needs no key, only an
+  operator who reads one plausible sentence and says yes.
+</p>
+<p>
+  Being key-free is what every careful entry in this space says, and it is a claim about what our
+  own code <em>declines</em> to do, which is only ever as good as our code.
+  <strong>The load-bearing difference is where the limit is enforced.</strong> Ours is not in the
+  plugin, not in the host, and not in the prompt: it is a deployed, audited on-chain program.
+</p>
+<p>
+  Demonstrated on <strong>mainnet</strong> rather than asserted. A delegated session key, a real
+  key that really signs, was made to sign an over-cap transfer, and the program rejected it with
+  custom error <code>0x12c</code>. The same key moved a within-cap transfer normally. Both are
+  captured as raw bytes in the repo and verify offline, with no network and no dependencies:
+</p>
+<pre><code>python3 scripts/verify_proof_offline.py</code></pre>
+<p>
+  Prompt-inject every layer we wrote and the ceiling is still there, because it was never ours to
+  remove.
+</p>
+
+<h2><span class="n">03</span>The customer's own page refuses, in their language</h2>
+<p>
+  Every layer above is still something the agent composes, and an agent talked into a different
+  recipient composes a perfectly well-formed link to it. So the checkout page pins the one address
+  it will ever pay and does not trust the link that opened it. Change a single character of the
+  recipient and the card is replaced by <strong>RECUSADO</strong>, the pay button is gone rather
+  than disabled, and both addresses print <em>in full</em>, because a truncated
+  <code>C331…iLHJ</code> is exactly what lets a swapped address survive a glance.
+</p>
+<pre><code>python demo/verify-merchant-invariant.py</code></pre>
+<p class="note">
+  The control is the point. A page that refused <em>everything</em> would produce an identical
+  screenshot, so the harness drives both directions: the pinned address must stay payable while a
+  one-character variant is refused. It reads the pinned address out of the shipped page rather than
+  restating it, so the two cannot drift, and neutering its tampering makes it exit non-zero instead
+  of quietly passing.
+</p>
+<p>
+  The page localises from <code>navigator.language</code> and renders <code>pt-BR</code> end to
+  end. The refusal a Brazilian customer actually reads:
+  <em>"Este link paga um endereço que não é desta loja. Nada foi enviado."</em>
+</p>
+
+<h2><span class="n">04</span>Reproduce it: clone, then three commands</h2>
+<pre><code>git clone https://github.com/belumume/zeroclaw-solana &amp;&amp; cd zeroclaw-solana
+python3 scripts/verify-proof.py           # 10 static + 4 live claims, stdlib only
+python3 scripts/verify_proof_offline.py   # the custody proofs, no network at all
+python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</code></pre>
+<p>
+  No install step, no virtualenv, no credentials. The offline verifier refuses to report at all if
+  its own positive control stops passing, so a green result cannot come from a broken checker.
+</p>
+
+<h2><span class="n">05</span>Watch it</h2>
+<video controls preload="metadata" src=".demo-assets/cut/zeroclaw-solana-demo.mp4"></video>
+
+<h2><span class="n">06</span>Everything else</h2>
+<ul class="links">
+  <li><b><a href="https://github.com/belumume/zeroclaw-solana">Repository</a></b>
+      <span>sixteen crates, clippy-clean at <code>-D warnings</code> on host and wasm</span></li>
+  <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/WRITEUP.md">Write-up</a></b>
+      <span>what it is, who it is for, custody and threat model</span></li>
+  <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/ONE-PAGER.md">One-pager</a></b>
+      <span>the whole argument, with every check inline</span></li>
+  <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/QUICKSTART.md">Quickstart</a></b>
+      <span>run it yourself</span></li>
+  <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/MAINNET-PROOF.md">Mainnet custody proof</a></b>
+      <span>the <code>0x12c</code> refusal, byte-for-byte</span></li>
+  <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/transcripts/injection-refund-redirect.md">Injection transcript</a></b>
+      <span>refused with zero tool calls; the model never reached for one</span></li>
+  <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/HOST-SECURITY-AUDIT.md">Upstream audit</a></b>
+      <span>ten host defects confirmed and reported, one escalated to a private advisory</span></li>
+</ul>
+
+<footer>
+  Built for the Superteam ZeroClaw bounty. Devnet for the feed by choice; the custody proof is on
+  mainnet. Figures on this page carry the command that re-derives them, because a number without
+  one is a claim with an expiry date.
+</footer>
+
+</div>
+</body>
+</html>
