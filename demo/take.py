@@ -120,6 +120,35 @@ BEATS = [
         "an RPC error printing a ~20-line raw traceback.",
     ),
     Beat(
+        "injection-replay",
+        "python demo/injection_replay.py",
+        # From the real run. "ATTACKER" and "AGENT" label the exchange; "invoked by this exchange"
+        # is the tail of the line carrying the on-screen zero. The count itself is one glyph and
+        # OCR-fragile, so the phrase around it is the marker.
+        ["ATTACKER", "AGENT", "invoked by this exchange"],
+        0.1,
+        "D1's transcript half: the attack and the refusal rendered FROM the committed transcript "
+        "file (parsed blockquotes, so the display cannot drift from the artifact a judge can "
+        "open), with 'tool calls invoked by this exchange: 0' as a number on screen and its "
+        "provenance stated beneath it. Offline, byte-identical across runs. Pairs with "
+        "injection-certify for the full beat 7.",
+    ),
+    Beat(
+        "clean-clone",
+        "python demo/clean_clone.py",
+        # From the real run: clone 14s, three commands exit 0, "CLEAN CLONE VERIFIED in 22s |
+        # nothing installed, no key, no account", then the heartbeat line from the CLONE's own
+        # copy. The elapsed digits move per run, so the phrase is the marker, never the number.
+        ["CLEAN CLONE VERIFIED", "FRESH", "seq="],
+        22.0,
+        "D9, the closing beat: a REAL network clone into a directory that did not exist when the "
+        "command started, three commands green with per-command clocks, and the ring close "
+        "re-running the opening beat's command from the clone so the seq on screen is the clone "
+        "proving the feed moved while the judge watched. The elapsed stamp is measured by the run "
+        "itself. Network beat, and the longest: warm nothing, it IS the cold-start story, but "
+        "expect run-to-run variance in the clock and keep whichever take's clock is honest.",
+    ),
+    Beat(
         "coherence-gate",
         "python scripts/check-claim-coherence.py",
         # From the real run: "surfaces read: 33 tracked document(s), 219 tracked file(s)" then
