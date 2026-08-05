@@ -23,25 +23,37 @@ not qualify.
 Built for a small operator who wants an agent touching money without handing it a signing key.
 
 **And it has been running, not demoed.** The rubric asks whether a stranger would still be running
-this in a month. Read as of 2026-08-05T00:47Z, and re-derive it yourself rather than believing the
-figure, because it moves every twenty minutes:
+this in a month. Read as of 2026-08-05T18:09Z, and re-derive it yourself rather than believing the
+figures, because they move every twenty minutes:
 
 ```bash
 python3 scripts/verify-proof.py          # stdlib only, no install, no key
 ```
 
 That checks the live claims. To count the history yourself, the underlying call is
-`getSignaturesForAddress` on the feed account `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg`, which
-any devnet RPC will answer unauthenticated.
+`getSignaturesForAddress` on a feed account, which any devnet RPC will answer unauthenticated.
 
-**760 transactions on the feed account. Zero failed.** First on 2026-07-25T04:12:01Z, spanning
-10.86 days at a median of 20.5 minutes between publishes.
+**Two independent devices, 1,570 publishes between them, zero failed.** That is the DePIN claim
+rather than a gadget claim: the same on-chain oracle program serves both, each device holds its own
+key, and neither can sign for the other.
 
-The honest part, stated here rather than left for you to find: the **largest gap is 61.5 minutes**,
-so the cadence is not unbroken. Zero failures is exact, meaning no transaction has ever errored, and
-"every twenty minutes" is true at the median with one hour-long interruption across eleven days.
-That distinction is the sort of thing the call above would have shown you anyway, which is the only
-reason it is worth stating: a number you can check is worth more than a rounder one you cannot.
+| Feed account | Publishes | Failed | Span | Median gap | Largest gap |
+|---|---|---|---|---|---|
+| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 810 | 0 | 11.6 d | 20.5 min | **61.5 min** |
+| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device) | 760 | 0 | 12.2 d | 20.0 min | **36 h** |
+
+The ARM node is the one the durability claim rests on. Its key was generated on that box with
+`openssl rand -hex 32` and has never left it, so this workstation cannot forge a reading for it, and
+a `systemd --user` timer with lingering keeps it publishing with no laptop in the loop.
+
+The honest part, stated here rather than left for you to find. Zero failures is exact and covers
+both devices: no transaction has ever errored. Continuity is where they differ. The node's largest
+gap is 61.5 minutes across 11.6 days, so "every twenty minutes" is true at the median with one
+hour-long interruption. The second device is laptop-hosted and its largest gap is 36 hours, because
+a laptop sleeps. That is the reason the node exists, and the reason the headline claim is the node's
+rather than the pair's. Both are the sort of thing the call above would have shown you anyway, which
+is the only reason either is worth stating: a number you can check is worth more than a rounder one
+you cannot.
 
 ---
 
@@ -99,6 +111,29 @@ signs, and it still could not move the money, because it may move only up to a c
 enforces, from an account it does not own. A fund key has no such ceiling. Prompt-inject every layer
 we wrote and the ceiling is still there, because it was never ours to remove.
 
+**The selling side is capped too, which the brief makes mandatory in both directions.** The node
+sells its readings behind an x402 paywall, and a per-payer per-day ceiling is enforced in the gate's
+own code rather than by the protocol, so a payer who drains the cap in many small buys is refused
+exactly like one who tries it in a single large one. The ledger is durable: restarting the process
+does not re-open a spent allowance. An earlier version restarted the day on every boot, which is a
+cap in name only, and the fix is the part worth checking rather than the cap itself:
+
+```bash
+curl -s https://x402.perfpilot.dev/health | jq '.ledger'
+```
+
+`restored_sales_at_startup` is non-zero because the ledger really was rebuilt from disk at boot.
+
+And where the cap's boundary sits *today* is locatable rather than assertable, on mainnet, with no
+key and no funds. The captured refusal proves the program said no once; this reads the remaining
+allowance off the delegation account and replays the captured message either side of it, requiring
+at least one refusal **and** at least one acceptance, so a dead program and a broken check both fail
+it instead of printing a clean result over nothing:
+
+```bash
+python3 scripts/replay_allowance_probe.py
+```
+
 ---
 
 ## Reproduce every claim above: clone, then three commands
@@ -135,6 +170,16 @@ Sixteen crates, formatted and clippy-clean at `-D warnings` on host and wasm. Tw
 the shortvec decoder, one covering all 16,777,216 three-byte inputs. A differential fuzzer graded
 against solana-sdk's own deserializer rather than invariants we chose. Every gate ships a control
 proving it can fail, because zero findings is also what a broken detector prints.
+
+Two more, both exercisable rather than described. **A second deployed program reads the feed on
+chain**, which is the difference between an oracle and a memo: `consumer_example` CPI-reads the feed
+account, checks the owner and gates on freshness, so the data is consumable by something other than
+a human squinting at an explorer. Its most recent read of the live ARM feed is transaction
+`4CRapo3AEFBFLh7Y7byJR9XDYZEa95MEioUQMzUhJVxTB9HaDTRtX2X47pVgxaSu8KNfYsPyugeQ6FjN8hBzi54L`. And
+**the sanitizer runs in your browser, compiled from the code that ships**: `sanitizer-microworld/`
+is not a JavaScript reimplementation demonstrating the idea, it compiles `solana_core::sanitize`
+itself to wasm, so pasting a right-to-left override or a zero-width joiner shows what the model
+would actually receive. Open `sanitizer-microworld/index.html`; there is no build step.
 
 Those four are the numbers, and this page promised each one is checkable, so here is how:
 

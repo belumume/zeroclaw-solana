@@ -100,27 +100,45 @@
 
 <h2><span class="n">01</span>It has been running, not demoed</h2>
 <div class="stats">
-  <div class="stat"><b>762</b><span>feed transactions</span></div>
+  <div class="stat"><b>1,570</b><span>publishes on chain</span></div>
   <div class="stat good"><b>0</b><span>failed</span></div>
-  <div class="stat"><b>10.9</b><span>days continuous</span></div>
+  <div class="stat"><b>2</b><span>independent devices</span></div>
   <div class="stat"><b>20.5<small>m</small></b><span>median gap</span></div>
 </div>
 <p>
-  Read at 2026-08-05T01:28Z, first publish 2026-07-25T04:12:01Z. The count moves every twenty
-  minutes, so re-derive it rather than believing this page. It is an unauthenticated call against
-  a public devnet RPC, no key and no account:
+  Read at 2026-08-05T18:09Z. The counts move every twenty minutes, so re-derive them rather than
+  believing this page. It is an unauthenticated call against a public devnet RPC, no key and no
+  account:
 </p>
 <pre><code>python3 scripts/verify-proof.py    # stdlib only, no install, no key</code></pre>
 <p>
-  To count the history directly, the underlying call is <code>getSignaturesForAddress</code> on the
-  feed account <code>JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg</code>.
+  <strong>Two devices, not one, and that is the DePIN claim rather than a gadget claim.</strong>
+  The same on-chain oracle program serves both, each with its own device key, each on its own
+  machine. Neither can sign for the other.
+</p>
+<ul class="links">
+  <li><b><code>JEtuZk&hellip;Vveg</code></b>
+      <span>the ARM node. 810 publishes, 0 failed, 11.6 days, median gap 20.5&nbsp;min. Its key was
+      generated on that box and has never left it, so this workstation cannot forge a reading for
+      it.</span></li>
+  <li><b><code>3aMsPj&hellip;Vx8K</code></b>
+      <span>a second device, 760 publishes, 0 failed, spanning 12.2 days. Deterministic publisher,
+      no model in its path.</span></li>
+</ul>
+<p>
+  To count either history directly, the underlying call is <code>getSignaturesForAddress</code> on
+  the feed account.
 </p>
 <p class="note">
-  <strong>The honest part, stated here rather than left for you to find: the largest gap is 61.5
-  minutes,</strong> so the cadence is not unbroken. Zero failures is exact: no transaction has
-  ever errored. "Every twenty minutes" is true at the median, with one hour-long interruption
-  across eleven days. The command above would have shown you that anyway, which is the only reason
-  it is worth writing down: a number you can check beats a rounder one you cannot.
+  <strong>The honest part, stated here rather than left for you to find.</strong> Zero failures is
+  exact and covers both devices: no transaction has ever errored. Continuity is where they differ,
+  and the difference is the interesting part. The ARM node's largest gap is <strong>61.5
+  minutes</strong> across 11.6 days, so "every twenty minutes" is true at the median with one
+  hour-long interruption. The second device is laptop-hosted and its largest gap is
+  <strong>36 hours</strong>, because a laptop sleeps. That is exactly why the node exists, and why
+  the durability claim rests on the node rather than on it. The command above would have
+  shown you both anyway, which is the only reason either is worth writing down: a number you can
+  check beats a rounder one you cannot.
 </p>
 
 <h2><span class="n">02</span>The custody argument does not depend on trusting us</h2>
@@ -149,6 +167,15 @@
   Prompt-inject every layer we wrote and the ceiling is still there, because it was never ours to
   remove.
 </p>
+<p>
+  <strong>The selling side is capped too, which the brief makes mandatory in both directions.</strong>
+  The node sells its readings behind an x402 paywall, and a per-payer per-day ceiling is enforced in
+  the gate's own code rather than by the protocol: a payer who drains the cap in many small buys is
+  refused the same as one who tries it in a single large one. The ledger is durable, so restarting
+  the process does not re-open a spent allowance. An earlier version restarted the day on every
+  boot, which is a cap in name only, and the fix is the part worth checking:
+</p>
+<pre><code>curl -s https://x402.perfpilot.dev/health | jq '.ledger'</code></pre>
 
 <h2><span class="n">03</span>The customer's own page refuses, in their language</h2>
 <p>
@@ -194,7 +221,52 @@ python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</
   The walkthrough video is being re-recorded and will be linked here when it lands.
 </p>
 
-<h2><span class="n">06</span>Everything else</h2>
+<h2><span class="n">06</span>Four things in the repo worth a minute each</h2>
+<p>
+  These are not extras bolted on for a demo. Each one exists because a specific claim elsewhere on
+  this page would otherwise rest on our word, and each is exercisable by a stranger.
+</p>
+
+<p>
+  <strong>The cap's boundary, located rather than asserted, on mainnet with no key and no
+  funds.</strong> The captured refusal above proves the program said no once. This finds where it
+  says no <em>today</em>: it reads the remaining allowance off the delegation account and replays
+  the captured message at amounts either side of it. It requires at least one amount to be refused
+  <em>and</em> at least one to be accepted, so a program that had stopped working and a check that
+  had stopped checking both fail it rather than printing a clean result over nothing.
+</p>
+<pre><code>python3 scripts/replay_allowance_probe.py</code></pre>
+
+<p>
+  <strong>A second program reads the feed on chain, which is the difference between an oracle and a
+  memo.</strong> Publishing signed bytes proves only that bytes were published. A separate deployed
+  program, <code>consumer_example</code>, CPI-reads the feed account, checks the owner and gates on
+  freshness, so the data is consumable by something other than a human squinting at an
+  explorer. It last read the live ARM feed in transaction
+  <code>4CRapo3AEFBFLh7Y7byJR9XDYZEa95MEioUQMzUhJVxTB9HaDTRtX2X47pVgxaSu8KNfYsPyugeQ6FjN8hBzi54L</code>.
+</p>
+
+<p>
+  <strong>The sanitizer, in your browser, compiled from the code that ships.</strong> Untrusted
+  on-chain text reaches a model through our plugins, so it is sanitized and labelled first. The page
+  below is not a JavaScript reimplementation demonstrating the idea. It compiles
+  <code>solana_core::sanitize</code> itself to wasm, so what you are typing at is the same function
+  the plugins call. Paste a right-to-left override or a zero-width joiner and watch what the model
+  would actually receive.
+</p>
+<pre><code>sanitizer-microworld/index.html    # open it, no build step</code></pre>
+
+<p>
+  <strong>A fuzzer graded by someone else's decoder.</strong> Every other correctness gate here
+  tests a property we thought to write down. The differential fuzzer seeds from real serialized
+  transactions, mutates them with correlated perturbations rather than uniform byte flips, and
+  scores each result against <code>solana-sdk</code>'s own deserializer as an external oracle
+  so it can find disagreement we did not predict. It is deliberately isolated from the
+  plugin workspace, because that oracle cannot compile to wasm and must never be reachable from the
+  shipped crates.
+</p>
+
+<h2><span class="n">07</span>Everything else</h2>
 <ul class="links">
   <li><b><a href="https://github.com/belumume/zeroclaw-solana">Repository</a></b>
       <span>sixteen crates, clippy-clean at <code>-D warnings</code> on host and wasm</span></li>
