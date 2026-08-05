@@ -30,7 +30,7 @@ An approval prompt is not a boundary. The sentence a human reads before approvin
 by the model, so influencing the model influences the description. An attacker needs no key,
 only an operator who reads one plausible sentence and says yes.
 
-Two answers, and neither requires the operator to read correctly:
+Three answers, and none of them requires the operator to read correctly:
 
 **Where intent is fixed, nothing asks.** The publish path can express exactly one intent, so the
 exact serialized bytes are re-derived and anything else is refused. Its self-test *is* the attack,
@@ -42,6 +42,29 @@ key signed an over-cap transfer and the program rejected it with custom error `0
 `AmountExceedsLimit`, sourced to the upstream program in [`MAINNET-PROOF.md`](MAINNET-PROOF.md)); a within-cap
 transfer by the same key settled normally. Both are captured as raw bytes in the repo and verify
 **offline, with no network and no dependencies**.
+
+**Where the agent is wrong anyway, the customer's own page refuses.** Every layer above is still
+something the agent composes, and an agent talked into a different recipient composes a perfectly
+well-formed link to it. So the checkout page pins the one address it will ever pay, and it does not
+trust the link that opened it. Change a single character of the recipient and the card is replaced
+by **RECUSADO**, the pay button is gone rather than disabled, and both addresses are printed **in
+full** — because a truncated `C331…iLHJ` is precisely what lets a swapped address survive a glance.
+
+Run it yourself; it drives both directions and fails unless the page discriminates:
+
+```bash
+python demo/verify-merchant-invariant.py
+```
+
+The control is the whole point. A page that refused *everything* would produce an identical
+screenshot, so the pinned address must stay payable while a one-character variant is refused. The
+harness reads the pinned address out of the shipped page rather than restating it, so the two cannot
+drift, and neutering its tampering makes it exit non-zero instead of passing.
+
+That page also speaks the customer's language. It localises from `navigator.language` and renders
+`pt-BR` end to end. The refusal above reads, verbatim:
+*"Este link paga um endereço que não é desta loja. Nada foi enviado."*
+The shop quotes in BRL; the page a Brazilian customer actually opens is in Portuguese.
 
 Custody tier is declared per component: T0 reads run automatically, T1 emits an unsigned
 transaction a human approves. **No component holds a fund-signing key.** The delegated key in the
