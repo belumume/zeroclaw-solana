@@ -54,9 +54,14 @@ ATTEMPTS = 3
 
 
 def is_transport_error(e):
-    """True when the network refused, rather than the feed having a real problem."""
+    """True when the network refused, rather than the feed having a real problem.
+
+    429 and 408 belong here for the same reason they do in `verify-proof.py`: a public
+    Solana RPC rate-limits routinely, and reading that as the feed having a real problem
+    reports a healthy feed as broken without ever having consulted the chain.
+    """
     if isinstance(e, urllib.error.HTTPError):
-        return e.code >= 500
+        return e.code >= 500 or e.code in (408, 429)
     if isinstance(e, urllib.error.URLError):
         return True
     return isinstance(e, (TimeoutError, ConnectionError))

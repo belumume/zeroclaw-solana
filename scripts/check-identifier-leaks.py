@@ -76,6 +76,22 @@ OTHER_SHAPES = {
         r"|xox[bpas]-[A-Za-z0-9-]{10,}|AKIA[A-Z0-9]{16}"
         r"|hf_[A-Za-z0-9]{30,}|nvapi-[A-Za-z0-9_-]{20,}|AIza[A-Za-z0-9_-]{35}"
     ),
+    # A path into the authoring agent's own config. Carries NO username and NO credential,
+    # so every shape above misses it by construction, and it shipped to the public raw URL
+    # inside a module docstring for days behind a green gate. It discloses only that the
+    # tooling was authored against an internal corpus, plus a filename, which is precisely
+    # why it reads as scaffolding left in rather than as a breach.
+    #
+    # Anchored on the `.claude/<subdir>/` shape rather than on the bare word, because
+    # `.claude` alone matches this repo's own tracked `.claude/` project directory and
+    # would fire on every legitimate mention of it.
+    "internal agent-config path": re.compile(
+        r"~[/\\]\.claude\b"
+        r"|(?<![\w.-])\.claude[/\\](?:rules|skills|hooks|solutions|agents|projects)[/\\]"
+        r"|~[/\\]PC[/\\]Downloads"
+        r"|standing-excellence-bar",
+        re.IGNORECASE,
+    ),
 }
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")

@@ -149,9 +149,15 @@ count toward the live total, so a pending claim can never be tallied as a verifi
 is derived from what actually gated rather than hardcoded, so it rises to four by itself on the
 next deploy.
 
-Against the live node today that claim prints PENDING, which means the only branch anyone has
-seen it take is the one that gates nothing, and a verdict nobody has watched go red is not yet
-known to work. So `scripts/verify_proof_ledger_control.py` serves crafted payloads from a
+That claim now PASSES against the live node, reporting three restored sales against the cap, so
+the live total is four. This paragraph said it printed PENDING until 2026-08-05, which was true
+when written and stopped being true at the deploy that carried the check; two other documents had
+already moved to four while this one had not, and a figure repeated on three surfaces goes stale on
+whichever one nobody re-derived.
+
+The reasoning it carried survives the correction and is the reason the control still exists. A
+verdict nobody has watched go red is not yet known to work, and passing against one live node is
+not that evidence either. So `scripts/verify_proof_ledger_control.py` serves crafted payloads from a
 loopback port and asserts the checker reaches the right verdict on all six branches, including
 every FAIL. Stdlib only, no network, no chain: `python3 scripts/verify_proof_ledger_control.py`.
 

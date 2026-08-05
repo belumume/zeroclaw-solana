@@ -32,8 +32,8 @@ Settle it with the instrument rather than the grep: `python build.py --check` re
 `OK index.html matches its sources` and exit 0, which proves the artifact and the sources
 agree. `grep -c -E "Pagar|Conectar|navigator\\.language" src/app.js` returns a nonzero
 count. Both files are tracked, so a fresh clone rebuilds the Portuguese rather than losing
-it. The general form is in `~/.claude/rules/skill-consolidation-extract-diff-first.md`:
-searching an assembler for content that lives in its parts cannot find it.
+it. The general form: searching an assembler for content that lives in its parts cannot
+find it, so a zero there is evidence about the file's ROLE and never about the content.
 """
 
 import sys
