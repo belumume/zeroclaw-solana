@@ -42,7 +42,15 @@ PAGE_DIR = REPO / "webshop-pay"
 # this file would drift from the page, and the drifted copy is the one a future reader trusts.
 MERCHANT_MARKER = "var MERCHANT='"
 
-MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"  # devnet USDC, named in the page's own map
+MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # mainnet USDC
+RPC_MARKER = "api.mainnet-beta.solana.com"
+
+# 0.25, not 25. The payer wallet holds 0.4 USDC, so 25 is not payable on mainnet at all --
+# the amount is forced by the funds, not chosen for thrift. It also keeps a filmed payment
+# at cents. COST, stated because it is real: the listing's own worked example is "charge
+# table 4, 25 USDC", and 0.25 no longer matches that number literally. Mesa 4 and Pedido 412
+# still do.
+AMOUNT = "0.25"
 
 # Two rendering profiles, not two code paths. "desktop" is the frozen correctness harness: 2x
 # device scale because the frames feed a 1080p+ timeline, where a 1x capture of small type is
@@ -71,6 +79,29 @@ def pinned_merchant() -> str:
     return src[i : src.index("'", i)]
 
 
+def check_network_agreement() -> list[str]:
+    """Fail loudly if this harness and the page disagree about the network.
+
+    MERCHANT is read out of the page precisely so no second copy can drift. MINT cannot be
+    read the same way -- the page's map holds more than one mint on purpose -- so it stays an
+    explicit constant here and this asserts the page agrees with it. A harness that composes
+    a devnet link against a mainnet page would still PASS the two-direction verdict, because
+    the refusal keys on the recipient and never on the mint. It would pass while filming the
+    wrong asset name, which is the shape of drift worth catching before a take, not after.
+    """
+    src = (PAGE_DIR / "src" / "app.js").read_text(encoding="utf-8")
+    problems = []
+    if MINT not in src:
+        problems.append(
+            f"the page does not know mint {MINT} (its KNOWN_MINTS map lacks it)"
+        )
+    if RPC_MARKER not in src:
+        problems.append(
+            f"the page's RPC is not {RPC_MARKER}; this harness assumes mainnet"
+        )
+    return problems
+
+
 def tamper(addr: str) -> str:
     """Change exactly one character, so the difference is the smallest one that matters.
 
@@ -87,7 +118,7 @@ def pay_url(recipient: str, lang: str = "pt") -> str:
     from urllib.parse import quote
 
     solana = (
-        f"solana:{recipient}?amount=25&spl-token={MINT}"
+        f"solana:{recipient}?amount={AMOUNT}&spl-token={MINT}"
         f"&label={quote('Mesa 4')}&message={quote('Pedido 412')}"
     )
     return f"/index.html?lang={lang}&url={quote(solana, safe='')}"
@@ -261,11 +292,22 @@ def main() -> int:
         )
         return 2
 
+    drift = check_network_agreement()
+    if drift:
+        for d in drift:
+            print(f"FAIL  {d}", file=sys.stderr)
+        print(
+            "      this harness and the page disagree about the network; reconcile before filming",
+            file=sys.stderr,
+        )
+        return 2
+
     good = pinned_merchant()
     bad = tamper(good)
     diff = sum(1 for a, b in zip(good, bad) if a != b)
     print(f"pinned merchant : {good}")
     print(f"tampered        : {bad}   ({diff} character differs)")
+    print(f"network         : mainnet-beta   mint {MINT}   amount {AMOUNT} USDC")
     if diff != 1 or len(good) != len(bad):
         print(
             "FAIL  the tampered address must differ by exactly one character",

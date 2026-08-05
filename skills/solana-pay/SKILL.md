@@ -85,11 +85,11 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
       must be in the customer's language; never leave an English fragment inside a non-English
       reply. Use the matching version:
       - English: "Tap the link to pay: on your phone it opens your Solana wallet (Phantom,
-        Solflare); on a computer it shows a QR to scan with your phone wallet. This shop runs on
-        devnet."
+        Solflare); on a computer it shows a QR to scan with your phone wallet. This shop settles
+        in USDC on Solana mainnet."
       - Portuguese (pt-BR): "Toque no link para pagar: no celular ele abre sua carteira Solana
         (Phantom, Solflare); no computador mostra um QR para escanear com a carteira do celular.
-        Esta loja funciona na devnet."
+        Esta loja recebe em USDC na mainnet da Solana."
       For any other language the customer writes in, translate this line into that language; never
       mix English into a non-English reply.
    Why the pay page: the chat channels are text-only (no image send) and `solana:` is not
@@ -107,11 +107,15 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
 
 ## Worked example
 
-Request 25 USDC (devnet) to the shop wallet with a fresh reference:
+Request 0.25 USDC on mainnet to the shop wallet with a fresh reference:
 
 ```
-solana:C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ?amount=25&spl-token=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU&reference=<fresh>&label=Demo%20Shop&message=Order%20%2342
+solana:C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ?amount=0.25&spl-token=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&reference=<fresh>&label=Demo%20Shop&message=Order%20%2342
 ```
+
+`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` is USDC on Solana mainnet. The pay page pins the
+same mint and will label anything else `token`, so a link built with the wrong mint is visibly
+wrong to the customer before they approve it rather than after.
 
 
 ## BRL invoicing (Brazil-first flow)
