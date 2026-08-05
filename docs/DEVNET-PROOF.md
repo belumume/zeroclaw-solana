@@ -108,6 +108,23 @@ Both programs carry an on-chain **Anchor IDL** (so the explorer decodes the inst
 - oracle IDL account `DRaviitdm5rojHS7YGTQxG8Ho26g8PdAdqodWoLaaKtJ`
 - consumer IDL account `GHrkqYsBWp55eJCZg3vgYzGvoQELDUfu2kRQqpBn7tr8`
 
+### The consumer has read the LIVE feed, which is the difference between an oracle and a memo
+
+Publishing signed bytes proves only that bytes were published. `consumer_example` CPI-reads the
+feed account, checks the owner and gates on freshness, so the data is consumable by a program
+rather than by a human squinting at an explorer. Its most recent read of the **live ARM feed**:
+
+    signature   4CRapo3AEFBFLh7Y7byJR9XDYZEa95MEioUQMzUhJVxTB9HaDTRtX2X47pVgxaSu8KNfYsPyugeQ6FjN8hBzi54L
+    slot        481442353          err None          2026-08-05T18:09:00Z
+    logs        Instruction: ActOnFeed -> program success, 1809 compute units
+    feed read   JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg
+
+Stated as a signature rather than an explorer link on purpose, for the same retention reason this
+document already gives elsewhere. Re-derive it with `getSignaturesForAddress` on the consumer
+program `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`, which any devnet RPC answers
+unauthenticated: the read above is the newest entry, and the older `ActOnFeed` at
+2026-07-21T19:02:38Z against `CfWaZAQ9…` is the historical one, kept rather than dropped.
+
 ## The DePIN feed is publishing on a schedule (the "yours, running" proof)
 
 These are consecutive device-signed `publish_reading` transactions on the **ARM node-born
