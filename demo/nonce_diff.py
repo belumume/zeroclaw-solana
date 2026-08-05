@@ -6,7 +6,7 @@
     challenge 2  memo: x402-18c8f10a22e41b77-13
                        ^^^^^ common prefix ^^^^^  ROTATED
 
-Beat 8's entire point is a single-use nonce visibly changing between requests, and without help it
+The point is a single-use nonce visibly changing between requests, and without help it
 is two near-identical strings: 21 of 23 characters are a common prefix, so the rotation is
 invisible at a glance. This prints both memos aligned and marks where they diverge.
 

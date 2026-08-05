@@ -16,10 +16,10 @@ Run it:  python demo/verify-merchant-invariant.py [--viewport desktop|phone] [--
 --viewport desktop (the default) is the CORRECTNESS harness and its behaviour is frozen: same
 geometry, same frame filenames, same pass/fail. --viewport phone renders the page the way the
 opening two beats of the video will see it -- 390x844 at device_scale_factor=3, is_mobile -- and
-writes both plates into .submission-research/frames/ under names carrying the viewport.
+writes both plates into .demo-assets/frames/ under names carrying the viewport.
 
 Both modes also MEASURE the refused card's two differing characters and print the horizontal
-offset between them, because the highlight overlay in beat 1 is keyed to that number and a claim
+offset between them, because the highlight overlay is keyed to that number and a claim
 about it is worth nothing without the measurement beside it.
 
 Needs playwright (pip install playwright). It drives the system Chrome via channel="chrome", so no
@@ -290,7 +290,7 @@ def main() -> int:
     if args.shots:
         shots = Path(args.shots).resolve()
     elif phone:
-        shots = REPO / ".submission-research" / "frames"
+        shots = REPO / ".demo-assets" / "frames"
     else:
         shots = None
     if shots:

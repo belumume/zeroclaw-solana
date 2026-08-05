@@ -34,7 +34,7 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-OUT = REPO / ".submission-research" / "takes"
+OUT = REPO / ".demo-assets" / "takes"
 TESSERACT = Path(
     "C:/Program Files/Tesseract-OCR/tesseract.exe"
 )  # installed, not on PATH
