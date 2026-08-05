@@ -81,7 +81,7 @@ something the agent composes, and an agent talked into a different recipient com
 well-formed link to it. So the checkout page pins the one address it will ever pay, and it does not
 trust the link that opened it. Change a single character of the recipient and the card is replaced
 by **RECUSADO**, the pay button is gone rather than disabled, and both addresses are printed **in
-full** — because a truncated `C331…iLHJ` is precisely what lets a swapped address survive a glance.
+full**. A truncated `C331…iLHJ` is precisely what lets a swapped address survive a glance.
 
 Run it yourself; it drives both directions and fails unless the page discriminates:
 
