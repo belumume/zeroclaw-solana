@@ -120,6 +120,47 @@ BEATS = [
         "an RPC error printing a ~20-line raw traceback.",
     ),
     Beat(
+        "coherence-gate",
+        "python scripts/check-claim-coherence.py",
+        # From the real run: "surfaces read: 33 tracked document(s), 219 tracked file(s)" then
+        # "PASS  every script a doc credits with a runtime role is invoked, instructed, or honestly
+        # disclosed". The confession beat's point is the gate passing on its DISCLOSURE condition,
+        # so the passing sentence's tail is the load-bearing marker.
+        ["surfaces read", "honestly disclosed"],
+        2.38,
+        "D8, the confession beat's terminal half: framed beside ONE-PAGER's 'What we are not "
+        "claiming'. R1's refutation is the reason this beat exists in this form: the gate PASSES, "
+        "it does not flag, and the pass condition is the project having said plainly what it "
+        "cannot prove. Offline, cannot fail mid-take.",
+    ),
+    Beat(
+        "injection-certify",
+        "python scripts/certify_publish_tx.py",
+        # From the real run: one positive control then four injection shapes, each REFUSED with its
+        # reason, closing "5/5 cases correct". "fail-closed" is in the header line.
+        ["fail-closed", "REFUSED", "cases correct"],
+        0.12,
+        "D1's certification half: the fail-closed suite where the one good publish certifies and "
+        "four injection shapes refuse, on screen in a single 8-line block. Offline and "
+        "byte-identical across runs. NOTE the beat does NOT yet cover D1's transcript-replay half "
+        "(the attacker message + the '0 tool calls' count rendered as a number); that display is "
+        "the remaining D1 sub-item.",
+    ),
+    Beat(
+        "x402-nonce",
+        "python demo/nonce_diff.py",
+        # From a real run. "ROTATED" is the payoff word; "same prefix" proves the alignment
+        # rendered; "challenge 2" proves both requests landed. The memos themselves rotate by
+        # design, so no memo string is a marker.
+        ["challenge 2", "same prefix", "ROTATED"],
+        2.8,
+        "H2: beat 8's second shot (D3). Two live challenges, memos aligned, carets under the "
+        "rotating tail. Layout instead of ANSI colour because legacy conhost VT rendering is a "
+        "gamble and OCR does not read colour. The script refuses to render a comparison of empty "
+        "strings, which is the failure the earlier sed attempt shipped silently. Network beat: "
+        "warm before rolling.",
+    ),
+    Beat(
         "chain-history",
         "python demo/chain_history.py",
         # From the real run this beat was built from: "774 tx | 0 failed | median gap 20.5 min |
