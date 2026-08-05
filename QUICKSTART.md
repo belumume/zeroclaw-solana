@@ -72,6 +72,12 @@ settlement is
 Settlement and feed-read now take separate RPC endpoints, which is what makes that split possible
 (see the run block below).
 
+That settlement came from a locally-run gate with the split configured. **The hosted endpoint at
+`x402.perfpilot.dev` still runs the devnet default on both endpoints**, so the challenge you get
+from the `curl` below quotes the devnet mint and a payment against it settles on devnet. Both
+statements are true at once and the distinction is the point: the capability is real and proven on
+mainnet, and the box you can poke is not currently pointed there.
+
 ## Three more demos, each under a minute
 
 Still no host build, and none of these needs a key.
