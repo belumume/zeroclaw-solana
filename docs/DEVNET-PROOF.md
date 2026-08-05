@@ -42,8 +42,14 @@ The instruction names are derived, not asserted. An Anchor instruction is identi
 as unrecognized rather than receiving a plausible label.
 
 **Current result: every captured transaction verifies, controls pass, exit 0.** The script prints
-the count it verified rather than this page asserting one; at the capture in this bundle it reports
-16. The bundle previously held 12, with four signatures recorded as `ALREADY_PRUNED` because the
+the count it verified rather than this page asserting one; run it and read the number off the run.
+As of 2026-08-05 it reports **28 devnet** (plus 3 mainnet in the second bundle). **This paragraph
+said 16 until then, and 16 was the count before the bundle grew on 2026-08-01.** That is the worst
+possible sentence in this document to be stale, because it is the one whose whole move is "do not
+believe me, run the command", and a reader who took the invitation got 28 against a stated 16 on
+their first try. The count is now dated rather than asserted flat, and the honest instruction is to
+re-derive it: `python scripts/verify_proof_offline.py`. The bundle previously held 12, with four
+signatures recorded as `ALREADY_PRUNED` because the
 endpoint would not serve them when the bundle was built. On 2026-08-01 it served all four, so they
 were captured and now verify like the rest. Nothing was overwritten to do it: the capture refuses
 to replace bytes it already holds, which is what keeps a later retry from turning real evidence
@@ -151,8 +157,13 @@ Two honesty notes about this table, because both were wrong here until an audit 
 
 - These rows deliberately come from `JEtuZk…`, **not** from `CfWaZA…`. An earlier version of
   this section proved "yours, running" using the agent-driven feed, which the table above marks
-  historical and which has not published in over a day. A document cannot cite a dead feed as
-  evidence of a live one.
+  historical and whose last transaction landed **2026-07-24 13:47:28Z**. A document cannot cite a
+  dead feed as evidence of a live one. This bullet read "has not published in over a day" until
+  2026-08-05, which was true when written and understated the gap roughly tenfold by the time
+  anyone read it, in the one sentence whose job is calling out dead evidence. A relative duration
+  in a document that outlives the day it was written is a claim that rots on its own; the absolute
+  timestamp does not. Re-derive with `getSignaturesForAddress` on that feed rather than trusting
+  this line.
 - The cadence is 20 minutes. Earlier rows here showed gaps of two to nine hours, which was the
   irregular hand-run era before the timer existed, presented under a heading that claimed a
   schedule.
