@@ -42,7 +42,19 @@ TITLE = "ZCXTAKE"
 
 # >=130 columns: the replay probe's output wraps below that and wrapped terminal text reads as
 # noise on video. 34 rows keeps the tallest beat (the offline verifier, 20 lines) off the scroll.
-COLS, ROWS = 130, 34
+#
+# 134, not 130, and the distinction it encodes cost a shipped take: `mode con: cols=` sets the
+# BUFFER, and conhost clamps the WINDOW to the panel. At Consolas height 30 the 1900px window
+# rendered only ~106 of the 130 buffered columns, so characters past the window edge were CLIPPED
+# OFF-FRAME while the gate passed on markers that sat left of the cut — the mainnet take shipped
+# with `Custom": 300`, the entire point of its beat, outside the frame. Probed empirically
+# (probe_geometry.py: launch, print a ruler ending in a marker, capture, OCR the marker):
+#   height 30 / cols 130  ->  ~106 columns visible, CLIPPED
+#   height 26 / cols 134  ->  1900x1024 window, ALL columns render
+# 134 fits every beat's longest line: mainnet-refusal 120, replay-probe 130, reproducibility's
+# PASS lines 133. Only reproducibility's 148-char footnote wraps, and a wrapped footnote is
+# acceptable where a clipped payload is not.
+COLS, ROWS = 134, 34
 
 
 class Beat:
@@ -77,8 +89,21 @@ BEATS = [
         "mainnet-refusal",
         "python3 scripts/verify_proof_offline.py --bundle docs/proof-bundle/mainnet-transactions.json",
         # The literal is {"Custom": 300} with a colon. Matching on the JSON punctuation would be
-        # brittle under OCR, so these two carry the same meaning and survive the pixel round-trip.
-        ["FAILED ON CHAIN", "cap=500000"],
+        # brittle under OCR, so the first two carry the meaning in characters that survive the
+        # pixel round-trip. The third exists because of a measured failure, not symmetry: a take
+        # shipped with `Custom": 300` clipped off the RIGHT EDGE of the frame while this gate
+        # passed, because both original markers sit to the LEFT of the cut. `Custom` is the last
+        # word on the beat's 120-char critical line, so if the frame loses the payload again the
+        # gate fails instead of certifying a frame missing the entire point of the beat. Bare word,
+        # no punctuation, and it appears only on that line.
+        # `createFixedDelegation` rather than `cap=500000`, and the distinction is which FAILURE
+        # each marker is for. The digit string is the semantic payload, and OCR misreads its final
+        # zero as `@` (`cap=50000@`, both psm modes, measured on a frame where every character
+        # renders crisply), so gating on it fails good frames — the FRESH/psm-11 lesson again: fix
+        # the instrument's marker, never loosen the gate to protect a frame. The method name is on
+        # the SAME line, is unambiguous English OCR reads reliably, and proves the same thing: the
+        # cap line rendered. A human judge reads cap=500000 off the frame effortlessly.
+        ["FAILED ON CHAIN", "createFixedDelegation", "Custom"],
         0.65,
         "Offline and byte-identical across runs, so it cannot fail mid-take. Film THIS rather than "
         "MAINNET-PROOF.md, whose own reproduce recipe moves real money. Best-composed beat in the "
@@ -93,6 +118,23 @@ BEATS = [
         4.1,
         "Live against mainnet, no key and no funds. Warm it up before rolling: its only real risk is "
         "an RPC error printing a ~20-line raw traceback.",
+    ),
+    Beat(
+        "reproducibility",
+        "python3 scripts/verify-proof.py",
+        # Taken from a real run, not from the summary anyone remembers. The counts themselves
+        # ("10/10", "4/4") are deliberately NOT markers: a slash between digits is exactly what OCR
+        # turns into a 1 or a letter, so gating on them would fail good frames. These two phrases
+        # carry the same proof — both summary lines rendered — in characters that survive.
+        ["static claims verified", "live claims verified"],
+        9.67,
+        "The reproducibility axis made visible, and the fourth of the four uncontested beats. One "
+        "command, no install, no key, and fourteen checks go green: 10/10 static and 4/4 live on "
+        "the measured run. TWO SHOOT CONSTRAINTS. It is 31 lines, which is near the console's row "
+        "budget at the 30px font, so verify the summary has not scrolled off before keeping a take. "
+        "And at 9.67s it is by far the longest beat here, roughly 6% of a three-minute cut, so it "
+        "wants narration over it rather than silence, or a speed ramp in the edit. It also hits the "
+        "network, so it carries the same warm-up requirement as the other live beats.",
     ),
 ]
 
@@ -147,14 +189,18 @@ def launch(beat, hold):
 # and put it back.
 #
 # Measured: default (__DefaultTTFont__, height 16) gives a 1260x680 window with 20px glyphs.
-# Consolas at height 30 gives 1900x1026 with 30px glyphs, 2.2x the pixel area, still inside the
-# 1920x1080 panel at 130 columns.
+# Consolas at height 30 gave a 1900-wide window — and only ~106 VISIBLE columns of the 130-column
+# buffer, which is the clipping defect documented at COLS above. The claim this comment used to
+# make ("1900x1026 ... at 130 columns") conflated the buffer with the window: the window was 1900px,
+# the columns were not all in it. Height 26 is the probed value at which every one of the 134
+# buffered columns renders inside the panel (1900x1024 window, ~14px advance). Glyphs are still
+# 1.6x the default's area.
 FONT_KEY = r"HKCU:\Console"
 SHOOT_FONT = {
     "FaceName": "Consolas",
     "FontFamily": 54,
     "FontWeight": 400,
-    "FontSize": 0x001E0000,
+    "FontSize": 0x001A0000,
 }
 
 
