@@ -42,6 +42,7 @@ MIN_DOCS = 10  # a walk finding fewer than this is broken, not clean
 ACCEPTED = {
     "docs/upstream/whatsapp-policy-fail-open.md": "a filed upstream report; its canonical home is the GitHub issue, which the write-up links",
     "wit/VERSIONING.md": "reference for anyone editing the vendored WIT; reached from that directory, not from prose",
+    "docs/SUBMISSION-CAPTURE-RIG.md": "shoot-production reference for whoever is behind the camera; the only surfaces that could route to it are judge-facing, where a link to our capture settings is process leakage rather than routing",
 }
 
 

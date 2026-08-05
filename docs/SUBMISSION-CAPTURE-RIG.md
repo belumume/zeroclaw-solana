@@ -1,4 +1,4 @@
-# Capture rig — verified settings for the demo shoot
+# Capture rig: verified settings for the demo shoot
 
 Every number here was produced by running the thing, not by reading documentation. Where a route
 failed, the failure is recorded with its evidence, because the failures are the expensive part: two
@@ -88,8 +88,15 @@ capturing at target size.
 | scrcpy / adb | being installed; see below |
 
 **Phone is Android.** Determined from the device list rather than asked: Windows reports a
-`SAMSUNGDEVICE` PnP entry, and `%USERPROFILE%\.android` does not exist, so adb has never run here.
-That settles the mirroring route — scrcpy, not Phone Link, not filming the handset.
+`SAMSUNGDEVICE` PnP entry. That settles the mirroring route: scrcpy, not Phone Link, not filming
+the handset.
+
+**Corrected 2026-08-05.** This paragraph used to add that the home directory held no `.android`
+folder, "so adb has never run here". That evidence has expired: the folder now holds an `adbkey`
+pair written at 01:44 today, which is what adb creates on its first run. The Android determination
+rests on the PnP entry alone, so the conclusion did not move, but the supporting sentence had gone
+stale. Recorded rather than quietly deleted, because a file whose opening paragraph promises
+numbers produced by running the thing is the worst place to carry a claim that stopped being true.
 
 **scrcpy install trap, recorded because it exits 0 while doing nothing.** `winget install --id
 Genymobile.scrcpy` without a source returns exit code 0 and installs nothing, printing only
