@@ -22,6 +22,27 @@ not qualify.
 
 Built for a small operator who wants an agent touching money without handing it a signing key.
 
+**And it has been running, not demoed.** The rubric asks whether a stranger would still be running
+this in a month. Read as of 2026-08-05T00:47Z, and re-derive it yourself rather than believing the
+figure, because it moves every twenty minutes:
+
+```bash
+python3 scripts/verify-proof.py          # stdlib only, no install, no key
+```
+
+That checks the live claims. To count the history yourself, the underlying call is
+`getSignaturesForAddress` on the feed account `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg`, which
+any devnet RPC will answer unauthenticated.
+
+**760 transactions on the feed account. Zero failed.** First on 2026-07-25T04:12:01Z, spanning
+10.86 days at a median of 20.5 minutes between publishes.
+
+The honest part, stated here rather than left for you to find: the **largest gap is 61.5 minutes**,
+so the cadence is not unbroken. Zero failures is exact, meaning no transaction has ever errored, and
+"every twenty minutes" is true at the median with one hour-long interruption across eleven days.
+That distinction is the sort of thing the call above would have shown you anyway, which is the only
+reason it is worth stating: a number you can check is worth more than a rounder one you cannot.
+
 ---
 
 ## The custody argument, which is the part that does not depend on trusting us
@@ -30,7 +51,7 @@ An approval prompt is not a boundary. The sentence a human reads before approvin
 by the model, so influencing the model influences the description. An attacker needs no key,
 only an operator who reads one plausible sentence and says yes.
 
-Two answers, and neither requires the operator to read correctly:
+Three answers, and none of them requires the operator to read correctly:
 
 **Where intent is fixed, nothing asks.** The publish path can express exactly one intent, so the
 exact serialized bytes are re-derived and anything else is refused. Its self-test *is* the attack,
@@ -43,10 +64,40 @@ key signed an over-cap transfer and the program rejected it with custom error `0
 transfer by the same key settled normally. Both are captured as raw bytes in the repo and verify
 **offline, with no network and no dependencies**.
 
+**Where the agent is wrong anyway, the customer's own page refuses.** Every layer above is still
+something the agent composes, and an agent talked into a different recipient composes a perfectly
+well-formed link to it. So the checkout page pins the one address it will ever pay, and it does not
+trust the link that opened it. Change a single character of the recipient and the card is replaced
+by **RECUSADO**, the pay button is gone rather than disabled, and both addresses are printed **in
+full** — because a truncated `C331…iLHJ` is precisely what lets a swapped address survive a glance.
+
+Run it yourself; it drives both directions and fails unless the page discriminates:
+
+```bash
+python demo/verify-merchant-invariant.py
+```
+
+The control is the whole point. A page that refused *everything* would produce an identical
+screenshot, so the pinned address must stay payable while a one-character variant is refused. The
+harness reads the pinned address out of the shipped page rather than restating it, so the two cannot
+drift, and neutering its tampering makes it exit non-zero instead of passing.
+
+That page also speaks the customer's language. It localises from `navigator.language` and renders
+`pt-BR` end to end. The refusal above reads, verbatim:
+*"Este link paga um endereço que não é desta loja. Nada foi enviado."*
+The shop quotes in BRL; the page a Brazilian customer actually opens is in Portuguese.
+
 Custody tier is declared per component: T0 reads run automatically, T1 emits an unsigned
-transaction a human approves. **No component holds a fund-signing key.** The delegated key in the
-proof above is not one: it can move only up to a cap the on-chain program enforces, from an
-account it does not own, which is why the chain could refuse it. A fund key has no such ceiling.
+transaction a human approves, and no component holds a fund-signing key.
+
+That last sentence is table stakes and we would rather be judged on the one that follows it.
+Key-free is what every careful entry in this space says, and it is a claim about what our code
+*declines to do*, which is only as good as our code. **The load-bearing difference is WHERE the
+limit is enforced.** Ours is not in the plugin, not in the host, and not in the prompt: it is a
+deployed, audited on-chain program. The delegated key in the proof above is a real key that really
+signs, and it still could not move the money, because it may move only up to a cap the program
+enforces, from an account it does not own. A fund key has no such ceiling. Prompt-inject every layer
+we wrote and the ceiling is still there, because it was never ours to remove.
 
 ---
 
@@ -110,6 +161,20 @@ A live node answering `HTTP/1.1 402 Payment Required` with a single-use nonce th
 request, which is the whole machine-commerce claim in one request. Note the verifier's LIVE claims
 can legitimately go red if that node is down; the static and offline ones cannot, which is why they
 are separated.
+
+That challenge is also graded by someone other than us, which is the difference between claiming
+conformance and letting you check it:
+
+```bash
+cd scripts/x402-validator && npm ci --silent && node validate-challenge.mjs
+```
+
+It runs the live body past `PaymentRequiredV2Schema` from `@x402/core`, pinned with a committed
+lockfile. What makes a green result worth anything is the control shipped beside it: the body this
+endpoint served before the spec-conformance fix, which the run must REJECT. It does, naming both
+reasons, a missing `resource` and a `network` that is not CAIP-2. A validator never shown to reject
+anything has not been shown to work. It also reads `resource.url` itself, because the schema accepts
+a `localhost` value and so cannot tell you the advertised address is one a payer could reach.
 
 If that fails on Windows with `curl: (35) schannel: ... CRYPT_E_REVOCATION_OFFLINE`, the node is
 fine and the fault is on the client: Schannel could not reach a certificate-revocation responder,

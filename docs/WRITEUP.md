@@ -176,7 +176,7 @@ as uncertainty about the one claim that is settled.
 | Upstream | What it is | State |
 |---|---|---|
 | [#9348](https://github.com/zeroclaw-labs/zeroclaw/issues/9348) | Under `mode = "business"` the WhatsApp Web transport never consults `dm_policy` or `group_policy`, and an empty `allowed_groups` permits every group rather than none. The shop answered a real group because of it. | Maintainer-triaged `priority:p1`, `status:accepted`, `risk:high` |
-| [#9354](https://github.com/zeroclaw-labs/zeroclaw/pull/9354) | A warning when those policies cannot take effect. Deliberately the least opinionated of three shapes offered: no runtime change, so it cannot break a deployment. | Open. The maintainer calls it "the right compatibility-safe v0.8.4 slice" |
+| [#9354](https://github.com/zeroclaw-labs/zeroclaw/pull/9354) | A warning when those policies cannot take effect. Deliberately the least opinionated of three shapes offered: no runtime change, so it cannot break a deployment. | **Merged 2026-08-01.** The maintainer called it "the right compatibility-safe v0.8.4 slice" |
 | [#9366](https://github.com/zeroclaw-labs/zeroclaw/issues/9366) | `approval_timeout_secs` validates on both WhatsApp transports and is read by only one. Filed separately at the maintainer's request. | Open |
 
 They are independent bugs with one shape: the config layer accepts a key without checking that
