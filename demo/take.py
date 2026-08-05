@@ -120,33 +120,24 @@ BEATS = [
         "an RPC error printing a ~20-line raw traceback.",
     ),
     Beat(
-        "injection-replay",
-        "python demo/injection_replay.py",
-        # From the real run. "ATTACKER" and "AGENT" label the exchange; "invoked by this exchange"
-        # is the tail of the line carrying the on-screen zero. The count itself is one glyph and
-        # OCR-fragile, so the phrase around it is the marker.
-        ["ATTACKER", "AGENT", "invoked by this exchange"],
-        0.1,
-        "D1's transcript half: the attack and the refusal rendered FROM the committed transcript "
-        "file (parsed blockquotes, so the display cannot drift from the artifact a judge can "
-        "open), with 'tool calls invoked by this exchange: 0' as a number on screen and its "
-        "provenance stated beneath it. Offline, byte-identical across runs. Pairs with "
-        "injection-certify for the full beat 7.",
-    ),
-    Beat(
         "clean-clone",
-        "python demo/clean_clone.py",
-        # From the real run: clone 14s, three commands exit 0, "CLEAN CLONE VERIFIED in 22s |
-        # nothing installed, no key, no account", then the heartbeat line from the CLONE's own
-        # copy. The elapsed digits move per run, so the phrase is the marker, never the number.
-        ["CLEAN CLONE VERIFIED", "FRESH", "seq="],
-        22.0,
-        "D9, the closing beat: a REAL network clone into a directory that did not exist when the "
-        "command started, three commands green with per-command clocks, and the ring close "
-        "re-running the opening beat's command from the clone so the seq on screen is the clone "
-        "proving the feed moved while the judge watched. The elapsed stamp is measured by the run "
-        "itself. Network beat, and the longest: warm nothing, it IS the cold-start story, but "
-        "expect run-to-run variance in the clock and keep whichever take's clock is honest.",
+        # The commands a stranger actually types, run by the shell itself. An earlier version of
+        # this beat wrapped them in a Python script that printed "$ " prompt lines: a shell
+        # impersonating a shell. A re-enactment of a terminal session is precisely what the brief
+        # refuses, and it was indistinguishable from the real thing on camera, which is worse.
+        # What the frame shows now is cmd running git and python, and nothing else.
+        "cd /d %TEMP% && rmdir /s /q zcx-fresh 2>nul & "
+        "git clone -q https://github.com/belumume/zeroclaw-solana zcx-fresh && cd zcx-fresh && "
+        "python scripts/verify-proof.py && python scripts/verify_proof_offline.py && "
+        "python scripts/certify_publish_tx.py",
+        # The three tools' own summary lines. Nothing here was printed by a wrapper, because there
+        # is no wrapper left to print it.
+        ["static claims verified", "verify offline", "cases correct"],
+        24.0,
+        "The closing beat: a real clone into a directory the command deletes first, then the three "
+        "commands chained so a failure anywhere stops the chain and the frame shows exactly where. "
+        "Network beat and the longest in the set. It IS the cold-start story, so warm nothing, and "
+        "expect the wall clock to vary between takes.",
     ),
     Beat(
         "coherence-gate",
@@ -157,10 +148,9 @@ BEATS = [
         # so the passing sentence's tail is the load-bearing marker.
         ["surfaces read", "honestly disclosed"],
         2.38,
-        "D8, the confession beat's terminal half: framed beside ONE-PAGER's 'What we are not "
-        "claiming'. R1's refutation is the reason this beat exists in this form: the gate PASSES, "
-        "it does not flag, and the pass condition is the project having said plainly what it "
-        "cannot prove. Offline, cannot fail mid-take.",
+        "Frame this beside the one-pager section headed 'What we are not claiming'. The gate "
+        "PASSES rather than flagging, and it passes on its disclosure condition: the project said "
+        "plainly what it cannot prove. Offline, so it cannot fail mid-take.",
     ),
     Beat(
         "injection-certify",
@@ -169,11 +159,10 @@ BEATS = [
         # reason, closing "5/5 cases correct". "fail-closed" is in the header line.
         ["fail-closed", "REFUSED", "cases correct"],
         0.12,
-        "D1's certification half: the fail-closed suite where the one good publish certifies and "
-        "four injection shapes refuse, on screen in a single 8-line block. Offline and "
-        "byte-identical across runs. NOTE the beat does NOT yet cover D1's transcript-replay half "
-        "(the attacker message + the '0 tool calls' count rendered as a number); that display is "
-        "the remaining D1 sub-item.",
+        "The fail-closed suite: one good publish certifies, four injection shapes refuse, each "
+        "with its reason, in a single eight-line block. Offline and byte-identical across runs. "
+        "The attack text itself is not filmed here; it lives in the committed transcript, which is "
+        "a document a judge reads rather than a terminal impersonating a conversation.",
     ),
     Beat(
         "x402-nonce",
@@ -183,11 +172,10 @@ BEATS = [
         # design, so no memo string is a marker.
         ["challenge 2", "same prefix", "ROTATED"],
         2.8,
-        "H2: beat 8's second shot (D3). Two live challenges, memos aligned, carets under the "
-        "rotating tail. Layout instead of ANSI colour because legacy conhost VT rendering is a "
-        "gamble and OCR does not read colour. The script refuses to render a comparison of empty "
-        "strings, which is the failure the earlier sed attempt shipped silently. Network beat: "
-        "warm before rolling.",
+        "Two live challenges with the memos aligned and carets under the rotating tail, because "
+        "21 of 23 characters are a fixed prefix and the rotation is otherwise invisible. Layout "
+        "rather than colour: legacy console VT rendering is unreliable and OCR cannot read colour "
+        "either way. Refuses to render a comparison of empty strings. Network beat, warm it first.",
     ),
     Beat(
         "chain-history",
