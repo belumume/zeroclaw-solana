@@ -102,8 +102,18 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
    they have paid.
 5. Hand the reference to `payment_watch` to verify settlement on-chain. Never tell the
    customer "paid" from their say-so, only from the watch result.
-6. Record `{reference, amount, mint, customer, timestamp}` to memory for the evening
-   reconciliation SOP.
+6. Record `{reference, amount, customer, timestamp}` to memory for the evening
+   reconciliation SOP. **Do NOT record the mint, the recipient, or any other fixed constant of
+   this shop, and never read one back out of memory.** Those come from config on every order and
+   from nowhere else.
+
+   This instruction used to include the mint, and that is what caused the 2026-08-06 incident:
+   the shop moved to mainnet, this file was corrected to match, and the agent kept emitting
+   devnet links because eleven days of accumulated order records held the old mint and outvoted
+   the corrected file. Purging those rows fixes the day and not the class, because the next order
+   writes a new one. A constant that is written to memory becomes readable from memory, and
+   memory is mutable, accumulative and reachable by anything that can get text in front of the
+   model. Order data is per-order and belongs here; shop constants are not order data.
 
 ## Worked example
 
