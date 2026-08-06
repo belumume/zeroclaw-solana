@@ -139,6 +139,12 @@ docs/MAINNET-COSTING.md
 docs/SHOP-MAINNET-MOVE.md
 docs/OCI-AND-NETWORKS.md
 docs/SUBMISSION-CAPTURE-RIG.md
+
+# Local safety net: archived operational artifacts kept off every clone.
+# Holds the laptop publisher's attempt + deterministic logs, captured before the
+# scheduled task was disabled. Operational evidence, not a deliverable.
+.local-archive/
+
 docs/PLUGIN-NETWORK-TARGETS-2026-08-05.md
 docs/SETTLED-DECISIONS.md
 docs/BRANCH-TRACE.md
