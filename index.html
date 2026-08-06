@@ -202,6 +202,26 @@
   <code>C331…iLHJ</code> is exactly what lets a swapped address survive a glance.
 </p>
 <pre><code>python demo/verify-merchant-invariant.py</code></pre>
+<p>
+  <strong>Or exercise it yourself, right now, with no wallet and no funds.</strong> These are the
+  live checkout page, opened with three different orders. Nothing is sent by loading any of them.
+</p>
+<ul>
+  <li>
+    <a href="https://zeroclaw-shop-pay.pages.dev/index.html?lang=pt&amp;u=c29sYW5hOkMzMzFYNFlDSENkY0VTZXhSVEtTakU1ZXRqc1d5V0pMSzczWjE4WldpTEhLP2Ftb3VudD0wLjM5JnNwbC10b2tlbj1FUGpGV2RkNUF1ZnFTU3FlTTJxTjF4enliYXBDOEc0d0VHR2tad3lURHQxdiZyZWZlcmVuY2U9NVp6Z3V6NE5zU1JGeEdrSGZNNEttSlROVlBNSjJQM2pGYTJ5OGJUSFk0a1cmbGFiZWw9WmVyb0NsYXclMjBTaG9wJm1lc3NhZ2U9UGVkaWRv">One character changed in the recipient</a>
+    &rarr; <strong>RECUSADO</strong>, no pay button, both addresses in full.
+  </li>
+  <li>
+    <a href="https://zeroclaw-shop-pay.pages.dev/index.html?lang=pt&amp;u=c29sYW5hOkMzMzFYNFlDSENkY0VTZXhSVEtTakU1ZXRqc1d5V0pMSzczWjE4WldpTEhKP2Ftb3VudD0wLjM5JnNwbC10b2tlbj1FUGpGV2RkNUF1ZnFTU3FlTTJxTjF4enliYXBDOEc0d0VHR2tad3lURHQxdiZyZWZlcmVuY2U9NVp6Z3V6NE5zU1JGeEdrSGZNNEttSlROVlBNSjJQM2pGYTJ5OGJUSFk0a1cmbGFiZWw9WmVyb0NsYXclMjBTaG9wJm1lc3NhZ2U9UGVkaWRv">The correct recipient</a>
+    &rarr; the payable card, with the pay button live. <em>This one is the control</em>: without it,
+    the refusal above would be consistent with a page that refuses everything.
+  </li>
+  <li>
+    <a href="https://zeroclaw-shop-pay.pages.dev/index.html?lang=pt&amp;u=c29sYW5hOkMzMzFYNFlDSENkY0VTZXhSVEtTakU1ZXRqc1d5V0pMSzczWjE4WldpTEhKP2Ftb3VudD01LjAwJnNwbC10b2tlbj1FUGpGV2RkNUF1ZnFTU3FlTTJxTjF4enliYXBDOEc0d0VHR2tad3lURHQxdiZyZWZlcmVuY2U9OVROS29DdlZvdzFrdFJnTU1hcEo5ZDlHV2hnVFlDQTlpM3IzTVo3MUZVVDImbGFiZWw9WmVyb0NsYXclMjBTaG9wJm1lc3NhZ2U9UGVkaWRv">A reference that already settled</a>
+    &rarr; <strong>Pago</strong>. Note the link asks for <code>5.00</code> and the card shows
+    <code>0.39</code>, because 0.39 is what the chain recorded. The page reads the chain, not the link.
+  </li>
+</ul>
 <p class="note">
   The control is the point. A page that refused <em>everything</em> would produce an identical
   screenshot, so the harness drives both directions: the pinned address must stay payable while a
@@ -258,7 +278,13 @@ python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</
   the plugins call. Paste a right-to-left override or a zero-width joiner and watch what the model
   would actually receive.
 </p>
-<pre><code>sanitizer-microworld/index.html    # open it, no build step</code></pre>
+<p>
+  <a href="https://belumume.github.io/zeroclaw-solana/sanitizer-microworld/"><strong>Open the
+  sanitizer microworld</strong></a> &mdash; it runs in this browser, no clone and no build. Six
+  presets, and one of them strips zero invisible characters and still labels the input, which is
+  the case a canned demo would not think to include.
+</p>
+<pre><code>sanitizer-microworld/index.html    # or open it from a clone, no build step</code></pre>
 
 <p>
   <strong>A fuzzer graded by someone else's decoder.</strong> Every other correctness gate here
