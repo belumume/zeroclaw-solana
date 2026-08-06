@@ -73,6 +73,7 @@ claims separately, and names what it does not cover.
 | Why each design call went the way it did, including what was rejected | [`docs/DECISIONS.md`](docs/DECISIONS.md) |
 | How it is tested, and what each layer cannot catch | [`TESTING.md`](TESTING.md) |
 | What an adversarial audit found here, including what is still open | [`docs/AUDIT.md`](docs/AUDIT.md) |
+| Eight things we believed that were wrong, and the measurement that killed each | [`docs/WHAT-WE-GOT-WRONG.md`](docs/WHAT-WE-GOT-WRONG.md) |
 | Ten verified defects found in the HOST this runs on, all reported upstream | [`docs/HOST-SECURITY-AUDIT.md`](docs/HOST-SECURITY-AUDIT.md) |
 | The agent refusing an attack, verbatim | [`docs/transcripts/`](docs/transcripts/) |
 | To poke the sanitizer yourself, no build needed | [`sanitizer-microworld/index.html`](sanitizer-microworld/index.html) |

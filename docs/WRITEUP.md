@@ -763,8 +763,17 @@ The type was wrong by **one enum variant**. Our vendored `wit/v0/logging.wit` de
 is the whole defect. Component-model interfaces match
 **nominally**, so 37 and 38 are different types, the whole `logging` instance fails typecheck, and
 every plugin importing it dies at instantiation regardless of what else is correct. Copying the
-host's `logging.wit` over ours and rebuilding took 28 seconds and took instantiation failures from
-14 to 0.
+host's `logging.wit` over ours and rebuilding took 28 seconds and fixed **one** plugin.
+
+**The honest count, because an earlier draft of this paragraph claimed the fix took instantiation
+failures "from 14 to 0" and that was false.** Only `payment-watch` was rebuilt and redeployed. Six
+of the eight still carry the 38-case file and still fail to instantiate, so this box has run
+exactly one WASM tool plugin. The 14-to-0 figure came from a run that measured a real number about
+the wrong object: the rebuild had been written to a directory the daemon does not load from, so the
+loaded binary was still the old one while the count was read from a window that never contained a
+load of the deployed path. The corrected measurement is `payment-watch` absent from the failing
+list while six siblings remain on it, which is also the positive control proving the query still
+detects failures rather than returning an empty set.
 
 This is trap 2 and trap 4 in one defect. Trap 4 says:
 
