@@ -175,7 +175,12 @@ else{
   }else{
   el('label').textContent=label;
   el('amt').textContent=amount?(amount+' '+(token?assetName(token):'SOL')):T('amtwallet','(amount set in your wallet)');
-  el('msg').textContent=message;if(!message)el('msg').style.display='none';
+  // Show the order's own reference tail. A Solana Pay reference is what distinguishes one order
+  // from the next, and a customer holding several links from the same shop cannot otherwise tell
+  // which card belongs to which order -- every other field on the page is identical between them.
+  // Four payments in one evening went to a stale link for exactly that reason.
+  var ordertag=reference?(' · #'+reference.slice(-5)):'';
+  el('msg').textContent=message+ordertag;if(!message&&!ordertag)el('msg').style.display='none';
   el('recip').textContent=recip;
   try{var qr=qrcode(0,'M');qr.addData(url);qr.make();el('qr').innerHTML=qr.createImgTag(10,8);}catch(e){el('qr').textContent=T('qrbig','(QR too large)');}
   el('copy').onclick=function(){navigator.clipboard.writeText(url).then(function(){el('copy').textContent=T('copied','Copied ✓');setTimeout(function(){el('copy').textContent=T('copy','Copy Solana Pay link')},1500)})};
