@@ -114,7 +114,30 @@ BEATS = [
     Beat(
         "replay-probe",
         "python3 scripts/replay_allowance_probe.py",
-        ["ACCEPT"],
+        # WAS a single "ACCEPT", which gated almost nothing on the climax of the film. Three
+        # problems with it, all found by an audit that drove the probe's own output through the
+        # check. It matched case-insensitively, so the failure line "nothing was accepted"
+        # SATISFIED it. It sat only on the ACCEPTED rows, so a capture that scrolled and left just
+        # the bottom of the table passed while the refusals were off-frame. And it did not cover
+        # the owner line at all, which is the SOLE VISIBLE EVIDENCE for the spoken climax, "It's
+        # the Foundation's program. I can't change it."
+        #
+        # These four are read off a real run and chosen to survive OCR. "refused" and "ACCEPTED"
+        # are the two halves of the boundary and must both be in frame or the beat shows a cap
+        # with nothing to compare against. "remaining allowance" pins the header, so a capture that
+        # scrolled past it fails rather than certifying a table with no stated limit.
+        #
+        # Deliberately NOT the digits. "100000" against "1000000" differs by one character and OCR
+        # has already been measured misreading a trailing zero as @ on a crisp frame of this very
+        # project. A human judge reads the numbers off the frame effortlessly; the gate should not
+        # try to, and loosening a marker to protect a frame is the failure this file warns about
+        # twice already.
+        # "EXISTS, owner" rather than the program id itself. The id begins De1eg with a DIGIT ONE,
+        # and OCR read it as Deleg with a lowercase L on a frame where every character renders
+        # crisply -- this gate rejected its own beat on that marker before it was corrected. The
+        # English phrase sits on the same line, is unambiguous under OCR, and proves the same
+        # thing: the owner line rendered. A human reads the id off the frame effortlessly.
+        ["refused", "ACCEPTED", "EXISTS, owner", "remaining allowance"],
         4.1,
         "Live against mainnet, no key and no funds. Warm it up before rolling: its only real risk is "
         "an RPC error printing a ~20-line raw traceback.",
@@ -259,6 +282,28 @@ BEATS = [
         "wants narration over it rather than silence, or a speed ramp in the edit. It also hits the "
         "network, so it carries the same warm-up requirement as the other live beats.",
     ),
+    # NOT A BEAT. A POSITIVE CONTROL for the exit-code gate, and it never appears in the cut.
+    #
+    # It exists because the gate it tests was added after an audit found the marker check acting
+    # as an OUTCOME gate: on `replay-probe` the single marker "ACCEPT" matches case-insensitively,
+    # so the probe's own failure line "nothing was accepted" SATISFIED it. Re-shooting until a
+    # string appears is selecting for a favourable result, in the tool written to prevent staging.
+    #
+    # This command prints all three of mainnet-refusal's markers and then exits 3. Under the old
+    # gate it was a clean PASS: bright frame, every marker legible, nothing to object to. It must
+    # now FAIL, and it must fail on the EXIT CODE rather than on legibility, which is what makes
+    # the passing runs above evidence rather than an instrument that cannot discriminate.
+    #
+    #   python demo/take.py --beat _control-failing-command     # must print FAIL and return 1
+    Beat(
+        "_control-failing-command",
+        "python -c \"print('FAILED ON CHAIN createFixedDelegation Custom: 300'); "
+        'import sys; sys.exit(3)"',
+        ["FAILED ON CHAIN", "createFixedDelegation", "Custom"],
+        0.2,
+        "CONTROL, never filmed. Markers all present, exit 3. A run of this that PASSES means the "
+        "exit-code gate has stopped working and every other beat's verdict is worth nothing.",
+    ),
 ]
 
 
@@ -293,7 +338,13 @@ def launch(beat, hold):
         # could produce a keepable take, which is selecting for a favourable outcome in the tool
         # written to prevent staging. `@echo off` is set above and the write is redirected, so
         # nothing about this line reaches the frame.
-        f'echo %ERRORLEVEL%> "{OUT / f"_{beat.name}.rc"}"\r\n',
+        # PARENTHESISED, and the parens are load-bearing. `echo %ERRORLEVEL%> file` expands to
+        # `echo 0> file`, and cmd reads a digit immediately before `>` as a FILE DESCRIPTOR
+        # redirect rather than as text, so it echoed nothing and wrote an EMPTY sentinel. Measured
+        # on this gate's first real run: "FAIL exit-code sentinel is unparseable: ''" on a beat
+        # that had succeeded. The parens close the command token before the redirect is parsed,
+        # and they avoid the trailing space that `%ERRORLEVEL% >` would leave in the file.
+        f'(echo %ERRORLEVEL%)> "{OUT / f"_{beat.name}.rc"}"\r\n',
         # No `timeout` here. MSYS ships its own `timeout` that takes -t rather than /t and wins on
         # PATH, so `timeout /t N` printed "invalid time interval" INTO THE CAPTURED FRAME. `cmd /k`
         # already holds the window open, so the hold was never needed; the tidy-looking line was
@@ -513,6 +564,13 @@ def main():
     # opens afterwards.
     if saved:
         atexit.register(font_apply, saved[0], saved[1], saved[2], saved[3])
+
+    # A stale sentinel from an earlier run would be read as THIS run's result, which is the
+    # wrong-value shape this whole change exists to remove. Delete before launching so a missing
+    # file afterwards means "not obtained" and can never mean "the last take passed".
+    rc_file = OUT / f"_{beat.name}.rc"
+    rc_file.unlink(missing_ok=True)
+
     launch(beat, hold)
 
     # Let the command actually finish before rolling, or the capture films a half-drawn screen.
@@ -637,8 +695,8 @@ def main():
         # font size x columns, so the fix is a LARGER CONSOLE FONT rather than more columns:
         # more columns at the same font makes the window wider and the glyphs no bigger.
         print(
-            f"          NOTE below 1920x1080. Upscaling this into the timeline reproduces the "
-            f"softness of the old cut. Raise the console font size before the real take."
+            "          NOTE below 1920x1080. Upscaling this into the timeline reproduces the "
+            "softness of the old cut. Raise the console font size before the real take."
         )
 
     if mean <= 1:
@@ -691,10 +749,47 @@ def main():
         )
         return 1
 
+    # THE OUTCOME GATE, and it did not exist until an audit drove the climax beat's own script
+    # through the marker check. `expect` is a LEGIBILITY probe -- it answers "can a viewer read
+    # this frame" -- and it was being used as the whole verdict. On `replay-probe` the single
+    # marker "ACCEPT" matches case-insensitively, so it is satisfied by the probe's own failure
+    # line "nothing was accepted" and would have been MISSING on one of its success paths. The
+    # gate was inverted on the beat carrying the strongest safety claim, and re-shooting until a
+    # string appears is selecting for a favourable outcome in the tool written to prevent staging.
+    #
+    # The exit code is the outcome. Markers stay, demoted to what they always were.
+    rc_raw = None
+    if rc_file.exists():
+        rc_raw = rc_file.read_text(encoding="utf-8", errors="replace").strip()
+    if rc_raw is None:
+        print(
+            "\nFAIL  the command's exit code was NOT OBTAINED, so this take's outcome is unknown. "
+            "An unknown outcome is not a pass. The console may still be open, or the sentinel "
+            "write did not run.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        rc_val = int(rc_raw)
+    except ValueError:
+        print(f"\nFAIL  exit-code sentinel is unparseable: {rc_raw!r}", file=sys.stderr)
+        return 1
+
+    print(f"exit    : {rc_val}")
+    if rc_val != 0:
+        print(
+            f"\nFAIL  the filmed command exited {rc_val}. The frame may look perfect and the "
+            f"command did not succeed, which is exactly the take that must not be kept.",
+            file=sys.stderr,
+        )
+        print(f"OCR read: {' '.join((text or '').split())[:300]}", file=sys.stderr)
+        return 1
+
     if missing:
         print(
-            f"\nFAIL  the frame does not show {missing}. Light is not legibility: this frame has "
-            f"content and it is not the content the beat is for.",
+            f"\nFAIL  ILLEGIBLE. The command SUCCEEDED (exit 0) but the frame does not show "
+            f"{missing}, so a viewer cannot read what the beat is for. This is a framing, font "
+            f"or scroll problem, not a defect in what was run. Re-shoot the FRAME.",
             file=sys.stderr,
         )
         print(f"OCR read: {' '.join((text or '').split())[:300]}", file=sys.stderr)
@@ -702,7 +797,8 @@ def main():
 
     print(f"OCR     : {' '.join(text.split())[:220]}")
     print(
-        f"\nPASS  every expected marker {beat.expect} is legible in the captured frame."
+        f"\nPASS  command exited 0, and every legibility marker {beat.expect} is readable in the "
+        f"captured frame."
     )
     return 0
 
