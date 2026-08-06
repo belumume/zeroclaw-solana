@@ -334,7 +334,18 @@ is deterministic in its RNG seed so the result repeats rather than being taken o
 `cargo run --release --manifest-path differential-fuzz/Cargo.toml -- 20000`.
 Its self-test plants a divergence in every field
 it compares and requires a complaint for each, because zero findings is also what a broken
-detector reports, and the binary refuses to print a result if that control fails.
+detector reports, and the binary refuses to print a result if that control fails. That
+self-test is not a separate invocation; it runs before every fuzzing run, so the command above
+is the control and the result together.
+
+**Linux or macOS for this one.** It is the only thing here that will not build on Windows under
+MinGW: `solana-sdk` reaches `solana-precompiles` and then `openssl-sys`, and
+`default-features = false` does not shed it. The crate declares its own `[workspace]` on
+purpose, so `solana-sdk` can never become reachable from the components that must compile to
+`wasm32-wasip2`, and the cost of that isolation is that every workspace-scoped command walks
+past it. Which is why the 20,000-iteration run is now a job in `ci.yml` rather than something
+we assert: a claim whose only evidence is that someone once ran it locally is a claim taken on
+trust, and that is the one thing this paragraph says it is not.
 
 The same reasoning applies to the test suite itself. Two mutation harnesses ship runnable rather
 than described: one re-injects a real defect this build actually had, a nonce decoder reading the

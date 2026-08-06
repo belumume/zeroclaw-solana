@@ -488,3 +488,40 @@ jobs:
       # proving this can fail; it is not run here because it edits a tracked source file.
       - name: Declared custody tier matches the compiled component
         run: python3 scripts/check-custody-tier.py
+
+  differential-fuzz:
+    name: differential fuzzer, the run the write-up advertises
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: differential-fuzz
+
+      # WHY THIS JOB EXISTS. `docs/WRITEUP.md` gives a reader a run command AND a result:
+      # 20,000 iterations over a three-transaction seed population with no unexplained
+      # divergence, deterministic in its RNG seed "so the result repeats rather than being
+      # taken on trust". Until now nothing verified either half. The crate declares its own
+      # `[workspace]`, deliberately, so `solana-sdk` never becomes reachable from the
+      # components that must compile to wasm32-wasip2 -- and the side effect is that every
+      # workspace-scoped command in this file walked straight past it. A claim whose only
+      # evidence is that someone once ran it locally is a claim taken on trust, which is the
+      # exact thing the sentence promises it is not.
+      #
+      # It belongs in ci.yml rather than proof-check.yml because it is offline and
+      # deterministic, which is this file's stated contract: no RPC, no devnet, no secrets.
+      #
+      # It does NOT build on Windows/MinGW without OpenSSL: `solana-sdk` pulls
+      # solana-precompiles -> solana-secp256r1-program -> openssl-sys, and
+      # `default-features = false` does not shed it (measured). That is a platform
+      # requirement rather than a defect, and it is why the write-up now names the platform.
+      # ONE step, not two. There is no `--self-test` flag; I wrote one into this job from the
+      # write-up's prose and the source refuted it. `main.rs:478` reads argv[1] as the
+      # iteration count and argv[2] as the RNG seed, and the self-test runs UNCONDITIONALLY at
+      # `main.rs:489-490` before any fuzzing, with the binary refusing to continue when the
+      # planted divergence goes undetected. So the control is already inside this command and a
+      # separate invocation would have passed `--self-test` as a number.
+      - name: 20,000 iterations, the exact command the write-up prints
+        working-directory: differential-fuzz
+        run: cargo run --release --locked -- 20000
