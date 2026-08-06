@@ -164,3 +164,6 @@ docs/DEMO-CONTENT-INVENTORY.md
 # construction (it pins box paths and build hashes), so it is regenerated rather than tracked;
 # the generator and its two config files are what a fresh clone needs.
 deploy/SHOP-INVARIANTS.json
+
+# Agent fan-out writes findings here; scratch, never shipped.
+.audit-findings/
