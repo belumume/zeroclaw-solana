@@ -51,10 +51,13 @@ PAGE_DIR = REPO / "webshop-pay"
 # Read the pinned address and the endpoint out of the shipped page rather than restating them. A
 # second copy here would drift from the page, and the drifted copy is the one a reader trusts.
 MERCHANT_MARKER = "var MERCHANT='"
-# READ_RPC, not RPC: the settlement check reads from its own endpoint because the pay path's
-# endpoint 403s every browser request. Reading the wrong one here would break the RPC-failure
-# cases silently -- they would intercept a host the page never contacts and pass for free.
-RPC_MARKER = "var READ_RPC='"
+# The page's one RPC constant. It was READ_RPC while the settlement check read from a different
+# endpoint than the pay path; the pay path has since been repointed at the same host and the two
+# collapsed, because two constants holding one value drift and the drifted one is the one a reader
+# trusts. Still read out of the page rather than restated: the RPC-failure cases below derive their
+# intercept glob from whatever the page NAMES, so a repoint cannot leave them intercepting a host
+# nothing contacts and passing for free.
+RPC_MARKER = "var RPC='"
 
 MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # mainnet USDC
 

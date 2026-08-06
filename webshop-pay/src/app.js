@@ -35,7 +35,13 @@ var STR={pt:{
  loadinglibs:'Carregando as bibliotecas da Solana…',
  building:'Preparando a transferência…',
  approve:'Aprove o pagamento na sua carteira…',
- confirming:'Pago. Confirmando on-chain…',
+ // "Enviado", not "Pago". The wallet has broadcast and nothing has confirmed yet, and this line
+ // is on screen for the whole confirmation window, so calling it paid here is the same overclaim
+ // the timeout state below exists to avoid.
+ confirming:'Enviado. Confirmando on-chain…',
+ confirmwait:'Ainda confirmando… ',
+ confirmslow:'Enviado, mas a confirmação está demorando mais que o normal. O pagamento pode ter sido concluído. Confira a transação antes de pagar de novo, ou recarregue esta página.',
+ chainfailed:'A rede informou que esta transação falhou, então a transferência não foi feita. Recarregue esta página para tentar de novo.',
  paid:'✓ Pago',
  failed:'O pagamento não foi concluído: ',
  explorer:'Ver no explorer',
@@ -70,31 +76,42 @@ function T(k,en){var d=STR[LANG];return (d&&d[k])||en}
 // makes a swapped address survive a glance, so a mismatch is refused rather than
 // shown, and the full address is rendered on the happy path.
 var MERCHANT='C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ';
-// TWO endpoints, deliberately, and the reason is measured rather than stylistic.
+// ONE endpoint, and the reason it is not api.mainnet-beta.solana.com is measured rather than
+// stylistic.
 //
-// api.mainnet-beta.solana.com returns HTTP 403 to any request carrying an Origin header -- that
-// is, to EVERY browser fetch, from every origin including this page's own. Same IP and same
-// second, a request without the header returns 200. Verified again from inside a browser using
-// this page's own libraries: getLatestBlockhash, getMint and getSignaturesForAddress all fail 403
-// there and all three succeed on the endpoint below. A settlement check pointed at a host that
-// always 403s is a guard that can never fire, so the check reads from somewhere it can reach.
+// That host returns HTTP 403 to any request carrying an Origin header -- that is, to EVERY browser
+// fetch, from every origin including this page's own. Same host and same second, a request without
+// the header returns 200. The rejection is protocol-agnostic: the websocket handshake is refused
+// with the same 403 once a browser sends Origin, which every browser does. So BOTH halves of the
+// desktop pay path were dead there, not only the settlement read.
+//
+//   host                          HTTP no Origin   HTTP +Origin   WS no Origin   WS +Origin
+//   api.mainnet-beta.solana.com        200             403           OPEN           403
+//   solana-rpc.publicnode.com          200             200           OPEN           OPEN
+//
+// That table is why the desktop "connect wallet and pay" button had been broken since the shop
+// moved to mainnet while every phone payment worked: scanning the QR hands the solana: URL to the
+// wallet, which builds and submits the transaction itself and never touches this page's RPC.
+//
+// A CORRECTION, recorded rather than quietly applied. This constant was left pointing at the 403
+// host on the stated grounds that "that host's websocket does not open (measured, no handshake in
+// 8s)". That measurement does not reproduce: the handshake opens in 0.36s WITH an Origin header
+// and accepts slotSubscribe. The premise the two-endpoint split rested on is refuted, so the two
+// collapse back into one rather than sitting at the same value under different names.
 //
 // Keyless and unauthenticated on purpose: this is static HTML served to anyone, so an RPC key
-// pasted here would be a published credential. It is rate-limited, and the check treats a
-// throttle exactly like an outage (see the fail-open note further down).
+// pasted here would be a published credential. Measured under load rather than assumed: 40
+// back-to-back calls at 4.8 rps all returned 200, against the ~0.5 rps one payment generates. A
+// throttle is absorbed rather than avoided, because rpc() returns null for it and every caller
+// already reads null as "change nothing" or "ask again".
 //
-// THIRD-PARTY TRUST, declared rather than implied: this endpoint answers a READ. The worst a
-// hostile answer achieves is refusing a good link, which is recoverable in one message to the
-// shop, or claiming nothing settled, which is only today's behaviour. It cannot misdirect money:
-// the recipient, the mint and the amount are pinned in this page and shown again by the wallet.
-var READ_RPC='https://solana-rpc.publicnode.com';
-// The pay path's endpoint, UNCHANGED. It is subject to the same 403, which is a real and separate
-// defect in the desktop "connect wallet and pay" button; the phone path is unaffected because the
-// wallet builds the transaction from the QR itself and never uses this. It is deliberately NOT
-// repointed at READ_RPC: that host's websocket does not open (measured, no handshake in 8s) and
-// confirmTransaction needs one, so swapping this would trade one broken half of the desktop path
-// for another. Picking the replacement is a change to a money path and carries a deploy.
-var RPC='https://api.mainnet-beta.solana.com';
+// THIRD-PARTY TRUST, declared rather than implied: this endpoint answers READS. It never signs and
+// never broadcasts, the wallet does both, so a hostile answer cannot misdirect money: the
+// recipient, the mint and the amount are pinned in this page and shown again by the wallet before
+// the customer approves. What a hostile answer can do is refuse a good link, or withhold a
+// confirmation the page then reports as unconfirmed rather than as paid. Both are recoverable in
+// one message to the shop, and neither moves funds.
+var RPC='https://solana-rpc.publicnode.com';
 // Asset names come from THIS map, keyed by mint address, and never from the mint's own
 // on-chain metadata. A mint can call itself whatever it likes, so reading the symbol off
 // the token would let a worthless mint present itself as USDC next to an amount the
@@ -197,7 +214,7 @@ function rpc(method,params){
   var opts={method:'POST',headers:{'content-type':'application/json'},
             body:JSON.stringify({jsonrpc:'2.0',id:1,method:method,params:params})};
   if(ctl)opts.signal=ctl.signal;
-  return fetch(READ_RPC,opts)
+  return fetch(RPC,opts)
     .then(function(r){return r.ok?r.json():null})
     .then(function(j){return (j&&!j.error&&j.result!==undefined&&j.result!==null)?j.result:null})
     .catch(function(){return null})
@@ -285,15 +302,99 @@ function showPaid(sig){
   // the transaction was never on -- a dead link at the exact moment it has to hold.
   if(isSig(sig)){var a=document.createElement('a');a.className='link';a.target='_blank';a.rel='noopener noreferrer';a.href='https://explorer.solana.com/tx/'+encodeURIComponent(sig);a.textContent=T('explorer','View on explorer');card.appendChild(a);}
 }
+// A status line carrying an explorer link, for the two outcomes that are neither a confirmed
+// payment nor a clean pre-broadcast failure. Same signature gate as everywhere else: a signature
+// reaching an href is re-validated for shape and encoded, so a hostile RPC cannot steer where this
+// link points. The signature is NOT rendered as text -- an 88-char base58 run has no break
+// opportunity and measured +286px of horizontal scroll when one was last put on this card, and the
+// opening shot's plate is keyed to there being none.
+function statusWithTx(msg,cls,sig){
+  var s=el('status');s.textContent=msg;s.className='status '+(cls||'');
+  if(isSig(sig)){
+    s.appendChild(document.createTextNode(' '));
+    var a=document.createElement('a');a.className='link';a.target='_blank';a.rel='noopener noreferrer';
+    a.href='https://explorer.solana.com/tx/'+encodeURIComponent(sig);
+    a.textContent=T('explorer','View on explorer');s.appendChild(a);
+  }
+}
+// Confirmation by POLLING plain HTTPS, not by opening a websocket, and the reason is about WHEN a
+// failure lands rather than about which endpoint works.
+//
+// By the time this runs the wallet has already broadcast and the customer's money has already
+// moved. Anything that throws from here is therefore reporting on a transfer that may well have
+// succeeded, and the catch in connectAndPay renders a throw as "the payment did not complete" --
+// a FALSE claim about a settled transfer, which is the worst sentence this page can show. A
+// websocket adds a second transport, with its own handshake and its own failure modes, on top of
+// the HTTPS this page has just proven it can reach (it built the transaction over it). That
+// concentrates a NEW way to fail at the exact moment the page can least afford one. Polling reuses
+// the transport that is already working, and rpc() cannot throw, so the post-broadcast path has no
+// route into the catch at all.
+//
+// Three terminal states, and the third is the point. CONFIRMED. FAILED-ON-CHAIN, where the network
+// itself reports the transaction errored and no transfer happened. And UNKNOWN, where the window
+// ran out: not paid, not failed, and it must never be rendered as either.
+//
+// 45 attempts at 2s is ~90s, which is roughly the life of a blockhash: past that an unlanded
+// transaction can no longer land, so continuing to poll would only delay an answer that is not
+// coming. Every failure mode in between -- offline, DNS, abort, a 429 -- arrives as a null from
+// rpc() and is read as "ask again", so a throttle degrades this into a slower confirmation and
+// never into a false verdict.
+var CONFIRM_INTERVAL_MS=2000,CONFIRM_ATTEMPTS=45;
+async function awaitConfirmation(sig){
+  for(var i=0;i<CONFIRM_ATTEMPTS;i++){
+    var r=await rpc('getSignatureStatuses',[[sig],{searchTransactionHistory:true}]);
+    var st=(r&&r.value&&r.value[0])||null;
+    if(st){
+      // A failed transaction moved no funds and must never read as a settlement. Same gate as the
+      // already-paid check above and as plugins/payment-watch/src/watch.rs.
+      if(st.err)return 'failed';
+      var c=st.confirmationStatus;
+      // "confirmed" is the bar the watcher credits an order at; "processed" is not, so a
+      // transaction seen but not yet confirmed keeps polling rather than resolving early.
+      if(c==='confirmed'||c==='finalized')return 'confirmed';
+    }
+    status(T('confirmwait','Still confirming… ')+Math.round((i+1)*CONFIRM_INTERVAL_MS/1000)+'s');
+    await new Promise(function(f){setTimeout(f,CONFIRM_INTERVAL_MS)});
+  }
+  return 'unknown';
+}
+// The three outcomes, rendered. Extracted from connectAndPay rather than left inline so the mapping
+// from outcome to what the customer actually sees can be driven directly, including the two states
+// a live run cannot produce on demand.
+//
+// TWO INVARIANTS, and they are the whole reason this is a function. Only 'confirmed' renders as
+// paid, so a timeout can never claim a payment that has not confirmed. And NOTHING here re-enables
+// the Pay button, in either failing case.
+//
+// The second is deliberate even for 'failed', where nothing moved and a retry would be safe. The
+// authority on whether this order is still payable is the settlement check that runs on LOAD, which
+// refuses a reference that has already settled. Routing a retry through a reload therefore reuses a
+// proven guard instead of letting one status read decide it, and re-offering Pay here is exactly how
+// one order comes to take two transfers.
+function renderOutcome(outcome,sig){
+  if(outcome==='confirmed'){showPaid(sig);return;}
+  // Disabled HERE rather than left to connectAndPay having done it on the way in. The comment
+  // above claims this function never hands the button back, and until this line that claim was
+  // true only because a DIFFERENT function forty lines away happened to disable it first. An
+  // invariant asserted in one place and enforced in another is the shape that silently stops
+  // holding; this makes it local, and the harness drives renderOutcome directly to prove it.
+  if(el('pay'))el('pay').disabled=true;
+  statusWithTx(outcome==='failed'
+    ? T('chainfailed','The network reported this transaction as failed, so the transfer did not go through. Reload this page to try again.')
+    : T('confirmslow','Sent, but confirmation is taking longer than usual. The payment may still have gone through. Check the transaction before paying again, or reload this page.'),
+    outcome==='failed'?'err':'',sig);
+}
 async function connectAndPay(){
   var provider=(window.phantom&&window.phantom.solana)||window.solflare||window.solana;
   if(!provider){status('No Solana wallet extension detected in this browser. Install Phantom or Solflare (desktop), or scan the QR above with a phone wallet.','err');return;}
   el('pay').disabled=true;status(T('loadinglibs','Loading Solana libraries…'));
   try{
     var web3=await import('https://esm.sh/@solana/web3.js@1.95.3');
-    // Mainnet, from the constant at the top. See the note there: this endpoint 403s a browser
-    // fetch, which is a live defect in this desktop path and is tracked rather than papered over
-    // with a swap whose websocket half is unverified.
+    // Mainnet, from the single constant at the top. Used for reads only -- getMint, the two
+    // getAccount preflights and getLatestBlockhash. It never signs and never broadcasts: the
+    // wallet does both, via its own RPC. web3.js opens its websocket lazily, on the first
+    // subscription, and this page makes none now that confirmation is a poll, so no websocket is
+    // ever opened here.
     var conn=new web3.Connection(RPC,'confirmed');
     status(T('connecting','Connecting wallet…'));
     var resp=await provider.connect();
@@ -339,8 +440,7 @@ async function connectAndPay(){
     status(T('approve','Approve the payment in your wallet…'));
     var sig=await provider.signAndSendTransaction(tx);
     var s=(sig&&sig.signature)?sig.signature:sig;
-    status(T('confirming','Paid. Confirming on-chain…'));
-    await conn.confirmTransaction(s,'confirmed');
-    showPaid(s);
+    status(T('confirming','Sent. Confirming on-chain…'));
+    renderOutcome(await awaitConfirmation(s),s);
   }catch(e){status(T('failed','Payment did not complete: ')+(e&&e.message?String(e.message):String(e)),'err');el('pay').disabled=false;}
 }
