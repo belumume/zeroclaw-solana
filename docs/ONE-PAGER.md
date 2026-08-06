@@ -244,8 +244,9 @@ happens. Scripting it instead? Send a browser `User-Agent`, because Cloudflare a
 
 **Repo:** https://github.com/belumume/zeroclaw-solana
 **Write-up:** [docs/WRITEUP.md](WRITEUP.md) &nbsp;&nbsp; **Run it:** [QUICKSTART.md](../QUICKSTART.md)
-**Demo (2:55, plays in the browser):**
-https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/zeroclaw-solana-demo.mp4
-(also committed at [.demo-assets/cut/zeroclaw-solana-demo.mp4](../.demo-assets/cut/zeroclaw-solana-demo.mp4), so a clone carries it)
+**Demo:** superseded. The cut at
+[.demo-assets/cut/zeroclaw-solana-demo.mp4](../.demo-assets/cut/zeroclaw-solana-demo.mp4)
+(2:39) carries synthetic narration and is kept only so nothing that once linked it breaks.
+It is not advertised, and the submission's video is recorded separately.
 **Injection transcript:** [docs/transcripts/injection-refund-redirect.md](transcripts/injection-refund-redirect.md)
 **Mainnet custody proof:** [docs/MAINNET-PROOF.md](MAINNET-PROOF.md)
