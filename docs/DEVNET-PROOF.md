@@ -108,6 +108,44 @@ Both programs carry an on-chain **Anchor IDL** (so the explorer decodes the inst
 - oracle IDL account `DRaviitdm5rojHS7YGTQxG8Ho26g8PdAdqodWoLaaKtJ`
 - consumer IDL account `GHrkqYsBWp55eJCZg3vgYzGvoQELDUfu2kRQqpBn7tr8`
 
+## A second program read the live feed on chain (the feed is consumable, not a memo)
+
+A feed only earns the word oracle if some *other* program can read it, check its provenance and
+its freshness, and act. `consumer_example` does that, and this is the transaction where it did
+it against the feed the rest of this page is about.
+
+`4CRapo3AEFBFLh7Y7byJR9XDYZEa95MEioUQMzUhJVxTB9HaDTRtX2X47pVgxaSu8KNfYsPyugeQ6FjN8hBzi54L`
+at slot 481442353, 2026-08-05T18:09:00Z, `err: None`, 5,000 lamports, 1,809 compute units.
+
+The call was `act_on_feed(threshold=4000, max_age_secs=1800)` against
+`JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg`, and the program emitted `ActionTaken` with
+`value=4130 scale=-2 threshold=4000 crossed=true`, carrying the publishing device
+`6RfiDnqZRZeDj9qiNJjoVbMQxtbLkfzHLgayTCDLDKKu`. In the units the feed declares that is 41.30 °C
+read against a 40.00 °C threshold, so the consumer crossed and acted, on a reading 1,045 seconds
+old inside a 30-minute freshness window.
+
+Three things in that sentence are enforced by the chain rather than asserted here. The feed
+argument is typed `Account<DeviceFeed>`, so a look-alike account owned by anything other than
+`EFCRmE5w…` is rejected before the body runs. The value the consumer acted on was signed by the
+device key, which was generated on the ARM node and has never left it. And the freshness gate is
+load-bearing rather than decorative, which is checkable in one command and costs nothing:
+
+```
+python scripts/consume_feed_once.py --threshold 4000 --max-age 0     # refuses
+python scripts/consume_feed_once.py --threshold 4000 --max-age 1800  # accepts
+```
+
+The first simulates to `Custom: 6000`, `StaleFeed`, `0x1770`. The second simulates clean. Both
+are simulations, so neither costs anything or needs a funded key; `--send` is what broadcasts.
+A gate that has only ever been observed passing has not been shown to work, which is why the
+refusing direction is the one written down first.
+
+**Honest scope.** Before this transaction the deployed consumer had read the *historical*
+`CfWaZA…` feed once, on 2026-07-21, four days before the ARM feed existed. So the consumability
+argument was sound and had never been exercised against the feed it was being made about. It has
+now, and the bytes are in `docs/proof-bundle/devnet-transactions.json` rather than behind an
+explorer link that devnet retention deletes before anyone reads this.
+
 ## The DePIN feed is publishing on a schedule (the "yours, running" proof)
 
 These are consecutive device-signed `publish_reading` transactions on the **ARM node-born

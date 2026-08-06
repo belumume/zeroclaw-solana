@@ -783,6 +783,20 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   publish ledger, the proof the node keeps running. `scripts/verify-proof.py` checks all three
   feeds and additionally asserts the node feed is FRESH, since an owned-but-dead feed would
   otherwise pass an ownership check forever.
+- **the consumer program has read that live feed on chain**, which is what separates an oracle
+  from a memo. `consumer_example` called `act_on_feed(threshold=4000, max_age_secs=1800)`
+  against `JEtuZk…` in
+  `4CRapo3AEFBFLh7Y7byJR9XDYZEa95MEioUQMzUhJVxTB9HaDTRtX2X47pVgxaSu8KNfYsPyugeQ6FjN8hBzi54L`
+  (slot 481442353, `err: None`) and emitted `ActionTaken` with `value=4130 scale=-2
+  threshold=4000 crossed=true`, so a second program checked provenance and freshness and acted
+  on a device-signed reading. Provenance is enforced by the typed `Account<DeviceFeed>` rather
+  than by the caller, and the freshness gate refuses: the same call at `max_age_secs=0` returns
+  `StaleFeed`, `0x1770`. Run `python scripts/consume_feed_once.py --threshold 4000 --max-age 0`
+  and then the same command with `--max-age 1800` to see both directions yourself; both simulate
+  against the live feed, so neither costs anything nor needs a funded key, and `--send` is what
+  broadcasts. Until 2026-08-05 this program had only ever read
+  the historical `CfWaZA…` feed, so the claim was sound and unexercised against the feed it was
+  made about; `docs/DEVNET-PROOF.md` states that scope.
 - x402 settlement `EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE`
   (err None, devnet USDC, buyer on a different machine from the node); a replayed payment refused
   NonceReused.
