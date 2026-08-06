@@ -116,7 +116,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reference", help="a Solana Pay reference pubkey for one order")
     ap.add_argument("--interval", type=float, default=3.0)
-    ap.add_argument("--timeout", type=float, default=600.0)
+    # 40 minutes, not 10. The 10-minute default expired mid-shoot while the operator
+    # was still paying, which is the one failure a watcher must not have: it is meant
+    # to outlast the human, and a person placing an order on a phone takes longer than
+    # a script author imagines. Pass --timeout to shorten it for a quick check.
+    ap.add_argument("--timeout", type=float, default=2400.0)
     a = ap.parse_args()
 
     if a.reference:
