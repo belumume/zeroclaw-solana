@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "_doc": [
+    "MACHINE-WRITTEN by `python deploy/make_invariants.py --bless <plugin> --wasm <path>`.",
+    "Do not hand-edit: every field here exists so the record cannot be typed wrong.",
+    "",
+    "WHY A BLESSED HASH RATHER THAN A DERIVED ONE. Every other entry in the manifest is derived",
+    "from a file this repo tracks, so the repo IS the source of truth and drift means the box",
+    "disagrees with it. A plugin binary has no repo copy: the repo holds Rust, the box holds a",
+    "compiled .wasm, and there is no hash to derive. A manifest is a STATEMENT of what should be",
+    "deployed, so for a built artifact that statement has to be RECORDED at the moment someone",
+    "builds and deploys it. Blessing is that moment.",
+    "",
+    "HOW A READER TELLS BLESSED-AND-CURRENT FROM A STALE PIN. Each record carries the sha256 of",
+    "the SOURCE that produced the binary: the plugin's own tracked files, plus wit/ and",
+    "crates/solana-core/, because those three determine the artifact. The generator recomputes",
+    "that hash every run. If the source has moved since blessing, the pin is stale and the",
+    "generator REFUSES to emit rather than baking a lie into the manifest. Emitting anyway needs",
+    "--allow-stale-binaries, and the manifest then records stale:true with the two hashes, so the",
+    "staleness is a fact on the box rather than a thing someone has to remember.",
+    "",
+    "wit/ is in the source hash on purpose. The 2026-08-06 arity defect was one extra enum",
+    "variant in a vendored .wit file, and it made every plugin fail to instantiate while the",
+    "Rust was untouched. A source hash that ignored wit/ would have called those binaries",
+    "current.",
+    "",
+    "A plugin with NO record here is not checked at all. That is honest rather than hidden: the",
+    "generator lists every such plugin under not_checked in the manifest and says so on stdout."
+  ],
+  "entries": {}
+}

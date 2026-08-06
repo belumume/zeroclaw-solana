@@ -89,6 +89,16 @@ generated **on the ARM node itself** with `openssl rand -hex 32` and has never l
 so this workstation cannot produce a signature for that feed. A `systemd --user` timer with
 lingering enabled publishes on a schedule with no laptop in the loop.
 
+**What the ARM node is.** `zc-arm-ref`, a VM.Standard.A1.Flex instance in Oracle's me-jeddah-1
+region, on their free tier at a measured 0.00 EUR. Ampere Altra is ARM, so the phrase is accurate,
+but it is a rented virtual machine and not a board anyone owns. Stated here because this document
+is the one a reader opens to check the DePIN claim, and "device-signed" should not be allowed to
+smuggle in "device we own". The provenance argument is unaffected: the key was generated there and
+has never left, which is what makes the signature unforgeable from here. What a rented host does
+change is the durability claim's scope, so read it as continuous operation on infrastructure we do
+not control. A Raspberry Pi with a DHT11 is a drop-in for the reading source and the on-chain half
+is byte-identical either way.
+
 That was a deliberate reversal, and it is worth stating because the easier path was
 available. The first plan was to copy this workstation's existing device seed to the node so
 the new feed would inherit the old one's sequence history. That would have made "the device

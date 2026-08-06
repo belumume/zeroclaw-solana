@@ -38,6 +38,14 @@ RPC = os.environ.get("ZC_RPC", "https://api.devnet.solana.com")
 FEED = os.environ.get("ZC_FEED", "JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg")
 CONSUMER = os.environ.get("ZC_CONSUMER", "B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt")
 ORACLE = os.environ.get("ZC_ORACLE", "EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn")
+# Fee payer used when SIMULATING with no key on disk. This is a PUBLIC address and holds no
+# secret; it is named here so a fresh clone can run the documented command. It must simply be
+# an account that EXISTS and is funded on devnet, because the runtime resolves the payer even
+# when it is not verifying signatures. A throwaway pubkey does NOT work and returns
+# AccountNotFound, which is why this is pinned rather than generated.
+SIM_PAYER = os.environ.get(
+    "ZC_SIM_PAYER", "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
+)
 KEYPAIR = os.environ.get(
     "ZC_KEYPAIR",
     os.path.join(
@@ -186,10 +194,38 @@ def main():
         f"        expect: fresh={age <= args.max_age}, crossed={feed['value'] >= args.threshold}"
     )
 
-    seed = bytes(json.load(open(KEYPAIR))[:32])
-    key = Ed25519PrivateKey.from_private_bytes(seed)
-    payer = b58encode(key.public_key().public_bytes_raw())
-    print(f"payer   {payer}")
+    # A SIMULATION NEEDS NO PRIVATE KEY, and this script used to demand one anyway.
+    #
+    # `simulateTransaction` defaults to `sigVerify: false`, so the signature is never checked.
+    # What the runtime does need is a fee payer that EXISTS on chain, which is public
+    # information. So without --send we sign with an ephemeral throwaway and name a known
+    # funded devnet account as payer.
+    #
+    # This is a REPRODUCIBILITY fix, not a convenience. `docs/DEVNET-PROOF.md` tells a judge
+    # the freshness gate is "checkable in one command" and that it does not "need a funded
+    # key", and that sentence was FALSE on a fresh clone: the default keypair path is under
+    # `.devnet-proof/`, which `.gitignore:20` excludes and `git ls-files` returns zero files
+    # for, so the advertised command died with FileNotFoundError. Handing a stranger a
+    # command that cannot run, inside the paragraph arguing a stranger can check it, is worse
+    # than making no claim.
+    #
+    # Verified both directions against live devnet before shipping: --max-age 0 simulates to
+    # `Custom: 6000` / StaleFeed / 0x1770, --max-age 1800 simulates clean, which is exactly
+    # what the doc promises.
+    if os.path.exists(KEYPAIR):
+        seed = bytes(json.load(open(KEYPAIR))[:32])
+        key = Ed25519PrivateKey.from_private_bytes(seed)
+        payer = b58encode(key.public_key().public_bytes_raw())
+        print(f"payer   {payer}")
+    elif args.send:
+        sys.exit(
+            f"--send needs a signing key and {KEYPAIR} does not exist.\n"
+            "Set ZC_KEYPAIR to a funded devnet keypair, or drop --send to simulate."
+        )
+    else:
+        key = Ed25519PrivateKey.generate()
+        payer = SIM_PAYER
+        print(f"payer   {payer}  (public account; no key on disk, simulation only)")
 
     bh = rpc("getLatestBlockhash", [{"commitment": "finalized"}])["result"]["value"][
         "blockhash"

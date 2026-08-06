@@ -43,7 +43,18 @@ PAGE_DIR = REPO / "webshop-pay"
 MERCHANT_MARKER = "var MERCHANT='"
 
 MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # mainnet USDC
-RPC_MARKER = "api.mainnet-beta.solana.com"
+
+# The page's RPC constant, read BY NAME and then judged, rather than compared against a host string.
+#
+# This used to assert the literal "api.mainnet-beta.solana.com" appeared somewhere in app.js, and
+# that check is now inverted twice over. The page deliberately does NOT use that host: it returns
+# 403 to every request carrying an Origin header, so no browser fetch reaches it at all. And the
+# page's comment NAMES the host in order to explain why, so the old assertion would still pass --
+# on prose describing the endpoint we refuse to use. A check keyed on one wording punishes changing
+# the wording; this keys on the criterion the check was always for, which is that the page is
+# pointed at mainnet and this harness is therefore composing a link it can settle.
+RPC_MARKER = "var RPC='"
+NON_MAINNET = ("devnet", "testnet", "localhost", "127.0.0.1")
 
 # 0.25, not 25. The payer wallet holds 0.4 USDC, so 25 is not payable on mainnet at all --
 # the amount is forced by the funds, not chosen for thrift. It also keeps a filmed payment
@@ -97,8 +108,17 @@ def check_network_agreement() -> list[str]:
         )
     if RPC_MARKER not in src:
         problems.append(
-            f"the page's RPC is not {RPC_MARKER}; this harness assumes mainnet"
+            f"the page has no {RPC_MARKER}...' constant, so its network cannot be read"
         )
+    else:
+        i = src.index(RPC_MARKER) + len(RPC_MARKER)
+        endpoint = src[i : src.index("'", i)]
+        hits = [m for m in NON_MAINNET if m in endpoint]
+        if hits:
+            problems.append(
+                f"the page's RPC {endpoint} is not mainnet (matched {', '.join(hits)}); "
+                "this harness composes a mainnet link and would film the wrong asset"
+            )
     return problems
 
 
@@ -307,7 +327,10 @@ def main() -> int:
     diff = sum(1 for a, b in zip(good, bad) if a != b)
     print(f"pinned merchant : {good}")
     print(f"tampered        : {bad}   ({diff} character differs)")
-    print(f"network         : mainnet-beta   mint {MINT}   amount {AMOUNT} USDC")
+    src = (PAGE_DIR / "src" / "app.js").read_text(encoding="utf-8")
+    i = src.index(RPC_MARKER) + len(RPC_MARKER)
+    print(f"page rpc        : {src[i : src.index(chr(39), i)]}")
+    print(f"network         : mainnet   mint {MINT}   amount {AMOUNT} USDC")
     if diff != 1 or len(good) != len(bad):
         print(
             "FAIL  the tampered address must differ by exactly one character",

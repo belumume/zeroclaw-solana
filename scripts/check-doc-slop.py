@@ -64,9 +64,15 @@ CANNOT = 2
 # A FLOOR, not a target. The repo tracked 29 markdown documents when this gate was written.
 # Adding documents is fine and raises the real count; a run that discovers FEWER than this has a
 # broken discovery step, and without the floor it would print a perfect result over nothing.
-EXPECTED_MIN_DOCS = 29
+EXPECTED_MIN_DOCS = 30
 
-MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdx")
+# WAS markdown-only, and that made every "N/N documents are clean" statement a claim about
+# markdown rather than about the judge-facing set. index.html is the GitHub Pages landing page and
+# one of the submission form's five links, and this gate had never scanned it -- the word "html"
+# appeared nowhere in this file. A gate whose scope is narrower than the surface it reports on does
+# not merely miss things, it reports green about the part it can see and says nothing about the
+# rest, which downstream is indistinguishable from covering everything.
+PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".html")
 
 # Upstream-authored, vendored verbatim. Values are the marker counts present in the upstream copy
 # at zeroclaw-labs/zeroclaw, measured rather than estimated. Anything above these is local and is
@@ -224,7 +230,7 @@ def discover_docs(root):
     docs = [
         line.strip()
         for line in out.stdout.splitlines()
-        if line.strip().lower().endswith(MARKDOWN_SUFFIXES)
+        if line.strip().lower().endswith(PROSE_SUFFIXES)
     ]
     return sorted(docs)
 
@@ -342,7 +348,7 @@ def run(root, docs=None, min_docs=EXPECTED_MIN_DOCS):
     scanned = len(docs)
     if scanned < min_docs:
         report.append(
-            f"FLOOR  discovered {scanned} tracked markdown documents, expected at least "
+            f"FLOOR  discovered {scanned} tracked prose documents, expected at least "
             f"{min_docs}. Refusing to report a result over a scope this small."
         )
         report.append(
@@ -358,7 +364,7 @@ def run(root, docs=None, min_docs=EXPECTED_MIN_DOCS):
 
     if dirty:
         report.append(
-            f"{scanned - len(dirty)}/{scanned} tracked markdown documents are clean"
+            f"{scanned - len(dirty)}/{scanned} tracked prose documents are clean"
         )
         report.append(
             f"{len(dirty)} carry slop markers outside code fences and blockquotes"
@@ -366,7 +372,7 @@ def run(root, docs=None, min_docs=EXPECTED_MIN_DOCS):
         return FOUND, report
 
     exempt = len(VENDORED_BASELINE)
-    report.append(f"{scanned}/{scanned} tracked markdown documents are clean")
+    report.append(f"{scanned}/{scanned} tracked prose documents are clean")
     report.append(
         f"fenced code and blockquote lines exempted throughout; "
         f"{exempt} vendored paths bounded by their upstream marker counts"

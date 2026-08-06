@@ -334,7 +334,18 @@ is deterministic in its RNG seed so the result repeats rather than being taken o
 `cargo run --release --manifest-path differential-fuzz/Cargo.toml -- 20000`.
 Its self-test plants a divergence in every field
 it compares and requires a complaint for each, because zero findings is also what a broken
-detector reports, and the binary refuses to print a result if that control fails.
+detector reports, and the binary refuses to print a result if that control fails. That
+self-test is not a separate invocation; it runs before every fuzzing run, so the command above
+is the control and the result together.
+
+**Linux or macOS for this one.** It is the only thing here that will not build on Windows under
+MinGW: `solana-sdk` reaches `solana-precompiles` and then `openssl-sys`, and
+`default-features = false` does not shed it. The crate declares its own `[workspace]` on
+purpose, so `solana-sdk` can never become reachable from the components that must compile to
+`wasm32-wasip2`, and the cost of that isolation is that every workspace-scoped command walks
+past it. Which is why the 20,000-iteration run is now a job in `ci.yml` rather than something
+we assert: a claim whose only evidence is that someone once ran it locally is a claim taken on
+trust, and that is the one thing this paragraph says it is not.
 
 The same reasoning applies to the test suite itself. Two mutation harnesses ship runnable rather
 than described: one re-injects a real defect this build actually had, a nonce decoder reading the
@@ -725,12 +736,87 @@ needed at any step.
 [`scripts/check-config-drift.py`](../scripts/check-config-drift.py) compares the documented
 set against the live one by machine, because the two had silently diverged once before.
 
-**SOPs.** [`payment-confirmation`](../sops/payment-confirmation/SOP.md) is the one that closes the
-loop a customer actually feels: it polls the shop's open payment references every minute, and when
-one settles on-chain it sends a single short message naming the order and the amount. It is
-read-only by construction, holds no key and builds no transaction, and it appends to its ledger
-only *after* the message is sent, so a failure between the two re-announces (visible, correctable)
-rather than swallowing a confirmation (invisible, and it would tell the owner an order never paid).
+**SOPs.** [`payment-confirmation`](../sops/payment-confirmation/SOP.md) is the one that would close
+the loop a customer actually feels: scheduled every minute, it polls the shop's open references and,
+when one settles on-chain, sends a single short message naming the order and the amount. It is
+read-only by construction, holds no key and builds no transaction.
+
+**It does not ship, and the reason is the most useful thing this project found.** Measured on the
+box at 2026-08-06T22:15Z, the detection half works: the cron fires on the minute and returns `ok`,
+and the runtime trace records eight real `payment_watch` invocations, so the plugin instantiates and
+the reference-key poll runs. The *reporting* half is composed by the model, and when we finally read
+what it had written, every entry was invented. Its ledger held four records: two with a literal
+ellipsis where a signature belongs (`5QzQ1...`, `4vC...M2n`), two sharing one settlement signature
+across two different orders and amounts, two stamped two minutes in the future, and none carrying
+any of the three references that actually settled to this merchant that day. Checked against the
+chain, the merchant's token account holds twelve lifetime signatures and not one of the seven values
+in that ledger matches any of them.
+
+Nothing was ever sent. Enumerating every tool name in the trace returns `file_read`, `memory_recall`
+and `payment_watch`, with no channel-send at all, so no fabricated confirmation reached a customer
+or the owner. That is closer to luck than to design, and it is the whole point: a prose SOP hands
+the final wording to a model, and a model asked to report a settlement it cannot find will write a
+plausible one instead. The correct shape is a deterministic step whose fields bind to the tool's
+actual output rather than to the model's, which the host supports and our prose-authored SOP does
+not use.
+
+So the beat is cut from the demo rather than filmed. An agent that invents a payment confirmation is
+the same failure class as an agent that can be talked into moving funds, and it is the reason the
+custody argument in this submission rests on an on-chain program rather than on anything the model
+says.
+
+**This SOP is where we hit the component boundary the bounty's trap 2 names, and the diagnosis is
+worth more than the fix.** For the whole life of this project, every WASM tool plugin failed to
+instantiate with:
+
+```
+failed to instantiate tool plugin: component imports instance `zeroclaw:plugin/logging@0.1.0`,
+but a matching implementation was not found in the linker
+```
+
+That message reads as *the host never registered the import*, and it sent us to the host's source
+looking for a missing `add_to_linker`. The host registers it correctly. **The real cause is that
+`wasmtime` emits the same sentence for "import absent" and "import present but the wrong type",**
+and the discriminating detail is in the `Caused by:` chain underneath, which a truncated log drops.
+
+The type was wrong by **one enum variant**. Our vendored `wit/v0/logging.wit` declares
+`plugin-action` with 38 cases; the host binary we run declares 37. The difference is one extra
+`memory-audit` case that landed upstream on 2026-07-24, after the host we build against, and that
+is the whole defect. Component-model interfaces match
+**nominally**, so 37 and 38 are different types, the whole `logging` instance fails typecheck, and
+every plugin importing it dies at instantiation regardless of what else is correct. Copying the
+host's `logging.wit` over ours and rebuilding took 28 seconds and fixed **one** plugin.
+
+**The honest count, because an earlier draft of this paragraph claimed the fix took instantiation
+failures "from 14 to 0" and that was false.** Only `payment-watch` was rebuilt and redeployed. Six
+of the eight still carry the 38-case file and still fail to instantiate, so this box has run
+exactly one WASM tool plugin. The 14-to-0 figure came from a run that measured a real number about
+the wrong object: the rebuild had been written to a directory the daemon does not load from, so the
+loaded binary was still the old one while the count was read from a window that never contained a
+load of the deployed path. The corrected measurement is `payment-watch` absent from the failing
+list while six siblings remain on it, which is also the positive control proving the query still
+detects failures rather than returning an empty set.
+
+This is trap 2 and trap 4 in one defect. Trap 4 says:
+
+> wit/v0 is experimental — no `.frozen` marker, the ABI can move. Pin your assumptions and expect
+> a rebuild.
+
+Our assumption was pinned in a vendored file that a later upstream commit silently invalidated, and
+the failure surfaced only at instantiation, never at compile time and never in the host-run tests,
+which all pass. If you take one
+thing from this write-up as an operator, take this: **diff your vendored `wit/` against the host you
+actually run before you debug anything else.** [`demo/check_wit_parity.py`](../demo/check_wit_parity.py)
+does it in one command (`--host-wit <zeroclaw-checkout>/wit`) and asserts set equality rather than
+containment, because our copy was a strict *superset* of the host's and every containment check we
+had stayed green throughout. It exits 2 rather than 0 when it cannot find a host to compare
+against, and `--self-test` drives it against the real incident plus a mutation control that guts
+the parser and requires the incident to go undetected.
+
+**The paying half of this loop is real and verifiable on mainnet; the announcing half is not yet
+proven end to end.** With the plugin instantiating, the scheduled run still terminates on a
+different error we have not finished reading, and no settlement has been announced to the owner's
+channel. We would rather write that down than let a judge find it.
 [`evening-reconciliation`](../sops/evening-reconciliation/SOP.md) reconciles the shop's open payment
 requests against on-chain settlement daily and holds the human checkpoint on the refund path.
 [`node-earnings-report`](../sops/node-earnings-report/SOP.md) reports the DePIN node's x402
@@ -769,13 +855,37 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
 - oracle program `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn`, consumer
   `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`; three device feed PDAs, all owned by the
   oracle: `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (the ARM node, publishing 24/7 on its
-  own hardware), `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (deterministic LLM-free,
-  climbing every 20 min) and `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` (agent-driven, our
-  first proof, kept as history); Anchor IDLs on-chain; security.txt embedded.
+  own host), `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (deterministic LLM-free, a
+  **completed** second-device run, last published 2026-08-06) and
+  `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` (agent-driven, our first proof, kept as
+  history); Anchor IDLs on-chain; security.txt embedded.
+
+  **Only the ARM node feed is still live, and that is deliberate.** The second device was a
+  laptop, so it slept, and the 36-hour gap in the table below is what that looks like on chain.
+  Its job was to show the same program accepting signed readings from a second independent
+  device with a second key, and 779 publishes over 12.4 days with zero failures did that. A
+  control that has finished is a result; a control that depends on someone's laptop staying
+  awake through a two-week judging window is a liability. The claim this submission makes about
+  continuous operation rests on the node, which runs on hardware we do not switch off.
 - the node feed is the one that makes the DePIN claim literal. Its device key was generated on
   the node with `openssl rand -hex 32` and has never left that box, so that feed is signed by
   hardware we cannot forge from here, and a `systemd --user` timer with lingering keeps it
-  publishing whether or not any laptop is awake. The earlier plan was to transport this
+  publishing whether or not any laptop is awake.
+
+  **What that node actually is, said plainly because the paragraph above would otherwise let you
+  assume.** It is `zc-arm-ref`, a VM.Standard.A1.Flex instance in Oracle's me-jeddah-1 region,
+  running on their free tier at a measured 0.00 EUR. An Ampere Altra is genuinely ARM, so "ARM
+  node" is accurate, but it is a rented virtual machine rather than a board anyone owns. Declaring
+  it costs nothing and hiding it would be the same failure this submission spends the custody
+  section arguing against: a third party you depend on belongs in the threat model. Oracle can
+  reclaim that instance, and the honest scope of the durability claim is that the feed has
+  published without failing for as long as the table says, on infrastructure we do not control.
+
+  Nothing downstream of that changes. The key still never left the box, this workstation still
+  cannot forge a reading, and the schedule still runs with no laptop in the loop. A Raspberry Pi
+  with a DHT11 is a drop-in for the reading source and the on-chain half is byte-identical either
+  way, which is why the reading source is documented as a keyless weather API rather than dressed
+  up as a probe. The earlier plan was to transport this
   machine's existing seed so the new feed would inherit the old sequence history; that would
   have made the claim architecturally true and literally false, so the copy was shredded
   unused and the node made its own. `docs/DEVNET-PROOF.md` carries the full reasoning.

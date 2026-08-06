@@ -1,0 +1,354 @@
+#!/usr/bin/env python3
+"""Prove the pay page refuses a link whose reference key has already settled -- both directions.
+
+WHY THIS EXISTS. A Solana Pay reference key is single-use: it rides the transfer as a read-only
+non-signer account, so the chain can be asked whether this exact order has been paid. Until this
+check existed, reloading a paid link rendered a live Pay button again, and the page would have
+taken a second transfer for one order. The customer cannot see that; the shop then owes a refund,
+which is the one path here that touches funds and sits behind a human checkpoint.
+
+A refusal alone proves nothing -- a page that refused everything would look identical on the paid
+case. So this drives four directions and fails unless the page DISCRIMINATES:
+
+  PAID       a reference with a real settlement   -> refused, no Pay button, amount + signature
+  UNPAID     a reference with no history at all   -> payable, Pay button, QR
+  RPC DEAD   the PAID reference, endpoint aborted -> payable  (fail open on the network)
+  RPC 429    the PAID reference, rate-limited     -> payable  (fail open on a throttle)
+
+The last two are the point of the design and the easiest thing to get backwards: an RPC failure
+must never refuse a good link, because that failure is invisible to the shop while the untaken
+second payment simply does not happen.
+
+The PAID case also composes its link with a DELIBERATELY WRONG amount. The card must show what the
+CHAIN says was paid (0.39 USDC), not what the link asked for, or the figure on a receipt is an echo
+of the request rather than a fact about the settlement.
+
+Both fixtures are asserted against mainnet before the browser opens, so a "payable" verdict cannot
+come from a fixture that quietly stopped meaning what it did when it was written.
+
+Run it:  python demo/verify_paid_link_refused.py [--viewport desktop|phone] [--shots DIR]
+
+Needs playwright (pip install playwright). It drives the system Chrome via channel="chrome", so no
+browser download is required. Everything else is stdlib.
+"""
+
+from __future__ import annotations
+
+import argparse
+import http.server
+import json
+import socketserver
+import sys
+import threading
+import urllib.request
+from base64 import urlsafe_b64encode
+from pathlib import Path
+from urllib.parse import quote
+
+REPO = Path(__file__).resolve().parent.parent
+PAGE_DIR = REPO / "webshop-pay"
+
+# Read the pinned address and the endpoint out of the shipped page rather than restating them. A
+# second copy here would drift from the page, and the drifted copy is the one a reader trusts.
+MERCHANT_MARKER = "var MERCHANT='"
+# The page's one RPC constant. It was READ_RPC while the settlement check read from a different
+# endpoint than the pay path; the pay path has since been repointed at the same host and the two
+# collapsed, because two constants holding one value drift and the drifted one is the one a reader
+# trusts. Still read out of the page rather than restated: the RPC-failure cases below derive their
+# intercept glob from whatever the page NAMES, so a repoint cannot leave them intercepting a host
+# nothing contacts and passing for free.
+RPC_MARKER = "var RPC='"
+
+MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # mainnet USDC
+
+# A real, finalized mainnet settlement. The operator paid this order from his phone wallet on
+# 2026-08-06 and then reproduced the defect by reloading the link. It is a permanent fixture: a
+# settled transaction does not un-settle, so this case cannot go stale the way a live balance does.
+PAID_REFERENCE = "9TNKoCvVow1ktRgMMapJ9d9GWhgTYCA9i3r3MZ71FUT2"
+PAID_AMOUNT = "0.39"  # what the CHAIN says the merchant received
+LINK_AMOUNT = "5.00"  # what the link is made to ASK for, so the two cannot be confused
+
+# 32 bytes of nothing in particular, base58-encoded: a syntactically valid pubkey with no history.
+# Asserted to have zero signatures below rather than assumed, because "no history" is exactly the
+# property that would make this test pass for the wrong reason if it ever stopped holding.
+UNPAID_REFERENCE = "5Zzguz4NsSRFxGkHfM4KmJTNVPMJ2P3jFa2y8bTHY4kW"
+
+VIEWPORTS = {
+    "desktop": {"viewport": {"width": 1280, "height": 900}, "device_scale_factor": 2},
+    "phone": {
+        "viewport": {"width": 390, "height": 844},
+        "device_scale_factor": 3,
+        "is_mobile": True,
+        "has_touch": True,
+    },
+}
+
+
+def read_pin(marker: str) -> str:
+    src = (PAGE_DIR / "src" / "app.js").read_text(encoding="utf-8")
+    i = src.index(marker) + len(marker)
+    return src[i : src.index("'", i)]
+
+
+def rpc(endpoint: str, method: str, params: list) -> object:
+    """Plain JSON-RPC from the harness, so the fixtures are checked by something other than the
+    code under test. curl on this platform dies on schannel revocation for any https host, so this
+    is urllib with a browser UA."""
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        ).encode(),
+        headers={"content-type": "application/json", "User-Agent": "Mozilla/5.0"},
+    )
+    with urllib.request.urlopen(req, timeout=25) as r:
+        return json.loads(r.read()).get("result")
+
+
+def check_fixtures(endpoint: str) -> list[str]:
+    """Both references, asserted against the chain before anything is rendered."""
+    problems = []
+    try:
+        paid = rpc(
+            endpoint,
+            "getSignaturesForAddress",
+            [PAID_REFERENCE, {"limit": 20, "commitment": "confirmed"}],
+        )
+        unpaid = rpc(
+            endpoint,
+            "getSignaturesForAddress",
+            [UNPAID_REFERENCE, {"limit": 20, "commitment": "confirmed"}],
+        )
+    except (OSError, ValueError) as e:
+        # OSError covers URLError and socket timeouts; ValueError covers a body that is not JSON.
+        # Every one of them means the same thing here: the fixtures are unchecked, so nothing
+        # below can be trusted and the run must stop rather than report a verdict it cannot back.
+        return [f"could not reach {endpoint} to check the fixtures: {e}"]
+
+    settled = [e for e in (paid or []) if not e.get("err")]
+    if not settled:
+        problems.append(
+            f"PAID_REFERENCE {PAID_REFERENCE} has no confirmed non-errored signature; "
+            "the paid direction would pass for the wrong reason"
+        )
+    else:
+        print(f"paid fixture    : {PAID_REFERENCE}")
+        print(
+            f"                  settled by {settled[-1]['signature']}"
+            f"  ({settled[-1].get('confirmationStatus')})"
+        )
+    if unpaid:
+        problems.append(
+            f"UNPAID_REFERENCE {UNPAID_REFERENCE} now has {len(unpaid)} signature(s); "
+            "it is no longer an unpaid fixture and the payable direction is void"
+        )
+    else:
+        print(f"unpaid fixture  : {UNPAID_REFERENCE}  (0 signatures)")
+    return problems
+
+
+def pay_url(reference: str, amount: str, lang: str = "pt") -> str:
+    solana = (
+        f"solana:{read_pin(MERCHANT_MARKER)}?amount={amount}&spl-token={MINT}"
+        f"&reference={reference}"
+        f"&label={quote('Mesa 4')}&message={quote('Pedido 412')}"
+    )
+    # ?u= base64, which is the form skills/solana-pay/scripts/pay_link.py actually emits.
+    return f"/index.html?lang={lang}&u={urlsafe_b64encode(solana.encode()).decode()}"
+
+
+def serve() -> tuple[socketserver.TCPServer, int]:
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=str(PAGE_DIR), **kw)
+
+        def log_message(self, *a):  # silence; the harness owns the output
+            pass
+
+    socketserver.TCPServer.allow_reuse_address = True
+    # Port 0: this server is addressed by nobody but this script, so it must not claim a named one.
+    srv = socketserver.TCPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.server_address[1]
+
+
+PROBE = """() => {
+  const card = document.getElementById('card');
+  const pay  = document.getElementById('pay');
+  const qr   = document.querySelector('#qr img, #qr canvas');
+  const text = card ? card.innerText.replace(/\\s+/g, ' ').trim() : '';
+  const doc  = document.scrollingElement;
+  return {
+    lang:      document.documentElement.lang,
+    cardClass: card ? card.className : null,
+    cardBox:   card ? (b => ({w: b.width, h: b.height}))(card.getBoundingClientRect()) : null,
+    viewH:     window.innerHeight,
+    payable:   !!pay && pay.offsetParent !== null,
+    qr:        !!qr,
+    // The overlay plate for the opening beat is keyed to there being no horizontal scroll at all.
+    docOverflow: doc.scrollWidth - doc.clientWidth,
+    text:      text,
+  };
+}"""
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--viewport", choices=sorted(VIEWPORTS), default="desktop")
+    ap.add_argument("--shots", default=None, help="directory to write frames into")
+    args = ap.parse_args()
+
+    if not (PAGE_DIR / "index.html").exists():
+        print(f"FAIL  no built page at {PAGE_DIR / 'index.html'}", file=sys.stderr)
+        print("      run: python webshop-pay/build.py", file=sys.stderr)
+        return 2
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print(
+            "FAIL  playwright is not installed:  pip install playwright",
+            file=sys.stderr,
+        )
+        return 2
+
+    merchant, endpoint = read_pin(MERCHANT_MARKER), read_pin(RPC_MARKER)
+    print(f"pinned merchant : {merchant}")
+    print(f"pinned rpc      : {endpoint}")
+    if MINT not in (PAGE_DIR / "src" / "app.js").read_text(encoding="utf-8"):
+        print(f"FAIL  the page does not know mint {MINT}", file=sys.stderr)
+        return 2
+
+    drift = check_fixtures(endpoint)
+    if drift:
+        for d in drift:
+            print(f"FAIL  {d}", file=sys.stderr)
+        return 2
+
+    profile = VIEWPORTS[args.viewport]
+    vw, vh = profile["viewport"]["width"], profile["viewport"]["height"]
+    dsf = profile["device_scale_factor"]
+    print(f"viewport        : {args.viewport}  {vw}x{vh} css @ {dsf}x")
+    print(f"link asks for   : {LINK_AMOUNT} USDC   chain settled: {PAID_AMOUNT} USDC")
+
+    shots = Path(args.shots).resolve() if args.shots else None
+    if shots:
+        shots.mkdir(parents=True, exist_ok=True)
+
+    # name, reference, how to break the RPC, must the Pay button survive?
+    CASES = [
+        ("paid", PAID_REFERENCE, None, False),
+        ("unpaid", UNPAID_REFERENCE, None, True),
+        ("paid-rpc-dead", PAID_REFERENCE, "abort", True),
+        ("paid-rpc-429", PAID_REFERENCE, "429", True),
+    ]
+
+    srv, port = serve()
+    failures: list[str] = []
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(channel="chrome")
+            for name, reference, breakage, want_payable in CASES:
+                page = browser.new_page(**profile)
+                calls = {"n": 0}
+
+                def handler(route, breakage=breakage, calls=calls):
+                    calls["n"] += 1
+                    if breakage == "abort":
+                        route.abort()
+                    else:
+                        route.fulfill(
+                            status=429,
+                            content_type="application/json",
+                            body='{"jsonrpc":"2.0","error":{"code":429,'
+                            '"message":"Too many requests"},"id":1}',
+                        )
+
+                if breakage:
+                    # Glob derived from the endpoint the page actually names, so a repoint cannot
+                    # leave this intercepting a host nothing contacts and passing for free.
+                    page.route(
+                        f"**{endpoint.split('//', 1)[1].split('/')[0]}**", handler
+                    )
+
+                page.goto(f"http://127.0.0.1:{port}{pay_url(reference, LINK_AMOUNT)}")
+                # Long enough for two round trips on the paid path; the check is asynchronous
+                # precisely so a slow endpoint cannot hold the card back.
+                page.wait_for_timeout(4000)
+                r = page.evaluate(PROBE)
+
+                print(f"\n--- {name} ---")
+                print(f"  class={r['cardClass']}  payable={r['payable']}  qr={r['qr']}")
+                if breakage:
+                    print(f"  rpc {breakage}: {calls['n']} request(s) intercepted")
+                cb = r["cardBox"]
+                if cb:
+                    print(
+                        f"  card: {cb['w']:.0f}x{cb['h']:.0f} css px  (viewport {r['viewH']})"
+                    )
+                print(f"  document overflow: +{r['docOverflow']}px")
+                print(f"  on screen: {r['text'][:240]}")
+
+                if r["payable"] != want_payable:
+                    failures.append(
+                        f"{name}: expected payable={want_payable}, got {r['payable']}"
+                    )
+                if r["lang"] != "pt-BR":
+                    failures.append(f"{name}: expected pt-BR, got {r['lang']!r}")
+                if r["docOverflow"] > 1:
+                    failures.append(
+                        f"{name}: the page scrolls sideways (+{r['docOverflow']}px)"
+                    )
+                if want_payable:
+                    if not r["qr"]:
+                        failures.append(f"{name}: the QR did not render")
+                    if "Pago" in r["text"] and "já foi pago" in r["text"]:
+                        failures.append(
+                            f"{name}: refused a link it must have rendered payable"
+                        )
+                    if LINK_AMOUNT not in r["text"]:
+                        failures.append(
+                            f"{name}: the payable card does not show the {LINK_AMOUNT} amount"
+                        )
+                else:
+                    if "já foi pago" not in r["text"]:
+                        failures.append(f"{name}: no already-paid message on the card")
+                    if f"{PAID_AMOUNT} USDC" not in r["text"]:
+                        failures.append(
+                            f"{name}: the card does not show the {PAID_AMOUNT} USDC the chain "
+                            "recorded (is it echoing the link instead?)"
+                        )
+                    if LINK_AMOUNT in r["text"]:
+                        failures.append(
+                            f"{name}: the card shows the link's {LINK_AMOUNT}, so the figure is "
+                            "an echo of the request rather than the settlement"
+                        )
+                    if not any(len(w) >= 64 for w in r["text"].split()):
+                        failures.append(f"{name}: no full signature on the card")
+
+                if shots:
+                    out = shots / f"paid-link-{name}-{vw}x{vh}.png"
+                    page.screenshot(path=str(out))
+                    print(f"  frame: {out.name}")
+                page.close()
+            browser.close()
+    finally:
+        srv.shutdown()
+
+    print()
+    if failures:
+        for f in failures:
+            print(f"FAIL  {f}", file=sys.stderr)
+        return 1
+    print("PASS  the page discriminates on settlement, not on the link:")
+    print(
+        "      a settled reference is refused with the amount the CHAIN recorded and no Pay"
+    )
+    print("      button; an unsettled one stays fully payable; and an unreachable or")
+    print(
+        "      rate-limited endpoint leaves a good link payable rather than refusing it."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
