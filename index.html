@@ -87,8 +87,9 @@
 <pre><code>curl -i https://x402.perfpilot.dev/price</code></pre>
   <p class="note">
     A live node answering <code>HTTP/1.1 402 Payment Required</code> with a single-use nonce that
-    changes on every request. That is the whole machine-commerce claim, in one request, against
-    hardware that is running right now.
+    changes on every request. That is the whole machine-commerce claim, in one request, against a
+    node that is running right now. The node is an Ampere ARM instance on Oracle's free tier, named
+    rather than left for you to assume; its signing key was generated there and has never left it.
   </p>
   <p class="lede" style="font-size:15px">
     On Windows that can fail with <code>curl: (35) schannel: … CRYPT_E_REVOCATION_OFFLINE</code>.

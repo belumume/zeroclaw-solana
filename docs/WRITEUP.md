@@ -824,7 +824,7 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
 - oracle program `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn`, consumer
   `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`; three device feed PDAs, all owned by the
   oracle: `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (the ARM node, publishing 24/7 on its
-  own hardware), `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (deterministic LLM-free, a
+  own host), `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (deterministic LLM-free, a
   **completed** second-device run, last published 2026-08-06) and
   `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` (agent-driven, our first proof, kept as
   history); Anchor IDLs on-chain; security.txt embedded.
@@ -839,7 +839,22 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
 - the node feed is the one that makes the DePIN claim literal. Its device key was generated on
   the node with `openssl rand -hex 32` and has never left that box, so that feed is signed by
   hardware we cannot forge from here, and a `systemd --user` timer with lingering keeps it
-  publishing whether or not any laptop is awake. The earlier plan was to transport this
+  publishing whether or not any laptop is awake.
+
+  **What that node actually is, said plainly because the paragraph above would otherwise let you
+  assume.** It is `zc-arm-ref`, a VM.Standard.A1.Flex instance in Oracle's me-jeddah-1 region,
+  running on their free tier at a measured 0.00 EUR. An Ampere Altra is genuinely ARM, so "ARM
+  node" is accurate, but it is a rented virtual machine rather than a board anyone owns. Declaring
+  it costs nothing and hiding it would be the same failure this submission spends the custody
+  section arguing against: a third party you depend on belongs in the threat model. Oracle can
+  reclaim that instance, and the honest scope of the durability claim is that the feed has
+  published without failing for as long as the table says, on infrastructure we do not control.
+
+  Nothing downstream of that changes. The key still never left the box, this workstation still
+  cannot forge a reading, and the schedule still runs with no laptop in the loop. A Raspberry Pi
+  with a DHT11 is a drop-in for the reading source and the on-chain half is byte-identical either
+  way, which is why the reading source is documented as a keyless weather API rather than dressed
+  up as a probe. The earlier plan was to transport this
   machine's existing seed so the new feed would inherit the old sequence history; that would
   have made the claim architecturally true and literally false, so the copy was shredded
   unused and the node made its own. `docs/DEVNET-PROOF.md` carries the full reasoning.

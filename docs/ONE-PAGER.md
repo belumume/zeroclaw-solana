@@ -11,8 +11,13 @@ or one link. Nothing here is a screenshot of something that used to work.
 
 **A device that earns.** An ARM node publishes device-signed readings to a Solana feed on a
 schedule, and gates the same feed behind x402: a machine that wants the reading pays for it,
-per request, and the node covers its own gas. That is the whole loop. Nobody subsidises the
-hardware.
+per request, and the node covers its own gas. That is the whole loop.
+
+The node is an Ampere ARM instance on Oracle's free tier, not a board on a desk, and it is named
+here because the rest of this page asks you to trust what runs where. What the arrangement buys is
+the part that matters: its signing key was generated on that box and has never left it, and a
+`systemd --user` timer with lingering publishes on a schedule no laptop is in. A Raspberry Pi with
+a DHT11 is a drop-in for the reading source and the on-chain half is identical either way.
 
 **A shop that takes money without holding keys.** A merchant agent on Telegram and WhatsApp
 quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in mainnet

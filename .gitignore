@@ -167,3 +167,4 @@ deploy/SHOP-INVARIANTS.json
 
 # Agent fan-out writes findings here; scratch, never shipped.
 .audit-findings/
+docs/SHOOT-SHEET.md
