@@ -824,9 +824,18 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
 - oracle program `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn`, consumer
   `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`; three device feed PDAs, all owned by the
   oracle: `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (the ARM node, publishing 24/7 on its
-  own hardware), `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (deterministic LLM-free,
-  climbing every 20 min) and `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` (agent-driven, our
-  first proof, kept as history); Anchor IDLs on-chain; security.txt embedded.
+  own hardware), `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (deterministic LLM-free, a
+  **completed** second-device run, last published 2026-08-06) and
+  `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` (agent-driven, our first proof, kept as
+  history); Anchor IDLs on-chain; security.txt embedded.
+
+  **Only the ARM node feed is still live, and that is deliberate.** The second device was a
+  laptop, so it slept, and the 36-hour gap in the table below is what that looks like on chain.
+  Its job was to show the same program accepting signed readings from a second independent
+  device with a second key, and 779 publishes over 12.4 days with zero failures did that. A
+  control that has finished is a result; a control that depends on someone's laptop staying
+  awake through a two-week judging window is a liability. The claim this submission makes about
+  continuous operation rests on the node, which runs on hardware we do not switch off.
 - the node feed is the one that makes the DePIN claim literal. Its device key was generated on
   the node with `openssl rand -hex 32` and has never left that box, so that feed is signed by
   hardware we cannot forge from here, and a `systemd --user` timer with lingering keeps it

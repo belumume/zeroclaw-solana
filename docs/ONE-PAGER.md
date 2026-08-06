@@ -44,12 +44,20 @@ the oldest signature is the account's own creation.
 | Feed account | Publishes | Failed | Span | Median gap | Largest gap |
 |---|---|---|---|---|---|
 | `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 850 | 0 | 12.1 d | 20.5 min | **61.5 min** |
-| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
+| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
 
 Both largest gaps are stated rather than smoothed. The ARM node's 61.5 minutes is its worst run in
 twelve days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
 node's figure is the point: a reader who runs the command finds both, and an outlier they discover
 for themselves discredits everything around it.
+
+**The second device's run is finished, and its row is a completed result rather than a running
+counter.** It stopped on 2026-08-06 and the numbers above will not grow. Its purpose was to show
+the same on-chain program accepting signed readings from a second independent device holding a
+second key, which 779 publishes at zero failures over 12.4 days establishes. **Only the ARM node
+is still publishing**, and every continuity claim in this submission rests on that row alone. A
+reader checking this a fortnight from now will find the node's count higher and the second
+device's identical, which is what these two rows are each supposed to mean.
 
 The ARM node is the one the durability claim rests on. Its key was generated on that box with
 `openssl rand -hex 32` and has never left it, so this workstation cannot forge a reading for it, and
