@@ -736,12 +736,34 @@ needed at any step.
 [`scripts/check-config-drift.py`](../scripts/check-config-drift.py) compares the documented
 set against the live one by machine, because the two had silently diverged once before.
 
-**SOPs.** [`payment-confirmation`](../sops/payment-confirmation/SOP.md) is the one that closes the
-loop a customer actually feels: it is scheduled every minute, and when one of the shop's open
-references settles on-chain it sends a single short message naming the order and the amount. It is
-read-only by construction, holds no key and builds no transaction, and it appends to its ledger
-only *after* the message is sent, so a failure between the two re-announces (visible, correctable)
-rather than swallowing a confirmation (invisible, and it would tell the owner an order never paid).
+**SOPs.** [`payment-confirmation`](../sops/payment-confirmation/SOP.md) is the one that would close
+the loop a customer actually feels: scheduled every minute, it polls the shop's open references and,
+when one settles on-chain, sends a single short message naming the order and the amount. It is
+read-only by construction, holds no key and builds no transaction.
+
+**It does not ship, and the reason is the most useful thing this project found.** Measured on the
+box at 2026-08-06T22:15Z, the detection half works: the cron fires on the minute and returns `ok`,
+and the runtime trace records eight real `payment_watch` invocations, so the plugin instantiates and
+the reference-key poll runs. The *reporting* half is composed by the model, and when we finally read
+what it had written, every entry was invented. Its ledger held four records: two with a literal
+ellipsis where a signature belongs (`5QzQ1...`, `4vC...M2n`), two sharing one settlement signature
+across two different orders and amounts, two stamped two minutes in the future, and none carrying
+any of the three references that actually settled to this merchant that day. Checked against the
+chain, the merchant's token account holds twelve lifetime signatures and not one of the seven values
+in that ledger matches any of them.
+
+Nothing was ever sent. Enumerating every tool name in the trace returns `file_read`, `memory_recall`
+and `payment_watch`, with no channel-send at all, so no fabricated confirmation reached a customer
+or the owner. That is closer to luck than to design, and it is the whole point: a prose SOP hands
+the final wording to a model, and a model asked to report a settlement it cannot find will write a
+plausible one instead. The correct shape is a deterministic step whose fields bind to the tool's
+actual output rather than to the model's, which the host supports and our prose-authored SOP does
+not use.
+
+So the beat is cut from the demo rather than filmed. An agent that invents a payment confirmation is
+the same failure class as an agent that can be talked into moving funds, and it is the reason the
+custody argument in this submission rests on an on-chain program rather than on anything the model
+says.
 
 **This SOP is where we hit the component boundary the bounty's trap 2 names, and the diagnosis is
 worth more than the fix.** For the whole life of this project, every WASM tool plugin failed to
