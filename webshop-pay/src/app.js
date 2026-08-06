@@ -27,6 +27,9 @@ var STR={pt:{
  shopis:' / a loja é: ',
  refusednet:'Este link usa um token que esta loja não aceita. Nada foi enviado. Peça um link novo à loja.',
  linktoken:'token do link: ',
+ refusedpaid:'Este pedido já foi pago. Nada foi enviado. Peça um link novo à loja se precisar pagar de novo.',
+ paidamt:'pago: ',
+ paidtx:'transação: ',
  amtwallet:'(valor definido na sua carteira)',
  connecting:'Conectando a carteira…',
  loadinglibs:'Carregando as bibliotecas da Solana…',
@@ -67,6 +70,31 @@ function T(k,en){var d=STR[LANG];return (d&&d[k])||en}
 // makes a swapped address survive a glance, so a mismatch is refused rather than
 // shown, and the full address is rendered on the happy path.
 var MERCHANT='C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ';
+// TWO endpoints, deliberately, and the reason is measured rather than stylistic.
+//
+// api.mainnet-beta.solana.com returns HTTP 403 to any request carrying an Origin header -- that
+// is, to EVERY browser fetch, from every origin including this page's own. Same IP and same
+// second, a request without the header returns 200. Verified again from inside a browser using
+// this page's own libraries: getLatestBlockhash, getMint and getSignaturesForAddress all fail 403
+// there and all three succeed on the endpoint below. A settlement check pointed at a host that
+// always 403s is a guard that can never fire, so the check reads from somewhere it can reach.
+//
+// Keyless and unauthenticated on purpose: this is static HTML served to anyone, so an RPC key
+// pasted here would be a published credential. It is rate-limited, and the check treats a
+// throttle exactly like an outage (see the fail-open note further down).
+//
+// THIRD-PARTY TRUST, declared rather than implied: this endpoint answers a READ. The worst a
+// hostile answer achieves is refusing a good link, which is recoverable in one message to the
+// shop, or claiming nothing settled, which is only today's behaviour. It cannot misdirect money:
+// the recipient, the mint and the amount are pinned in this page and shown again by the wallet.
+var READ_RPC='https://solana-rpc.publicnode.com';
+// The pay path's endpoint, UNCHANGED. It is subject to the same 403, which is a real and separate
+// defect in the desktop "connect wallet and pay" button; the phone path is unaffected because the
+// wallet builds the transaction from the QR itself and never uses this. It is deliberately NOT
+// repointed at READ_RPC: that host's websocket does not open (measured, no handshake in 8s) and
+// confirmTransaction needs one, so swapping this would trade one broken half of the desktop path
+// for another. Picking the replacement is a change to a money path and carries a deploy.
+var RPC='https://api.mainnet-beta.solana.com';
 // Asset names come from THIS map, keyed by mint address, and never from the mint's own
 // on-chain metadata. A mint can call itself whatever it likes, so reading the symbol off
 // the token would let a worthless mint present itself as USDC next to an amount the
@@ -84,14 +112,36 @@ var KNOWN_MINTS={
 function assetName(mint){return KNOWN_MINTS[mint]||'token'}
 var recip='',amount='',label=T('payment','Payment'),message='',token='',reference='';
 function status(m,cls){el('status').textContent=m;el('status').className='status '+(cls||'')}
-// One refusal card, two callers. Both build with textContent rather than innerHTML because the
-// detail line echoes attacker-controlled bytes straight out of the link.
-function refuse(msg,detail){
-  el('card').textContent='';
-  var eh=document.createElement('h1');eh.textContent=T('refused','Refused');el('card').appendChild(eh);
-  var ep=document.createElement('p');ep.className='msg';ep.textContent=msg;el('card').appendChild(ep);
-  var ed=document.createElement('div');ed.className='recip';ed.textContent=detail;el('card').appendChild(ed);
-  el('card').className='card err';
+// One refusal card, three callers. Every one builds with textContent rather than innerHTML
+// because the detail lines echo attacker-controlled bytes straight out of the link, and now also
+// a signature out of an RPC response.
+//
+// `opts` exists so the already-paid case can come through this same door rather than growing a
+// second one. It changes only presentation: a card the customer should read as good news must not
+// arrive in the red error style, because "your order is already paid" and "this link is trying to
+// rob you" are opposite facts and the page has exactly one chance to say which. The mechanism is
+// unchanged in all three cases -- clear the card, no Pay button, textContent throughout -- and
+// both existing callers pass no opts, so their DOM is byte-identical to before.
+function refuse(msg,detail,opts){
+  opts=opts||{};
+  var c=el('card');c.textContent='';
+  var eh=document.createElement('h1');eh.textContent=opts.heading||T('refused','Refused');c.appendChild(eh);
+  if(opts.big){var eb=document.createElement('div');eb.className='paid';eb.textContent=opts.big;c.appendChild(eb);}
+  var ep=document.createElement('p');ep.className='msg';ep.textContent=msg;c.appendChild(ep);
+  // opts.wrap adds break opportunities inside an unbreakable run. Only the already-paid card asks
+  // for it, because only it renders an 88-char signature; the two address refusals must keep the
+  // exact layout their plate was measured against.
+  (Array.isArray(detail)?detail:[detail]).forEach(function(d){
+    var ed=document.createElement('div');ed.className=opts.wrap?'recip brk':'recip';ed.textContent=d;c.appendChild(ed);
+  });
+  // Same signature gate as the in-session paid card: a signature reaching an href is re-validated
+  // for shape and encoded, so a hostile RPC cannot steer where this link points.
+  if(opts.link&&isSig(opts.link)){
+    var ea=document.createElement('a');ea.className='link';ea.target='_blank';ea.rel='noopener noreferrer';
+    ea.href='https://explorer.solana.com/tx/'+encodeURIComponent(opts.link);
+    ea.textContent=T('explorer','View on explorer');c.appendChild(ea);
+  }
+  c.className=opts.cls||'card err';
 }
 if(!url||url.indexOf('solana:')!==0){el('card').textContent=T('invalid','No valid Solana Pay request in this link.');el('card').className='card err';}
 else{
@@ -113,9 +163,118 @@ else{
   try{var qr=qrcode(0,'M');qr.addData(url);qr.make();el('qr').innerHTML=qr.createImgTag(10,8);}catch(e){el('qr').textContent=T('qrbig','(QR too large)');}
   el('copy').onclick=function(){navigator.clipboard.writeText(url).then(function(){el('copy').textContent=T('copied','Copied ✓');setTimeout(function(){el('copy').textContent=T('copy','Copy Solana Pay link')},1500)})};
   el('pay').onclick=connectAndPay;
+  checkAlreadyPaid();
   }
 }
 function isSig(s){return typeof s==='string'&&/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(s)}
+function isPubkey(s){return typeof s==='string'&&/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s)}
+// --- has this order already been paid? -------------------------------------------------------
+//
+// A Solana Pay reference key is SINGLE-USE by design: it rides the transfer as a read-only
+// non-signer account, so getSignaturesForAddress on the reference returns the transaction that
+// settled this order. A page that keeps offering to pay a spent link will take a SECOND transfer
+// for one order, the customer cannot tell, and the shop then owes a refund -- which is the one
+// path in this system that touches funds and sits behind a human checkpoint. So the page asks.
+//
+// The check lives HERE and not only in the agent because the link is a URL: a customer can open
+// it days later out of chat history with no agent involved.
+//
+// FAIL OPEN ON THE NETWORK, CLOSED ONLY ON A POSITIVE FINDING. This runs AFTER the payable card
+// has rendered and can only ever replace it, so an unreachable, slow, rate-limited or malformed
+// endpoint leaves a good link fully payable. That direction is deliberate: refusing a real order
+// because a public RPC was busy would be a worse failure than the one being fixed, and it would
+// be invisible to the shop, whereas the untaken second payment simply does not happen. The cost
+// of that choice, stated rather than hidden: for the few hundred milliseconds the call is in
+// flight, a spent link is still clickable. The realistic customer is reading the page for longer
+// than that, and the shop's own watcher is the authority either way.
+//
+// One JSON-RPC POST. Returns the result, or null for ANY failure -- offline, DNS, abort, HTTP
+// error, a rate-limit 429, malformed JSON, or a JSON-RPC error object. Null is the only failure
+// signal because every caller treats "the chain did not answer" identically: change nothing.
+function rpc(method,params){
+  var ctl=(typeof AbortController!=='undefined')?new AbortController():null;
+  var timer=ctl?setTimeout(function(){ctl.abort()},6000):0;
+  var opts={method:'POST',headers:{'content-type':'application/json'},
+            body:JSON.stringify({jsonrpc:'2.0',id:1,method:method,params:params})};
+  if(ctl)opts.signal=ctl.signal;
+  return fetch(READ_RPC,opts)
+    .then(function(r){return r.ok?r.json():null})
+    .then(function(j){return (j&&!j.error&&j.result!==undefined&&j.result!==null)?j.result:null})
+    .catch(function(){return null})
+    .then(function(v){if(timer)clearTimeout(timer);return v});
+}
+// The settling signature, or null. Same gate as plugins/payment-watch/src/watch.rs, which is the
+// component that actually credits the order: commitment "confirmed", and an entry whose `err` is
+// unset. A failed transaction moved no funds and must never read as a settlement.
+function settledSignature(){
+  // Validated before the network, as watch.rs validates its address before any RPC call: a
+  // reference lifted out of a hostile link never reaches an endpoint unless it is a pubkey.
+  if(!isPubkey(reference))return Promise.resolve(null);
+  return rpc('getSignaturesForAddress',[reference,{limit:20,commitment:'confirmed'}]).then(function(list){
+    if(!Array.isArray(list))return null;
+    // The node answers newest-first, so walk backwards to reach the OLDEST entry: the transaction
+    // that settled this order rather than a later one that happens to touch the same key.
+    for(var i=list.length-1;i>=0;i--){
+      var e=list[i];
+      if(e&&!e.err&&isSig(e.signature))return e.signature;
+    }
+    return null;
+  });
+}
+// The full ordered account-key list, static keys then any address-lookup-table addresses. This is
+// the index space the lamport balance arrays are aligned with; reading only the static half would
+// misindex a v0 transaction. Mirrors account_keys() in watch.rs.
+function accountKeys(tx){
+  var out=[],msg=((tx.transaction||{}).message)||{},loaded=((tx.meta||{}).loadedAddresses)||{};
+  (msg.accountKeys||[]).forEach(function(k){out.push((typeof k==='string')?k:(k&&k.pubkey))});
+  ['writable','readonly'].forEach(function(s){(loaded[s]||[]).forEach(function(k){out.push(k)})});
+  return out;
+}
+// What the merchant ACTUALLY received, read out of the settling transaction by balance delta the
+// way watch.rs does it, rather than echoed back from the link. The link states what was
+// REQUESTED; only the chain states what was PAID, and on a receipt those are different claims.
+// Null when the transaction cannot be read or does not credit this shop, in which case the card
+// still refuses and simply names no figure.
+function merchantCredit(tx){
+  var meta=tx&&tx.meta;if(!meta||meta.err)return null;
+  if(token){
+    var side=function(arr){
+      var sum=0,dec=null,seen=false;
+      (arr||[]).forEach(function(b){
+        if(!b||b.owner!==MERCHANT||b.mint!==token)return;
+        seen=true;var u=b.uiTokenAmount||{};
+        if(dec===null&&typeof u.decimals==='number')dec=u.decimals;
+        var a=parseFloat(u.amount);if(isFinite(a))sum+=a;
+      });
+      return {sum:sum,dec:dec,seen:seen};
+    };
+    var pre=side(meta.preTokenBalances),post=side(meta.postTokenBalances);
+    if(!pre.seen&&!post.seen)return null;
+    var dec=(post.dec===null?pre.dec:post.dec);if(dec===null)return null;
+    var net=post.sum-pre.sum;if(!(net>0))return null;
+    return trimZeros((net/Math.pow(10,dec)).toFixed(dec))+' '+assetName(token);
+  }
+  var idx=accountKeys(tx).indexOf(MERCHANT);if(idx<0)return null;
+  var p=(meta.preBalances||[])[idx],q=(meta.postBalances||[])[idx];
+  if(typeof p!=='number'||typeof q!=='number'||!(q-p>0))return null;
+  return trimZeros(((q-p)/1e9).toFixed(9))+' SOL';
+}
+function trimZeros(s){return s.indexOf('.')<0?s:s.replace(/0+$/,'').replace(/\.$/,'')}
+function checkAlreadyPaid(){
+  settledSignature().then(function(sig){
+    if(!sig)return;
+    // Only now, and only because the page is about to refuse, does it spend a second round trip.
+    // The payable path -- the common one, and the one the demo films -- stays at exactly one call.
+    return rpc('getTransaction',[sig,{encoding:'jsonParsed',commitment:'confirmed',maxSupportedTransactionVersion:0}])
+      .then(function(tx){
+        var detail=[],paid=tx?merchantCredit(tx):null;
+        if(paid)detail.push(T('paidamt','paid: ')+paid);
+        detail.push(T('paidtx','tx: ')+sig);
+        refuse(T('refusedpaid','This order has already been paid. Nothing has been sent. Ask the shop for a new link if you need to pay again.'),
+               detail,{heading:'Solana Pay',big:T('paid','✓ Paid'),cls:'card',link:sig,wrap:true});
+      });
+  });
+}
 function showPaid(sig){
   var card=el('card');card.textContent='';
   var h=document.createElement('h1');h.textContent='Solana Pay';card.appendChild(h);
@@ -132,11 +291,10 @@ async function connectAndPay(){
   el('pay').disabled=true;status(T('loadinglibs','Loading Solana libraries…'));
   try{
     var web3=await import('https://esm.sh/@solana/web3.js@1.95.3');
-    // Mainnet, via the public endpoint. Deliberately NOT a keyed provider: this page is static
-    // HTML served to anyone, so an RPC key pasted here is a published credential. The public
-    // endpoint is rate-limited and that is the correct trade for a page with no secrets in it.
-    // Same value as every plugin's DEFAULT_RPC in this repo, so the two cannot disagree.
-    var conn=new web3.Connection('https://api.mainnet-beta.solana.com','confirmed');
+    // Mainnet, from the constant at the top. See the note there: this endpoint 403s a browser
+    // fetch, which is a live defect in this desktop path and is tracked rather than papered over
+    // with a swap whose websocket half is unverified.
+    var conn=new web3.Connection(RPC,'confirmed');
     status(T('connecting','Connecting wallet…'));
     var resp=await provider.connect();
     var payer=resp.publicKey||provider.publicKey;

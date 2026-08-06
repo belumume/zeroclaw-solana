@@ -12,6 +12,12 @@ h1{font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:#8a93a6;ma
 @media (min-width:430px){#qr img{width:260px;height:260px}}
 .scan{font-size:13px;color:#8a93a6;margin:4px 0 12px}
 .recip{font-size:13px;color:#8a93a6;margin:4px 0 16px;font-family:ui-monospace,monospace}
+/* An 88-char base58 signature has no break opportunity in it, so without this the already-paid
+   card widens past the viewport and the whole page scrolls sideways: measured +286px at 390.
+   Deliberately its own class rather than a rule on .recip, so the payable card and the
+   wrong-recipient refusal -- one of which is the opening shot's plate, keyed to a measured
+   delta-x of 0.00 at 390 -- keep exactly the layout they were verified with. */
+.brk{overflow-wrap:anywhere}
 button#pay{width:100%;background:#ab9ff2;color:#1a1035;font-weight:700;border:0;padding:15px;border-radius:12px;font-size:17px;cursor:pointer;margin:4px 0}
 button#pay:disabled{opacity:.55}
 button#copy{width:100%;background:#20242e;color:#e8eaed;border:1px solid #333a47;padding:11px;border-radius:12px;font-size:14px;cursor:pointer;margin:8px 0}
