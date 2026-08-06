@@ -33,18 +33,22 @@ SCRIPT = Path(__file__).with_name("pay_link.py")
 MERCHANT = "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
 ATTACKER_FROM_REAL_INCIDENT = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
 USDC_DEVNET = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+# Kept, and now a NEGATIVE control: this is the mint the agent recalled from its
+# memory store on 2026-08-06 while the deployed skill said mainnet. A suite that
+# only ever passes the right mint cannot tell a pinned constant from a pass-through.
+USDC_MAINNET = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
 # (description, url, must_be_accepted)
 CASES = [
     (
         "legit merchant link",
-        f"solana:{MERCHANT}?amount=25&spl-token={USDC_DEVNET}",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}",
         True,
     ),
     ("merchant, no query params", f"solana:{MERCHANT}", True),
     (
         "merchant with a reference",
-        f"solana:{MERCHANT}?amount=1&reference={MERCHANT}",
+        f"solana:{MERCHANT}?amount=1&reference={MERCHANT}&spl-token={USDC_MAINNET}",
         True,
     ),
     (
@@ -53,6 +57,35 @@ CASES = [
         False,
     ),
     ("empty recipient", "solana:?amount=25", False),
+    # THE MINT PIN, both directions. Case 1 is the 2026-08-06 incident verbatim: the
+    # agent recalled this mint from three rows in its memory store while the deployed
+    # skill said mainnet, and the pay page refused the link it produced. If this case
+    # ever passes again, the pin has become a pass-through.
+    (
+        "devnet mint the agent recalled from memory on 2026-08-06",
+        f"solana:{MERCHANT}?amount=8.80&spl-token={USDC_DEVNET}",
+        False,
+    ),
+    (
+        "amount with no spl-token, which Solana Pay reads as native SOL",
+        f"solana:{MERCHANT}?amount=8.80",
+        False,
+    ),
+    (
+        "duplicate spl-token: this parser reads the first, the page reads the last",
+        f"solana:{MERCHANT}?amount=8.80&spl-token={USDC_MAINNET}&spl-token={USDC_DEVNET}",
+        False,
+    ),
+    # OVER-CORRECTION CONTROL. The first version of this pin refused every link without
+    # a mint, which killed the legitimate flow where the customer sets the amount in
+    # their own wallet and the page renders "(amount set in your wallet)". Nothing to
+    # reprice means nothing to refuse. If this case ever fails, the pin over-reached
+    # again in exactly the way it did the first time.
+    (
+        "no amount and no mint: the customer-sets-it flow, still accepted",
+        f"solana:{MERCHANT}",
+        True,
+    ),
     (
         "merchant smuggled into a query param, attacker in the recipient slot",
         f"solana:{ATTACKER_FROM_REAL_INCIDENT}?reference={MERCHANT}",
@@ -127,7 +160,7 @@ def main():
             failures.append(f"{desc}: {detail}, got rc={rc} out={out.strip()[:200]!r}")
 
     for desc, brl, rate, amount, must_accept in AMOUNT_CASES:
-        url = f"solana:{MERCHANT}?amount={amount}&spl-token={USDC_DEVNET}"
+        url = f"solana:{MERCHANT}?amount={amount}&spl-token={USDC_MAINNET}"
         rc, out = run(url, ["--brl", brl, "--rate", rate])
         if must_accept:
             ok = rc == 0 and PAGE_OK(out, url)
@@ -144,7 +177,7 @@ def main():
     # One flag alone verifies nothing, so it must refuse rather than silently skip the
     # check. A guard that quietly does nothing is the failure mode this whole file exists
     # to prevent.
-    base = f"solana:{MERCHANT}?amount=15.74&spl-token={USDC_DEVNET}"
+    base = f"solana:{MERCHANT}?amount=15.74&spl-token={USDC_MAINNET}"
     for lone in (["--brl", "80"], ["--rate", "5.0827"]):
         rc, out = run(base, lone)
         ok = rc != 0 and "REFUSED" in out
@@ -158,7 +191,7 @@ def main():
 
     # Verification requested against a URL that carries nothing to verify.
     rc, out = run(
-        f"solana:{MERCHANT}?spl-token={USDC_DEVNET}",
+        f"solana:{MERCHANT}?spl-token={USDC_MAINNET}",
         ["--brl", "80", "--rate", "5.0827"],
     )
     ok = rc != 0 and "REFUSED" in out
