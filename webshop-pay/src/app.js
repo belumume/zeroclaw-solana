@@ -25,6 +25,8 @@ var STR={pt:{
  refusedmsg:'Este link paga um endereço que não é desta loja. Nada foi enviado. Peça um link novo à loja.',
  linkwanted:'o link pedia: ',
  shopis:' / a loja é: ',
+ refusednet:'Este link usa um token que esta loja não aceita. Nada foi enviado. Peça um link novo à loja.',
+ linktoken:'token do link: ',
  amtwallet:'(valor definido na sua carteira)',
  connecting:'Conectando a carteira…',
  loadinglibs:'Carregando as bibliotecas da Solana…',
@@ -35,7 +37,7 @@ var STR={pt:{
  failed:'O pagamento não foi concluído: ',
  explorer:'Ver no explorer',
  holds:'Esta carteira tem ',
- hint:'No computador: clique em <b>Conectar carteira e pagar</b> (extensão Phantom ou Solflare). No celular: escaneie o QR com o app da sua carteira. Esta loja funciona na devnet, então a carteira precisa estar na devnet e ter um pouco de SOL de devnet.'
+ hint:'No computador: clique em <b>Conectar carteira e pagar</b> (extensão Phantom ou Solflare). No celular: escaneie o QR com o app da sua carteira. Esta loja funciona na mainnet: o pagamento é em USDC de verdade e a carteira precisa de um pouco de SOL para a taxa.'
 }};
 var LANG=(function(){
   var q=(p.get('lang')||'').toLowerCase();
@@ -70,30 +72,45 @@ var MERCHANT='C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ';
 // the token would let a worthless mint present itself as USDC next to an amount the
 // customer is about to approve. An unknown mint stays the generic word, which is the
 // honest thing to show when we cannot name the asset ourselves.
-var KNOWN_MINTS={'4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU':'devnet USDC'};
+//
+// This map is also the settleable set. A mint that is not in it is refused outright rather
+// than rendered with a cautionary label, because a label sits next to a live Pay button and
+// a customer can click past it into an opaque getMint failure. The page pays on mainnet, so
+// the devnet mint is not listed and a stale devnet link now gets the same clean refusal a
+// wrong recipient gets: one door, one mechanism, nothing sent.
+var KNOWN_MINTS={
+ 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v':'USDC'
+};
 function assetName(mint){return KNOWN_MINTS[mint]||'token'}
 var recip='',amount='',label=T('payment','Payment'),message='',token='',reference='';
 function status(m,cls){el('status').textContent=m;el('status').className='status '+(cls||'')}
+// One refusal card, two callers. Both build with textContent rather than innerHTML because the
+// detail line echoes attacker-controlled bytes straight out of the link.
+function refuse(msg,detail){
+  el('card').textContent='';
+  var eh=document.createElement('h1');eh.textContent=T('refused','Refused');el('card').appendChild(eh);
+  var ep=document.createElement('p');ep.className='msg';ep.textContent=msg;el('card').appendChild(ep);
+  var ed=document.createElement('div');ed.className='recip';ed.textContent=detail;el('card').appendChild(ed);
+  el('card').className='card err';
+}
 if(!url||url.indexOf('solana:')!==0){el('card').textContent=T('invalid','No valid Solana Pay request in this link.');el('card').className='card err';}
 else{
   var m=url.match(/^solana:([^?]+)\??(.*)$/);recip=m?m[1]:'';var q=new URLSearchParams(m?m[2]:'');
   amount=q.get('amount')||'';label=q.get('label')||T('payment','Payment');message=q.get('message')||'';token=q.get('spl-token')||'';reference=q.get('reference')||'';
   if(recip!==MERCHANT){
-    el('card').textContent='';
-    var eh=document.createElement('h1');eh.textContent=T('refused','Refused');el('card').appendChild(eh);
-    var ep=document.createElement('p');ep.className='msg';
-    ep.textContent=T('refusedmsg','This link pays an address that is not this shop. Nothing has been sent. Ask the shop for a new link.');
-    el('card').appendChild(ep);
-    var ed=document.createElement('div');ed.className='recip';
-    ed.textContent=T('linkwanted','link wanted: ')+recip+T('shopis',' / shop is: ')+MERCHANT;
-    el('card').appendChild(ed);
-    el('card').className='card err';
+    refuse(T('refusedmsg','This link pays an address that is not this shop. Nothing has been sent. Ask the shop for a new link.'),
+           T('linkwanted','link wanted: ')+recip+T('shopis',' / shop is: ')+MERCHANT);
+  }else if(token&&!KNOWN_MINTS[token]){
+    // A mint this page cannot settle. Refused rather than labelled: a label sits beside a live
+    // Pay button, and the customer who clicks it gets an opaque failure deep in the wallet.
+    refuse(T('refusednet','This link is for a token this shop cannot accept. Nothing has been sent. Ask the shop for a new link.'),
+           T('linktoken','link token: ')+token);
   }else{
   el('label').textContent=label;
   el('amt').textContent=amount?(amount+' '+(token?assetName(token):'SOL')):T('amtwallet','(amount set in your wallet)');
   el('msg').textContent=message;if(!message)el('msg').style.display='none';
   el('recip').textContent=recip;
-  try{var qr=qrcode(0,'M');qr.addData(url);qr.make();el('qr').innerHTML=qr.createImgTag(5,8);}catch(e){el('qr').textContent=T('qrbig','(QR too large)');}
+  try{var qr=qrcode(0,'M');qr.addData(url);qr.make();el('qr').innerHTML=qr.createImgTag(10,8);}catch(e){el('qr').textContent=T('qrbig','(QR too large)');}
   el('copy').onclick=function(){navigator.clipboard.writeText(url).then(function(){el('copy').textContent=T('copied','Copied ✓');setTimeout(function(){el('copy').textContent=T('copy','Copy Solana Pay link')},1500)})};
   el('pay').onclick=connectAndPay;
   }
@@ -104,7 +121,10 @@ function showPaid(sig){
   var h=document.createElement('h1');h.textContent='Solana Pay';card.appendChild(h);
   var d=document.createElement('div');d.className='paid';d.textContent=T('paid','✓ Paid');card.appendChild(d);
   var pl=document.createElement('p');pl.className='msg';pl.textContent=label;card.appendChild(pl);
-  if(isSig(sig)){var a=document.createElement('a');a.className='link';a.target='_blank';a.rel='noopener noreferrer';a.href='https://explorer.solana.com/tx/'+encodeURIComponent(sig)+'?cluster=devnet';a.textContent=T('explorer','View on explorer');card.appendChild(a);}
+  // No ?cluster= query: mainnet-beta is the explorer's default. This link is the customer's
+  // receipt for a real payment, so a stale cluster param would point their proof at a chain
+  // the transaction was never on -- a dead link at the exact moment it has to hold.
+  if(isSig(sig)){var a=document.createElement('a');a.className='link';a.target='_blank';a.rel='noopener noreferrer';a.href='https://explorer.solana.com/tx/'+encodeURIComponent(sig);a.textContent=T('explorer','View on explorer');card.appendChild(a);}
 }
 async function connectAndPay(){
   var provider=(window.phantom&&window.phantom.solana)||window.solflare||window.solana;
@@ -112,7 +132,11 @@ async function connectAndPay(){
   el('pay').disabled=true;status(T('loadinglibs','Loading Solana libraries…'));
   try{
     var web3=await import('https://esm.sh/@solana/web3.js@1.95.3');
-    var conn=new web3.Connection('https://api.devnet.solana.com','confirmed');
+    // Mainnet, via the public endpoint. Deliberately NOT a keyed provider: this page is static
+    // HTML served to anyone, so an RPC key pasted here is a published credential. The public
+    // endpoint is rate-limited and that is the correct trade for a page with no secrets in it.
+    // Same value as every plugin's DEFAULT_RPC in this repo, so the two cannot disagree.
+    var conn=new web3.Connection('https://api.mainnet-beta.solana.com','confirmed');
     status(T('connecting','Connecting wallet…'));
     var resp=await provider.connect();
     var payer=resp.publicKey||provider.publicKey;
@@ -131,12 +155,14 @@ async function connectAndPay(){
       // about what the customer is being asked to pay.
       var knownName=KNOWN_MINTS[token];
       // preflight: the payer must actually hold the token, else the wallet returns a cryptic
-      // "Internal error". Detect it and say exactly what's wrong + where to get devnet USDC.
+      // "Internal error". Detect it and say exactly what is short, by how much.
       var have=-1n;try{have=(await spl.getAccount(conn,fromAta)).amount;}catch(e2){have=-1n;}
       if(have<amt){
         var haveStr=have<0n?'0':(Number(have)/Math.pow(10,mintInfo.decimals)).toString();
         var needStr=(Number(amt)/Math.pow(10,mintInfo.decimals)).toString();
-        status(T('holds','This wallet holds ')+haveStr+(knownName?' '+knownName:' of the requested token')+', needs '+needStr+'. Get free devnet USDC at faucet.circle.com (pick Solana Devnet, paste this wallet), then retry.','err');
+        // No faucet line on mainnet: there is no faucet, and pointing a customer at one for
+        // real USDC would be advice that cannot be followed. State the shortfall and stop.
+        status(T('holds','This wallet holds ')+haveStr+(knownName?' '+knownName:' of the requested token')+', needs '+needStr+'. Fund this wallet on Solana mainnet, then retry.','err');
         el('pay').disabled=false;return;
       }
       // ensure the recipient's token account exists (idempotent; payer funds the tiny rent) so

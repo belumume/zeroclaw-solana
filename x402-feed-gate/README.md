@@ -133,6 +133,16 @@ X402_SELLER_WALLET   base58 wallet that receives payment (required)
 X402_MINT            base58 stablecoin mint (required)
 X402_FEED_PDA        base58 feed account to read + serve (required)
 X402_RPC_URL         Solana RPC (default https://api.devnet.solana.com)
+X402_READ_RPC_URL    RPC used ONLY to read the feed being sold.
+                     Default: X402_RPC_URL
+X402_SETTLE_RPC_URL  RPC used ONLY to simulate/broadcast/confirm the buyer's
+                     payment -- the endpoint real money moves over.
+                     Default: X402_RPC_URL
+                     Reading the goods and settling the money are separate
+                     concerns and can honestly sit on different clusters: this
+                     gate has settled mainnet USDC while serving a devnet
+                     reading. Point them apart only deliberately, and match
+                     X402_MINT and X402_NETWORK to the SETTLE cluster.
 X402_NETWORK         CAIP-2 network id, which x402 v2 requires
                      (default solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1 = devnet;
                       mainnet is solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp)

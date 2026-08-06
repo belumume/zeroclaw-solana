@@ -171,7 +171,7 @@ and would permanently destroy the transferred amount on a live cluster.
 
 ## What is deliberately NOT on mainnet
 
-The DePIN feed and its consumer program stay on devnet. Deploying both costs about 2.73 SOL in
+The DePIN feed and its consumer program stay on devnet. Deploying both costs 2.87 SOL in
 rent, against 0.0059 SOL for everything on this page, and it would buy a second copy of a proof
 that already verifies offline. The feed's value is its sequence history, which devnet already
 carries. That is a decision on the merits rather than a budget limit, and it is recorded so a

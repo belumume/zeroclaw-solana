@@ -34,20 +34,10 @@ the reference is an additional optional condition, not the check itself. A payme
 wrong amount, or of a token the payer minted themselves, does not settle an order. Brazilian
 orders are quoted in BRL at a stated rate and settled in USDC.
 
-**Watch it first, it plays in the browser:**
-[2 minutes 55 seconds, five beats, no slides](https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/zeroclaw-solana-demo.mp4).
-Four of the five beats are live terminal runs rather than recordings of a result: the injection
-attack refused with zero tool calls, the feed publishing on schedule, the claim verifier at 10 of
-10 static and 4 of 4 live with the over-cap rejection on screen, and the x402 gate answering 402
-with its nonce visibly incrementing between requests. That link is this repository's own GitHub
-Pages, which serves the file as `video/mp4` so it opens in a player on one click; the same bytes
-are committed at [`.demo-assets/cut/zeroclaw-solana-demo.mp4`](.demo-assets/cut/zeroclaw-solana-demo.mp4),
-so a clone carries the demo and it does not rest on anyone else's retention policy.
-
 **The feed has published to devnet every 20 minutes since 2026-07-25, and not one of its
 transactions has failed.** The account holds the `RegisterDevice` call that created it plus one
 per reading, so the transaction count and the sequence number move together and both only climb.
-They read 746 and 745 on 2026-08-04, and are higher by the time you run the commands below. One
+They read 850 and 849 at 2026-08-06T07:50Z, and are higher by the time you run the commands below. One
 `getSignaturesForAddress` against `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every
 transaction the device has ever sent, which is the complete history because the oldest of them is
 the account's own creation.
@@ -169,16 +159,23 @@ allows for, and a wider capability than "holds no key" would have implied.
 
 ## What the two use cases run on
 
-| Component | Job | Tier |
-|---|---|---|
-| [`oracle-publish`](plugins/oracle-publish) | Device-signed reading into a typed on-chain feed, behind a durable nonce | T1 build, device co-signs |
-| [`payment-watch`](plugins/payment-watch) | Confirms a payment only when amount, mint, destination and (when supplied) the Solana Pay reference all match on-chain | T0 read-only |
-| [`spl-transfer-build`](plugins/spl-transfer-build) | Unsigned SPL transfers that survive an approval queue via durable nonces | T1 build |
-| [`allowance-spend-build`](plugins/allowance-spend-build) | Spends bounded by the audited SF Allowances program | T1 build |
-| [`solana-core`](crates/solana-core) | Shared wasm32-wasip2 core: transactions, PDAs, Token-2022, response-path sanitizer | library |
-| [`onchain/`](onchain) | `zeroclaw_oracle` and `consumer_example`, Anchor, live on devnet | on-chain |
-| [`x402-feed-gate`](x402-feed-gate) | Sells one signed reading per paid request | T0/T1, holds no key |
-| [`skills/solana-pay`](skills/solana-pay) | Builds the payment URL. A skill, not a plugin, on purpose | skill |
+| Component | Job | Tier | Network by default |
+|---|---|---|---|
+| [`oracle-publish`](plugins/oracle-publish) | Device-signed reading into a typed on-chain feed, behind a durable nonce | T1 build, device co-signs | devnet, because it writes to `zeroclaw_oracle` and that program is deployed there |
+| [`payment-watch`](plugins/payment-watch) | Confirms a payment only when amount, mint, destination and (when supplied) the Solana Pay reference all match on-chain | T0 read-only | **mainnet** |
+| [`spl-transfer-build`](plugins/spl-transfer-build) | Unsigned SPL transfers that survive an approval queue via durable nonces | T1 build | **mainnet** |
+| [`allowance-spend-build`](plugins/allowance-spend-build) | Spends bounded by the audited SF Allowances program | T1 build | **mainnet**, and its three real mainnet transactions are the custody proof |
+| [`solana-core`](crates/solana-core) | Shared wasm32-wasip2 core: transactions, PDAs, Token-2022, response-path sanitizer | library | none, it makes no network call |
+| [`onchain/`](onchain) | `zeroclaw_oracle` and `consumer_example`, Anchor, live on devnet | on-chain | devnet |
+| [`x402-feed-gate`](x402-feed-gate) | Sells one signed reading per paid request | T0/T1, holds no key | **split**: settlement is whatever `X402_SETTLE_RPC_URL` names and has settled on **mainnet** (`3gSg3mQE…`, 1.000000 USDC); the reading stays devnet, because the program owning the feed account is deployed there. The hosted endpoint runs the devnet default |
+| [`skills/solana-pay`](skills/solana-pay) | Builds the payment URL. A skill, not a plugin, on purpose | skill | none, it builds a string |
+
+Read that last column as the compiled default with no config override, which is what a
+stranger gets on a fresh clone. Every row is a constant you can grep:
+`grep -rn DEFAULT_RPC plugins/*/src/*.rs`. Nothing signs on a read or a build, so the four
+mainnet rows cost nothing to run there, and pointing a risk check or a settlement check at
+mainnet is the difference between exercising it against real tokens and exercising it
+against a devnet toy.
 
 `solana-pay-request` was built as a wasm plugin and then **demoted to a skill**, because
 building a URL is string work and string work does not need a sandbox. The reason first given
@@ -189,6 +186,13 @@ the tree as the evidence trail for that call rather than as part of the shipped 
 
 Three earlier plugins (`token-risk-check`, `lending-health`, `depin-attest`) predate the two
 use cases and are **not part of them**. They keep their own READMEs and tests.
+`token-risk-check` reads **mainnet** by default, and that is where the thing it looks for
+actually exists: the Token-2022 mint it was written to flag carries eight live extensions
+there, including a transfer hook and a permanent delegate, where the same address on devnet
+is a plain system account with no token data at all. `lending-health` names no cluster
+because it queries Kamino's REST API rather than an RPC, and Kamino runs on mainnet.
+`depin-attest` defaults to devnet, since it writes to the same devnet program
+`oracle-publish` does.
 `depin-attest` describes a T2 posture and is not run by either use case; `oracle-publish` is
 its T1 successor and is what actually publishes the live feed. The reasoning for both calls is
 in [`docs/DECISIONS.md`](docs/DECISIONS.md).

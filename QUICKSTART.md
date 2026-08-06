@@ -65,7 +65,18 @@ node serves the x402 ledger block and 3 until then, and a claim reporting PENDIN
 tallied as verified.
 
 Or open any explorer link in `docs/DEVNET-PROOF.md`; the programs, the feed sequence history,
-and the x402 settlement are all public devnet.
+and the devnet x402 settlements are all public devnet. The gate has also settled once on
+**mainnet-beta**, for 1.000000 USDC, while serving a reading from that same devnet feed. The
+settlement is
+`3gSg3mQE9vA5X9CmFBxGEY2EFSAMXGhaC1HrUDbH8uA3MQhuaVjCdHjb1kshyzTqWKRALa9EQPeKja2Hk2rWcF2f`.
+Settlement and feed-read now take separate RPC endpoints, which is what makes that split possible
+(see the run block below).
+
+That settlement came from a locally-run gate with the split configured. **The hosted endpoint at
+`x402.perfpilot.dev` still runs the devnet default on both endpoints**, so the challenge you get
+from the `curl` below quotes the devnet mint and a payment against it settles on devnet. Both
+statements are true at once and the distinction is the point: the capability is real and proven on
+mainnet, and the box you can poke is not currently pointed there.
 
 ## Three more demos, each under a minute
 
@@ -287,27 +298,25 @@ create a scheduled job while taking an order, and a cron entry is persistence th
 the turn it was planted in. `cron_list` is a read and stays. The DePIN publisher uses an OS
 scheduler rather than `zeroclaw cron`, so nothing loses a capability.
 
-### Point the payment watcher at devnet, or your order never marks paid
+### The payment watcher needs no network override, and this page used to say it did
 
-**This step is not optional and this page omitted it until 2026-08-04.** `payment_watch`
-compiles with mainnet defaults on purpose, because a real merchant runs on mainnet: its
-`DEFAULT_RPC` is `api.mainnet-beta.solana.com` and its default mint is mainnet USDC
-(`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). This shop settles on **devnet** in devnet
-USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`). Follow the rest of this page without
-this block and the watcher polls the wrong chain for the wrong token, so a payment you can
-see in the explorer is never matched and the order sits at NOT_YET forever. Nothing errors,
-which is what makes it expensive.
+**Read this if you followed an earlier copy of this page.** Until 2026-08-05 this section
+told you to point `payment_watch` at devnet and to pass a devnet mint on every call. Both
+instructions are now wrong, and following them is the exact failure the old text warned
+about, with the chain the other way round: the watcher would poll devnet for a payment that
+settled on mainnet, the order would sit at NOT_YET forever, and nothing would error.
 
-```
-zeroclaw config set --no-interactive tools.payment_watch.config.rpc_url \
-  "https://api.devnet.solana.com"
-```
+The shop moved to mainnet, so the two sides now agree by default. `payment_watch` compiles
+with `DEFAULT_RPC = https://api.mainnet-beta.solana.com` and defaults its mint to mainnet
+USDC (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`); the pay page settles on mainnet in
+that same real USDC. **No `rpc_url` override and no explicit `mint` argument are needed.**
 
-Then pass the devnet mint explicitly on every call. The `mint` argument is optional and
-omitting it falls back to mainnet USDC, so on devnet it has to be supplied:
+Re-derive both halves rather than trusting this paragraph:
 
 ```
-mint = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+grep -n DEFAULT_RPC plugins/payment-watch/src/watch.rs     # api.mainnet-beta.solana.com
+grep -c "api.devnet" webshop-pay/src/app.js                # 0
+grep -n "api.mainnet-beta" webshop-pay/src/app.js          # the page's own RPC
 ```
 
 Optional and recommended, since the plugin asks a second independent endpoint to re-derive
@@ -316,12 +325,14 @@ host is refused, because the same party answering twice is not corroboration):
 
 ```
 zeroclaw config set --no-interactive tools.payment_watch.config.corroborating_rpc_urls \
-  '["https://devnet.helius-rpc.com/?api-key=YOUR_KEY"]'
+  '["https://mainnet.helius-rpc.com/?api-key=YOUR_KEY"]'
 ```
 
-Re-derive the mismatch yourself rather than trusting this paragraph:
-`grep -n DEFAULT_RPC plugins/payment-watch/src/watch.rs` against
-`grep -n "api.devnet" webshop-pay/src/app.js`.
+If you point the shop at your own devnet deployment instead, the override still exists and
+it is now two settings rather than one: set `tools.payment_watch.config.rpc_url` to
+`https://api.devnet.solana.com` and pass the devnet USDC mint
+(`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`) on every call, because omitting `mint`
+falls back to the mainnet one.
 
 The second profile the node uses, documented here because an undocumented security profile
 is not a reviewable one:
@@ -441,13 +452,26 @@ ssh -L 8899:127.0.0.1:8899 <your-node>   # then open http://127.0.0.1:8899 local
 
 Stop the server once the session is linked. It has no reason to keep running afterwards.
 
-**Fund the paying wallet before you open the link.** The shop quotes in **devnet USDC**
-(mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, Circle's devnet USDC), so devnet SOL
-alone cannot settle a payment: SOL covers the transaction fee, the transfer itself is the
-SPL token. Get free devnet USDC at `faucet.circle.com` (choose Solana Devnet) for whichever
-wallet you will pay from, and fund it for at least the order amount. Without it the wallet
-returns an opaque internal error; the pay page pre-checks the balance and tells you the
-shortfall instead, but the fix is still the faucet.
+**Fund the paying wallet before you open the link.** The hosted pay page at
+`zeroclaw-shop-pay.pages.dev` settles in **mainnet USDC**
+(mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). SOL alone cannot settle a payment
+whichever network you are on: SOL covers the transaction fee, the transfer itself is the
+SPL token, so the paying wallet needs both.
+
+Two ways to run it, and the second costs nothing:
+
+1. **Against the hosted page, on mainnet.** Real USDC, and the demo order is 0.25 USDC plus a
+   fee under a tenth of a cent. Fund the wallet you will pay from with at least the order
+   amount.
+2. **Against your own devnet deployment, free.** Apply the two-setting devnet override
+   documented above (`tools.payment_watch.config.rpc_url` to `https://api.devnet.solana.com`,
+   and pass the devnet USDC mint `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` on every call),
+   serve `webshop-pay/` yourself, and take free devnet USDC from `faucet.circle.com`
+   (choose Solana Devnet). Every claim in this document is checkable this way without spending.
+
+Get the network wrong and the wallet returns an opaque internal error. The pay page pre-checks
+the balance and names the shortfall instead, which is the faster signal, but the underlying fix
+is funding the wallet on the network the page is actually using.
 
 If you paired WhatsApp, sanity-check that the channel is actually live before trusting it:
 the daemon's startup banner must list `whatsapp.<alias>`. If it lists only Telegram, you
@@ -515,6 +539,19 @@ X402_SELLER_WALLET=<your wallet> X402_MINT=<usdc mint> X402_FEED_PDA=<your feed>
   X402_NETWORK=solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1 \
   X402_RESOURCE_URL=https://<your public host>/reading cargo run --release
 ```
+**To settle in real money while selling a devnet feed**, add the two split RPC variables. Both
+default to `X402_RPC_URL`, so a run that omits them is unchanged:
+```
+  X402_READ_RPC_URL=https://api.devnet.solana.com \
+  X402_SETTLE_RPC_URL=https://api.mainnet-beta.solana.com \
+  X402_NETWORK=solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp \
+  X402_MINT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+```
+The gate prints both endpoints at startup, labelling which one moves money, so a half-applied
+split is visible rather than silent. Reading and settling were one client until 2026-08-05; they
+are separate because they are separate concerns and can honestly live on different clusters. The
+mint must match the settle cluster: the devnet USDC mint does not exist on mainnet-beta.
+
 Those last two are not optional decoration, and the recipe omitted them until 2026-08-05.
 Without `X402_NETWORK` the gate advertises `solana-devnet`, the v1 friendly form, which the
 published v2 schema rejects. Without `X402_RESOURCE_URL` it falls back to

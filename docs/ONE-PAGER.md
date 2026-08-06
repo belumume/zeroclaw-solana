@@ -15,7 +15,7 @@ per request, and the node covers its own gas. That is the whole loop. Nobody sub
 hardware.
 
 **A shop that takes money without holding keys.** A merchant agent on Telegram and WhatsApp
-quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in devnet
+quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in mainnet
 USDC. It marks an order paid only when four things agree: the reference, the exact amount, the
 exact mint, and the watched destination. A payment in a token the payer minted themselves does
 not qualify.
@@ -23,25 +23,46 @@ not qualify.
 Built for a small operator who wants an agent touching money without handing it a signing key.
 
 **And it has been running, not demoed.** The rubric asks whether a stranger would still be running
-this in a month. Read as of 2026-08-05T00:47Z, and re-derive it yourself rather than believing the
-figure, because it moves every twenty minutes:
+this in a month. Read as of 2026-08-05T18:09Z, and re-derive it yourself rather than believing the
+figures, because they move every twenty minutes:
 
 ```bash
 python3 scripts/verify-proof.py          # stdlib only, no install, no key
 ```
 
 That checks the live claims. To count the history yourself, the underlying call is
-`getSignaturesForAddress` on the feed account `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg`, which
-any devnet RPC will answer unauthenticated.
+`getSignaturesForAddress` on a feed account, which any devnet RPC will answer unauthenticated.
 
-**760 transactions on the feed account. Zero failed.** First on 2026-07-25T04:12:01Z, spanning
-10.86 days at a median of 20.5 minutes between publishes.
+**Two independent devices, 1,629 publishes between them, zero failed.** That is the DePIN claim
+rather than a gadget claim: the same on-chain oracle program serves both, each device holds its own
+key, and neither can sign for the other.
 
-The honest part, stated here rather than left for you to find: the **largest gap is 61.5 minutes**,
-so the cadence is not unbroken. Zero failures is exact, meaning no transaction has ever errored, and
-"every twenty minutes" is true at the median with one hour-long interruption across eleven days.
-That distinction is the sort of thing the call above would have shown you anyway, which is the only
-reason it is worth stating: a number you can check is worth more than a rounder one you cannot.
+**Measured 2026-08-06T07:50Z, and the publish counts only climb.** Do not read them as current;
+re-derive with one `getSignaturesForAddress` per account, which returns the complete history because
+the oldest signature is the account's own creation.
+
+| Feed account | Publishes | Failed | Span | Median gap | Largest gap |
+|---|---|---|---|---|---|
+| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 850 | 0 | 12.1 d | 20.5 min | **61.5 min** |
+| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
+
+Both largest gaps are stated rather than smoothed. The ARM node's 61.5 minutes is its worst run in
+twelve days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
+node's figure is the point: a reader who runs the command finds both, and an outlier they discover
+for themselves discredits everything around it.
+
+The ARM node is the one the durability claim rests on. Its key was generated on that box with
+`openssl rand -hex 32` and has never left it, so this workstation cannot forge a reading for it, and
+a `systemd --user` timer with lingering keeps it publishing with no laptop in the loop.
+
+The honest part, stated here rather than left for you to find. Zero failures is exact and covers
+both devices: no transaction has ever errored. Continuity is where they differ. The node's largest
+gap is 61.5 minutes across 11.6 days, so "every twenty minutes" is true at the median with one
+hour-long interruption. The second device is laptop-hosted and its largest gap is 36 hours, because
+a laptop sleeps. That is the reason the node exists, and the reason the headline claim is the node's
+rather than the pair's. Both are the sort of thing the call above would have shown you anyway, which
+is the only reason either is worth stating: a number you can check is worth more than a rounder one
+you cannot.
 
 ---
 
@@ -69,7 +90,7 @@ something the agent composes, and an agent talked into a different recipient com
 well-formed link to it. So the checkout page pins the one address it will ever pay, and it does not
 trust the link that opened it. Change a single character of the recipient and the card is replaced
 by **RECUSADO**, the pay button is gone rather than disabled, and both addresses are printed **in
-full** — because a truncated `C331…iLHJ` is precisely what lets a swapped address survive a glance.
+full**. A truncated `C331…iLHJ` is precisely what lets a swapped address survive a glance.
 
 Run it yourself; it drives both directions and fails unless the page discriminates:
 
@@ -99,6 +120,37 @@ signs, and it still could not move the money, because it may move only up to a c
 enforces, from an account it does not own. A fund key has no such ceiling. Prompt-inject every layer
 we wrote and the ceiling is still there, because it was never ours to remove.
 
+**The selling side is capped too, which the brief makes mandatory in both directions.** The node
+sells its readings behind an x402 paywall, and a per-payer per-day ceiling is enforced in the gate's
+own code rather than by the protocol, so a payer who drains the cap in many small buys is refused
+exactly like one who tries it in a single large one. The ledger is durable: restarting the process
+does not re-open a spent allowance. An earlier version restarted the day on every boot, which is a
+cap in name only, and the fix is the part worth checking rather than the cap itself:
+
+```bash
+curl -s https://x402.perfpilot.dev/health | jq '.ledger'
+```
+
+`restored_sales_at_startup` is non-zero because the ledger really was rebuilt from disk at boot.
+
+**That paywall has taken real money, and the precise claim is a split one.** Reading the feed and
+settling the payment are separate concerns on separate RPC endpoints, so the gate settled a genuine
+mainnet payment of 1.000000 USDC while serving a reading from our devnet feed. The settlement is
+`3gSg3mQE9vA5X9CmFBxGEY2EFSAMXGhaC1HrUDbH8uA3MQhuaVjCdHjb1kshyzTqWKRALa9EQPeKja2Hk2rWcF2f`,
+finalized on mainnet-beta. The goods stay on devnet because a `DeviceFeed` account is owned by our
+`zeroclaw_oracle` program, which is deployed on devnet only. A mainnet feed is therefore a program
+deployment rather than a config flag. The hosted endpoint above runs the devnet default.
+
+And where the cap's boundary sits *today* is locatable rather than assertable, on mainnet, with no
+key and no funds. The captured refusal proves the program said no once; this reads the remaining
+allowance off the delegation account and replays the captured message either side of it, requiring
+at least one refusal **and** at least one acceptance, so a dead program and a broken check both fail
+it instead of printing a clean result over nothing:
+
+```bash
+python3 scripts/replay_allowance_probe.py
+```
+
 ---
 
 ## Reproduce every claim above: clone, then three commands
@@ -121,7 +173,7 @@ The certifier's **mechanism** is proven and CI-gated; its **wiring** to the live
 operator-side configuration and is not provable from this repo. Corroborating a payment across
 independent RPC endpoints moves trust to the configured set rather than removing it, and endpoints
 sharing an operator or an upstream fail together. The DePIN feed runs on devnet by choice, since
-duplicating an already-offline-verifiable proof on mainnet costs about 2.73 SOL in rent.
+duplicating an already-offline-verifiable proof on mainnet costs 2.87 SOL in rent.
 
 These are stated here rather than found by a reviewer, because a control that is claimed and
 enforced by no runtime path is worse than an absent one: an absent control is visible, an inert
@@ -135,6 +187,16 @@ Sixteen crates, formatted and clippy-clean at `-D warnings` on host and wasm. Tw
 the shortvec decoder, one covering all 16,777,216 three-byte inputs. A differential fuzzer graded
 against solana-sdk's own deserializer rather than invariants we chose. Every gate ships a control
 proving it can fail, because zero findings is also what a broken detector prints.
+
+Two more, both exercisable rather than described. **A second deployed program reads the feed on
+chain**, which is the difference between an oracle and a memo: `consumer_example` CPI-reads the feed
+account, checks the owner and gates on freshness, so the data is consumable by something other than
+a human squinting at an explorer. Its most recent read of the live ARM feed is transaction
+`4CRapo3AEFBFLh7Y7byJR9XDYZEa95MEioUQMzUhJVxTB9HaDTRtX2X47pVgxaSu8KNfYsPyugeQ6FjN8hBzi54L`. And
+**the sanitizer runs in your browser, compiled from the code that ships**: `sanitizer-microworld/`
+is not a JavaScript reimplementation demonstrating the idea, it compiles `solana_core::sanitize`
+itself to wasm, so pasting a right-to-left override or a zero-width joiner shows what the model
+would actually receive. Open `sanitizer-microworld/index.html`; there is no build step.
 
 Those four are the numbers, and this page promised each one is checkable, so here is how:
 
@@ -191,8 +253,9 @@ happens. Scripting it instead? Send a browser `User-Agent`, because Cloudflare a
 
 **Repo:** https://github.com/belumume/zeroclaw-solana
 **Write-up:** [docs/WRITEUP.md](WRITEUP.md) &nbsp;&nbsp; **Run it:** [QUICKSTART.md](../QUICKSTART.md)
-**Demo (2:55, plays in the browser):**
-https://belumume.github.io/zeroclaw-solana/.demo-assets/cut/zeroclaw-solana-demo.mp4
-(also committed at [.demo-assets/cut/zeroclaw-solana-demo.mp4](../.demo-assets/cut/zeroclaw-solana-demo.mp4), so a clone carries it)
+**Demo:** superseded. The cut at
+[.demo-assets/cut/zeroclaw-solana-demo.mp4](../.demo-assets/cut/zeroclaw-solana-demo.mp4)
+(2:39) carries synthetic narration and is kept only so nothing that once linked it breaks.
+It is not advertised, and the submission's video is recorded separately.
 **Injection transcript:** [docs/transcripts/injection-refund-redirect.md](transcripts/injection-refund-redirect.md)
 **Mainnet custody proof:** [docs/MAINNET-PROOF.md](MAINNET-PROOF.md)

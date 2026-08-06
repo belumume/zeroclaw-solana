@@ -187,6 +187,47 @@ BEATS = [
         "either way. Refuses to render a comparison of empty strings. Network beat, warm it first.",
     ),
     Beat(
+        "x402-earnings",
+        "python demo/x402_earnings.py",
+        # EVERY MARKER IS DIGIT-FREE, and that is not style. The first version gated on
+        # "X402 EARNINGS" and failed a frame in which every character rendered crisply:
+        # OCR read "X4@2", the same zero-as-@ misread this file already records for
+        # `cap=50000@` on the mainnet beat. Same resolution as then, and the rule is worth
+        # restating because the tempting fix is the wrong one: fix the instrument's marker,
+        # never loosen the gate to protect a frame.
+        #
+        # Each is SUCCESS-ONLY, so no failure path can satisfy them. "EARNINGS" alone would
+        # have been the trap here, because "EARNINGS UNAVAILABLE" contains it -- a marker
+        # that passes on the refusal is worse than no marker. Between them they prove both
+        # lines rendered: the chain payload, the gate's own ledger, the cross-check verdict,
+        # and the per-day cap the listing calls mandatory.
+        #
+        # DELIBERATELY NOT MARKERS: the read count and the USDC figure. They are the live
+        # truth and they MOVE the moment anyone buys a read, so gating on "3" would fail a
+        # good take for being correct. The suite pins today's values instead, where a change
+        # is a prompt to re-measure rather than a dead shoot.
+        [
+            "paid reads settled on chain",
+            "gate ledger restored",
+            "AGREE",
+            "per payer per day",
+        ],
+        7.9,
+        "REPLACES THE FICTIONAL EARNINGS BEAT. The scripted line was the SOP's own template "
+        "sentence with plausible numbers dropped in, and the listing disqualifies re-enactment "
+        "outright. This derives the same fact from two sources a judge can check: the chain "
+        "(x402-memo settlements on the seller's token account) and the live gate's /health "
+        "ledger, then refuses to report unless they agree. "
+        "TWO SHOOT CONSTRAINTS. It is the second-longest beat here and it is RATE-LIMIT "
+        "SENSITIVE: 7.9s clean, but repeated sweeps against public devnet RPC pushed it to "
+        "32s and 58s as the backoff engaged. Warm it once, film the next run, and if the "
+        "console sits longer than ~10s kill it rather than shooting the backoff. Setting "
+        "X402_RPC_URL to a dedicated endpoint removes the variance entirely. "
+        "HONESTY NOTE FOR THE NARRATION: the payer is our own client wallet, so these are "
+        "agent-to-agent purchases against our own paywall, not third-party customers, and "
+        "the sales are dated rather than called 'today'.",
+    ),
+    Beat(
         "chain-history",
         "python demo/chain_history.py",
         # From the real run this beat was built from: "774 tx | 0 failed | median gap 20.5 min |

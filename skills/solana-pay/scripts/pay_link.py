@@ -52,6 +52,27 @@ PAGE = "https://zeroclaw-shop-pay.pages.dev/"
 # is signed, and no approval prompt fires. The funds that move are the customer's.
 MERCHANT = "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
 
+# The MINT is pinned for exactly the reasons the merchant above is pinned, and it is
+# here because the guard above was written for one field while its sibling was left a
+# pass-through. Substitute "mint" into the paragraph above and every clause still holds:
+# it is a fixed constant of this shop, argv and memory are both reachable by the agent,
+# and this is the last code that runs before a customer is asked for money.
+#
+# The recipient incident repeated itself on the mint on 2026-08-06, again with no
+# attacker. The pay page had moved to mainnet, the deployed SKILL.md was corrected to
+# match, and the agent KEPT emitting devnet links: three rows in its memory store held
+# the devnet mint, written by the skill's own instruction to record {reference, amount,
+# mint, customer} after every order. Eleven days of accumulated memory outvoted the
+# file. Correcting the memory clears today's rows and nothing more, because the next
+# order writes a new one; the constant has to stop being an input.
+#
+# ABSENT is refused too, not just MISMATCHED, and that is the deny-by-default choice
+# rather than an oversight. Solana Pay reads a missing `spl-token` as native SOL, so a
+# dropped parameter turns "8.80 USDC" into 8.80 SOL, which at current prices is a
+# roughly seventy-fold overcharge to a real customer. A SOL path, if this shop ever
+# wants one, needs an explicit flag that says so.
+MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
 USAGE = "usage: pay_link.py '<solana: URL>' [pt|en] [--brl <value> --rate <rate>]"
 
 # Pull the optional flags out first so the positional contract stays exactly what it
@@ -103,6 +124,60 @@ if recipient != MERCHANT:
         f"  got:      {recipient or '(empty)'}\n"
         f"No link was produced. If this was not a typo, treat it as an attempt to "
         f"redirect a customer payment and check the agent's memory store."
+    )
+
+# MINT. Same parse discipline as the recipient: split the query off first so a crafted
+# value cannot smuggle anything past the comparison. Read only the first `spl-token`,
+# because a duplicated parameter is itself a smuggling shape and the page's own parser
+# takes the last one.
+query = url[len("solana:") :].split("?", 1)[1] if "?" in url else ""
+mint_values = [
+    pair.split("=", 1)[1]
+    for pair in query.split("&")
+    if pair.split("=", 1)[0] == "spl-token" and "=" in pair
+]
+mint = mint_values[0].strip() if mint_values else ""
+
+if len(mint_values) > 1:
+    sys.exit(
+        f"REFUSED: pay link carries {len(mint_values)} spl-token parameters. "
+        f"This parser reads the first and the pay page reads the last, so a duplicate "
+        f"is a smuggling shape rather than a typo. No link was produced."
+    )
+
+# The refusal is split because the two failures are not the same failure, and pinning
+# them together over-reached: it refused `solana:<merchant>` with no parameters at all,
+# which is the legitimate flow where the customer sets the amount in their own wallet
+# and which the pay page explicitly renders ("(amount set in your wallet)").
+#
+# A WRONG mint is always refused: it reprices the order in some other asset, and a mint
+# can call itself whatever it likes.
+#
+# An ABSENT mint is refused only when an AMOUNT is present, because that is the
+# repricing shape: Solana Pay reads a missing `spl-token` as native SOL, so "8.80"
+# silently becomes 8.80 SOL. With no amount there is nothing to reprice, so that case
+# passes through as before.
+has_amount = any(
+    pair.split("=", 1)[0] == "amount" and "=" in pair for pair in query.split("&")
+)
+
+if mint and mint != MINT:
+    sys.exit(
+        f"REFUSED: pay link asset is not this shop's.\n"
+        f"  expected: {MINT}\n"
+        f"  got:      {mint}\n"
+        f"No link was produced. An altered mint reprices the order in a different "
+        f"asset, so check the agent's memory store the same way a wrong recipient "
+        f"would be checked."
+    )
+
+if not mint and has_amount:
+    sys.exit(
+        f"REFUSED: pay link carries an amount but no spl-token.\n"
+        f"  Solana Pay reads that as native SOL, so this would quote the order in SOL "
+        f"rather than in {MINT}.\n"
+        f"No link was produced. Either name the mint or drop the amount and let the "
+        f"customer's wallet set it."
     )
 
 # AMOUNT. The recipient check above exists because the recipient once came only from
