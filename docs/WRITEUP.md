@@ -726,11 +726,30 @@ needed at any step.
 set against the live one by machine, because the two had silently diverged once before.
 
 **SOPs.** [`payment-confirmation`](../sops/payment-confirmation/SOP.md) is the one that closes the
-loop a customer actually feels: it polls the shop's open payment references every minute, and when
-one settles on-chain it sends a single short message naming the order and the amount. It is
+loop a customer actually feels: it is scheduled every minute, and when one of the shop's open
+references settles on-chain it sends a single short message naming the order and the amount. It is
 read-only by construction, holds no key and builds no transaction, and it appends to its ledger
 only *after* the message is sent, so a failure between the two re-announces (visible, correctable)
 rather than swallowing a confirmation (invisible, and it would tell the owner an order never paid).
+
+**It has announced zero settlements so far, and the reason is the component boundary this bounty's
+own trap 2 points at.** The SOP is deployed and registered (`zeroclaw sop list`) and the scheduler
+does fire it every minute (`zeroclaw cron list` reports a recent `last=`). Its step 2 calls the
+`payment_watch` component, and against this host build that component will not instantiate:
+
+```
+failed to instantiate tool plugin: component imports instance `zeroclaw:plugin/logging@0.1.0`
+```
+
+The component compiles clean to `wasm32-wasip2` and its host-run tests pass. The failure appears
+only at instantiation, against a host binary whose `wit/v0` declares the same `zeroclaw:plugin@0.1.0`
+package the component imports. That is precisely where the listing says the remaining risk lives:
+*"the remaining risk lives at the component boundary (wit-bindgen integration and the host's
+capability grants), not in the compiler."*
+
+So the paying half of this loop is real and independently verifiable on mainnet, and the noticing
+half is not yet. We would rather write that down than let a judge find it, and the honest shape of
+the gap is more useful to another operator than a claim we cannot currently reproduce.
 [`evening-reconciliation`](../sops/evening-reconciliation/SOP.md) reconciles the shop's open payment
 requests against on-chain settlement daily and holds the human checkpoint on the refund path.
 [`node-earnings-report`](../sops/node-earnings-report/SOP.md) reports the DePIN node's x402

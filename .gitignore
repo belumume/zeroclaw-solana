@@ -152,3 +152,6 @@ docs/ASSET-SURFACING-2026-08-05.md
 docs/PAYER-ROUTE.md
 docs/CONSUMER-READS-LIVE-FEED-2026-08-05.md
 docs/NETWORK-POLICY-COSTED-2026-08-05.md
+
+# Internal production script (audience: internal)
+docs/SCRIPT-LOCKED-v2.md
