@@ -29,7 +29,18 @@ import sys
 import time
 from pathlib import Path
 
-PASS_EXE = Path(r"C:/Users/elzai/AppData/Local/Programs/ProtonPass/pass-cli.exe")
+# DERIVED, never hardcoded, and never a placeholder either. This file is TRACKED, so an absolute
+# home path here ships the author's account name to every clone -- which it did until 2026-08-06,
+# and `scripts/check-identifier-leaks.py` was red on exactly this line. A `<your-user>` placeholder
+# would have fixed the leak and broken the script for everyone including its owner; deriving fixes
+# both. PASS_CLI overrides for a non-default install.
+PASS_EXE = Path(
+    os.environ.get("PASS_CLI")
+    or Path(os.environ.get("LOCALAPPDATA") or (Path.home() / "AppData" / "Local"))
+    / "Programs"
+    / "ProtonPass"
+    / "pass-cli.exe"
+)
 ITEM = "Cloudflare Pages deploy token (zeroclaw-shop-pay)"
 VAULT = "Personal"
 PROJECT = "zeroclaw-shop-pay"
