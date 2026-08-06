@@ -68,6 +68,23 @@ VERDICT_DEFAULT = ZC / "state" / "box-selfcheck.json"
 # under-matching is not.
 B58 = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
 
+# A line that FORBIDS a network necessarily names it, so the network-prose check has to tell a
+# prohibition apart from an assertion to the customer. Deliberately a small, boring marker set:
+# this is a semantic distinction and regex does those badly (measured F1 ~0.22-0.33 for the class),
+# so the honest posture is a narrow list plus a stated ceiling rather than a clever pattern.
+#
+# CEILING, so nobody reads a green as stronger than it is: a prohibition phrased with none of these
+# markers still reads as an assertion and FALSE-POSITIVES, and an assertion that happens to carry
+# one of them elsewhere in the same line FALSE-NEGATIVES. The strong instrument is the emitted
+# message, not the template; this check is the cheap file-side backstop for the case where the
+# value is right and the sentence under it is wrong.
+PROHIBITION_RE = re.compile(
+    r"\b(never|not|no longer|don'?t|do NOT|must not|cannot|can'?t|avoid|forbid\w*|"
+    r"prohibit\w*|refus\w*|reject\w*|wrong|stale|incorrect|instead of|rather than|"
+    r"no longer accurate|used to)\b",
+    re.IGNORECASE,
+)
+
 
 def sha256_file(p: Path) -> str:
     h = hashlib.sha256()
@@ -202,11 +219,20 @@ def check_network_prose(inv: dict, r: Result) -> None:
             bad.append(f"{rel}: MISSING")
             continue
         checked += 1
-        low = p.read_text(encoding="utf-8", errors="replace").lower()
-        for word in sorted(forbid):
-            n = low.count(word)
-            if n:
-                bad.append(f"{rel}: {n}x {word!r}")
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            low = line.lower()
+            hits = [w for w in sorted(forbid) if w in low]
+            if not hits:
+                continue
+            # A PROHIBITION HAS TO NAME WHAT IT FORBIDS, so a whole-file count of the forbidden
+            # word scores the CORRECTED file worse than one that never mentioned the hazard. That
+            # is not a strict check, it is an inverted one: this gate was red before the fix, red
+            # after, red forever, and `Result.ok` is all-of so it pinned the entire verdict to
+            # DRIFTED. Skipping prohibition lines is what makes the check able to pass at all.
+            if PROHIBITION_RE.search(line):
+                continue
+            bad.append(f"{rel}:{lineno}: {', '.join(repr(w) for w in hits)}")
     r.add(
         "network-prose",
         not bad,
@@ -240,6 +266,41 @@ def check_pins(inv: dict, r: Result) -> None:
     )
 
 
+def unit_verdict(
+    unit: str, active_state: str, result: str, utype: str
+) -> tuple[bool, str]:
+    """Pure decision, split out from the systemd call SO THE SELF-TEST CAN DRIVE IT.
+
+    THIS WAS INVERTED UNTIL 2026-08-06 AND THE INVERSION WAS INVISIBLE, because the self-test set
+    `units = []` and skipped the only check that had it. The old expression allowed `inactive` for
+    a `.timer` and forbade it for everything else, which is backwards in both directions:
+
+        stopped zc-feed.timer  -> PASSED     the feed is the submission's lead claim, and its
+                                             death was the exact thing this gate existed to catch
+        finished oneshot       -> FAILED     the healthy steady state of zc-feed.service
+
+    The correct model needs the unit's TYPE, which `is-active` alone cannot supply:
+
+      .timer      a loaded timer waiting to fire reports ACTIVE. So `inactive` means stopped and
+                  whatever it drives is dead. Nothing else is acceptable.
+      oneshot     finishes and reports inactive; healthy only when Result=success. A crashed one
+                  reports inactive too, which is why Result rather than ActiveState decides it.
+      anything    a daemon (simple/notify/forking) must be running. `inactive` is dead even when
+      else        it was stopped cleanly, so Result=success must NOT rescue it here.
+    """
+    if unit.endswith(".timer"):
+        ok = active_state == "active"
+        return ok, "" if ok else f"{unit}={active_state} (timer not scheduled)"
+    if active_state in ("active", "activating"):
+        return True, ""
+    if utype == "oneshot" and active_state == "inactive" and result == "success":
+        return True, ""
+    return (
+        False,
+        f"{unit}={active_state}/{result or 'unknown'} type={utype or 'unknown'}",
+    )
+
+
 def check_services(inv: dict, r: Result) -> None:
     """Liveness. A correct configuration on a dead service is not a working shop."""
     units = inv.get("units") or []
@@ -250,26 +311,42 @@ def check_services(inv: dict, r: Result) -> None:
     for unit in units:
         try:
             out = subprocess.run(
-                ["systemctl", "--user", "is-active", unit],
+                [
+                    "systemctl",
+                    "--user",
+                    "show",
+                    unit,
+                    "-p",
+                    "ActiveState",
+                    "-p",
+                    "Result",
+                    "-p",
+                    "Type",
+                ],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=15,
             )
-            state = (out.stdout or "").strip()
+            kv = dict(
+                line.split("=", 1)
+                for line in (out.stdout or "").splitlines()
+                if "=" in line
+            )
         except Exception as exc:
-            state = f"error:{exc}"
-        # A oneshot that has finished reports inactive and that is HEALTHY, which cost a wrong
-        # verdict once. Timers are what carry the liveness for those.
-        if state not in (
-            "active",
-            "activating",
-            "inactive" if unit.endswith(".timer") else "active",
-        ):
-            if not (unit.endswith(".timer") and state == "active"):
-                bad.append(f"{unit}={state}")
-    r.add("services", not bad, "all active" if not bad else "; ".join(bad))
+            # Fail CLOSED: an unreadable unit is not a passing unit.
+            bad.append(f"{unit}=error:{exc}")
+            continue
+        ok, why = unit_verdict(
+            unit,
+            kv.get("ActiveState", ""),
+            kv.get("Result", ""),
+            kv.get("Type", ""),
+        )
+        if not ok:
+            bad.append(why)
+    r.add("services", not bad, "all healthy" if not bad else "; ".join(bad))
 
 
 def run_checks() -> Result:
@@ -392,6 +469,97 @@ def self_test() -> int:
                 )
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    # SERVICES. Driven through the pure verdict rather than systemd, because the whole reason the
+    # inversion survived is that the self-test set units=[] and this check was never exercised.
+    # Case 1 is the incident verbatim: a stopped feed timer used to PASS, which made the death of
+    # the submission's lead claim invisible.
+    for unit, state, res, utype, want, label in (
+        (
+            "zc-feed.timer",
+            "inactive",
+            "success",
+            "",
+            False,
+            "STOPPED timer FAILS (the incident)",
+        ),
+        ("zc-feed.timer", "active", "success", "", True, "scheduled timer passes"),
+        (
+            "zc-feed.service",
+            "inactive",
+            "success",
+            "oneshot",
+            True,
+            "finished oneshot passes",
+        ),
+        (
+            "zc-feed.service",
+            "inactive",
+            "exit-code",
+            "oneshot",
+            False,
+            "crashed oneshot FAILS",
+        ),
+        (
+            "zc-shop.service",
+            "active",
+            "success",
+            "simple",
+            True,
+            "running daemon passes",
+        ),
+        (
+            "zc-shop.service",
+            "inactive",
+            "success",
+            "simple",
+            False,
+            "stopped daemon FAILS",
+        ),
+        (
+            "zc-shop.service",
+            "failed",
+            "exit-code",
+            "simple",
+            False,
+            "failed daemon FAILS",
+        ),
+    ):
+        got, _why = unit_verdict(unit, state, res, utype)
+        report(f"services: {label}", got is want)
+
+    # NETWORK PROSE. The over-correction control matters more than the fix here: "the false
+    # positive stopped" is equally consistent with having disabled the detector, so a real
+    # customer-facing sentence must still fire.
+    tmp = Path(tempfile.mkdtemp(prefix="boxcheck-prose-"))
+    try:
+        ZC = tmp
+        (tmp / "skill.md").write_text(
+            "Never tell the customer this shop settles on devnet.\n"
+            "Do NOT emit a devnet mint under any circumstances.\n"
+            "This shop receives USDC on Solana mainnet.\n",
+            encoding="utf-8",
+        )
+        r = Result()
+        check_network_prose({"network": "mainnet", "prose_scan": ["skill.md"]}, r)
+        report(
+            "prose: a prohibition NAMING devnet passes (was red forever)",
+            r.checks[0]["ok"] is True,
+        )
+
+        (tmp / "skill.md").write_text(
+            "This shop receives USDC on Solana mainnet.\n"
+            "Esta loja funciona na devnet.\n",
+            encoding="utf-8",
+        )
+        r = Result()
+        check_network_prose({"network": "mainnet", "prose_scan": ["skill.md"]}, r)
+        report(
+            "prose: an ASSERTION of devnet still FAILS (over-correction control)",
+            r.checks[0]["ok"] is False,
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
     # The fail-closed case, which is the one a broken deploy actually produces.
     tmp = Path(tempfile.mkdtemp(prefix="boxcheck-"))
