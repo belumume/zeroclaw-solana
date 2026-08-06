@@ -1,0 +1,49 @@
+[sop]
+name = "payment-confirmation"
+description = "Watch the shop's open payment references and announce each one to the owner's channel within about a minute of it settling on-chain. Read-only: it verifies and reports, and can move no funds. The fund-touching path (refunds) lives in evening-reconciliation behind a human checkpoint."
+version = "1.0.0"
+priority = "normal"
+
+# DECLARATIVE, and worth stating plainly because a reader will assume otherwise. Verified against
+# the host source on 2026-08-06: `Supervised` and `Auto` are never branched on anywhere in
+# zeroclaw-runtime -- every functional comparison on `execution_mode` is against `Deterministic`
+# (sop/dispatch.rs:289, sop/engine.rs:1685, sop/engine.rs:1868), and the two remaining uses are
+# `println!`. The approval gate is created PER STEP at engine.rs:5474 `if step.requires_confirmation`,
+# layered with the risk profile's AutonomyLevel and the self-approval check in
+# sop/approval/resolve.rs. So this field does not gate anything either way; it declares intent.
+#
+# `auto` is the honest declaration here. This SOP reads chain state and sends a message. It holds no
+# key, builds no transaction and touches no funds, so there is nothing for a per-run human gate to
+# protect. Declaring `supervised` would misdescribe it while changing no behaviour.
+#
+# `deterministic` IS THE BETTER MODE FOR THIS JOB AND IS NOT YET REACHABLE. Measured, not assumed:
+# it is the ONE mode the engine branches on, and `SopEngine` tracks `DeterministicSavings
+# { total_llm_calls_saved }` (sop/types.rs:892) -- a deterministic run skips the model entirely. At
+# this cadence that is 1,440 model invocations a day versus zero, and a confirmation that cannot
+# hallucinate a payment, which is a safety property and not only a cost one.
+#
+# What blocks it is structural rather than effort. A deterministic step is authored as
+# `calls: Vec<PlannedToolCall>` -- ordered tool invocations whose args carry `{{steps.N.path}}`
+# bindings resolved against captured run data and VALIDATED AT SAVE TIME (sop/types.rs:281-292).
+# Prose steps with a `- tools:` hint map to `suggested_tools`, which is the LLM-driven path. So both
+# existing SOPs in this repo are prose-authored and neither could be deterministic as written, and
+# converting this one means binding every arg against payment_watch's and memory_recall's exact
+# output shapes. A wrong binding path fails at save time if you are lucky and produces a silently
+# non-firing confirmation if you are not. That needs one run against the live agent to author
+# correctly, which is the tracked follow-up rather than a guess shipped into the beat the demo
+# depends on.
+execution_mode = "auto"
+agent = "demo"
+
+# Every minute. The listing's own worked example is "forty seconds later the agent posts
+# Invoice #412 paid", and a one-minute poll averages roughly half that in latency.
+#
+# THE COST, stated rather than buried, because a reproducing operator inherits it: this is 1,440
+# runs a day. Step 1 short-circuits on an empty reference set, so the overwhelming majority are a
+# single memory_recall and an exit with no RPC call and no further reasoning. If that is still too
+# much for your setup, widen to `*/2` or `*/5` -- the beat degrades gracefully to a slower
+# confirmation and nothing else changes. Trap 7 in the listing is the reason this is a poll rather
+# than a webhook: a chat-resident agent has no guaranteed public inbound ingress.
+[[triggers]]
+type = "cron"
+expression = "* * * * *"
