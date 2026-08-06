@@ -1,7 +1,12 @@
 # Showcase write-up
 
 ## What it does
-Two use cases, one suite, both live on devnet. Either one is a submission on its own; what is
+Two use cases, one suite, both running, and they do not sit on the same network. The shop settles
+in real **mainnet** USDC. The custody refusal is on **mainnet** too, against an audited program we
+did not write and cannot change. The DePIN feed publishes to **devnet**, deliberately: the program
+that owns its account would cost more to deploy on mainnet than the unbroken history it would throw
+away is worth, and that trade is costed further down rather than asserted here. Either one is a
+submission on its own; what is
 claimed here is that they share a single custody spine rather than being two projects in a
 folder. One coherent
 body from the physical edge (a device signing its own readings on-chain), through machine
@@ -14,15 +19,21 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    signs each reading with a device key the host never exposes, and publishes a
    typed on-chain feed another program consumes. Two publish paths share the same device
    signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
-   publisher runs the durable feed on a schedule so the on-chain sequence never gaps. You can
-   message the node on Telegram to ask what it saw and why a reading was refused.
+   publisher runs the durable feed on a schedule. As of 2026-08-06 that feed carries **843
+   publishes and zero failures across 12.0 days**, unbroken since 2026-07-25, at a median gap of
+   20.5 minutes. Its largest gap is 61.5 minutes, and a second publisher running the same path from
+   a laptop has a largest gap of 36 hours because the laptop sleeps. Both outliers are stated here
+   because the command that reproduces the good numbers is the same command that finds them:
+   `python demo/chain_history.py`. Re-derive rather than trusting this paragraph; the count only
+   grows. You can message the node on Telegram to ask what it saw and why a reading was refused.
    It also SELLS that feed rather than only publishing it, which is the half worth reading
    twice: another agent asks for a reading, gets an HTTP 402 with a price menu, signs its own
    stablecoin transfer, and is served. No human is in that loop at any point and no facilitator
    sits in the middle, because the buyer is the fee payer. The gate holds no key beyond its own
    receiving address, so its entire power is recognising a payment made to it. A replay against a
    spent nonce is refused, and the per-payer daily cap is rebuilt from the earnings log at boot so
-   a restart cannot quietly reopen it. The node earns the gas it spends.
+   a restart cannot quietly reopen it. The node earns its own gas rather than being funded: the mechanism is real and the amounts are
+   devnet, so read it as the loop closing, not as a profit.
 2. **The shop terminal**: a merchant's ZeroClaw on Telegram and WhatsApp. It builds a Solana Pay
    request (skill) and hands the customer a tappable pay page (the channels are text-only, so a
    hosted page renders the QR and a wallet picker), then confirms settlement on-chain by matching
@@ -182,6 +193,9 @@ move in both directions as the maintainers triage: **eighteen issues filed, four
 `status:accepted`, sixteen rated `priority:p1`**, plus five pull requests of which **#9354 is
 MERGED**. Re-derive rather than trusting the sentence:
 `gh search issues --repo zeroclaw-labs/zeroclaw --author @me --limit 100 --json labels,state`.
+That command returns issues only, so the pull-request half of the sentence needs a second
+line to be checkable at all: `gh search prs --repo zeroclaw-labs/zeroclaw --author @me --limit 100
+--json number,state`.
 
 This paragraph previously read "if #9354 has merged by the time you read it, that is the
 outcome we were after". That was a conditional about something which had already happened,
@@ -314,9 +328,11 @@ reaching a flag it should not.
 **A search for what we did not think to check.** The three layers above all verify properties
 we chose, which makes them strong where we anticipated the failure and silent elsewhere. So
 `differential-fuzz/` mutates real transactions and grades both decoders against `solana-sdk`'s
-deserializer, classifying disagreement instead of asserting an invariant. 220,000 iterations
-across five seeds, no unexplained divergence, a figure measured from one run that the
-`differential-fuzz/` crate reproduces. Its self-test plants a divergence in every field
+deserializer, classifying disagreement instead of asserting an invariant. A default run is
+20,000 iterations over a three-transaction seed population, no unexplained divergence, and it
+is deterministic in its RNG seed so the result repeats rather than being taken on trust:
+`cargo run --release --manifest-path differential-fuzz/Cargo.toml -- 20000`.
+Its self-test plants a divergence in every field
 it compares and requires a complaint for each, because zero findings is also what a broken
 detector reports, and the binary refuses to print a result if that control fails.
 
@@ -501,7 +517,7 @@ The tiers in words:
   insufficient funds, and a rejection for the wrong reason would prove nothing about the cap; the
   harness asserts the error code rather than printing it, and refuses to run when the balance
   cannot support that separation. The DePIN feed deliberately stays on devnet, since deploying its
-  two programs costs about 2.73 SOL in rent to duplicate a proof that already verifies offline.
+  two programs costs 2.87 SOL in rent (2.865418, re-derive: rent-exempt is (128 + len) x 6960 lamports over 215,141 and 195,973 bytes of programdata plus two 36-byte program accounts) to duplicate a proof that already verifies offline.
 - **The approval prompt is not, on its own, a security boundary.** When an agent asks a human to
   approve a transaction, the sentence that human reads was written by the model. Influence the
   model and you influence the description, so an attacker does not need the signing key, only an
@@ -759,7 +775,7 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
 - x402 settlement `EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE`
   (err None, devnet USDC, buyer on a different machine from the node); a replayed payment refused
   NonceReused.
-- shop terminal Track-A settlement `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`
+- shop terminal Track-A settlement (Track A is the shop path, where a payment is threaded to its reference key) `4kDo6NCcAxSe3BSTtQ4onTASenxRWr2miagweVway3RnDMLG7drv6NkTdV7eRtTSDcNXURy2ESpKcqkk2jG9sYqS`
   (payment_watch verdict PAID on an exact amount + mint + destination match, with the reference
   also matching; a wrong amount, a foreign mint, or a wrong reference each return NOT_YET), reference
   `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`.

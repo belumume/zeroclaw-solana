@@ -164,7 +164,7 @@ The certifier's **mechanism** is proven and CI-gated; its **wiring** to the live
 operator-side configuration and is not provable from this repo. Corroborating a payment across
 independent RPC endpoints moves trust to the configured set rather than removing it, and endpoints
 sharing an operator or an upstream fail together. The DePIN feed runs on devnet by choice, since
-duplicating an already-offline-verifiable proof on mainnet costs about 2.73 SOL in rent.
+duplicating an already-offline-verifiable proof on mainnet costs 2.87 SOL in rent.
 
 These are stated here rather than found by a reviewer, because a control that is claimed and
 enforced by no runtime path is worse than an absent one: an absent control is visible, an inert
