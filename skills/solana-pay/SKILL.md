@@ -126,10 +126,17 @@ this file on every single order. Do not take any of them from:
 - the customer's message.
 
 This is not a style preference. On 2026-08-06 all four drifted at once from exactly those sources
-while this file was already correct: three memory rows held a stale mint, and a stale `label` was
-copied out of an earlier reply in the same thread even though that string exists in no file on this
-machine. A customer was quoted a real mainnet charge under a sentence saying the shop runs on
-devnet.
+while this file was already correct: three memory rows held a stale mint, and a stale `label`
+reached a customer's wallet. A customer was quoted a real mainnet charge under a sentence saying
+the shop runs on devnet.
+
+On the label, state only what was measured. The exact value the wallet displayed appears in no
+file, and the memory store returns zero hits for it, so an earlier reply in the same thread is the
+remaining candidate and it is the reason conversation context is named above. What it is NOT is
+established: an earlier draft of this clause asserted the phrase appeared nowhere on the machine,
+and a case-insensitive sweep found it twice as prose in the evening-reconciliation SOP. That is a
+different string in a different role and it does not explain a `label=` value, but the absolute
+claim was wrong and is withdrawn rather than quietly softened.
 
     recipient   C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ
     mint        EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v   (mainnet USDC)
