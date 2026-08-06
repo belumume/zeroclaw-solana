@@ -490,16 +490,33 @@ def main():
         req = urllib.request.Request(
             SHOP_PAY_URL, headers={"User-Agent": "Mozilla/5.0 (verify-proof)"}
         )
+        # Read a generous cap rather than 64 KiB, and DISTINGUISH a truncated read from a
+        # genuine absence. The old 65536 was a silent time bomb: the pin sat at byte 63,009
+        # until the page grew by 2,545 bytes, which pushed it to 65,554 and put it EIGHTEEN
+        # bytes past the cut. The gate then reported "merchant pin MISSING" about a page
+        # serving the correct pin, which is the worst possible wording -- it names a
+        # swapped-recipient regression when the real event was the page getting longer.
+        # A cap is still right (an attacker-controlled body should not be read unbounded),
+        # so the fix is to notice when the cap was reached instead of reasoning past it.
+        CAP = 2_000_000
         with urllib.request.urlopen(req, timeout=20) as r:
-            body = r.read(65536).decode("utf-8", "replace")
+            raw = r.read(CAP + 1)
+        truncated = len(raw) > CAP
+        body = raw[:CAP].decode("utf-8", "replace")
         # 200 alone only proves a CDN answered. The pinned merchant address is what makes
         # the page the shop's page rather than any page, so that is what is asserted.
         if r.status == 200 and MERCHANT_PIN in body:
             print(f"PASS  shop pay page reachable and pinned to the shop ({r.status})")
+        elif truncated:
+            print(
+                f"FAIL  shop pay page: HTTP {r.status}, body exceeded the {CAP:,}-byte read "
+                f"cap, so the merchant pin was NOT SEARCHED rather than found absent"
+            )
+            fails += 1
         else:
             print(
                 f"FAIL  shop pay page: HTTP {r.status}, merchant pin "
-                f"{'present' if MERCHANT_PIN in body else 'MISSING'}"
+                f"MISSING from {len(body):,} bytes read in full"
             )
             fails += 1
     except Exception as e:

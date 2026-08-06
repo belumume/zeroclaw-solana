@@ -33,14 +33,23 @@ python3 scripts/verify-proof.py          # stdlib only, no install, no key
 That checks the live claims. To count the history yourself, the underlying call is
 `getSignaturesForAddress` on a feed account, which any devnet RPC will answer unauthenticated.
 
-**Two independent devices, 1,570 publishes between them, zero failed.** That is the DePIN claim
+**Two independent devices, 1,629 publishes between them, zero failed.** That is the DePIN claim
 rather than a gadget claim: the same on-chain oracle program serves both, each device holds its own
 key, and neither can sign for the other.
 
+**Measured 2026-08-06T07:50Z, and the publish counts only climb.** Do not read them as current;
+re-derive with one `getSignaturesForAddress` per account, which returns the complete history because
+the oldest signature is the account's own creation.
+
 | Feed account | Publishes | Failed | Span | Median gap | Largest gap |
 |---|---|---|---|---|---|
-| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 810 | 0 | 11.6 d | 20.5 min | **61.5 min** |
-| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device) | 760 | 0 | 12.2 d | 20.0 min | **36 h** |
+| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 850 | 0 | 12.1 d | 20.5 min | **61.5 min** |
+| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
+
+Both largest gaps are stated rather than smoothed. The ARM node's 61.5 minutes is its worst run in
+twelve days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
+node's figure is the point: a reader who runs the command finds both, and an outlier they discover
+for themselves discredits everything around it.
 
 The ARM node is the one the durability claim rests on. Its key was generated on that box with
 `openssl rand -hex 32` and has never left it, so this workstation cannot forge a reading for it, and
@@ -164,7 +173,7 @@ The certifier's **mechanism** is proven and CI-gated; its **wiring** to the live
 operator-side configuration and is not provable from this repo. Corroborating a payment across
 independent RPC endpoints moves trust to the configured set rather than removing it, and endpoints
 sharing an operator or an upstream fail together. The DePIN feed runs on devnet by choice, since
-duplicating an already-offline-verifiable proof on mainnet costs about 2.73 SOL in rent.
+duplicating an already-offline-verifiable proof on mainnet costs 2.87 SOL in rent.
 
 These are stated here rather than found by a reviewer, because a control that is claimed and
 enforced by no runtime path is worse than an absent one: an absent control is visible, an inert

@@ -6,7 +6,8 @@ sits behind an explicit human checkpoint.
 
 ## Steps
 
-1. **Recall open references**: Use memory_recall to list every payment reference logged today for the shop (order number, amount, mint, reference key). If none, report "no open orders today" and stop.
+1. **Recall open references**: Use memory_recall to list every payment reference logged today for the shop (order number, amount, reference key). If none, report "no open orders today" and stop.
+   Do NOT recall the mint, and do not expect one: it is a fixed constant of this shop, it is stated in the solana-pay skill, and reconciliation never needs it because a reference key identifies a settlement on its own. This step used to ask for it, which made the memory store a READ path for a funds-critical constant while the skill's step 6 was the matching WRITE path. That pair is what let a stale mint survive a corrected skill file for eleven days on 2026-08-06. Closing one side and leaving the other open closes nothing.
    - tools: memory_recall
 2. **Verify settlement on-chain**: For each open reference from step 1, call payment_watch to check whether a payment carrying that reference key has settled. Collect the paid set and the still-open set.
    - tools: payment_watch
