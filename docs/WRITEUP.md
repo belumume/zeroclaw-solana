@@ -732,24 +732,49 @@ read-only by construction, holds no key and builds no transaction, and it append
 only *after* the message is sent, so a failure between the two re-announces (visible, correctable)
 rather than swallowing a confirmation (invisible, and it would tell the owner an order never paid).
 
-**It has announced zero settlements so far, and the reason is the component boundary this bounty's
-own trap 2 points at.** The SOP is deployed and registered (`zeroclaw sop list`) and the scheduler
-does fire it every minute (`zeroclaw cron list` reports a recent `last=`). Its step 2 calls the
-`payment_watch` component, and against this host build that component will not instantiate:
+**This SOP is where we hit the component boundary the bounty's trap 2 names, and the diagnosis is
+worth more than the fix.** For the whole life of this project, every WASM tool plugin failed to
+instantiate with:
 
 ```
-failed to instantiate tool plugin: component imports instance `zeroclaw:plugin/logging@0.1.0`
+failed to instantiate tool plugin: component imports instance `zeroclaw:plugin/logging@0.1.0`,
+but a matching implementation was not found in the linker
 ```
 
-The component compiles clean to `wasm32-wasip2` and its host-run tests pass. The failure appears
-only at instantiation, against a host binary whose `wit/v0` declares the same `zeroclaw:plugin@0.1.0`
-package the component imports. That is precisely where the listing says the remaining risk lives:
-*"the remaining risk lives at the component boundary (wit-bindgen integration and the host's
-capability grants), not in the compiler."*
+That message reads as *the host never registered the import*, and it sent us to the host's source
+looking for a missing `add_to_linker`. The host registers it correctly. **The real cause is that
+`wasmtime` emits the same sentence for "import absent" and "import present but the wrong type",**
+and the discriminating detail is in the `Caused by:` chain underneath, which a truncated log drops.
 
-So the paying half of this loop is real and independently verifiable on mainnet, and the noticing
-half is not yet. We would rather write that down than let a judge find it, and the honest shape of
-the gap is more useful to another operator than a claim we cannot currently reproduce.
+The type was wrong by **one enum variant**. Our vendored `wit/v0/logging.wit` declares
+`plugin-action` with 38 cases; the host binary we run declares 37. The difference is one extra
+`memory-audit` case that landed upstream on 2026-07-24, after the host we build against, and that
+is the whole defect. Component-model interfaces match
+**nominally**, so 37 and 38 are different types, the whole `logging` instance fails typecheck, and
+every plugin importing it dies at instantiation regardless of what else is correct. Copying the
+host's `logging.wit` over ours and rebuilding took 28 seconds and took instantiation failures from
+14 to 0.
+
+This is trap 2 and trap 4 in one defect. Trap 4 says:
+
+> wit/v0 is experimental — no `.frozen` marker, the ABI can move. Pin your assumptions and expect
+> a rebuild.
+
+Our assumption was pinned in a vendored file that a later upstream commit silently invalidated, and
+the failure surfaced only at instantiation, never at compile time and never in the host-run tests,
+which all pass. If you take one
+thing from this write-up as an operator, take this: **diff your vendored `wit/` against the host you
+actually run before you debug anything else.** [`demo/check_wit_parity.py`](../demo/check_wit_parity.py)
+does it in one command (`--host-wit <zeroclaw-checkout>/wit`) and asserts set equality rather than
+containment, because our copy was a strict *superset* of the host's and every containment check we
+had stayed green throughout. It exits 2 rather than 0 when it cannot find a host to compare
+against, and `--self-test` drives it against the real incident plus a mutation control that guts
+the parser and requires the incident to go undetected.
+
+**The paying half of this loop is real and verifiable on mainnet; the announcing half is not yet
+proven end to end.** With the plugin instantiating, the scheduled run still terminates on a
+different error we have not finished reading, and no settlement has been announced to the owner's
+channel. We would rather write that down than let a judge find it.
 [`evening-reconciliation`](../sops/evening-reconciliation/SOP.md) reconciles the shop's open payment
 requests against on-chain settlement daily and holds the human checkpoint on the refund path.
 [`node-earnings-report`](../sops/node-earnings-report/SOP.md) reports the DePIN node's x402
@@ -802,6 +827,20 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   publish ledger, the proof the node keeps running. `scripts/verify-proof.py` checks all three
   feeds and additionally asserts the node feed is FRESH, since an owned-but-dead feed would
   otherwise pass an ownership check forever.
+- **the consumer program has read that live feed on chain**, which is what separates an oracle
+  from a memo. `consumer_example` called `act_on_feed(threshold=4000, max_age_secs=1800)`
+  against `JEtuZk…` in
+  `4CRapo3AEFBFLh7Y7byJR9XDYZEa95MEioUQMzUhJVxTB9HaDTRtX2X47pVgxaSu8KNfYsPyugeQ6FjN8hBzi54L`
+  (slot 481442353, `err: None`) and emitted `ActionTaken` with `value=4130 scale=-2
+  threshold=4000 crossed=true`, so a second program checked provenance and freshness and acted
+  on a device-signed reading. Provenance is enforced by the typed `Account<DeviceFeed>` rather
+  than by the caller, and the freshness gate refuses: the same call at `max_age_secs=0` returns
+  `StaleFeed`, `0x1770`. Run `python scripts/consume_feed_once.py --threshold 4000 --max-age 0`
+  and then the same command with `--max-age 1800` to see both directions yourself; both simulate
+  against the live feed, so neither costs anything nor needs a funded key, and `--send` is what
+  broadcasts. Until 2026-08-05 this program had only ever read
+  the historical `CfWaZA…` feed, so the claim was sound and unexercised against the feed it was
+  made about; `docs/DEVNET-PROOF.md` states that scope.
 - x402 settlement `EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE`
   (err None, devnet USDC, buyer on a different machine from the node); a replayed payment refused
   NonceReused.

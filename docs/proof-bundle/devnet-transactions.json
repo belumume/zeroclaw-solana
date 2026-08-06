@@ -1,5 +1,5 @@
 {
-  "captured_utc": "2026-08-01T13:36:36Z",
+  "captured_utc": "2026-08-05T18:13:45Z",
   "cluster": "devnet",
   "source_rpc": "https://api.devnet.solana.com",
   "note": "Raw base64 transactions captured before public devnet RPC prunes them (~4 day retention). Each entry is verifiable offline: the signature is ed25519 over the serialized message.",
@@ -262,6 +262,15 @@
       "raw_base64": "Atp4z+hOY/EuQVc7nIKuBZSutWDJ703p5cmWLle/5hdvKJrvT55ih0DoEzCue+aqm5QbrEbrJvayOZ2TpZ2N2AV4MnDOaR8yWRZXEHaLGHnh2glk+UpeosLcUbEt4FiEGYyMOeqkruGoms2jEkQUSctBS+o7zvJMxyQvnRQGccsDAgEDB6P1/UQHneYVvckkJFAamCFgnIkuoWQS3UJqyVGQ+DRVUJwk9dSz8U/sp0HyPwQNF3ZWzA46ztA/kAG+UoJTgiAEapW2AmjRjkrLlndhWxJiW2rIfFtNw51CKkhFpbz5Hb64XXmgF5cHwF9GO4mE3+MvS0Ej79gzJEXPxY8GZi4KAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGp9UXGSxWjuCKhF9z0peIzwNcMUWyGrNE2AYuqUAAAMTK+1qh86f1lPzb3osk0lCoAhbIs4SGKCKd7b+aTq515rbqCbhtTHhLO2eAKCFXtcq2cektcJqJ7eQoOxKy8UsCBAMDBQAEBAAAAAYCAgEusn9eEHWn50jiDgAAAAAAAP5DAAAAAAAAAAAAAAALAAAAAAAAAIVnZGoAAAAAAA==",
       "raw_sha256": "cc25120c8dc567fc74cb3474c6f9ebf2d43b152f0c7081b9f70d431d13d27cb8",
       "raw_len": 451
+    },
+    "4CRapo3AEFBFLh7Y7byJR9XDYZEa95MEioUQMzUhJVxTB9HaDTRtX2X47pVgxaSu8KNfYsPyugeQ6FjN8hBzi54L": {
+      "status": "CAPTURED",
+      "slot": 481442353,
+      "blockTime": 1785953340,
+      "err": null,
+      "raw_base64": "AZ/nCXHZLxLikkZw+Ij2gPZ07TN+/y6x6d2epkrYt6j76FByrz+iOM2pOQONvpCFM3lgsVy3w7DgbQISCG4V0wkBAAIDo/X9RAed5hW9ySQkUBqYIWCciS6hZBLdQmrJUZD4NFUEapW2AmjRjkrLlndhWxJiW2rIfFtNw51CKkhFpbz5HZUPr3PCgjGd6QYnqzkjObzSJwq5zo+kgh4hH3st7ue/r/o8ORZLrXjLgOzfNtgksJiHPocuW56XZTnVL8we46IBAgEBGDZBC/rL7JtloA8AAAAAAAAIBwAAAAAAAA==",
+      "raw_sha256": "8d9dbfa6968c4648ffcd4881e8bbda1439addb016b5d7d7cf940c7ded59572e5",
+      "raw_len": 226
     }
   }
 }
