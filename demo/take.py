@@ -286,7 +286,14 @@ def launch(beat, hold):
         # caught it. A short project prompt is also simply better on camera.
         "prompt zeroclaw$G \r\n"
         "cls\r\n"
-        f"{beat.command}\r\n",
+        f"{beat.command}\r\n"
+        # THREAD THE EXIT CODE OUT. Until this line existed the capture path could not obtain it
+        # at all -- the command runs in a console this process only spawned -- so a take was
+        # judged purely on whether some strings appeared in the frame. A command that FAILED
+        # could produce a keepable take, which is selecting for a favourable outcome in the tool
+        # written to prevent staging. `@echo off` is set above and the write is redirected, so
+        # nothing about this line reaches the frame.
+        f'echo %ERRORLEVEL%> "{OUT / f"_{beat.name}.rc"}"\r\n',
         # No `timeout` here. MSYS ships its own `timeout` that takes -t rather than /t and wins on
         # PATH, so `timeout /t N` printed "invalid time interval" INTO THE CAPTURED FRAME. `cmd /k`
         # already holds the window open, so the hold was never needed; the tidy-looking line was
