@@ -19,8 +19,8 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    signs each reading with a device key the host never exposes, and publishes a
    typed on-chain feed another program consumes. Two publish paths share the same device
    signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
-   publisher runs the durable feed on a schedule. As of 2026-08-06 that feed carries **843
-   publishes and zero failures across 12.0 days**, unbroken since 2026-07-25, at a median gap of
+   publisher runs the durable feed on a schedule. As of 2026-08-06T07:50Z that feed carries **850
+   publishes and zero failures across 12.1 days**, unbroken since 2026-07-25, at a median gap of
    20.5 minutes. Its largest gap is 61.5 minutes, and a second publisher running the same path from
    a laptop has a largest gap of 36 hours because the laptop sleeps. Both outliers are stated here
    because the command that reproduces the good numbers is the same command that finds them:
@@ -725,10 +725,21 @@ needed at any step.
 [`scripts/check-config-drift.py`](../scripts/check-config-drift.py) compares the documented
 set against the live one by machine, because the two had silently diverged once before.
 
-**SOPs.** [`evening-reconciliation`](../sops/evening-reconciliation/SOP.md) reconciles the
-shop's open payment requests against on-chain settlement daily.
+**SOPs.** [`payment-confirmation`](../sops/payment-confirmation/SOP.md) is the one that closes the
+loop a customer actually feels: it polls the shop's open payment references every minute, and when
+one settles on-chain it sends a single short message naming the order and the amount. It is
+read-only by construction, holds no key and builds no transaction, and it appends to its ledger
+only *after* the message is sent, so a failure between the two re-announces (visible, correctable)
+rather than swallowing a confirmation (invisible, and it would tell the owner an order never paid).
+[`evening-reconciliation`](../sops/evening-reconciliation/SOP.md) reconciles the shop's open payment
+requests against on-chain settlement daily and holds the human checkpoint on the refund path.
 [`node-earnings-report`](../sops/node-earnings-report/SOP.md) reports the DePIN node's x402
 earnings. Each ships its `SOP.toml` beside the prose, so what you read is what runs.
+
+The two cadences answer different questions and collapsing them would break both: the per-minute
+one answers *did this order just land*, the evening one answers *what did the whole day look like,
+including the orders that never paid*. Merging them would either spam one message per order or hold
+every confirmation until nine in the evening.
 
 **Skills.** [`skills/solana-pay`](../skills/solana-pay) is the payment skill, and it is the
 worked example of the layering argument above: it is a skill rather than a plugin because the
