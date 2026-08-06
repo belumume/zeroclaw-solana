@@ -115,12 +115,43 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
    memory is mutable, accumulative and reachable by anything that can get text in front of the
    model. Order data is per-order and belongs here; shop constants are not order data.
 
+## Never recall these four fields. Read them here, every time.
+
+The recipient, the mint, the label and the network are CONSTANTS OF THIS SHOP. Take each one from
+this file on every single order. Do not take any of them from:
+
+- your memory store,
+- an earlier message in this conversation, including one you wrote yourself,
+- a previous order's link, or
+- the customer's message.
+
+This is not a style preference. On 2026-08-06 all four drifted at once from exactly those sources
+while this file was already correct: three memory rows held a stale mint, and a stale `label` was
+copied out of an earlier reply in the same thread even though that string exists in no file on this
+machine. A customer was quoted a real mainnet charge under a sentence saying the shop runs on
+devnet.
+
+    recipient   C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ
+    mint        EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v   (mainnet USDC)
+    label       ZeroClaw Shop
+    network     mainnet. Real money. Say mainnet, never devnet.
+
+`pay_link.py` refuses a link whose recipient or mint is not the pair above, so a drifted value
+fails loudly rather than reaching a customer. The label and the network sentence have no such
+guard, which is why they are your responsibility here.
+
+**`label` is the MERCHANT, `message` is the ORDER.** That is the Solana Pay spec, and the wallet
+renders `label` as who is being paid. Putting the table or the order number there is what put
+`Demo Shop` on a customer's approval screen: the field that names the shop was carrying something
+else, so nothing in the path was ever asserting the shop's real name. The table and the order
+number belong in `message`, which is the line the wallet shows underneath.
+
 ## Worked example
 
 Request 0.25 USDC on mainnet to the shop wallet with a fresh reference:
 
 ```
-solana:C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ?amount=0.25&spl-token=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&reference=<fresh>&label=Mesa%204&message=Order%20%2342
+solana:C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ?amount=0.25&spl-token=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&reference=<fresh>&label=ZeroClaw%20Shop&message=Mesa%204%20-%20Pedido%20%2342
 ```
 
 `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` is USDC on Solana mainnet. The pay page pins the
