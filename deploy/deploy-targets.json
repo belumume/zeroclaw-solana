@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "_doc": [
+    "The box-side facts that have NO source in this repo, and nothing else.",
+    "Everything derivable is derived by deploy/make_invariants.py from `git ls-files`, so this",
+    "file holds only the two things a repo cannot know: WHERE the daemon loads each artifact",
+    "from, and WHICH units must be alive. Adding a file here is almost always wrong; adding a",
+    "file to git is what should make it appear in the manifest.",
+    "",
+    "Every path below is relative to ZEROCLAW_HOME (~/.zeroclaw), which is the root",
+    "deploy/box_selfcheck.py resolves against. That is deliberate and it is the whole point of",
+    "the `dst` field: on 2026-08-06 a rebuilt plugin was written to ~/zc-shop/plugins/ while the",
+    "daemon kept loading ~/.zeroclaw/plugins/, so the fresh artifact and the running one were",
+    "different files and every content hash in the world would have compared the wrong one.",
+    "",
+    "A `dst` that is WRONG fails LOUD rather than silent: check_manifest reports the path it",
+    "looked for as MISSING. That is the safe direction, and it means a first run on the box is",
+    "how this file gets confirmed. The generator prints a reconcile command for exactly that."
+  ],
+
+  "map": [
+    {
+      "src": "skills/solana-pay",
+      "dst": "shared/skills/default/solana-pay",
+      "include": "**",
+      "flatten": false,
+      "why": "The shared skill tree the agent loads. SKILL.md here is the worked example the model copies verbatim, which is how a stale mint and a devnet sentence reached a customer on 2026-08-06."
+    },
+    {
+      "src": "skills/solana-pay/scripts",
+      "dst": "agents/demo/workspace/tools",
+      "include": "pay_link.py",
+      "flatten": true,
+      "why": "The jailed workspace copy the skill actually shells out to, once per order. It is a SECOND copy of the same file at a different path, and neither is tracked against the other, so a fix applied to one leaves the other live. Scoped to pay_link.py because that is the only member evidenced as deployed here; widening it is one edit once a box listing confirms the rest."
+    },
+    {
+      "src": "sops",
+      "dst": "data/sops",
+      "include": "**",
+      "flatten": false,
+      "why": "The daemon's SOP store."
+    },
+    {
+      "src": "sops",
+      "dst": "agents/demo/workspace/sops",
+      "include": "**",
+      "flatten": false,
+      "why": "The agent workspace copy. SOPs also live in two places, and the evening-reconciliation read path stayed open for two hours after the skill write path was closed because only one copy was corrected."
+    }
+  ],
+
+  "units": [
+    {
+      "unit": "zc-shop.service",
+      "why": "The agent daemon. Nothing else on this list matters if it is down."
+    },
+    {
+      "unit": "zc-feed.timer",
+      "why": "Schedules the DePIN feed publisher. A stopped timer is the death of the submission's most defensible claim, and it used to PASS this gate."
+    },
+    {
+      "unit": "zc-feed.service",
+      "why": "The oneshot the timer drives. Healthy when inactive with Result=success; a crash is inactive too, which is why Result rather than ActiveState decides it."
+    },
+    {
+      "unit": "x402-feed-gate.service",
+      "why": "The machine paywall. Answers HTTP 402 and is the surface a judge can exercise."
+    },
+    {
+      "unit": "x402-tunnel.service",
+      "why": "The Cloudflare tunnel that makes the gate reachable. The gate being alive behind a dead tunnel looks identical to the gate being down."
+    }
+  ],
+
+  "mint_scan_extra": [
+    {
+      "path": "agents/demo/workspace/memory/brain.db",
+      "enabled": true,
+      "why": "The 2026-08-06 incident surface: the skill on disk was already correct while three brain.db rows still held the devnet mint, so a file-to-file comparison could never have seen it. Included deliberately even though box_selfcheck's mint scan has a known open defect (it matches any base58 token against a static allowlist, and a fresh reference key per order is that shape). If this proves noisy in steady state the fix is to populate known_other or to disable this entry WITH the reason, never to drop the scan silently."
+    }
+  ],
+
+  "allowed_addresses": [],
+  "_allowed_addresses_doc": [
+    "Base58 addresses that may legitimately appear in a deployed file besides the merchant and",
+    "the mint. Measured 2026-08-06 across every tracked file under skills/ and sops/: the only",
+    "foreign tokens anywhere are two fixtures inside test_pay_link.py, and test files are",
+    "excluded from the scan by rule, so this list is correctly empty.",
+    "",
+    "It is NOT auto-populated, and that is the design decision. A generator that allowlisted",
+    "whatever it found would bless the current state, including drift, which is the one thing",
+    "this manifest exists to detect. A new address here is a deliberate declaration."
+  ],
+
+  "known_other": [],
+  "_known_other_doc": [
+    "Consumed by box_selfcheck's mint scan as a second suppression list. Empty on purpose: see",
+    "the note on brain.db above. Populating it is a judgement call about live box state, which",
+    "cannot be made from this repo."
+  ]
+}

@@ -56,8 +56,10 @@ from pathlib import Path
 
 ZC = Path(os.environ.get("ZEROCLAW_HOME", str(Path.home() / ".zeroclaw")))
 
-# Written at deploy time from the repo. Absent means we cannot know what SHOULD be here, which is
-# a failure rather than a skip.
+# Written by `deploy/make_invariants.py` from the repo, then copied here at deploy time. Absent
+# means we cannot know what SHOULD be here, which is a failure rather than a skip -- and it was
+# absent for this file's whole life until that generator existed, so every check below was
+# unrunnable on the box whatever its logic said.
 INVARIANTS = ZC / "SHOP-INVARIANTS.json"
 DEPLOYED_SHA = ZC / "DEPLOYED_SHA"
 
