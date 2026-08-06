@@ -101,15 +101,15 @@
 
 <h2><span class="n">01</span>It has been running, not demoed</h2>
 <div class="stats">
-  <div class="stat"><b>1,570</b><span>publishes on chain</span></div>
+  <div class="stat"><b>1,657</b><span>publishes on chain</span></div>
   <div class="stat good"><b>0</b><span>failed</span></div>
   <div class="stat"><b>2</b><span>independent devices</span></div>
   <div class="stat"><b>20.5<small>m</small></b><span>median gap</span></div>
 </div>
 <p>
-  Read at 2026-08-05T18:09Z. The counts move every twenty minutes, so re-derive them rather than
-  believing this page. It is an unauthenticated call against a public devnet RPC, no key and no
-  account:
+  Read at 2026-08-06T17:20Z. The ARM node's count moves every twenty minutes or so and the second
+  device's is final, so re-derive both rather than believing this page. It is an unauthenticated
+  call against a public devnet RPC, no key and no account:
 </p>
 <pre><code>python3 scripts/verify-proof.py    # stdlib only, no install, no key</code></pre>
 <p>
@@ -119,12 +119,13 @@
 </p>
 <ul class="links">
   <li><b><code>JEtuZk&hellip;Vveg</code></b>
-      <span>the ARM node. 810 publishes, 0 failed, 11.6 days, median gap 20.5&nbsp;min. Its key was
+      <span>the ARM node. 878 publishes, 0 failed, 12.5 days, median gap 20.5&nbsp;min. Its key was
       generated on that box and has never left it, so this workstation cannot forge a reading for
       it.</span></li>
   <li><b><code>3aMsPj&hellip;Vx8K</code></b>
-      <span>a second device, 760 publishes, 0 failed, spanning 12.2 days. Deterministic publisher,
-      no model in its path.</span></li>
+      <span>a second device, 779 publishes, 0 failed, over a <strong>completed</strong> 12.4-day
+      run ending 2026-08-06. Deterministic publisher, no model in its path. It was laptop-hosted
+      and it has stopped, which is why the continuity claim below rests on the node alone.</span></li>
 </ul>
 <p>
   To count either history directly, the underlying call is <code>getSignaturesForAddress</code> on
@@ -134,12 +135,15 @@
   <strong>The honest part, stated here rather than left for you to find.</strong> Zero failures is
   exact and covers both devices: no transaction has ever errored. Continuity is where they differ,
   and the difference is the interesting part. The ARM node's largest gap is <strong>61.5
-  minutes</strong> across 11.6 days, so "every twenty minutes" is true at the median with one
-  hour-long interruption. The second device is laptop-hosted and its largest gap is
-  <strong>36 hours</strong>, because a laptop sleeps. That is exactly why the node exists, and why
-  the durability claim rests on the node rather than on it. The command above would have
-  shown you both anyway, which is the only reason either is worth writing down: a number you can
-  check beats a rounder one you cannot.
+  minutes</strong> across 12.5 days, so "every twenty minutes" is true at the median with one
+  hour-long interruption. The second device was laptop-hosted, so it slept, and its largest gap
+  inside its run was <strong>36 hours</strong>. It has since stopped for good, which is stated
+  rather than smoothed because a stopped feed's largest gap only grows and a reader checking this
+  page a week from now would find the figure understating our own flaw. Its job was to show the
+  same program accepting signed readings from a second independent device with a second key, and a
+  completed run of 779 publishes at zero failures did that. Continuity rests on the node alone.
+  The command above shows you both anyway, which is the only reason either is worth writing down:
+  a number you can check beats a rounder one you cannot.
 </p>
 
 <h2><span class="n">02</span>The custody argument does not depend on trusting us</h2>
