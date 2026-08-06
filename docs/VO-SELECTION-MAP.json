@@ -1,250 +1,262 @@
-[
- {
-  "beat": 1,
-  "take": "take2",
-  "in": 0.7,
-  "out": 3.12,
-  "text": "A customer taps a payment link.",
-  "note": "T2 has the scripted present tense; T1 says 'tapped' | margin 0.24s in / 0.18s out; silence gap 0.94s / 1.01s"
- },
- {
-  "beat": 1,
-  "take": "take2",
-  "in": 3.705,
-  "out": 5.455,
-  "text": "One character was wrong.",
-  "note": "margin 0.24s in / 0.23s out; silence gap 1.01s / 0.84s"
- },
- {
-  "beat": 2,
-  "take": "take2",
-  "in": 5.815,
-  "out": 7.16,
-  "text": "Same page.",
-  "note": "margin 0.25s in / 0.21s out; silence gap 0.84s / 0.88s"
- },
- {
-  "beat": 2,
-  "take": "take2",
-  "in": 7.64,
-  "out": 10.945,
-  "text": "A refusal only counts next to what it lets through.",
-  "note": "margin 0.18s in / 0.23s out; silence gap 0.88s / 0.56s"
- },
- {
-  "beat": 3,
-  "take": "take2",
-  "in": 11.07,
-  "out": 12.785,
-  "text": "I run this.",
-  "note": "margin 0.21s in / 0.18s out; silence gap 0.56s / 0.60s"
- },
- {
-  "beat": 3,
-  "take": "take2",
-  "in": 12.95,
-  "out": 14.41,
-  "text": "Eleven days now.",
-  "note": "margin 0.25s in / 0.23s out; silence gap 0.60s / 0.64s"
- },
- {
-  "beat": 4,
-  "take": "take2",
-  "in": 14.585,
-  "out": 16.875,
-  "text": "A stranger messaged the shop.",
-  "note": "margin 0.23s in / 0.20s out; silence gap 0.64s / 0.79s"
- },
- {
-  "beat": 4,
-  "take": "take2",
-  "in": 17.315,
-  "out": 19.765,
-  "text": "The host dropped it before the model ran.",
-  "note": "margin 0.15s in / 0.22s out; silence gap 0.79s / 0.60s"
- },
- {
-  "beat": 5,
-  "take": "take2",
-  "in": 19.945,
-  "out": 22.5,
-  "text": "A regular does get answered.",
-  "note": "T1 stumbles and says this twice | margin 0.20s in / 0.17s out; silence gap 0.60s / 0.92s"
- },
- {
-  "beat": 5,
-  "take": "take2",
-  "in": 23.03,
-  "out": 25.655,
-  "text": "It quotes dollars at a named rate.",
-  "note": "T1 stumbles on 'at ... at' | margin 0.22s in / 0.24s out; silence gap 0.92s / 0.82s"
- },
- {
-  "beat": 5,
-  "take": "take2",
-  "in": 25.99,
-  "out": 27.405,
-  "text": "It holds no key.",
-  "note": "margin 0.24s in / 0.20s out; silence gap 0.82s / 1.44s"
- },
- {
-  "beat": 6,
-  "take": "take2",
-  "in": 28.47,
-  "out": 30.595,
-  "text": "The customer's own wallet pays it.",
-  "note": "T1 is audibly hesitant here (147 wpm) | margin 0.17s in / 0.16s out; silence gap 1.44s / 1.07s"
- },
- {
-  "beat": 6,
-  "take": "take2",
-  "in": 35.1,
-  "out": 37.86,
-  "text": "Forty seconds later the shop tells me.",
-  "note": "2nd of 2 renditions in T2; T1's single is also clean at 44.48-47.11 if room tone matters | margin 0.24s in / 0.20s out; silence gap 0.62s / 0.42s"
- },
- {
-  "beat": 7,
-  "take": "take1",
-  "in": 53.45,
-  "out": 57.51,
-  "text": "Someone tries to talk it into refunding an attacker.",
-  "note": "T1 2nd rendition; T1 1st drops the word 'it'. Chosen over T2's 229 wpm, which rushes an attack line | margin 0.17s in / 0.15s out; silence gap 0.41s / 0.82s"
- },
- {
-  "beat": 7,
-  "take": "take1",
-  "in": 58.0,
-  "out": 60.09,
-  "text": "It never reached for the transfer.",
-  "note": "clean single; T2 says it twice, fused across a region boundary | margin 0.18s in / 0.15s out; silence gap 0.82s / 0.31s"
- },
- {
-  "beat": 7,
-  "take": "take1",
-  "in": 61.025,
-  "out": 62.975,
-  "text": "Behaving well isn't a boundary.",
-  "note": "clean single; T2 1st stutters 'Behaving Behaving' | margin 0.20s in / 0.18s out; silence gap 0.77s / 1.30s"
- },
- {
-  "beat": 8,
-  "take": "take2",
-  "in": 54.08,
-  "out": 57.25,
-  "text": "When the shop is quiet, the box isn't.",
-  "note": "T1 fuses this into the next line with no pause to cut on | margin 0.16s in / 0.22s out; silence gap 0.93s / 0.73s"
- },
- {
-  "beat": 8,
-  "take": "take2",
-  "in": 59.475,
-  "out": 61.78,
-  "text": "Every challenge carries a fresh nonce.",
-  "note": "T2 2nd rendition; the 1st breaks off at 'a fresh,' | margin 0.17s in / 0.24s out; silence gap 0.37s / 1.15s"
- },
- {
-  "beat": 9,
-  "take": "take2",
-  "in": 62.5,
-  "out": 64.72,
-  "text": "So I asked it what it sold.",
-  "note": "T1 stumbles 'what ... what' | margin 0.18s in / 0.15s out; silence gap 1.15s / 0.72s"
- },
- {
-  "beat": 9,
-  "take": "take1",
-  "in": 74.7,
-  "out": 77.33,
-  "text": "Chain and node agree.",
-  "note": "1st of 2 in T1 at 152 wpm; T2's is 300 wpm, far too rushed to land the verification | margin 0.23s in / 0.16s out; silence gap 1.07s / 0.43s"
- },
- {
-  "beat": 10,
-  "take": "take1",
-  "in": 80.082,
-  "out": 85.745,
-  "text": "This one is mainnet. It replays a real payment at four amounts.",
-  "note": "COMBINED 10a+10b. T1 runs these together with only a 0.10 s gap, so they cut as one span. 139 wpm vs T2's 262 wpm on the second half. A 0.235 s gap isolates the stray 'Chain' before it. The scripted 1 s hold between them sat after the missing 'Real money.' anyway | margin 0.12s in / 0.19s out; silence gap 0.23s / 0.56s"
- },
- {
-  "beat": 10,
-  "take": "take1",
-  "in": 87.088,
-  "out": 89.135,
-  "text": "Refused one unit above.",
-  "note": "ONLY take containing 'above' - T2 stops at 'Refused one unit' | margin 0.07s in / 0.23s out; silence gap 0.14s / 1.26s"
- },
- {
-  "beat": 10,
-  "take": "take1",
-  "in": 89.96,
-  "out": 91.868,
-  "text": "That refusal isn't my code.",
-  "note": "T2's runs straight into 'one command' with no gap to cut on | margin 0.20s in / 0.07s out; silence gap 1.26s / 0.14s"
- },
- {
-  "beat": 11,
-  "take": "take1",
-  "in": 92.202,
-  "out": 94.77,
-  "text": "One command.",
-  "note": "sub-cut inside a merged region; T2's is fused to the previous line | margin 0.12s in / 0.20s out; silence gap 0.24s / 0.86s"
- },
- {
-  "beat": 11,
-  "take": "take1",
-  "in": 95.235,
-  "out": 97.475,
-  "text": "Longest gap, about an hour.",
-  "note": "183 wpm vs T2's 203 wpm | margin 0.20s in / 0.17s out; silence gap 0.86s / 0.49s"
- },
- {
-  "beat": 12,
-  "take": "take2",
-  "in": 84.28,
-  "out": 85.93,
-  "text": "Here's what I can't prove.",
-  "note": "isolated by a 2.41 s gap; T1 says it twice with only 0.18 s between the two | margin 0.20s in / 0.20s out; silence gap 2.41s / 0.75s"
- },
- {
-  "beat": 12,
-  "take": "take1",
-  "in": 102.935,
-  "out": 106.695,
-  "text": "Whether the certifier runs live is my config.",
-  "note": "separately bounded so the scripted hold can be inserted; T2 fuses the whole beat into one breath | margin 0.23s in / 0.17s out; silence gap 0.43s / 0.35s"
- },
- {
-  "beat": 12,
-  "take": "take1",
-  "in": 106.695,
-  "out": 108.235,
-  "text": "So we wrote it down.",
-  "note": "margin 0.17s in / 0.25s out; silence gap 0.35s / 1.67s"
- },
- {
-  "beat": 13,
-  "take": "take1",
-  "in": 109.44,
-  "out": 110.59,
-  "text": "Clone it.",
-  "note": "margin 0.21s in / 0.15s out; silence gap 1.67s / 0.79s"
- },
- {
-  "beat": 13,
-  "take": "take1",
-  "in": 111.485,
-  "out": 113.56,
-  "text": "Same command I opened with.",
-  "note": "margin 0.17s in / 0.23s out; silence gap 0.33s / 0.61s"
- },
- {
-  "beat": 13,
-  "take": "take1",
-  "in": 113.765,
-  "out": 115.56,
-  "text": "It's still running.",
-  "note": "T1 says \"It's still running\" as scripted; T2 drops the \"It's\" | margin 0.17s in / 0.15s out; silence gap 0.61s / 2.01s"
- }
-]
+{
+  "_note": "Selection map for the demo voiceover, from the operator's two scratch takes. CONSUMERS MUST READ 'spans' ONLY. 'rejected' holds audio that exists and is deliberately unusable, each with its reason; it is kept rather than deleted so the decision is auditable and nobody re-picks it from the raw takes.",
+  "source_takes": {
+    "take1": "Script v2 take 1.m4a  117.822s total, 44.8s silent",
+    "take2": "Take 2.m4a  98.004s total, 32.3s silent"
+  },
+  "assembled_rate_wpm": 140.5,
+  "assembled_rate_basis": "171 words across 73.04s of selected spans, INCLUDING the ~0.2s in/out margin every cut carries. This is the planning number. Articulation rate (171-188 wpm) is NOT, and sizing against it is the error that produced the dead 3:17 model.",
+  "spans": [
+    {
+      "beat": 1,
+      "take": "take2",
+      "in": 0.7,
+      "out": 3.12,
+      "text": "A customer taps a payment link.",
+      "note": "T2 has the scripted present tense; T1 says 'tapped' | margin 0.24s in / 0.18s out; silence gap 0.94s / 1.01s"
+    },
+    {
+      "beat": 1,
+      "take": "take2",
+      "in": 3.705,
+      "out": 5.455,
+      "text": "One character was wrong.",
+      "note": "margin 0.24s in / 0.23s out; silence gap 1.01s / 0.84s"
+    },
+    {
+      "beat": 2,
+      "take": "take2",
+      "in": 5.815,
+      "out": 7.16,
+      "text": "Same page.",
+      "note": "margin 0.25s in / 0.21s out; silence gap 0.84s / 0.88s"
+    },
+    {
+      "beat": 2,
+      "take": "take2",
+      "in": 7.64,
+      "out": 10.945,
+      "text": "A refusal only counts next to what it lets through.",
+      "note": "margin 0.18s in / 0.23s out; silence gap 0.88s / 0.56s"
+    },
+    {
+      "beat": 3,
+      "take": "take2",
+      "in": 11.07,
+      "out": 12.785,
+      "text": "I run this.",
+      "note": "margin 0.21s in / 0.18s out; silence gap 0.56s / 0.60s"
+    },
+    {
+      "beat": 3,
+      "take": "take2",
+      "in": 12.95,
+      "out": 14.41,
+      "text": "Eleven days now.",
+      "note": "margin 0.25s in / 0.23s out; silence gap 0.60s / 0.64s"
+    },
+    {
+      "beat": 4,
+      "take": "take2",
+      "in": 14.585,
+      "out": 16.875,
+      "text": "A stranger messaged the shop.",
+      "note": "margin 0.23s in / 0.20s out; silence gap 0.64s / 0.79s"
+    },
+    {
+      "beat": 4,
+      "take": "take2",
+      "in": 17.315,
+      "out": 19.765,
+      "text": "The host dropped it before the model ran.",
+      "note": "margin 0.15s in / 0.22s out; silence gap 0.79s / 0.60s"
+    },
+    {
+      "beat": 5,
+      "take": "take2",
+      "in": 19.945,
+      "out": 22.5,
+      "text": "A regular does get answered.",
+      "note": "T1 stumbles and says this twice | margin 0.20s in / 0.17s out; silence gap 0.60s / 0.92s"
+    },
+    {
+      "beat": 5,
+      "take": "take2",
+      "in": 23.03,
+      "out": 25.655,
+      "text": "It quotes dollars at a named rate.",
+      "note": "T1 stumbles on 'at ... at' | margin 0.22s in / 0.24s out; silence gap 0.92s / 0.82s"
+    },
+    {
+      "beat": 5,
+      "take": "take2",
+      "in": 25.99,
+      "out": 27.405,
+      "text": "It holds no key.",
+      "note": "margin 0.24s in / 0.20s out; silence gap 0.82s / 1.44s"
+    },
+    {
+      "beat": 6,
+      "take": "take2",
+      "in": 28.47,
+      "out": 30.595,
+      "text": "The customer's own wallet pays it.",
+      "note": "T1 is audibly hesitant here (147 wpm) | margin 0.17s in / 0.16s out; silence gap 1.44s / 1.07s"
+    },
+    {
+      "beat": 7,
+      "take": "take1",
+      "in": 53.45,
+      "out": 57.51,
+      "text": "Someone tries to talk it into refunding an attacker.",
+      "note": "T1 2nd rendition; T1 1st drops the word 'it'. Chosen over T2's 229 wpm, which rushes an attack line | margin 0.17s in / 0.15s out; silence gap 0.41s / 0.82s"
+    },
+    {
+      "beat": 7,
+      "take": "take1",
+      "in": 58.0,
+      "out": 60.09,
+      "text": "It never reached for the transfer.",
+      "note": "clean single; T2 says it twice, fused across a region boundary | margin 0.18s in / 0.15s out; silence gap 0.82s / 0.31s"
+    },
+    {
+      "beat": 7,
+      "take": "take1",
+      "in": 61.025,
+      "out": 62.975,
+      "text": "Behaving well isn't a boundary.",
+      "note": "clean single; T2 1st stutters 'Behaving Behaving' | margin 0.20s in / 0.18s out; silence gap 0.77s / 1.30s"
+    },
+    {
+      "beat": 8,
+      "take": "take2",
+      "in": 54.08,
+      "out": 57.25,
+      "text": "When the shop is quiet, the box isn't.",
+      "note": "T1 fuses this into the next line with no pause to cut on | margin 0.16s in / 0.22s out; silence gap 0.93s / 0.73s"
+    },
+    {
+      "beat": 8,
+      "take": "take2",
+      "in": 59.475,
+      "out": 61.78,
+      "text": "Every challenge carries a fresh nonce.",
+      "note": "T2 2nd rendition; the 1st breaks off at 'a fresh,' | margin 0.17s in / 0.24s out; silence gap 0.37s / 1.15s"
+    },
+    {
+      "beat": 9,
+      "take": "take2",
+      "in": 62.5,
+      "out": 64.72,
+      "text": "So I asked it what it sold.",
+      "note": "T1 stumbles 'what ... what' | margin 0.18s in / 0.15s out; silence gap 1.15s / 0.72s"
+    },
+    {
+      "beat": 9,
+      "take": "take1",
+      "in": 74.7,
+      "out": 77.33,
+      "text": "Chain and node agree.",
+      "note": "1st of 2 in T1 at 152 wpm; T2's is 300 wpm, far too rushed to land the verification | margin 0.23s in / 0.16s out; silence gap 1.07s / 0.43s"
+    },
+    {
+      "beat": 10,
+      "take": "take1",
+      "in": 80.082,
+      "out": 85.745,
+      "text": "This one is mainnet. It replays a real payment at four amounts.",
+      "note": "COMBINED 10a+10b. T1 runs these together with only a 0.10 s gap, so they cut as one span. 139 wpm vs T2's 262 wpm on the second half. A 0.235 s gap isolates the stray 'Chain' before it. The scripted 1 s hold between them sat after the missing 'Real money.' anyway | margin 0.12s in / 0.19s out; silence gap 0.23s / 0.56s"
+    },
+    {
+      "beat": 10,
+      "take": "take1",
+      "in": 87.088,
+      "out": 89.135,
+      "text": "Refused one unit above.",
+      "note": "ONLY take containing 'above' - T2 stops at 'Refused one unit' | margin 0.07s in / 0.23s out; silence gap 0.14s / 1.26s"
+    },
+    {
+      "beat": 10,
+      "take": "take1",
+      "in": 89.96,
+      "out": 91.868,
+      "text": "That refusal isn't my code.",
+      "note": "T2's runs straight into 'one command' with no gap to cut on | margin 0.20s in / 0.07s out; silence gap 1.26s / 0.14s"
+    },
+    {
+      "beat": 11,
+      "take": "take1",
+      "in": 92.202,
+      "out": 94.77,
+      "text": "One command.",
+      "note": "sub-cut inside a merged region; T2's is fused to the previous line | margin 0.12s in / 0.20s out; silence gap 0.24s / 0.86s"
+    },
+    {
+      "beat": 11,
+      "take": "take1",
+      "in": 95.235,
+      "out": 97.475,
+      "text": "Longest gap, about an hour.",
+      "note": "183 wpm vs T2's 203 wpm | margin 0.20s in / 0.17s out; silence gap 0.86s / 0.49s"
+    },
+    {
+      "beat": 12,
+      "take": "take2",
+      "in": 84.28,
+      "out": 85.93,
+      "text": "Here's what I can't prove.",
+      "note": "isolated by a 2.41 s gap; T1 says it twice with only 0.18 s between the two | margin 0.20s in / 0.20s out; silence gap 2.41s / 0.75s"
+    },
+    {
+      "beat": 12,
+      "take": "take1",
+      "in": 102.935,
+      "out": 106.695,
+      "text": "Whether the certifier runs live is my config.",
+      "note": "separately bounded so the scripted hold can be inserted; T2 fuses the whole beat into one breath | margin 0.23s in / 0.17s out; silence gap 0.43s / 0.35s"
+    },
+    {
+      "beat": 12,
+      "take": "take1",
+      "in": 106.695,
+      "out": 108.235,
+      "text": "So we wrote it down.",
+      "note": "margin 0.17s in / 0.25s out; silence gap 0.35s / 1.67s"
+    },
+    {
+      "beat": 13,
+      "take": "take1",
+      "in": 109.44,
+      "out": 110.59,
+      "text": "Clone it.",
+      "note": "margin 0.21s in / 0.15s out; silence gap 1.67s / 0.79s"
+    },
+    {
+      "beat": 13,
+      "take": "take1",
+      "in": 111.485,
+      "out": 113.56,
+      "text": "Same command I opened with.",
+      "note": "margin 0.17s in / 0.23s out; silence gap 0.33s / 0.61s"
+    },
+    {
+      "beat": 13,
+      "take": "take1",
+      "in": 113.765,
+      "out": 115.56,
+      "text": "It's still running.",
+      "note": "T1 says \"It's still running\" as scripted; T2 drops the \"It's\" | margin 0.17s in / 0.15s out; silence gap 0.61s / 2.01s"
+    }
+  ],
+  "rejected": [
+    {
+      "beat": 6,
+      "take": "take2",
+      "in": 35.1,
+      "out": 37.86,
+      "text": "Forty seconds later the shop tells me.",
+      "note": "2nd of 2 renditions in T2; T1's single is also clean at 44.48-47.11 if room tone matters | margin 0.24s in / 0.20s out; silence gap 0.62s / 0.42s",
+      "rejected_reason": "FALSE AS RECORDED. The payment-confirmation SOP does not announce settlements; docs/WRITEUP.md says so in writing and beat 6 is the unproven beat. Using this span would put a claim in the video that the artifact contradicts. The real half of beat 6 is filmed instead, and the missing half moves to beat 12 as the confession. Do not restore this without an end-to-end mainnet run proving the announcement fires."
+    }
+  ]
+}
