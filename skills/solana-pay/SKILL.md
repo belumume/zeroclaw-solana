@@ -141,10 +141,16 @@ fails loudly rather than reaching a customer. The label and the network sentence
 guard, which is why they are your responsibility here.
 
 **`label` is the MERCHANT, `message` is the ORDER.** That is the Solana Pay spec, and the wallet
-renders `label` as who is being paid. Putting the table or the order number there is what put
-`Demo Shop` on a customer's approval screen: the field that names the shop was carrying something
-else, so nothing in the path was ever asserting the shop's real name. The table and the order
-number belong in `message`, which is the line the wallet shows underneath.
+renders `label` as who is being paid. Putting the table or the order number there is what put a
+stale placeholder name on a customer's approval screen: the field that names the shop was carrying
+something else, so nothing in the path was ever asserting the shop's real name, and the only string
+with any claim to that role came from a previous conversation. The table and the order number
+belong in `message`, which is the line the wallet shows underneath.
+
+A note for anyone writing a gate over this file. Do not assert that the words `devnet` or the old
+placeholder name are absent from it: the prohibition above has to NAME what it forbids, so a
+word-count check goes red on the corrected file and green on a file that never mentioned the
+hazard. Assert on the EMITTED VALUE instead, which is what `pay_link.py` does.
 
 ## Worked example
 
