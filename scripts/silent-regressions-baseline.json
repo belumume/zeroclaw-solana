@@ -1,0 +1,21 @@
+{
+  "_what": "Identifiers that once existed in this tree, are gone now, and whose removing commit never said so. Recorded here so the gate reports only what is NEW. Recording is cheap; the point is that a loss stops being SILENT.",
+  "_generated_by": "python scripts/check-silent-regressions.py",
+  "_established": "2026-08-07",
+  "_how_to_read": "An entry is not an excuse. Each one is either a deliberate refactor (fine) or an OPEN regression with a task (not fine, but at least visible). The second kind must name its task.",
+
+  "accepted": {
+    "walletsCache":   "OPEN REGRESSION, task #63. The Wallet Standard picker, added 2026-07-23 in f517f3e and refined 2026-07-24 in bbca651, destroyed hours later by 9628c69, a commit about payer preflight that never mentions wallets. Root cause: it was written into the GENERATED webshop-pay/index.html rather than src/, so the next build.py run erased it. Restore from bbca651.",
+    "loadWallets":    "OPEN REGRESSION, task #63. Same cluster as walletsCache.",
+    "renderWallets":  "OPEN REGRESSION, task #63. Same cluster as walletsCache.",
+    "disableWallets": "OPEN REGRESSION, task #63. Same cluster as walletsCache.",
+    "payWith":        "OPEN REGRESSION, task #63. Same cluster: the per-wallet pay entry point.",
+    "iconOK":         "OPEN REGRESSION, task #63. Same cluster: the wallet-icon URL validator.",
+
+    "applyI18n":      "DELIBERATE. Renamed rather than lost; the page still localises, verified live with ?lang=pt rendering Portuguese.",
+    "pollConfirm":    "DELIBERATE. Superseded by awaitConfirmation when confirmTransaction became a getSignatureStatuses poll, because the chosen RPC endpoint answers a browser Origin and the old one 403s it.",
+    "isUsdc":         "DELIBERATE. Replaced by the KNOWN_MINTS allowlist in a738de6, whose subject says so: naming the asset from an allowlist rather than from the mint.",
+    "READ_RPC":       "DELIBERATE. The read/settle RPC constants collapsed to one in 41d0fc3, because the split rested on a premise that was refuted and two constants holding one value drift apart.",
+    "tracked_files":  "DELIBERATE. Local variable removed in 7b3a697 when the last two hardcoded gate scopes were derived from git instead."
+  }
+}
