@@ -3,7 +3,7 @@
 A ZeroClaw tool plugin that builds an **unsigned** versioned (v0) transaction letting an agent spend
 under a Solana Foundation **Subscriptions & Allowances** delegation. The agent decides *how much* to
 pay a receiver; this plugin turns that into a ready-to-sign transaction that executes only inside the
-Cantina/Spearbit-audited on-chain program. It holds no wallet and no key, and the on-chain program
+Cantina-audited on-chain program. It holds no wallet and no key, and the on-chain program
 caps the spend, so a compromised or prompt-injected agent can never move more than the allowance
 permits.
 
@@ -14,7 +14,7 @@ The pitch in one line: **the agent proposes; an audited on-chain allowance dispo
 A user (the token owner) creates a fixed (one-time cap) or recurring (per-period cap) delegation on
 the Solana Foundation program `De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`
 ([solana-foundation/subscriptions](https://github.com/solana-foundation/subscriptions), MIT,
-Pinocchio-based, audited by Cantina and Spearbit, live on devnet and mainnet), naming the agent's
+Pinocchio-based, audited by Cantina, live on devnet and mainnet), naming the agent's
 key as the *delegatee*. This plugin then:
 
 1. reads that on-chain delegation account and auto-detects whether it is fixed or recurring (from the

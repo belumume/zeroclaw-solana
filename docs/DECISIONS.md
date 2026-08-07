@@ -10,7 +10,7 @@ recorded rather than tidied away.
 
 **Chosen.** The agent never holds a key that can move funds. It emits an unsigned
 transaction a human approves, and spends are additionally bounded by the Solana Foundation
-Allowances program, which is audited by Cantina and Spearbit. The delegatee is the agent's
+Allowances program, which is audited by Cantina. The delegatee is the agent's
 session key, and the cap is enforced by that program rather than by our code.
 
 **Rejected: a Tier 2 fund-holding session key.** It is the obvious way to make a demo feel

@@ -1,7 +1,7 @@
 //! `allowance-spend-build` -- a ZeroClaw tool plugin that builds an UNSIGNED
 //! versioned (v0) transaction spending under a Solana Foundation Subscriptions &
 //! Allowances delegation. The agent is the delegatee; the amount cap, per-period
-//! accounting, and expiry are enforced ON-CHAIN by the Cantina/Spearbit-audited
+//! accounting, and expiry are enforced ON-CHAIN by the Cantina-audited
 //! program (`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`), so even a fully
 //! prompt-injected agent cannot exceed the allowance. The plugin reads the
 //! on-chain delegation (auto-detecting fixed vs recurring), fails closed unless
@@ -81,7 +81,7 @@ mod component {
              converts the amount to exact base units, derives + idempotently creates the receiver's \
              token account, and supports durable-nonce mode so the unsigned tx never expires in an \
              approval queue. The amount cap, period accounting, and expiry are enforced ON-CHAIN by \
-             the Cantina/Spearbit-audited program, so even a prompt-injected agent cannot exceed the \
+             the Cantina-audited program, so even a prompt-injected agent cannot exceed the \
              allowance. The plugin holds no wallet and moves no funds -- it returns base64 + a \
              human-readable summary. Inputs: delegation (base58 delegation account), amount (UI-unit \
              decimal string, exact), receiver (base58 wallet), optional memo."
