@@ -172,6 +172,34 @@ def main() -> int:
                 )
             )
 
+            # 4b. A wallet that registers via Wallet Standard AND injects window.solana is ONE
+            # wallet and must be listed once. Missed entirely by the fakes above, because they only
+            # register; found by driving the live page in a real Brave, which does both and came
+            # back as "Brave Wallet" plus "Injected wallet". The dedupe keys on name, so two names
+            # for one extension slipped through it.
+            ctx = b.new_context()
+            pgd = ctx.new_page()
+            pgd.add_init_script(FAKE_WALLETS.replace("%NAMES%", '["DualWallet"]'))
+            pgd.add_init_script(
+                "window.solana={isDual:true,connect:async()=>({publicKey:null})};"
+            )
+            pgd.goto(url, wait_until="networkidle")
+            pgd.click("#pay")
+            pgd.wait_for_timeout(500)
+            dual = pgd.eval_on_selector_all(
+                ".wallet-btn span", "els => els.map(e => e.textContent)"
+            )
+            # One registered wallet plus its own injected global collapses to a direct connect,
+            # so there is no picker at all rather than a picker with a phantom duplicate in it.
+            results.append(
+                (
+                    "registered wallet + its injected global counts ONCE",
+                    dual == [],
+                    f"got {dual}",
+                )
+            )
+            ctx.close()
+
             # 5. base58, including leading zeros
             pg = b.new_page()
             pg.goto(url, wait_until="networkidle")

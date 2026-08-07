@@ -483,7 +483,17 @@ function enumerateWallets(){
   if(window.solflare&&window.solflare.isSolflare)legacy('Solflare',window.solflare);
   legacy('Backpack',window.backpack);
   legacy('Glow',window.glowSolana);
-  if(window.solana&&!(window.phantom&&window.phantom.solana))legacy('Injected wallet',window.solana);
+  // The unnamed injected global is a LAST RESORT and only when nothing registered properly.
+  //
+  // Found by driving the live page in a real Brave: enumeration returned BOTH "Brave Wallet" and
+  // "Injected wallet", which are the same extension counted twice. Brave registers through Wallet
+  // Standard AND injects window.solana, and the dedupe keys on NAME, so two different names for one
+  // wallet sail straight through it. The customer would have seen their wallet listed twice with
+  // one entry unnamed, which is worse than the bug this picker replaced.
+  //
+  // A wallet that registered properly has already been counted under its real name, so the generic
+  // global adds nothing except a duplicate. Only offer it when the list is otherwise empty.
+  if(!found.length&&window.solana)legacy('Injected wallet',window.solana);
   return found;
 }
 // Rendered IN PLACE OF the pay button, and only after a click. The original listed every wallet on
