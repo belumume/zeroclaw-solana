@@ -2,15 +2,15 @@
   "_what": "Identifiers that once existed in this tree, are gone now, and whose removing commit never said so. Recorded here so the gate reports only what is NEW. Recording is cheap; the point is that a loss stops being SILENT.",
   "_generated_by": "python scripts/check-silent-regressions.py",
   "_established": "2026-08-07",
-  "_how_to_read": "An entry is not an excuse. Each one is either a deliberate refactor (fine) or an OPEN regression with a task (not fine, but at least visible). The second kind must name its task.",
+  "_how_to_read": "An entry is not an excuse. Each one is either a deliberate refactor or an OPEN regression with a task. The second kind must name its task. When an open regression is FIXED, its entries are removed rather than left here, or the baseline becomes a lie.",
+
+  "_closed_2026-08-07": "The wallet-picker cluster was an OPEN REGRESSION here for one day and is now RESTORED, so walletsCache / loadWallets / renderWallets / disableWallets no longer appear as accepted. The capability is back under new names (enumerateWallets, renderWalletPicker, payWith, iconOK, b58), and the four old names stay absent by design rather than by accident: the new version drops the library, defers the list to a click, and returns the wallets rather than caching them in a module global.",
 
   "accepted": {
-    "walletsCache":   "OPEN REGRESSION, task #63. The Wallet Standard picker, added 2026-07-23 in f517f3e and refined 2026-07-24 in bbca651, destroyed hours later by 9628c69, a commit about payer preflight that never mentions wallets. Root cause: it was written into the GENERATED webshop-pay/index.html rather than src/, so the next build.py run erased it. Restore from bbca651.",
-    "loadWallets":    "OPEN REGRESSION, task #63. Same cluster as walletsCache.",
-    "renderWallets":  "OPEN REGRESSION, task #63. Same cluster as walletsCache.",
-    "disableWallets": "OPEN REGRESSION, task #63. Same cluster as walletsCache.",
-    "payWith":        "OPEN REGRESSION, task #63. Same cluster: the per-wallet pay entry point.",
-    "iconOK":         "OPEN REGRESSION, task #63. Same cluster: the wallet-icon URL validator.",
+    "walletsCache":   "SUPERSEDED, not lost. The restored picker returns the wallet list from enumerateWallets() rather than holding it in a module global, so nothing needs the cache. Removing it also removed a declared-but-unused binding, which is exactly the kind of dead name this gate should not have to track.",
+    "loadWallets":    "SUPERSEDED by enumerateWallets. The original was async because it imported @wallet-standard/app from esm.sh; the restored one is synchronous because the Wallet Standard handshake is a window event and needs no library.",
+    "renderWallets":  "SUPERSEDED by renderWalletPicker, which renders on CLICK and in place of the pay button rather than on load. The original rendered on load, which pushed the QR below the fold and needed a two-pane layout to undo.",
+    "disableWallets": "SUPERSEDED. The original disabled every wallet button during payment; the restored one removes the picker outright when a wallet is chosen, so there is nothing left to disable.",
 
     "applyI18n":      "DELIBERATE. Renamed rather than lost; the page still localises, verified live with ?lang=pt rendering Portuguese.",
     "pollConfirm":    "DELIBERATE. Superseded by awaitConfirmation when confirmTransaction became a getSignatureStatuses poll, because the chosen RPC endpoint answers a browser Origin and the old one 403s it.",

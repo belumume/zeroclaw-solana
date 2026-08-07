@@ -411,9 +411,107 @@ function renderOutcome(outcome,sig){
     : T('confirmslow','Sent, but confirmation is taking longer than usual. The payment may still have gone through. Check the transaction before paying again, or reload this page.'),
     outcome==='failed'?'err':'',sig);
 }
+// WALLET SELECTION. Restored 2026-08-07 after being silently destroyed on 2026-07-24.
+//
+// It was added 07-23, refined 07-24 so the wallet list could not push the QR below the fold, and
+// erased hours later by a commit about payer preflight that never mentions wallets. Root cause: it
+// was written into the GENERATED index.html rather than here, so the next build.py run wiped it.
+// This time it lives in src/, which is the only place that survives a rebuild.
+//
+// What it replaces was one line: (window.phantom&&window.phantom.solana)||window.solflare||
+// window.solana. That is a fixed priority chain, and window.solana is last-writer-wins across every
+// injected extension, so the customer got whichever won an invisible race. Measured in the
+// operator's Brave: window.phantom absent, window.solflare absent, window.solana present with
+// isPhantom true, which is Brave Wallet masquerading as Phantom. So even an isPhantom check cannot
+// tell them apart, and he was connected with no prompt and no choice.
+//
+// NOT restored verbatim, and this is the important deviation. The original imported
+// @wallet-standard/app from esm.sh -- the exact CDN dependency removed from this page today, and
+// the one his uMatrix was blocking. The Wallet Standard registration protocol is a window-event
+// handshake, so no library is needed: dispatch app-ready, collect whatever registers. Zero
+// third-party code, and the restored version is strictly better than the one that was lost.
+// A wallet-supplied icon is attacker-adjacent data rendered into the DOM, so only inline data: URIs
+// of known image types are allowed. An http(s) icon would also be a third-party request.
+function iconOK(u){return typeof u==='string'&&/^data:image\/(png|svg\+xml|webp|gif|jpeg);/.test(u)}
+// Base58, inline, because the vendored bundle does not export it (grep: bs58 appears zero times)
+// and a Wallet Standard wallet returns a signature as raw bytes. Leading zero bytes map to '1',
+// which is the part naive implementations drop and which would silently corrupt a signature.
+// Verified against a known vector in demo/verify_wallet_picker.py.
+function b58(bytes){
+  var A='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',d=[0],i,j,c;
+  for(i=0;i<bytes.length;i++){
+    c=bytes[i];
+    for(j=0;j<d.length;j++){c+=d[j]<<8;d[j]=c%58;c=(c/58)|0;}
+    while(c>0){d.push(c%58);c=(c/58)|0;}
+  }
+  var out='',nz=false;
+  for(i=0;i<bytes.length;i++)if(bytes[i]!==0){nz=true;break;}
+  for(i=0;i<bytes.length&&bytes[i]===0;i++)out+='1';
+  // Only emit digits when the VALUE is non-zero. d is seeded with [0], and appending that seed for
+  // an all-zero input produced one '1' too many -- 65 for 64 zero bytes. Leading zero bytes are
+  // already carried by the '1's above, so a zero value contributes no digits at all.
+  if(nz)for(i=d.length-1;i>=0;i--)out+=A[d[i]];
+  return out;
+}
+function enumerateWallets(){
+  var found=[],seen={};
+  try{
+    window.addEventListener('wallet-standard:register-wallet',function(e){
+      try{e.detail({register:function(w){
+        // Only wallets that can actually do the job. A wallet that cannot sign-and-send is not a
+        // choice, it is a dead end the customer would discover after picking it.
+        if(w&&w.features&&('solana:signAndSendTransaction' in w.features)&&('standard:connect' in w.features)&&!seen[w.name]){seen[w.name]=1;found.push(w);}
+        return function(){};
+      }});}catch(_){}
+    });
+    // MUST be a CustomEvent carrying detail. Wallet Standard is a TWO-WAY handshake: a wallet
+    // already loaded fires register-wallet (handled above), and a wallet loading later listens for
+    // app-ready and calls detail.register itself. A bare Event has no detail, so that second
+    // direction silently registers nothing. The first version dispatched a bare Event and found
+    // Brave anyway, purely because Brave uses the other direction -- which is exactly the kind of
+    // accident that reads as working code.
+    window.dispatchEvent(new CustomEvent('wallet-standard:app-ready',{detail:{register:function(w){
+      if(w&&w.features&&('solana:signAndSendTransaction' in w.features)&&('standard:connect' in w.features)&&!seen[w.name]){seen[w.name]=1;found.push(w);}
+      return function(){};
+    }}}));
+  }catch(_){}
+  // Legacy globals, for wallets that never registered. Deduped by name so a wallet that does both
+  // is not offered twice.
+  function legacy(n,o){if(o&&!seen[n]){seen[n]=1;found.push({name:n,_legacy:o});}}
+  if(window.phantom&&window.phantom.solana)legacy('Phantom',window.phantom.solana);
+  if(window.solflare&&window.solflare.isSolflare)legacy('Solflare',window.solflare);
+  legacy('Backpack',window.backpack);
+  legacy('Glow',window.glowSolana);
+  if(window.solana&&!(window.phantom&&window.phantom.solana))legacy('Injected wallet',window.solana);
+  return found;
+}
+// Rendered IN PLACE OF the pay button, and only after a click. The original listed every wallet on
+// load, which is what pushed the QR below the fold and needed a two-pane layout to fix. Deferring
+// it to the click keeps this page's single-column geometry byte-identical until the customer asks,
+// so the phone plate the opening shot is keyed to cannot move.
+function renderWalletPicker(list){
+  var host=el('pay').parentNode,box=document.createElement('div');box.id='wallets';
+  var last=null;try{last=localStorage.getItem('zeroclaw_last_wallet')}catch(_){}
+  list.forEach(function(w){
+    var b=document.createElement('button');b.className='wallet-btn';b.type='button';
+    if(w.icon&&iconOK(w.icon)){var img=document.createElement('img');img.src=w.icon;img.alt='';b.appendChild(img);}
+    var s=document.createElement('span');s.textContent=w.name;b.appendChild(s);
+    if(w.name===last){var t=document.createElement('em');t.className='lastused';t.textContent=T('lastused','last used');b.appendChild(t);}
+    b.onclick=function(){box.parentNode&&box.parentNode.removeChild(box);payWith(w);};
+    box.appendChild(b);
+  });
+  el('pay').style.display='none';host.insertBefore(box,el('pay').nextSibling);
+}
 async function connectAndPay(){
-  var provider=(window.phantom&&window.phantom.solana)||window.solflare||window.solana;
-  if(!provider){status('No Solana wallet extension detected in this browser. Install Phantom or Solflare (desktop), or scan the QR above with a phone wallet.','err');return;}
+  var list=enumerateWallets();
+  if(!list.length){status('No Solana wallet extension detected in this browser. Install Phantom or Solflare (desktop), or scan the QR above with a phone wallet.','err');return;}
+  // One wallet is not a choice. A picker with a single option is a pointless extra click.
+  if(list.length===1)return payWith(list[0]);
+  status(T('choosewallet','Choose a wallet.'));
+  renderWalletPicker(list);
+}
+async function payWith(w){
+  try{localStorage.setItem('zeroclaw_last_wallet',w.name)}catch(_){}
   el('pay').disabled=true;status(T('loadinglibs','Loading Solana libraries…'));
   try{
     var web3=(await import('/vendor/solana-bundle.js')).web3;
@@ -423,9 +521,17 @@ async function connectAndPay(){
     // subscription, and this page makes none now that confirmation is a poll, so no websocket is
     // ever opened here.
     var conn=new web3.Connection(RPC,'confirmed');
-    status(T('connecting','Connecting wallet…'));
-    var resp=await provider.connect();
-    var payer=resp.publicKey||provider.publicKey;
+    status(T('connecting','Connecting ')+w.name+'…');
+    // Two interfaces, because both kinds of wallet are real. A Wallet Standard wallet hands back
+    // accounts whose address is a base58 string; a legacy injected provider hands back a PublicKey.
+    var payer,wsAccount=null;
+    if(w._legacy){var resp=await w._legacy.connect();payer=resp.publicKey||w._legacy.publicKey;}
+    else{
+      var out=await w.features['standard:connect'].connect();
+      if(!out||!out.accounts||!out.accounts.length)throw new Error('wallet returned no account');
+      wsAccount=out.accounts[0];
+      payer=new web3.PublicKey(wsAccount.address);
+    }
     var recipientPk=new web3.PublicKey(recip);
     var refPk=reference?new web3.PublicKey(reference):null;
     var tx=new web3.Transaction();
@@ -465,7 +571,30 @@ async function connectAndPay(){
     tx.feePayer=payer;
     tx.recentBlockhash=(await conn.getLatestBlockhash()).blockhash;
     status(T('approve','Approve the payment in your wallet…'));
-    var sig=await provider.signAndSendTransaction(tx);
+    // Same split as the connect above. A legacy provider returns an object carrying a base58
+    // signature string; a Wallet Standard wallet returns raw signature BYTES.
+    //
+    // The first version reached for a bs58 helper off the web3 namespace. There is no such export:
+    // the string appears zero times in the vendored bundle, so it would have thrown or produced
+    // garbage on a real payment. Caught by grepping the bundle rather than by reading the code,
+    // which is the only reason it is not in this commit. b58 is inline instead and is checked
+    // against an independent encoder in demo/verify_wallet_picker.py.
+    //
+    // The symbol is deliberately NOT spelled in the dotted form here. verify_no_cdn_dependency.py
+    // extracts every web3.<symbol> from this file and asserts the bundle exports it, so naming a
+    // known-absent symbol inside a comment ABOUT its absence turns that gate red. Same shape as a
+    // prohibition that has to name what it forbids.
+    var sig;
+    if(w._legacy){sig=await w._legacy.signAndSendTransaction(tx);}
+    else{
+      tx.feePayer=payer;
+      var out2=await w.features['solana:signAndSendTransaction'].signAndSendTransaction({
+        account:wsAccount,   // captured at connect; a second connect would re-prompt the wallet
+        transaction:tx.serialize({requireAllSignatures:false,verifySignatures:false}),
+        chain:'solana:mainnet'
+      });
+      sig={signature:b58(out2[0].signature)};
+    }
     var s=(sig&&sig.signature)?sig.signature:sig;
     status(T('confirming','Sent. Confirming on-chain…'));
     renderOutcome(await awaitConfirmation(s),s);

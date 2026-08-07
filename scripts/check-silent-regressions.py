@@ -134,7 +134,10 @@ def main() -> int:
 
     # 2. which are absent from the working tree now
     head = sh(
-        ["git", "grep", "-h", "-o", "-E", r"[A-Za-z_$][A-Za-z0-9_$-]{3,}", "HEAD", "--"]
+        # WORKING TREE, not HEAD. Reading HEAD made the gate report a restoration as still missing
+        # until it was committed, which is backwards: the whole point is to catch a loss BEFORE it
+        # lands. In CI the working tree is the commit, so this is identical there and honest here.
+        ["git", "grep", "-h", "-o", "-E", r"[A-Za-z_$][A-Za-z0-9_$-]{3,}", "--"]
         + args.paths
     )
     present = set(head.split())

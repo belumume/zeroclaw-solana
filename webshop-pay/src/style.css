@@ -20,6 +20,15 @@ h1{font-size:15px;letter-spacing:.06em;text-transform:uppercase;color:#8a93a6;ma
 .brk{overflow-wrap:anywhere}
 button#pay{width:100%;background:#ab9ff2;color:#1a1035;font-weight:700;border:0;padding:15px;border-radius:12px;font-size:17px;cursor:pointer;margin:4px 0}
 button#pay:disabled{opacity:.55}
+/* The wallet picker, shown only after a click and IN PLACE OF the pay button, so the card's
+   height is unchanged until the customer asks. The earlier version listed wallets on load and
+   pushed the QR below the fold, which then needed a whole two-pane layout to undo. */
+#wallets{display:flex;flex-direction:column;gap:8px;margin:4px 0}
+button.wallet-btn{display:flex;align-items:center;gap:10px;width:100%;background:#20242e;color:#e8eaed;border:1px solid #333a47;padding:13px;border-radius:12px;font-size:15px;cursor:pointer;text-align:left}
+button.wallet-btn:hover{border-color:#ab9ff2}
+button.wallet-btn:disabled{opacity:.55;cursor:default}
+button.wallet-btn img{width:22px;height:22px;border-radius:5px;flex:0 0 auto}
+button.wallet-btn .lastused{margin-left:auto;font-style:normal;font-size:12px;color:#8b93a7}
 button#copy{width:100%;background:#20242e;color:#e8eaed;border:1px solid #333a47;padding:11px;border-radius:12px;font-size:14px;cursor:pointer;margin:8px 0}
 .or{color:#5c6473;font-size:12px;letter-spacing:.08em;margin:14px 0 8px}
 .status{font-size:13px;color:#b6bdca;min-height:18px;margin:10px 0 0}
