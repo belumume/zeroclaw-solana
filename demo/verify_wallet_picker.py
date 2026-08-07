@@ -200,6 +200,81 @@ def main() -> int:
             )
             ctx.close()
 
+            # 4c. EIGHT wallets must not push the QR out of view, and the two-wallet cases above
+            # are structurally blind to this: the list grows ~50px per wallet, so the defect only
+            # appears past about four. Measured in the operator's own Brave, which registers eight:
+            # the card grew 887 -> 1286 and the QR's bottom edge landed at 972 against a 900-tall
+            # viewport. His window happened to be 982 tall and cleared it by ten pixels, which is
+            # the only reason he did not hit it. The phone path must stay reachable after the
+            # picker opens, however many wallets are installed.
+            EIGHT = [
+                "Backpack",
+                "Brave Wallet",
+                "Phantom",
+                "MetaMask",
+                "Magic Eden",
+                "Solflare",
+                "Jupiter",
+                "Glow",
+            ]
+            for vw, vh in ((1280, 900), (390, 844)):
+                ctx = b.new_context(viewport={"width": vw, "height": vh})
+                p8 = ctx.new_page()
+                p8.add_init_script(
+                    FAKE_WALLETS.replace("%NAMES%", str(EIGHT).replace("'", '"'))
+                )
+                p8.goto(url, wait_until="networkidle")
+                p8.click("#pay")
+                p8.wait_for_timeout(600)
+                geo = p8.evaluate("""() => {
+                  var q = document.querySelector('#qr img');
+                  var r = q ? q.getBoundingClientRect() : null;
+                  return {n: document.querySelectorAll('.wallet-btn').length,
+                          bottom: r ? r.bottom : null, vh: window.innerHeight};
+                }""")
+                ok = (
+                    geo["n"] == 8
+                    and geo["bottom"] is not None
+                    and geo["bottom"] <= geo["vh"]
+                )
+                results.append(
+                    (
+                        f"8 wallets -> QR still fully in view at {vw}x{vh}",
+                        ok,
+                        f"{geo['n']} listed, qr bottom {geo['bottom']} vs vh {geo['vh']}",
+                    )
+                )
+                ctx.close()
+
+            # 4d. The list is height-capped, so the wallet the customer last used must be hoisted
+            # to the top rather than left wherever registration order put it. Solflare is 6th of
+            # the eight above and would sit below the fold of its own scrolling box.
+            ctx = b.new_context()
+            ph = ctx.new_page()
+            ph.add_init_script(
+                FAKE_WALLETS.replace("%NAMES%", str(EIGHT).replace("'", '"'))
+            )
+            ph.add_init_script(
+                "try{localStorage.setItem('zeroclaw_last_wallet','Solflare')}catch(e){}"
+            )
+            ph.goto(url, wait_until="networkidle")
+            ph.click("#pay")
+            ph.wait_for_timeout(600)
+            order = ph.eval_on_selector_all(
+                ".wallet-btn span", "els => els.map(e => e.textContent)"
+            )
+            badge = ph.eval_on_selector_all(
+                ".wallet-btn .lastused", "els => els.length"
+            )
+            results.append(
+                (
+                    "last-used wallet is hoisted to the top of the capped list",
+                    order[:1] == ["Solflare"] and badge == 1,
+                    f"order starts {order[:2]}, {badge} badge(s)",
+                )
+            )
+            ctx.close()
+
             # 5. base58, including leading zeros
             pg = b.new_page()
             pg.goto(url, wait_until="networkidle")

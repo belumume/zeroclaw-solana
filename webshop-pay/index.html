@@ -22,8 +22,13 @@ button#pay{width:100%;background:#ab9ff2;color:#1a1035;font-weight:700;border:0;
 button#pay:disabled{opacity:.55}
 /* The wallet picker, shown only after a click and IN PLACE OF the pay button, so the card's
    height is unchanged until the customer asks. The earlier version listed wallets on load and
-   pushed the QR below the fold, which then needed a whole two-pane layout to undo. */
-#wallets{display:flex;flex-direction:column;gap:8px;margin:4px 0}
+   pushed the QR below the fold, which then needed a whole two-pane layout to undo.
+   THE CAP IS THE SAME DEFECT ONE STEP LATER: deferring to the click keeps the geometry until
+   asked, and says nothing about after. A browser with eight wallets registered grew the card by
+   399px and pushed the QR out of view at 1280x900 and at 390x844, measured. Capping the list makes
+   a long one scroll inside itself, so the phone path stays reachable however many are installed.
+   The last-used wallet is hoisted to the top by renderWalletPicker, so the cap cannot hide it. */
+#wallets{display:flex;flex-direction:column;gap:8px;margin:4px 0;max-height:212px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 button.wallet-btn{display:flex;align-items:center;gap:10px;width:100%;background:#20242e;color:#e8eaed;border:1px solid #333a47;padding:13px;border-radius:12px;font-size:15px;cursor:pointer;text-align:left}
 button.wallet-btn:hover{border-color:#ab9ff2}
 button.wallet-btn:disabled{opacity:.55;cursor:default}
@@ -2855,7 +2860,13 @@ function enumerateWallets(){
 function renderWalletPicker(list){
   var host=el('pay').parentNode,box=document.createElement('div');box.id='wallets';
   var last=null;try{last=localStorage.getItem('zeroclaw_last_wallet')}catch(_){}
-  list.forEach(function(w){
+  // The box is height-capped and scrolls, so the wallet the customer is most likely to want must
+  // not sit below the fold of its own list. Hoist the last-used one; everything else keeps
+  // registration order, which is arbitrary but stable. Copy rather than sort in place: the
+  // caller's array is the enumeration result and reordering it is a side effect nobody asked for.
+  var ordered=list.slice();
+  if(last)ordered.sort(function(a,b){return (b.name===last)-(a.name===last)});
+  ordered.forEach(function(w){
     var b=document.createElement('button');b.className='wallet-btn';b.type='button';
     if(w.icon&&iconOK(w.icon)){var img=document.createElement('img');img.src=w.icon;img.alt='';b.appendChild(img);}
     var s=document.createElement('span');s.textContent=w.name;b.appendChild(s);

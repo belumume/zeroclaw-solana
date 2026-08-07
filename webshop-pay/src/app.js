@@ -503,7 +503,13 @@ function enumerateWallets(){
 function renderWalletPicker(list){
   var host=el('pay').parentNode,box=document.createElement('div');box.id='wallets';
   var last=null;try{last=localStorage.getItem('zeroclaw_last_wallet')}catch(_){}
-  list.forEach(function(w){
+  // The box is height-capped and scrolls, so the wallet the customer is most likely to want must
+  // not sit below the fold of its own list. Hoist the last-used one; everything else keeps
+  // registration order, which is arbitrary but stable. Copy rather than sort in place: the
+  // caller's array is the enumeration result and reordering it is a side effect nobody asked for.
+  var ordered=list.slice();
+  if(last)ordered.sort(function(a,b){return (b.name===last)-(a.name===last)});
+  ordered.forEach(function(w){
     var b=document.createElement('button');b.className='wallet-btn';b.type='button';
     if(w.icon&&iconOK(w.icon)){var img=document.createElement('img');img.src=w.icon;img.alt='';b.appendChild(img);}
     var s=document.createElement('span');s.textContent=w.name;b.appendChild(s);
