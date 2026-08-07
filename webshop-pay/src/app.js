@@ -426,7 +426,8 @@ function renderOutcome(outcome,sig){
 // tell them apart, and he was connected with no prompt and no choice.
 //
 // NOT restored verbatim, and this is the important deviation. The original imported
-// @wallet-standard/app from esm.sh -- the exact CDN dependency removed from this page today, and
+// the wallet-standard app package from a CDN -- the same third-party dependency the preceding
+// commit stripped out of this page, and
 // the one his uMatrix was blocking. The Wallet Standard registration protocol is a window-event
 // handshake, so no library is needed: dispatch app-ready, collect whatever registers. Zero
 // third-party code, and the restored version is strictly better than the one that was lost.
