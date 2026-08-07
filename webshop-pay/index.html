@@ -2529,6 +2529,7 @@ else{
   el('copy').onclick=function(){navigator.clipboard.writeText(url).then(function(){el('copy').textContent=T('copied','Copied ✓');setTimeout(function(){el('copy').textContent=T('copy','Copy Solana Pay link')},1500)})};
   el('pay').onclick=connectAndPay;
   checkAlreadyPaid();
+  watchForSettlement();
   }
 }
 function isSig(s){return typeof s==='string'&&/^[1-9A-HJ-NP-Za-km-z]{64,100}$/.test(s)}
@@ -2625,9 +2626,29 @@ function merchantCredit(tx){
   return trimZeros(((q-p)/1e9).toFixed(9))+' SOL';
 }
 function trimZeros(s){return s.indexOf('.')<0?s:s.replace(/0+$/,'').replace(/\.$/,'')}
+// Poll the reference while the payable card is on screen, so the page flips to Paid by itself when
+// the customer pays. WHY THIS IS NOT OPTIONAL: on a phone the wallet never consults this page --
+// scanning the QR hands the solana: URI straight to the wallet, which builds and submits on its
+// own -- so a load-time check alone leaves an open tab showing a live QR forever after settlement.
+// The customer's only signal was to reload, and if they held the wrong tab they reloaded the wrong
+// order. Four payments in one evening went that way.
+//
+// Bounded rather than endless: 6s apart for 20 minutes, roughly a shop's patience for one order,
+// after which the load-time check still covers a later reload. Stops the moment it refuses, and a
+// null answer (unreachable, throttled, malformed) just means ask again -- the card stays payable,
+// so the network can never turn a good link into a refusal.
+var POLL_MS=6000,POLL_MAX=200;
+function watchForSettlement(){
+  var n=0;
+  var tick=function(){
+    if(n++>=POLL_MAX)return;
+    checkAlreadyPaid().then(function(refused){ if(!refused)setTimeout(tick,POLL_MS); });
+  };
+  setTimeout(tick,POLL_MS);
+}
 function checkAlreadyPaid(){
-  settledSignature().then(function(sig){
-    if(!sig)return;
+  return settledSignature().then(function(sig){
+    if(!sig)return false;
     // Only now, and only because the page is about to refuse, does it spend a second round trip.
     // The payable path -- the common one, and the one the demo films -- stays at exactly one call.
     return rpc('getTransaction',[sig,{encoding:'jsonParsed',commitment:'confirmed',maxSupportedTransactionVersion:0}])
@@ -2637,6 +2658,7 @@ function checkAlreadyPaid(){
         detail.push(T('paidtx','tx: ')+sig);
         refuse(T('refusedpaid','This order has already been paid. Nothing has been sent. Ask the shop for a new link if you need to pay again.'),
                detail,{heading:'Solana Pay',big:T('paid','✓ Paid'),cls:'card',link:sig,wrap:true});
+        return true;
       });
   });
 }

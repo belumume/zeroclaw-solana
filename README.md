@@ -37,7 +37,7 @@ orders are quoted in BRL at a stated rate and settled in USDC.
 **The feed has published to devnet every 20 minutes since 2026-07-25, and not one of its
 transactions has failed.** The account holds the `RegisterDevice` call that created it plus one
 per reading, so the transaction count and the sequence number move together and both only climb.
-They read 850 and 849 at 2026-08-06T07:50Z, and are higher by the time you run the commands below. One
+They read 898 and 897 at 2026-08-07T00:10Z, and are higher by the time you run the commands below. One
 `getSignaturesForAddress` against `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every
 transaction the device has ever sent, which is the complete history because the oldest of them is
 the account's own creation.
