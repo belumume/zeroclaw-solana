@@ -47,6 +47,11 @@ PROJECT = "zeroclaw-shop-pay"
 
 SRC = Path(__file__).resolve().parent.parent / "webshop-pay"
 PAYLOAD = ["index.html", "_headers"]
+# Directories copied whole. `vendor/` holds the bundled Solana libraries the pay path
+# imports at click time. They used to come from esm.sh, which meant one click fanned out
+# into 18+ third-party requests and any shield or blocker turned a healthy page into
+# "o pagamento nao foi concluido". Same-origin removes the whole class.
+PAYLOAD_DIRS = ["vendor"]
 
 
 def creds() -> tuple[str, str]:
@@ -126,6 +131,10 @@ def main() -> int:
         src = SRC / name
         if src.is_file():
             shutil.copy2(src, stage / name)
+    for name in PAYLOAD_DIRS:
+        src = SRC / name
+        if src.is_dir():
+            shutil.copytree(src, stage / name)
     staged = sorted(p.name for p in stage.iterdir())
     print(f"staged {stage}: {staged}")
     assert not any(n in (".git", ".wrangler") for n in staged), (

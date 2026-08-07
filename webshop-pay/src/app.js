@@ -416,7 +416,7 @@ async function connectAndPay(){
   if(!provider){status('No Solana wallet extension detected in this browser. Install Phantom or Solflare (desktop), or scan the QR above with a phone wallet.','err');return;}
   el('pay').disabled=true;status(T('loadinglibs','Loading Solana libraries…'));
   try{
-    var web3=await import('https://esm.sh/@solana/web3.js@1.95.3');
+    var web3=(await import('/vendor/solana-bundle.js')).web3;
     // Mainnet, from the single constant at the top. Used for reads only -- getMint, the two
     // getAccount preflights and getLatestBlockhash. It never signs and never broadcasts: the
     // wallet does both, via its own RPC. web3.js opens its websocket lazily, on the first
@@ -431,7 +431,7 @@ async function connectAndPay(){
     var tx=new web3.Transaction();
     if(token){
       status(T('building','Building token transfer…'));
-      var spl=await import('https://esm.sh/@solana/spl-token@0.4.9');
+      var spl=(await import('/vendor/solana-bundle.js')).spl;
       var mint=new web3.PublicKey(token);
       var mintInfo=await spl.getMint(conn,mint);
       var fromAta=await spl.getAssociatedTokenAddress(mint,payer);
