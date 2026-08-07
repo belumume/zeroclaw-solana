@@ -440,6 +440,11 @@ function renderOutcome(outcome,sig){
 // icon that is URL-encoded rather than base64 (comma, not semicolon) or is a type nobody listed,
 // and a dropped icon renders as a blank slot that reads as a broken row. http(s) is still refused.
 function iconOK(u){return typeof u==='string'&&/^data:image\/[a-z0-9.+-]+[;,]/i.test(u)}
+// The stand-in for an icon we cannot draw. Same 22px slot, so the row keeps its alignment.
+function chipFor(name){
+  var e=document.createElement('em');e.className='noicon';e.setAttribute('aria-hidden','true');
+  e.textContent=((name||'?').trim().charAt(0)||'?').toUpperCase();return e;
+}
 // Base58, inline, because the vendored bundle does not export it (grep: bs58 appears zero times)
 // and a Wallet Standard wallet returns a signature as raw bytes. Leading zero bytes map to '1',
 // which is the part naive implementations drop and which would silently corrupt a signature.
@@ -519,9 +524,20 @@ function renderWalletPicker(list){
     var b=document.createElement('button');b.className='wallet-btn';b.type='button';
     // A wallet with no usable icon gets a lettered chip rather than an empty slot. Cause-independent
     // on purpose: whether the wallet supplies nothing, supplies an http URL we refuse, or supplies a
-    // shape we cannot read, the row must not render as a hole. Magic Eden showed up blank this way.
-    if(iconOK(w.icon)){var img=document.createElement('img');img.src=w.icon;img.alt='';b.appendChild(img);}
-    else{var ph=document.createElement('em');ph.className='noicon';ph.setAttribute('aria-hidden','true');ph.textContent=((w.name||'?').trim().charAt(0)||'?').toUpperCase();b.appendChild(ph);}
+    // shape we cannot read, the row must not render as a hole. Magic Eden showed up blank this way,
+    // and the cause turned out to be its own declared type: `data:image/png+xml`, which is not a
+    // MIME type at all. The bytes are a real PNG and a browser sniffs and renders them, so the icon
+    // is fine; only the label is wrong, and the old five-type list rejected it on that label.
+    // THE onerror BRANCH IS NOT BELT AND BRACES. A data URI can pass the filter and still fail to
+    // decode when the declared type and the bytes genuinely disagree, measured: png bytes declared
+    // as svg+xml load=false. Without the swap that case appends an img that draws nothing and
+    // suppresses the chip, which is a blank slot again by a longer route.
+    if(iconOK(w.icon)){
+      var img=document.createElement('img');img.alt='';
+      img.onerror=function(){if(img.parentNode)img.parentNode.replaceChild(chipFor(w.name),img);};
+      img.src=w.icon;b.appendChild(img);
+    }
+    else{b.appendChild(chipFor(w.name));}
     var s=document.createElement('span');s.textContent=w.name;b.appendChild(s);
     if(w.name===last){var t=document.createElement('em');t.className='lastused';t.textContent=T('lastused','last used');b.appendChild(t);}
     b.onclick=function(){box.parentNode&&box.parentNode.removeChild(box);payWith(w);};

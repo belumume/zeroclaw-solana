@@ -282,9 +282,23 @@ def main() -> int:
             # Now keyed on the property that actually matters: a data: URI, which issues no
             # third-party request and cannot execute script inside an <img>. Anything else gets a
             # lettered chip, so the row is never blank whatever the wallet supplies.
+            # A real 1x1 PNG, so "does the browser decode it" is a genuine question per case.
+            PNG1 = (
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+                "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+            )
             ICONS = {
-                "DataPng": "data:image/png;base64,iVBORw0KGgo=",
+                "DataPng": f"data:image/png;base64,{PNG1}",
+                # Magic Eden's ACTUAL declared type, read from the operator's console export
+                # 2026-08-07: `data:image/png+xml`, which is not a MIME type. They appear to have
+                # copied svg+xml and swapped the subtype. The bytes are a real PNG and a browser
+                # sniffs and renders them, so the icon must appear rather than fall back.
+                "MagicEdenShape": f"data:image/png+xml;base64,{PNG1}",
                 "UrlEncodedSvg": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E",
+                # Passes the filter and CANNOT decode: png bytes declared as svg+xml, measured
+                # load=false. This is why the img carries an onerror that swaps in the chip;
+                # without it the row appends an image that draws nothing and suppresses the chip.
+                "UndecodableDataUri": f"data:image/svg+xml;base64,{PNG1}",
                 "RemoteUrl": "https://example.invalid/icon.png",
                 "NoIcon": None,
             }
@@ -311,6 +325,10 @@ def main() -> int:
             got = {r["name"]: r for r in rows}
             for nm, want_img, want_chip in (
                 ("DataPng", True, None),
+                # The incident, verbatim from his console export.
+                ("MagicEdenShape", True, None),
+                # Passes the filter and cannot decode -> the img's onerror must swap in the chip.
+                ("UndecodableDataUri", False, "U"),
                 (
                     "UrlEncodedSvg",
                     True,
@@ -335,7 +353,7 @@ def main() -> int:
             results.append(
                 (
                     "no wallet row is ever blank (every row has an img or a chip)",
-                    all(r["img"] or r["chip"] for r in rows) and len(rows) == 4,
+                    all(r["img"] or r["chip"] for r in rows) and len(rows) == 6,
                     f"{len(rows)} rows",
                 )
             )
