@@ -433,7 +433,13 @@ function renderOutcome(outcome,sig){
 // third-party code, and the restored version is strictly better than the one that was lost.
 // A wallet-supplied icon is attacker-adjacent data rendered into the DOM, so only inline data: URIs
 // of known image types are allowed. An http(s) icon would also be a third-party request.
-function iconOK(u){return typeof u==='string'&&/^data:image\/(png|svg\+xml|webp|gif|jpeg);/.test(u)}
+// The security property is "a data: URI rendered in an <img>", not membership of a hardcoded list:
+// a data URI issues no third-party request (an icon fetched from a wallet's own CDN would quietly
+// undo the vendoring), and a browser does not execute script inside SVG loaded via <img>. Keyed on
+// the property rather than on five enumerated types, because the enumeration silently dropped any
+// icon that is URL-encoded rather than base64 (comma, not semicolon) or is a type nobody listed,
+// and a dropped icon renders as a blank slot that reads as a broken row. http(s) is still refused.
+function iconOK(u){return typeof u==='string'&&/^data:image\/[a-z0-9.+-]+[;,]/i.test(u)}
 // Base58, inline, because the vendored bundle does not export it (grep: bs58 appears zero times)
 // and a Wallet Standard wallet returns a signature as raw bytes. Leading zero bytes map to '1',
 // which is the part naive implementations drop and which would silently corrupt a signature.
@@ -511,7 +517,11 @@ function renderWalletPicker(list){
   if(last)ordered.sort(function(a,b){return (b.name===last)-(a.name===last)});
   ordered.forEach(function(w){
     var b=document.createElement('button');b.className='wallet-btn';b.type='button';
-    if(w.icon&&iconOK(w.icon)){var img=document.createElement('img');img.src=w.icon;img.alt='';b.appendChild(img);}
+    // A wallet with no usable icon gets a lettered chip rather than an empty slot. Cause-independent
+    // on purpose: whether the wallet supplies nothing, supplies an http URL we refuse, or supplies a
+    // shape we cannot read, the row must not render as a hole. Magic Eden showed up blank this way.
+    if(iconOK(w.icon)){var img=document.createElement('img');img.src=w.icon;img.alt='';b.appendChild(img);}
+    else{var ph=document.createElement('em');ph.className='noicon';ph.setAttribute('aria-hidden','true');ph.textContent=((w.name||'?').trim().charAt(0)||'?').toUpperCase();b.appendChild(ph);}
     var s=document.createElement('span');s.textContent=w.name;b.appendChild(s);
     if(w.name===last){var t=document.createElement('em');t.className='lastused';t.textContent=T('lastused','last used');b.appendChild(t);}
     b.onclick=function(){box.parentNode&&box.parentNode.removeChild(box);payWith(w);};

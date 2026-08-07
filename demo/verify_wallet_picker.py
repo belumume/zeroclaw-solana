@@ -275,6 +275,72 @@ def main() -> int:
             )
             ctx.close()
 
+            # 4e. ICONS. The operator's Brave listed Magic Eden with a blank icon slot while the
+            # other seven rendered. The old filter was a hardcoded list of five types each
+            # requiring a semicolon, so it silently dropped a URL-encoded SVG (comma, not
+            # semicolon) and anything unlisted, and a dropped icon rendered as a hole in the row.
+            # Now keyed on the property that actually matters: a data: URI, which issues no
+            # third-party request and cannot execute script inside an <img>. Anything else gets a
+            # lettered chip, so the row is never blank whatever the wallet supplies.
+            ICONS = {
+                "DataPng": "data:image/png;base64,iVBORw0KGgo=",
+                "UrlEncodedSvg": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E",
+                "RemoteUrl": "https://example.invalid/icon.png",
+                "NoIcon": None,
+            }
+            js = (
+                "(function(m){var ws=Object.keys(m).map(function(n){var w={name:n,version:'1.0.0',"
+                "chains:['solana:mainnet'],accounts:[],features:{"
+                "'standard:connect':{version:'1.0.0',connect:async function(){return{accounts:[]}}},"
+                "'solana:signAndSendTransaction':{version:'1.0.0',signAndSendTransaction:async function(){return[{signature:new Uint8Array(64)}]}}}};"
+                "if(m[n]!==null)w.icon=m[n];return w;});"
+                "window.addEventListener('wallet-standard:app-ready',function(e){"
+                "ws.forEach(function(w){try{e.detail.register(w)}catch(_){}})});})(%M%);"
+            ).replace("%M%", __import__("json").dumps(ICONS))
+            ctx = b.new_context()
+            pi = ctx.new_page()
+            pi.add_init_script(js)
+            pi.goto(url, wait_until="networkidle")
+            pi.click("#pay")
+            pi.wait_for_timeout(600)
+            rows = pi.eval_on_selector_all(
+                ".wallet-btn",
+                "els => els.map(e => ({name: e.querySelector('span').textContent,"
+                " img: !!e.querySelector('img'), chip: (e.querySelector('.noicon')||{}).textContent || null}))",
+            )
+            got = {r["name"]: r for r in rows}
+            for nm, want_img, want_chip in (
+                ("DataPng", True, None),
+                (
+                    "UrlEncodedSvg",
+                    True,
+                    None,
+                ),  # the WIDENING: this failed before, must fire now
+                (
+                    "RemoteUrl",
+                    False,
+                    "R",
+                ),  # http(s) still refused, and no longer a blank slot
+                ("NoIcon", False, "N"),
+            ):
+                r = got.get(nm)
+                ok = r is not None and r["img"] is want_img and r["chip"] == want_chip
+                results.append(
+                    (
+                        f"icon: {nm} -> {'img' if want_img else 'chip ' + str(want_chip)}",
+                        ok,
+                        f"got {r}",
+                    )
+                )
+            results.append(
+                (
+                    "no wallet row is ever blank (every row has an img or a chip)",
+                    all(r["img"] or r["chip"] for r in rows) and len(rows) == 4,
+                    f"{len(rows)} rows",
+                )
+            )
+            ctx.close()
+
             # 5. base58, including leading zeros
             pg = b.new_page()
             pg.goto(url, wait_until="networkidle")
