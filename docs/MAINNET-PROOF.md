@@ -14,7 +14,7 @@ A delegation was created against the audited Solana Foundation
 [Allowances program](https://explorer.solana.com/address/De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44)
 `De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`, capped at **0.5 USDC**. A freshly generated agent
 session key then signed two spends. Nothing about the program is ours: it is deployed, executable,
-owned by the BPF upgradeable loader, and audited by Cantina and Spearbit.
+owned by the BPF upgradeable loader, and audited by Cantina.
 
 | Step | Amount | Result | Transaction |
 |---|---|---|---|

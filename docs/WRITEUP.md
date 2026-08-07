@@ -19,8 +19,8 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    signs each reading with a device key the host never exposes, and publishes a
    typed on-chain feed another program consumes. Two publish paths share the same device
    signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
-   publisher runs the durable feed on a schedule. As of 2026-08-06T07:50Z that feed carries **850
-   publishes and zero failures across 12.1 days**, unbroken since 2026-07-25, at a median gap of
+   publisher runs the durable feed on a schedule. As of 2026-08-07T00:10Z that feed carries **898
+   publishes and zero failures across 12.7 days**, unbroken since 2026-07-25, at a median gap of
    20.5 minutes. Its largest gap is 61.5 minutes, and a second publisher running the same path from
    a laptop has a largest gap of 36 hours because the laptop sleeps. Both outliers are stated here
    because the command that reproduces the good numbers is the same command that finds them:

@@ -13,8 +13,8 @@
 //! transaction (every signature slot left empty) that a human approval gate
 //! renders and the host later signs with the agent's key and broadcasts. That is
 //! the T1 guarantee. On top of it, the spend is bounded a SECOND time on-chain:
-//! the transfer executes only inside the Solana-Foundation-audited (Cantina /
-//! Spearbit) Subscriptions & Allowances program, which enforces the delegation's
+//! the transfer executes only inside the Solana Foundation's Cantina-audited
+//! Subscriptions & Allowances program, which enforces the delegation's
 //! amount cap, per-period accounting, and expiry. The agent is the delegatee, not
 //! the fund custodian, so even a fully prompt-injected agent that fabricates a
 //! request can never move more than the on-chain allowance permits. The pitch:
@@ -64,7 +64,7 @@ use solana_core::{
 
 // --- Program constants, every one cited to its source in the audited repo ------
 // Source repo: github.com/solana-foundation/subscriptions (MIT, Pinocchio-based,
-// Cantina/Spearbit-audited, live on devnet + mainnet). Layouts read 2026-07-22.
+// Cantina-audited, live on devnet + mainnet). Layouts read 2026-07-22.
 
 /// The Subscriptions & Allowances program id.
 /// Source: `idl/subscriptions.json` `program.publicKey`; `program/src/lib.rs` `crate::ID`.

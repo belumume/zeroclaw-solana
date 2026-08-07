@@ -28,7 +28,7 @@ not qualify.
 Built for a small operator who wants an agent touching money without handing it a signing key.
 
 **And it has been running, not demoed.** The rubric asks whether a stranger would still be running
-this in a month. Read as of 2026-08-05T18:09Z, and re-derive it yourself rather than believing the
+this in a month. Read as of 2026-08-07T00:10Z, and re-derive it yourself rather than believing the
 figures, because they move every twenty minutes:
 
 ```bash
@@ -38,17 +38,17 @@ python3 scripts/verify-proof.py          # stdlib only, no install, no key
 That checks the live claims. To count the history yourself, the underlying call is
 `getSignaturesForAddress` on a feed account, which any devnet RPC will answer unauthenticated.
 
-**Two independent devices, 1,629 publishes between them, zero failed.** That is the DePIN claim
+**Two independent devices, 1,677 publishes between them, zero failed.** That is the DePIN claim
 rather than a gadget claim: the same on-chain oracle program serves both, each device holds its own
 key, and neither can sign for the other.
 
-**Measured 2026-08-06T07:50Z, and the publish counts only climb.** Do not read them as current;
+**Measured 2026-08-07T00:10Z, and the publish counts only climb.** Do not read them as current;
 re-derive with one `getSignaturesForAddress` per account, which returns the complete history because
 the oldest signature is the account's own creation.
 
 | Feed account | Publishes | Failed | Span | Median gap | Largest gap |
 |---|---|---|---|---|---|
-| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 850 | 0 | 12.1 d | 20.5 min | **61.5 min** |
+| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 898 | 0 | 12.7 d | 20.5 min | **61.5 min** |
 | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
 
 Both largest gaps are stated rather than smoothed. The ARM node's 61.5 minutes is its worst run in
