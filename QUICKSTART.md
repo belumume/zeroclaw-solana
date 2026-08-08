@@ -12,7 +12,7 @@ create your own.
 `zeroclaw_oracle` + `consumer_example` programs (`onchain/`), the `e2e-*` reproducibility harnesses,
 the `x402-feed-gate` node, and the `webshop-pay` pay page. Steps 2-7 run from a clone of this repo.
 
-## Fastest path: three checks, nothing installed, about thirteen seconds
+## Fastest path: three checks, nothing installed, 13 to 35 seconds
 
 Start here. These three need **stdlib Python 3 and nothing else**: no `pip install`, no
 virtualenv, no Rust, no Solana CLI, no API key, no config file, no account anywhere. Clone

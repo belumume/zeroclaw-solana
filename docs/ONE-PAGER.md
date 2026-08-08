@@ -1,7 +1,7 @@
 # ZeroClaw on Solana: an agent bounded by the chain, and a node that pays its own gas
 
 **Two things run, both self-hosted, both auditable by a stranger in an evening.** A DePIN node that
-signs its own sensor readings on-chain and *sells* them per request, and a merchant terminal that
+signs its own readings on-chain and *sells* them per request, and a merchant terminal that
 takes an order in Portuguese and settles in USDC. Every claim below is checkable with one command
 or one link. Nothing here is a screenshot of something that used to work.
 
@@ -17,7 +17,8 @@ The node is an Ampere ARM instance on Oracle's free tier, not a board on a desk,
 here because the rest of this page asks you to trust what runs where. What the arrangement buys is
 the part that matters: its signing key was generated on that box and has never left it, and a
 `systemd --user` timer with lingering publishes on a schedule no laptop is in. A Raspberry Pi with
-a DHT11 is a drop-in for the reading source and the on-chain half is identical either way.
+a DHT11 is a drop-in for the reading source and the on-chain half is identical either way. Today the
+reading comes from a keyless public weather API on that host rather than from a physical probe.
 
 **A shop that takes money without holding keys.** A merchant agent on Telegram and WhatsApp
 quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in mainnet
@@ -70,7 +71,8 @@ a `systemd --user` timer with lingering keeps it publishing with no laptop in th
 
 The honest part, stated here rather than left for you to find. Zero failures is exact and covers
 both devices: no transaction has ever errored. Continuity is where they differ. The node's largest
-gap is 61.5 minutes across 11.6 days, so "every twenty minutes" is true at the median with one
+gap is 61.5 minutes, one interruption across the span in the table above, so "every twenty minutes"
+is true at the median with one
 hour-long interruption. The second device is laptop-hosted and its largest gap is 36 hours, because
 a laptop sleeps. That is the reason the node exists, and the reason the headline claim is the node's
 rather than the pair's. Both are the sort of thing the call above would have shown you anyway, which
