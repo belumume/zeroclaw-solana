@@ -1,0 +1,235 @@
+# The floor that stops a working thing from silently stopping working during judging.
+#
+# WHY THIS EXISTS
+# The submission is filed and the judging window runs to 2026-08-21 with no stated
+# judging date, so the repo is pushed to while it is being read. Today a push to a
+# non-main branch runs NOTHING (ci.yml's push trigger is `branches: [main]`), `main`
+# carries no branch protection at all, and the five hermetic browser checks that prove
+# the pay path still works have never run on a runner. This job is the floor that stops
+# a working thing from silently stopping working.
+#
+# EVERY CHECK BELOW WAS RUN LOCALLY WITH ALL EXTERNAL NETWORK BLOCKED (dead proxy on
+# 127.0.0.1:9, localhost exempted) and exited 0. Nothing here touches a live third
+# party, so a devnet outage, an RPC rate limit, or a Cloudflare Pages blip can never
+# turn this red. That property is the whole point: a required gate that goes red for
+# reasons outside the repo teaches everyone to ignore it.
+#
+# The live checks are deliberately NOT here. They belong on the existing schedules
+# (proof-check.yml, host-drift.yml) or in a separate non-required smoke job.
+
+name: regression-gate
+
+on:
+  # pull_request alone is NOT sufficient: a PR in a CONFLICTING state receives zero
+  # check-runs, because GitHub cannot compute a merge commit, and `gh pr checks` reports
+  # "no checks reported" rather than pending or failing. A polling loop reads that as
+  # terminal and green. The unfiltered `push` below is what closes that hole — it keys on
+  # the branch tip, which always exists, so the gate cannot be silently absent.
+  push:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+  # Drives live-smoke only. Offset from proof-check.yml (17 6,18) and host-drift.yml
+  # (41 5) so three jobs do not contend for runners on the same minute.
+  schedule:
+    - cron: "23 9,21 * * *"
+
+# A superseded run on the same ref is wasted minutes, but never cancel on the default
+# branch, where the last completed run is the record.
+concurrency:
+  group: regression-gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic:
+    name: hermetic regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # check-silent-regressions.py walks the whole history to find identifiers that
+          # once existed and no longer do. On a shallow clone it walks one commit, reports
+          # a clean sweep, and is worth nothing. Its own floor catches this, but paying
+          # for full history here means the floor never has to fire.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # pyzbar is a binding to zbar, a C library. Without libzbar0 the import raises at
+      # runtime and verify_qr_scannable degrades to a single decoder, which defeats the
+      # point of running two implementations that do not share code.
+      - name: zbar, the C library pyzbar binds to
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libzbar0
+
+      - name: Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install playwright pyzbar opencv-python-headless numpy pillow
+
+      # Two browsers on purpose. Three of the five checks call pw.chromium.launch()
+      # (bundled chromium); demo/verify-merchant-invariant.py calls
+      # pw.chromium.launch(channel="chrome"), which resolves the Google Chrome channel and
+      # fails with a launch error if only bundled chromium is present.
+      - name: Browsers
+        run: python -m playwright install --with-deps chromium chrome
+
+      # ----------------------------------------------------------------------------
+      # THE SCOPE FLOOR.
+      #
+      # ci.yml invokes its gates by hardcoded name. scripts/check-all.py discovers them
+      # from `git ls-files scripts/check-*.py`. Those two disagree today:
+      # check-silent-regressions.py is discovered by check-all.py and invoked by no
+      # workflow, so it has never run on a runner. A gate added next week joins the
+      # discovery walk automatically and joins CI never.
+      #
+      # This step makes that divergence fail loudly instead of accumulating. It does NOT
+      # run check-all.py, because check-all.py's set includes check-doc-links.py, which
+      # needs the network and is correctly kept off runners.
+      # ----------------------------------------------------------------------------
+      - name: every tracked gate is either invoked by a workflow or declared network-excluded
+        run: |
+          python - <<'PY'
+          import pathlib, subprocess, sys
+
+          # Declared, each with the reason it cannot run unattended and offline.
+          EXCLUDED = {
+              "check-doc-links.py":
+                  "fetches external URLs and a devnet RPC; a third-party outage must never "
+                  "turn a required gate red. Runs manually and on proof-check.yml's schedule.",
+              "check-config-drift.py":
+                  "compares against ~/.zeroclaw/config.toml, which no runner has; it "
+                  "self-reports exit 2 (cannot check) rather than passing vacuously.",
+              "check-all.py":
+                  "the local aggregate runner, not a gate; it would pull check-doc-links.py "
+                  "onto the runner.",
+          }
+
+          tracked = subprocess.run(
+              ["git", "ls-files", "scripts/check-*.py"],
+              capture_output=True, text=True, check=True,
+          ).stdout.split()
+          gates = sorted(pathlib.Path(p).name for p in tracked if p.strip())
+
+          # A discovery walk that finds nothing would report a clean sweep. Floor it.
+          FLOOR = 10
+          if len(gates) < FLOOR:
+              print(f"FAIL  discovery found {len(gates)} gate(s), expected at least {FLOOR}.")
+              print("      The walk is broken, so a clean result here would mean nothing.")
+              sys.exit(2)
+
+          wf = "\n".join(
+              p.read_text(encoding="utf-8")
+              for p in sorted(pathlib.Path(".github/workflows").glob("*.yml"))
+          )
+
+          orphans = [
+              g for g in gates
+              if g not in EXCLUDED and f"scripts/{g}" not in wf
+          ]
+
+          print(f"{len(gates)} tracked gate(s); {len(EXCLUDED)} declared-excluded")
+          for g in sorted(EXCLUDED):
+              print(f"  skip  {g:<30} {EXCLUDED[g]}")
+
+          if orphans:
+              print("\nFAIL  gate(s) tracked in git but invoked by no workflow:\n")
+              for g in orphans:
+                  print(f"    scripts/{g}")
+              print(
+                  "\n  Each of these runs locally and has never run on a runner, so it "
+                  "protects\n  nothing during judging. Invoke it in a workflow, or add it "
+                  "to EXCLUDED here\n  with the reason it cannot run offline."
+              )
+              sys.exit(1)
+
+          print("\nok    every tracked gate is invoked or declared")
+          PY
+
+      # ----------------------------------------------------------------------------
+      # The gate that answers the actual question: has anything that once worked stopped
+      # existing? It walks every commit's added identifiers, diffs against the working
+      # tree, and flags any that vanished in a commit whose message never mentioned them.
+      # It carries its own positive control and refuses to report a verdict without it,
+      # so a green here is a green from an instrument proven able to go red.
+      #
+      # Measured 2.0s network-blocked. Absent from every workflow before this proposal.
+      # ----------------------------------------------------------------------------
+      - name: nothing that once existed has vanished unremarked
+        run: python3 scripts/check-silent-regressions.py
+
+      # ----------------------------------------------------------------------------
+      # The pay path, exercised in a real browser against this checkout's own bytes.
+      # Every one of these serves webshop-pay/ from a local http.server bound to port 0,
+      # so there is no fixed port to collide and no third party in the path.
+      #
+      # Ordered fastest first: a broken build should go red in under a minute.
+      # ----------------------------------------------------------------------------
+      - name: the pay path's code comes from this origin only
+        run: python3 demo/verify_no_cdn_dependency.py
+
+      - name: the pinned merchant is payable and a one-character variant is refused
+        run: python3 demo/verify-merchant-invariant.py
+
+      - name: the QR decodes on two independent readers at every viewport
+        run: python3 demo/verify_qr_scannable.py
+
+      - name: the customer chooses their wallet, and choosing costs no layout
+        run: python3 demo/verify_wallet_picker.py
+
+      - name: the page polls the reference while the card is payable
+        run: python3 demo/verify_settlement_poll.py
+
+      # ----------------------------------------------------------------------------
+      # Hermetic suites that no workflow currently runs.
+      # ----------------------------------------------------------------------------
+      - name: settlement confirmation logic
+        run: python3 demo/test_confirm_settlements.py
+
+      - name: x402 earnings accounting
+        run: python3 demo/test_x402_earnings.py
+
+      - name: the proof-transport predicate's controls actually gate
+        run: python3 scripts/test_verify_proof_transport.py
+
+  # ------------------------------------------------------------------------------
+  # NOT PART OF THE REQUIRED GATE.
+  #
+  # These four reach a live third party and exit 2 (cannot check) when they cannot,
+  # which is the correct behaviour and is exactly why they must never gate a merge:
+  # "cannot check" and "broken" are different verdicts, and a required job cannot
+  # express the difference. Scheduled so a real breakage still surfaces within hours.
+  # ------------------------------------------------------------------------------
+  live-smoke:
+    name: live smoke (never required)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip && python -m pip install playwright
+      - run: python -m playwright install --with-deps chromium chrome
+
+      - name: a settled reference is refused, an unsettled one stays payable
+        run: python3 demo/verify_paid_link_refused.py
+
+      - name: the pay path's RPC classifies every outcome correctly
+        run: python3 demo/verify_pay_path_rpc.py
+
+      - name: the deployed page renders the three links as specified
+        run: python3 demo/verify_shoot_links_live.py
+
+      - name: every URL and signature a doc names still resolves
+        run: python3 scripts/check-doc-links.py
