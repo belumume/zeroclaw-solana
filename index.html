@@ -105,8 +105,8 @@
   <p class="note">
     A live node answering <code>HTTP/1.1 402 Payment Required</code> with a single-use nonce that
     changes on every request. That is the whole machine-commerce claim, in one request, against a
-    node that is running right now. The node is an Ampere ARM instance on Oracle's free tier, named
-    rather than left for you to assume; its signing key was generated there and has never left it.
+    node that is running right now. The node is an Ampere ARM instance on Oracle's free tier;
+    its signing key was generated there and has never left it.
   </p>
   <p class="lede" style="font-size:15px">
     On Windows that can fail with <code>curl: (35) schannel: … CRYPT_E_REVOCATION_OFFLINE</code>.
@@ -133,14 +133,14 @@
 
 <h2><span class="n">01</span>It has been running, not demoed</h2>
 <div class="stats">
-  <div class="stat"><b>1,657</b><span>publishes on chain</span></div>
+  <div class="stat"><b>1,761+</b><span>publishes on chain</span></div>
   <div class="stat good"><b>0</b><span>failed</span></div>
   <div class="stat"><b>2</b><span>independent devices</span></div>
   <div class="stat"><b>20.5<small>m</small></b><span>median gap</span></div>
 </div>
 <p>
-  Read at 2026-08-06T17:20Z. The ARM node's count moves every twenty minutes or so and the second
-  device's is final, so re-derive both rather than believing this page. It is an unauthenticated
+  Read at 2026-08-08T04:34Z, and carried as a floor because the ARM node publishes every twenty
+  minutes or so; the second device's count is final. Re-derive both rather than believing this page. It is an unauthenticated
   call against a public devnet RPC, no key and no account:
 </p>
 <pre><code>python3 scripts/verify-proof.py    # stdlib only, no install, no key</code></pre>
@@ -151,7 +151,7 @@
 </p>
 <ul class="links">
   <li><b><code>JEtuZk&hellip;Vveg</code></b>
-      <span>the ARM node. 878 publishes, 0 failed, 12.5 days, median gap 20.5&nbsp;min. Its key was
+      <span>the ARM node. 982 publishes, 0 failed, 14.0 days, median gap 20.5&nbsp;min. Its key was
       generated on that box and has never left it, so this workstation cannot forge a reading for
       it.</span></li>
   <li><b><code>3aMsPj&hellip;Vx8K</code></b>
@@ -191,7 +191,7 @@
   plugin, not in the host, and not in the prompt: it is a deployed, audited on-chain program.
 </p>
 <p>
-  Demonstrated on <strong>mainnet</strong> rather than asserted, and the program that does the
+  Demonstrated on <strong>mainnet</strong>, and the program that does the
   refusing is <strong>not ours</strong> &mdash; that is the point. Solana Foundation's audited
   Allowances program (<code>De1egAFMk&hellip;</code>, on mainnet since June 2026, audited by Cantina) rejected an over-cap transfer with custom error <code>0x12c</code>, signed by a
   freshly generated agent session key. The same key moved a within-cap transfer normally, settling
@@ -283,7 +283,7 @@ python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</
 </p>
 
 <p>
-  <strong>The cap's boundary, located rather than asserted, on mainnet with no key and no
+  <strong>Where the cap's boundary sits today, on mainnet, with no key and no
   funds.</strong> The captured refusal above proves the program said no once. This finds where it
   says no <em>today</em>: it reads the remaining allowance off the delegation account and replays
   the captured message at amounts either side of it. It requires at least one amount to be refused
