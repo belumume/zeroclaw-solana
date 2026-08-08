@@ -58,7 +58,7 @@ python3 scripts/verify-proof.py
 ```
 
 Both use cases run on the same ARM node under `systemd --user`, and the two are not equally
-observable from outside, so this says which is which rather than leaving you to find out.
+observable from outside.
 The DePIN feed is continuously checkable: it publishes on a timer and every reading lands
 on chain, so `verify-proof.py` can go red on it. The shop is a Telegram and WhatsApp client
 with no inbound port, and its trace is traffic-driven, so from outside a quiet shop and a
@@ -94,7 +94,7 @@ transaction with the fee-payer slot left empty, so a reading is attributable to 
 while the signature that actually pays is still the operator's. Spends are additionally
 bounded on chain by the audited Solana Foundation Allowances program.
 
-That bound is demonstrated rather than asserted, and the demonstration deliberately does the
+The demonstration deliberately does the
 opposite of avoiding a key, because avoiding one proves nothing about what happens when an
 agent has one. A delegated session key, held by the agent, **signs** an over-cap transfer, and
 the audited program rejects it with custom error `0x12c` (300, `AmountExceedsLimit`, defined in the
@@ -106,7 +106,7 @@ read as the key simply not working.
 
 Read the two sentences above together, because they are easy to mistake for a contradiction.
 The **use cases** run no fund-signing key at all. The **cap demonstration** uses one on
-purpose, bounded on chain, so the guarantee can be shown failing closed rather than described.
+purpose, bounded on chain, so the guarantee can be shown failing closed.
 
 **The same refusal now holds on mainnet with real USDC**, because a rejection that costs nothing
 is a weaker claim than one that does. A 0.5 USDC cap, a 0.4 USDC spend that settled and moved
@@ -132,8 +132,8 @@ audited program refused a transfer the agent's own delegated key had already sig
 transfer that settled is the control that stops the refusal being read as a key that does not
 work. Both were served by `api.devnet.solana.com` on 2026-08-01, eight days after they landed.
 
-Retention on public devnet is set by whoever runs the endpoint and has moved before, so the
-captured bytes are what this rests on rather than the links. They are in
+Retention on public devnet is set by whoever runs the endpoint and has moved before, so this
+rests on the captured bytes, not the links. They are in
 [`docs/proof-bundle/`](docs/proof-bundle), and `python3 scripts/verify_proof_offline.py`
 re-checks the ed25519 signature over the exact serialized message with no network at all. If a
 link above has stopped resolving by the time you click it, that command still proves the same
@@ -156,9 +156,9 @@ The two use cases run **no T2 fund-signer**. Everything they touch sits at T0 (r
 T1 (builds a transaction the operator must sign), which the brief calls the sweet spot and
 which is the honest place for an LLM-driven system to stop.
 
-One T1 component departs from the ladder's "secrets held: none" wording, and it is worth
-naming rather than glossing. `oracle-publish` holds a 32-byte device seed. It is fund-less by
-construction, and the code asserts that rather than asking to be trusted: the device is added
+One T1 component departs from the ladder's "secrets held: none" wording.
+`oracle-publish` holds a 32-byte device seed. It is fund-less by
+construction, and the code enforces that: the device is added
 as a **readonly** signer, and a hard check rejects any message whose fee payer is not signer
 index zero. So the device key can attest that a reading came from that device, and it can
 never pay a fee or source value. That is a narrower deviation than the ladder's wording

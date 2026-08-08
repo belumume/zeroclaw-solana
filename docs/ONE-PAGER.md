@@ -75,8 +75,7 @@ gap is 61.5 minutes, one interruption across the span in the table above, so "ev
 is true at the median with one
 hour-long interruption. The second device is laptop-hosted and its largest gap is 36 hours, because
 a laptop sleeps. That is the reason the node exists, and the reason the headline claim is the node's
-rather than the pair's. Both are the sort of thing the call above would have shown you anyway: a number you can check is worth more than a rounder one
-you cannot.
+rather than the pair's. Both are the sort of thing the call above would have shown you anyway.
 
 ---
 
@@ -139,7 +138,7 @@ sells its readings behind an x402 paywall, and a per-payer per-day ceiling is en
 own code rather than by the protocol, so a payer who drains the cap in many small buys is refused
 exactly like one who tries it in a single large one. The ledger is durable: restarting the process
 does not re-open a spent allowance. An earlier version restarted the day on every boot, which is a
-cap in name only, and the fix is the part worth checking rather than the cap itself:
+cap in name only. Check the fix:
 
 ```bash
 curl -s https://x402.perfpilot.dev/health | jq '.ledger'
@@ -155,7 +154,7 @@ finalized on mainnet-beta. The goods stay on devnet because a `DeviceFeed` accou
 `zeroclaw_oracle` program, which is deployed on devnet only. A mainnet feed is therefore a program
 deployment rather than a config flag. The hosted endpoint above runs the devnet default.
 
-And where the cap's boundary sits *today* is locatable rather than assertable, on mainnet, with no
+And where the cap's boundary sits *today* can be located on mainnet, with no
 key and no funds. The captured refusal proves the program said no once; this reads the remaining
 allowance off the delegation account and replays the captured message either side of it, requiring
 at least one refusal **and** at least one acceptance, so a dead program and a broken check both fail
@@ -189,7 +188,7 @@ independent RPC endpoints moves trust to the configured set rather than removing
 sharing an operator or an upstream fail together. The DePIN feed runs on devnet by choice, since
 duplicating an already-offline-verifiable proof on mainnet costs 2.87 SOL in rent.
 
-These are stated here rather than found by a reviewer, because a control that is claimed and
+A control that is claimed and
 enforced by no runtime path is worse than an absent one: an absent control is visible, an inert
 one lets you believe you are protected.
 
@@ -202,7 +201,7 @@ the shortvec decoder, one covering all 16,777,216 three-byte inputs. A different
 against solana-sdk's own deserializer rather than invariants we chose. Every gate ships a control
 proving it can fail, because zero findings is also what a broken detector prints.
 
-Two more, both exercisable rather than described. **A second deployed program reads the feed on
+Two more, both exercisable. **A second deployed program reads the feed on
 chain**, which is the difference between an oracle and a memo: `consumer_example` CPI-reads the feed
 account, checks the owner and gates on freshness, so the data is consumable by something other than
 a human squinting at an explorer. Its most recent read of the live ARM feed is transaction
