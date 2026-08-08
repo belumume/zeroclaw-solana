@@ -41,8 +41,8 @@ wrong amount, or of a token the payer minted themselves, does not settle an orde
 orders are quoted in BRL at a stated rate and settled in USDC.
 
 **The feed has published to devnet since 2026-07-25 and not one of its transactions has failed.**
-Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes, and
-the one-pager states it beside the headline for the same reason it is stated here. The account holds the `RegisterDevice` call that created it plus one
+Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.
+The account holds the `RegisterDevice` call that created it plus one
 per reading, so the transaction count and the sequence number move together and both only climb.
 They read 898 and 897 at 2026-08-07T00:10Z, and are higher by the time you run the commands below. One
 `getSignaturesForAddress` against `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every
