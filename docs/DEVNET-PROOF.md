@@ -91,7 +91,7 @@ lingering enabled publishes on a schedule with no laptop in the loop.
 
 **What the ARM node is.** `zc-arm-ref`, a VM.Standard.A1.Flex instance in Oracle's me-jeddah-1
 region, on their free tier at a measured 0.00 EUR. Ampere Altra is ARM, so the phrase is accurate,
-but it is a rented virtual machine and not a board anyone owns. Stated here because this document
+but it is a rented virtual machine and not a board anyone owns. It belongs here because this document
 is the one a reader opens to check the DePIN claim, and "device-signed" should not be allowed to
 smuggle in "device we own". The provenance argument is unaffected: the key was generated there and
 has never left, which is what makes the signature unforgeable from here. What a rented host does

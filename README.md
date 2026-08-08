@@ -44,7 +44,8 @@ orders are quoted in BRL at a stated rate and settled in USDC.
 Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.
 The account holds the `RegisterDevice` call that created it plus one
 per reading, so the transaction count and the sequence number move together and both only climb.
-They read 898 and 897 at 2026-08-07T00:10Z, and are higher by the time you run the commands below. One
+They read at least 986 and 985, measured 2026-08-08T06:05Z, and are higher by the time you run the
+commands below. One
 `getSignaturesForAddress` against `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every
 transaction the device has ever sent, which is the complete history because the oldest of them is
 the account's own creation.
@@ -73,7 +74,7 @@ claims separately, and names what it does not cover.
 
 | If you want | Read |
 |---|---|
-| The whole thing on one page, in about three minutes | [`docs/ONE-PAGER.md`](docs/ONE-PAGER.md) |
+| The whole submission on one page | [`docs/ONE-PAGER.md`](docs/ONE-PAGER.md) |
 | What this is and why it is built this way | [`docs/WRITEUP.md`](docs/WRITEUP.md) |
 | To run it yourself | [`QUICKSTART.md`](QUICKSTART.md) |
 | Proof it is real, on chain | [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md) |
@@ -117,8 +118,9 @@ the reproduce command and the offline bundle are in [`docs/MAINNET-PROOF.md`](do
 The DePIN feed stays on devnet on the merits, and that page says why.
 
 The two links below are the **devnet** pair, not the mainnet trio just described, and they are
-served by an endpoint that keeps roughly four days of history, so by the time you read this they
-have probably expired. That is why the mainnet evidence is bytes in the repo rather than a link:
+served by an endpoint whose retention is set by whoever runs it, so they may stop resolving at any
+time. Both still resolved when this line was last checked. The mainnet evidence is bytes in the
+repo for the same reason:
 `python3 scripts/verify_proof_offline.py` verifies both bundles offline with no network and cannot
 rot.
 

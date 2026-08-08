@@ -47,7 +47,7 @@ cannot print a pass. Last line:
 PASS  all 2 bundles verified offline: devnet-transactions.json, mainnet-transactions.json
 ```
 
-That covers 28 devnet and 3 mainnet transactions, and it holds whether or not any RPC still
+That covers 29 devnet and 3 mainnet transactions, and it holds whether or not any RPC still
 serves them. Among them you can read the durable-nonce replay guard on every publish, and the
 over-cap transfer the on-chain allowance program refused, on both chains.
 

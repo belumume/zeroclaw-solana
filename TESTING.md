@@ -50,7 +50,7 @@ the durable-nonce decoder (total over arbitrary bytes, short input always
 rejected, unknown version and state discriminants failing closed, and the stored
 nonce returned byte for byte).
 
-Two of those are worth naming. **Idempotence** is the property most sanitizers
+Two of them: **Idempotence** is the property most sanitizers
 actually fail, and a sanitizer that changes its own output is one that did not
 finish. **Returning the stored nonce verbatim** guards a real footgun: the runtime
 domain-hashes the nonce, so the stored 32 bytes are not the blockhash they came
@@ -74,7 +74,6 @@ only with low probability, the way a controller holds a button down across frame
 instead of re-deciding every frame. No individual character becomes less random;
 only the correlation between neighbours changes.
 
-That claim is measured rather than asserted.
 `stateful_generator_reaches_runs_the_iid_generator_cannot` samples both
 generators under a deterministic runner and compares the longest run of
 characters the sanitizer promises to strip. **The independent generator reaches
@@ -82,9 +81,8 @@ characters the sanitizer promises to strip. **The independent generator reaches
 which is what would happen if the switch probability were tuned until the
 generator was independent again.
 
-The honest result: the sanitizer holds on the correlated inputs too, so this
-found no defect. It closed a hole in the evidence, not in the code. Worth stating
-plainly, because a suite that has only ever been run on inputs it can easily
+The sanitizer holds on the correlated inputs too, so this
+found no defect. It closed a hole in the evidence, not in the code, because a suite that has only ever been run on inputs it can easily
 reach is not evidence about the inputs an attacker sends.
 
 *Cannot catch:* anything about a real validator, a real RPC endpoint, or a real
@@ -103,7 +101,7 @@ Promotion is a separate, deliberate step in the named tests below it, because an
 envelope that holds only because the generator never produced a counterexample is
 a description of the generator, not an invariant.
 
-The triage rule is the useful part, and it is not ours: always-holds is a
+The triage rule is not ours: always-holds is a
 candidate law, never-holds is discarded, and MOSTLY-holds is the interesting
 bucket. Two rows came back MOSTLY, and one of them was a law we had already
 written down and promoted.
@@ -388,7 +386,7 @@ The six `check-*` lines are pre-publish gates rather than tests. That count read
 2026-07-27 and five until 2026-08-01, each time one short of the list directly above it, which is
 the same class of defect these gates exist to close: a number nobody recounts after the list it
 describes grows. It has now been wrong twice in the paragraph that documents it being wrong, so
-the honest reading is that prose counts drift by default and the list is the authority.
+prose counts drift by default and the list is the authority.
 `check-doc-links.py` deliberately
 does not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
 signature that does not exist, so a status-code checker would report a confident pass on a dead
@@ -530,7 +528,7 @@ plugins, zero on the x402 gate.** The packages are `rustls-webpki`, `ed25519-dal
 every project in this ecosystem carries and that no simple bump resolves, because `solana-program`
 pins the version.
 
-The two high-severity ones are worth one more line, because "high" reads worse than it is here.
+"High" reads worse than it is here.
 Both are `rustls-webpki 0.101.7` in the two end-to-end harnesses, and those same lockfiles already
 resolve `rustls-webpki 0.103.13` as well: the old copy is a duplicate pulled in by an older `rustls`
 alongside the patched one, in a graph that never ships. Verified by reading both lockfiles rather
@@ -559,10 +557,8 @@ from the code. Of the three failures in the section above, it would have caught 
 them on its own. The drift one is now covered by `host-drift.yml`; the dropped cargo
 feature and the wrong-direction pre-flight assertion both live in the host and the live
 config, outside this repo's reach, which is why the pre-flight script reads the running
-daemon's own banner instead. That script, `.tools/demo-preflight.sh`, is gitignored and
-deliberately not in the tree, as above: it is hardcoded to one machine's socket, log path
-and home directory, so publishing it would ship a username rather than a capability. It is
-named here for its reasoning and is not something you can run from a clone.
+daemon's own banner instead. That script, `.tools/demo-preflight.sh`, is the local operator tool
+described above, gitignored for the reason given there.
 
 ## Keeping the properties honest
 
@@ -601,7 +597,7 @@ auditing for the others.
 
 The extension discriminant is a `u16`, and it earns the walk because a human acts on the
 result: `token-risk-check` reports RED, AMBER or GREEN from flags keyed on six of those
-values. Whether those six work is the easy question. The one worth answering is whether any
+values. Whether those six work is the easy question. The harder one is whether any
 of the other 65,529 can reach a flag they should not, in either direction. A false positive
 condemns a safe token; a false negative lets a mint carrying a real permanent delegate read
 as safe, and that is the direction that costs someone money.
@@ -639,7 +635,7 @@ wider. Both scopes are derived from git now, which is what puts the rest of the 
 
 `sanitizer-microworld/index.html` opens straight out of a clone, no server and no build step,
 and runs `solana_core::sanitize` compiled to WebAssembly. It is the shipped function, not a
-demonstration reimplementation, which is the only version of this worth having: a JavaScript
+demonstration reimplementation, which is the distinction that matters: a JavaScript
 lookalike would be a claim about the sanitizer rather than the sanitizer. The module is pure
 with no imports, which is why compiling it for the browser is possible at all.
 
@@ -695,7 +691,7 @@ two places this decoder deliberately differs, refusing address-table lookups and
 refusing trailing bytes, are classified as expected so that real findings cannot drown
 in known noise.
 
-The control gates the run, and it is the part worth checking first. Zero findings is
+The control gates the run. Zero findings is
 exactly what a harness with a broken detector prints, which is the same failure this
 build removed from six other gates. So the self-test plants a divergence in every
 field the comparison covers, signature count, blockhash, account key, instruction
@@ -728,7 +724,7 @@ so `-D warnings` still holds on both targets.
   3, decode is total, and anything it ACCEPTS is the unique canonical encoding of the
   value it returns. VERIFICATION SUCCESSFUL, 4s.
 
-The second is the one worth having. If two distinct byte strings decoded to the same
+The second is the stronger one. If two distinct byte strings decoded to the same
 length, a length prefix would be malleable, and a message could be re-encoded to
 different bytes that still parse as the same structure, which breaks any signature or
 hash taken over those bytes. Proptest samples 1024 of the 16,777,216 three-byte

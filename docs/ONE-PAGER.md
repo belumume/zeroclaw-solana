@@ -49,11 +49,11 @@ the oldest signature is the account's own creation.
 
 | Feed account | Publishes | Failed | Span | Median gap | Largest gap |
 |---|---|---|---|---|---|
-| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 898 | 0 | 12.7 d | 20.5 min | **61.5 min** |
+| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 986+ | 0 | 14.1 d | 20.5 min | **61.5 min** |
 | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
 
 The ARM node's 61.5 minutes is its worst run in
-twelve days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
+fourteen days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
 node's figure is the point: a reader who runs the command finds both, and an outlier they discover
 for themselves discredits everything around it.
 
@@ -224,7 +224,7 @@ one of them escalated to a private advisory. That page states its own scope in i
 because the project total is larger and reported elsewhere as eighteen filed; the two count
 different populations and the audit doc says which is which. Re-derive the live total rather than
 trusting either number here:
-`gh search issues --repo zeroclaw-labs/zeroclaw --author @me --limit 100 --json state`
+`gh search issues --repo zeroclaw-labs/zeroclaw --author belumume --limit 100 --json state`
 
 ## The five-second version
 

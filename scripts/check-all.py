@@ -67,6 +67,7 @@ def main() -> int:
     print(f"running {len(runnable)} gate(s), {len(EXCLUDED)} declared-excluded\n")
 
     failures = []
+    not_checked = []
     for g in runnable:
         t0 = time.time()
         r = subprocess.run(
@@ -81,8 +82,11 @@ def main() -> int:
         if r.returncode == CANNOT_CHECK:
             # The gate ran and said it had nothing to compare. That is not a finding, and
             # treating it as one is how a suite trains people to ignore reds.
-            why = (r.stdout or "").strip().split("\n")[0][:74] or "reported it cannot check"
+            why = (r.stdout or "").strip().split("\n")[0][
+                :74
+            ] or "reported it cannot check"
             print(f"  n/a  {g:<28} {why}")
+            not_checked.append(g)
             continue
         mark = "ok  " if r.returncode == 0 else "FAIL"
         print(f"  {mark} {g:<28} rc={r.returncode}  {dt:5.1f}s")
@@ -100,7 +104,17 @@ def main() -> int:
                 print(f"    {line}")
         return 1
 
-    print(f"\nall {len(runnable)} gate(s) pass")
+    # A gate that could not run is not a passing gate. Folding it into the pass count is the
+    # false-green this repo argues against everywhere else, and it read "all 11 pass" on a
+    # machine where one gate never ran.
+    checked = len(runnable) - len(not_checked)
+    if not_checked:
+        print(
+            f"\n{checked} of {len(runnable)} gate(s) pass. "
+            f"{len(not_checked)} COULD NOT CHECK and is NOT a pass: {', '.join(not_checked)}"
+        )
+    else:
+        print(f"\nall {checked} gate(s) pass")
     return 0
 
 

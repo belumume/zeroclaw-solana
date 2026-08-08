@@ -76,7 +76,7 @@ They arrive in two shapes:
 | `candidates_count=1`, no address diagnostic | 9 | a plain phone-address sender, resolved, absent from the allowlist |
 | `candidates_count=2` plus `sender is LID; resolved phone did not match any allowlist entry` | 4 | a linked-identity sender whose resolution **succeeded**, still absent from the allowlist |
 
-The second shape is worth separating out. WhatsApp increasingly addresses senders by a linked
+The second shape is different. WhatsApp increasingly addresses senders by a linked
 identity rather than a phone number, and there is a known upstream defect where such a sender
 cannot be matched against a phone-shaped allowlist at all. That defect produces a different
 message, naming a resolution that returned nothing. These records are the other branch: the
