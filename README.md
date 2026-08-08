@@ -1,8 +1,8 @@
 # zeroclaw-solana
 
-**[Watch the demo](https://youtu.be/a0jT0feuMAg)** · **[The one-page version](https://belumume.github.io/zeroclaw-solana/)** · **[Watch the shop refuse a tampered link](https://zeroclaw-shop-pay.pages.dev/index.html?lang=pt&u=c29sYW5hOkMzMzFYNFlDSENkY0VTZXhSVEtTakU1ZXRqc1d5V0pMSzczWjE4WldpTEhLP2Ftb3VudD0wLjM5JnNwbC10b2tlbj1FUGpGV2RkNUF1ZnFTU3FlTTJxTjF4enliYXBDOEc0d0VHR2tad3lURHQxdiZyZWZlcmVuY2U9NVp6Z3V6NE5zU1JGeEdrSGZNNEttSlROVlBNSjJQM2pGYTJ5OGJUSFk0a1cmbGFiZWw9WmVyb0NsYXclMjBTaG9wJm1lc3NhZ2U9UGVkaWRv)**
+<video src="https://belumume.github.io/zeroclaw-solana/docs/assets/zeroclaw-demo-1080p.mp4" controls width="100%"></video>
 
-That third one costs nothing and needs no wallet: it is a real checkout whose recipient has one character changed, and the page shows both addresses in full and withholds the pay button. The [unmodified order](https://zeroclaw-shop-pay.pages.dev/index.html?lang=pt&u=c29sYW5hOkMzMzFYNFlDSENkY0VTZXhSVEtTakU1ZXRqc1d5V0pMSzczWjE4WldpTEhKP2Ftb3VudD0wLjM5JnNwbC10b2tlbj1FUGpGV2RkNUF1ZnFTU3FlTTJxTjF4enliYXBDOEc0d0VHR2tad3lURHQxdiZyZWZlcmVuY2U9RkwzdEIyd1E3eEtabVlROHNWSnFMeEhjNG5FZVJrOXdQellWQmRHdE5hWHUmbGFiZWw9WmVyb0NsYXclMjBTaG9wJm1lc3NhZ2U9UGVkaWRv) is the control: same page, valid recipient, live button.
+**[Watch the shop demo](https://youtu.be/a0jT0feuMAg)** (2:15, 4K) · **[Try it live](https://belumume.github.io/zeroclaw-solana/)** — the running system, including a checkout you can exercise yourself with no wallet and no funds.
 
 Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents, both running now, and the
 plugins, on-chain programs, skills and SOPs they run on.
