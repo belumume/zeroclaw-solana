@@ -266,9 +266,9 @@ happens. Scripting it instead? Send a browser `User-Agent`, because Cloudflare a
 
 **Repo:** https://github.com/belumume/zeroclaw-solana
 **Write-up:** [docs/WRITEUP.md](WRITEUP.md) &nbsp;&nbsp; **Run it:** [QUICKSTART.md](../QUICKSTART.md)
-**Demo:** superseded. The cut at
-[.demo-assets/cut/zeroclaw-solana-demo.mp4](../.demo-assets/cut/zeroclaw-solana-demo.mp4)
-(2:39) carries synthetic narration and is kept only so nothing that once linked it breaks.
-It is not advertised, and the submission's video is recorded separately.
+**Demo:** [youtu.be/a0jT0feuMAg](https://youtu.be/a0jT0feuMAg) (2:15, 4K), or the same cut
+served from this repo at
+[docs/assets/zeroclaw-demo-1080p.mp4](assets/zeroclaw-demo-1080p.mp4) with
+[captions](assets/zeroclaw-demo.vtt), so it plays without depending on a third party.
 **Injection transcript:** [docs/transcripts/injection-refund-redirect.md](transcripts/injection-refund-redirect.md)
 **Mainnet custody proof:** [docs/MAINNET-PROOF.md](MAINNET-PROOF.md)
