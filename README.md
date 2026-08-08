@@ -1,6 +1,6 @@
 # zeroclaw-solana
 
-<video src="https://belumume.github.io/zeroclaw-solana/docs/assets/zeroclaw-demo-1080p.mp4" controls width="100%"></video>
+[![The ZeroClaw shop chat: a customer orders R$ 2, and the agent replies with a payment link and the conversion to 0.39 USDC on Solana mainnet at the quoted ECB rate](docs/assets/demo-poster.jpg)](https://youtu.be/a0jT0feuMAg)
 
 **[Watch the shop demo](https://youtu.be/a0jT0feuMAg)** (2:15, 4K) · **[Try it live](https://belumume.github.io/zeroclaw-solana/)**: the running system, including a checkout you can exercise yourself with no wallet and no funds.
 
