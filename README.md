@@ -1,5 +1,10 @@
 # zeroclaw-solana
 
+**[Watch the demo](https://youtu.be/a0jT0feuMAg)** ·
+**[Read the one-page version](https://belumume.github.io/zeroclaw-solana/)** ·
+**[Pay the shop yourself](https://zeroclaw-shop-pay.pages.dev/?u=c29sYW5hOkMzMzFYNFlDSENkY0VTZXhSVEtTakU1ZXRqc1d5V0pMSzczWjE4WldpTEhKP2Ftb3VudD0wLjM5JnNwbC10b2tlbj1FUGpGV2RkNUF1ZnFTU3FlTTJxTjF4enliYXBDOEc0d0VHR2tad3lURHQxdiZyZWZlcmVuY2U9RkwzdEIyd1E3eEtabVlROHNWSnFMeEhjNG5FZVJrOXdQellWQmRHdE5hWHUmbGFiZWw9WmVyb0NsYXclMjBTaG9wJm1lc3NhZ2U9UGVkaWRv)**
+(real mainnet USDC, 0.39, no account needed)
+
 Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents, both running now, and the
 plugins, on-chain programs, skills and SOPs they run on.
 
