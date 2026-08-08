@@ -5,7 +5,7 @@ Two use cases, one suite, both running, and they do not sit on the same network.
 in real **mainnet** USDC. The custody refusal is on **mainnet** too, against an audited program we
 did not write and cannot change. The DePIN feed publishes to **devnet**, deliberately: the program
 that owns its account would cost more to deploy on mainnet than the unbroken history it would throw
-away is worth, and that trade is costed further down rather than asserted here. Either one is a
+away is worth, and that trade is costed further down. Either one is a
 submission on its own; what is
 claimed here is that they share a single custody spine rather than being two projects in a
 folder. One coherent
@@ -19,10 +19,10 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    signs each reading with a device key the host never exposes, and publishes a
    typed on-chain feed another program consumes. Two publish paths share the same device
    signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
-   publisher runs the durable feed on a schedule. As of 2026-08-07T00:10Z that feed carries **898
-   publishes and zero failures across 12.7 days**, unbroken since 2026-07-25, at a median gap of
+   publisher runs the durable feed on a schedule. As of 2026-08-08T06:05Z that feed carries **at least 986
+   publishes and zero failures across 14.1 days**, unbroken since 2026-07-25, at a median gap of
    20.5 minutes. Its largest gap is 61.5 minutes, and a second publisher running the same path from
-   a laptop has a largest gap of 36 hours because the laptop sleeps. Both outliers are stated here
+   a laptop has a largest gap of 36 hours because the laptop sleeps. Both outliers are named
    because the command that reproduces the good numbers is the same command that finds them:
    `python demo/chain_history.py`. Re-derive rather than trusting this paragraph; the count only
    grows. You can message the node on Telegram to ask what it saw and why a reading was refused.
@@ -101,7 +101,7 @@ at mainnet-beta, the gate accepted a genuine payment and broadcast it:
 That is 1.000000 mainnet USDC, memo `x402-18c905bdbdf70730-0`, finalized, `err: None`. Re-derive
 with `getSignatureStatuses` against `api.mainnet-beta.solana.com`.
 
-**The honest shape of that: the paywall settles on mainnet, the goods are devnet.** The reading it
+**The split: the paywall settles on mainnet, the goods are devnet.** The reading it
 served in that same response came from feed `JEtuZkcR…` on devnet at sequence 818, because a
 `DeviceFeed` account is owned by `zeroclaw_oracle` and that program is deployed on devnet only.
 Putting the feed on mainnet is a program deployment we have not paid for, not a configuration
@@ -135,7 +135,7 @@ genuine on-chain transfer the client signs, the verification reads the transacti
 the replay refusal is enforced by a single-use memo nonce. What has not been shown is somebody
 else choosing to pay for the data.
 
-**What fought us on wasm32-wasip2 (the honest list):**
+**What fought us on wasm32-wasip2:**
 1. `--features plugins-wasm` alone is a trap: the runtime integrates but no JIT backend
    ships, so every plugin loads as discovered-but-unregistered ("failed to load code").
    The working invocation is `plugins-wasm,plugins-wasm-cranelift`.
@@ -240,8 +240,8 @@ The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM. We
   work, and string work does not need a sandbox. So the live shop uses the `solana-pay` SKILL,
   and the plugin remains only as evidence of the reasoning.
 
-  **The original justification for that demotion was wrong, and the correction is worth more
-  than the decision.** We wrote that the worst failure of a malformed URL is a payment that
+  **The original justification for that demotion was wrong, and the correction is the part
+  that generalises.** We wrote that the worst failure of a malformed URL is a payment that
   never starts, so no funds are at risk. An audit pointed out the real failure is a
   *well-formed* URL carrying somebody else's recipient. That routes around every custody
   control rather than defeating one: no key is touched, nothing is signed, no approval fires,
@@ -300,7 +300,7 @@ DECISIONS.md.
 ## How the bytes are checked, since the custody claims rest on them
 
 Everything below about custody assumes the transaction our code builds is the transaction the
-chain will see. That assumption is the one worth attacking, so it is checked four ways, and
+chain will see. That assumption is checked four ways, and
 the layers are deliberately different in kind rather than more of the same.
 
 **Known answers.** Message serialization is byte-identical to `solana-sdk`'s for legacy and v0
@@ -406,7 +406,7 @@ a read-only plugin: any T0 lens answers the question it is handed. Closing it ne
 expected amount to come from an order ledger the agent cannot write, which is a design we have
 not built, so it is a stated boundary rather than a solved one.
 
-One narrower class inside that boundary is closed, and it is worth separating from the rest
+One narrower class inside that boundary is closed, and it is separated out here
 because the two are easy to confuse. The BRL conversion used to be computed by the model and
 checked by nothing: the pay link carried an `amount=` that no code had ever recomputed.
 `pay_link.py` now takes the order value and the rate, redoes the division at two decimal places
@@ -457,7 +457,7 @@ no corroboration option at all. It simulates, broadcasts and confirms the buyer'
 one endpoint, and on success it serves the reading and writes the sale to its earnings ledger, so
 an endpoint that fabricates a confirmation is believed exactly as `payment-watch` would have
 believed one before the fix above. The fix went to the plugin and the class was left un-swept,
-which is stated here rather than quietly closed, because the component that actually takes money
+because the component that actually takes money
 is where a residual is worth the most. Two things bound it and neither removes it. The gate holds
 no key and has no spend path, so the worst case is a reading served free and a wrong line in the
 ledger rather than funds leaving. And the buyer signs their own transfer, so a forged confirmation
@@ -506,7 +506,7 @@ The tiers in words:
   unsigned-build-needs-approval gate, since the agent never holds a broadcast-ready transaction.
   A DELEGATED spend adds a third, the audited on-chain allowance program, which bounds the agent
   whether or not it complies. The refund an attacker asks for is a direct transfer, and
-  `spl-transfer-build` contains zero references to the allowance program id, so the honest count
+  `spl-transfer-build` contains zero references to the allowance program id, so the count
   on that path is two. Neither path lets the model move funds on its own,
   and this is demonstrated live on devnet: the agent's session key signed an over-cap transfer
   and the program rejected it (custom error 0x12c), while a within-cap transfer settled (see
@@ -565,7 +565,7 @@ The tiers in words:
   devnet). An operator who is deceived into approving still cannot exceed a limit the chain
   enforces.
 
-  The residual, stated plainly: a spend that is within cap, to a destination the operator
+  The residual: a spend that is within cap, to a destination the operator
   accepts, still rests on the operator. That surface is narrowed here, not closed.
 - Third-party trust declared: none held; RPC endpoints and open-meteo are read-only inputs;
   no MCP servers in the loop.
@@ -592,7 +592,7 @@ The tiers in words:
   between-bytes bound ourselves, at the cost of hand-rolling the request path that the client
   exists to provide. We have not made that trade, and the reason is that the egress allowlist
   below already bounds who can do this to us, which is a cheaper control than rewriting every
-  network call. Stating it as a decision rather than a wall.
+  network call.
   What actually limits this here is the egress allowlist: four hosts, so the slow endpoint has to
   be one we already chose to trust rather than anything an attacker names. It costs liveness, not
   custody, since no funds move on a hung read. Stated because a reviewer who reads the host's
@@ -650,8 +650,7 @@ Scoped non-goals (deliberate):
   entry is a claim about WHO the agent is. Every custody guarantee here is a bound on WHAT it can
   do, enforced by an audited program that does not care about identity, which is the whole reason
   the bound survives an agent that has been deceived. Integrating it would add a surface without
-  moving the guarantee, and the brief scores depth over breadth. Recorded as a decision with its
-  reasoning rather than as an omission.
+  moving the guarantee, and the brief scores depth over breadth.
 
 **Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC at a stated
 rate source (ECB reference), so a merchant charges "R$120" and the customer pays the USDC
@@ -672,7 +671,7 @@ allowlist. Competing with audited wallet infrastructure on its own ground for a 
 fails the obvious question, which is why not just use Swig. So the custody story rests on the
 audited Allowances program instead, and an over-cap transfer signed by the agent's own session
 key is rejected on chain with custom error 0x12c (300, `AmountExceedsLimit`, sourced to the
-upstream program in MAINNET-PROOF). That is demonstrated rather than asserted.
+upstream program in MAINNET-PROOF).
 
 **A Blink for the shop payment.** Sponsor-endorsed and a cheap extra bullet. The brief
 recommends routing through a Blink specifically where building the transaction yourself is the
@@ -705,13 +704,13 @@ other side. A bank transfer leaves no trace this software can read, so the only 
 PIX invoice paid is for a human to say it was. Every other payment here is confirmed by
 checking amount, mint and destination against the chain, and the value of that is precisely
 that it does not rest on anyone's word. A leg that could only ever rest on someone's word
-would take the claim out of the rest. What is delivered instead is the honest half: BRL
+would take the claim out of the rest. What is delivered instead is BRL
 invoicing with USDC settlement at a stated rate source.
 
 **A plugin we had already built.** `solana-pay-request` was written as a Tier 3 plugin, and the
 tier test says a URL built from known inputs is a skill. It was demoted. It stays in the tree
 as evidence of the reasoning rather than deleted, because the brief scores correct layering and
-the honest way to show that discipline is to apply it to our own work when it costs us a
+showing that discipline means applying it to our own work when it costs us a
 component.
 
 ## Reproducibility (links)
@@ -727,8 +726,7 @@ and SOP install, cron, and the x402 node. It ends with a sharp-edges troubleshoo
 where every row is a real cost we paid. Secrets are the operator's own; no secret of ours is
 needed at any step.
 
-**Config.** The running posture is documented rather than described, and
-[`scripts/check-config-drift.py`](../scripts/check-config-drift.py) compares the documented
+**Config.** [`scripts/check-config-drift.py`](../scripts/check-config-drift.py) compares the documented
 set against the live one by machine, because the two had silently diverged once before.
 
 **SOPs.** [`payment-confirmation`](../sops/payment-confirmation/SOP.md) is the one that would close
@@ -775,13 +773,13 @@ and the discriminating detail is in the `Caused by:` chain underneath, which a t
 
 The type was wrong by **one enum variant**. Our vendored `wit/v0/logging.wit` declares
 `plugin-action` with 38 cases; the host binary we run declares 37. The difference is one extra
-`memory-audit` case that landed upstream on 2026-07-24, after the host we build against, and that
+`memory-audit` case that landed upstream on 2026-07-23, after the host we build against, and that
 is the whole defect. Component-model interfaces match
 **nominally**, so 37 and 38 are different types, the whole `logging` instance fails typecheck, and
 every plugin importing it dies at instantiation regardless of what else is correct. Copying the
 host's `logging.wit` over ours and rebuilding took 28 seconds and fixed **one** plugin.
 
-**The honest count, because an earlier draft of this paragraph claimed the fix took instantiation
+**The count, because an earlier draft of this paragraph claimed the fix took instantiation
 failures "from 14 to 0" and that was false.** Only `payment-watch` was rebuilt and redeployed. Six
 of the eight still carry the 38-case file and still fail to instantiate, so this box has run
 exactly one WASM tool plugin. The 14-to-0 figure came from a run that measured a real number about
@@ -810,7 +808,7 @@ the parser and requires the incident to go undetected.
 **The paying half of this loop is real and verifiable on mainnet; the announcing half is not yet
 proven end to end.** With the plugin instantiating, the scheduled run still terminates on a
 different error we have not finished reading, and no settlement has been announced to the owner's
-channel. We would rather write that down than let a judge find it.
+channel.
 [`evening-reconciliation`](../sops/evening-reconciliation/SOP.md) reconciles the shop's open payment
 requests against on-chain settlement daily and holds the human checkpoint on the refund path.
 [`node-earnings-report`](../sops/node-earnings-report/SOP.md) reports the DePIN node's x402
@@ -866,13 +864,12 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   hardware we cannot forge from here, and a `systemd --user` timer with lingering keeps it
   publishing whether or not any laptop is awake.
 
-  **What that node actually is, said plainly because the paragraph above would otherwise let you
-  assume.** It is `zc-arm-ref`, a VM.Standard.A1.Flex instance in Oracle's me-jeddah-1 region,
+  **What that node actually is, since the paragraph above invites the wrong assumption.** It is `zc-arm-ref`, a VM.Standard.A1.Flex instance in Oracle's me-jeddah-1 region,
   running on their free tier at a measured 0.00 EUR. An Ampere Altra is genuinely ARM, so "ARM
   node" is accurate, but it is a rented virtual machine rather than a board anyone owns. Declaring
   it costs nothing and hiding it would be the same failure this submission spends the custody
   section arguing against: a third party you depend on belongs in the threat model. Oracle can
-  reclaim that instance, and the honest scope of the durability claim is that the feed has
+  reclaim that instance, and the scope of the durability claim is that the feed has
   published without failing for as long as the table says, on infrastructure we do not control.
 
   Nothing downstream of that changes. The key still never left the box, this workstation still

@@ -133,7 +133,7 @@ audited on-chain program rather than by any jail or regex. The assets actually a
 customer funds, shop business data and durable agent memory, and an outbound regex is the
 wrong layer for all three while demonstrably mangling public on-chain data.
 
-**Consequence.** Stated plainly in QUICKSTART with the reasoning, because a reviewer who sees
+**Consequence.** QUICKSTART carries it with the reasoning, because a reviewer who sees
 a disabled security setting deserves the argument rather than a silent flag. An operator who
 does hold secrets reachable from this agent should keep the detector on and expect broken
 payment links until upstream grows an allowlist.
