@@ -213,7 +213,7 @@ diff <(sed -n '/enum plugin-action/,/}/p' <path-to-host>/wit/v0/logging.wit) \
      <(sed -n '/enum plugin-action/,/}/p' wit/v0/logging.wit)
 ```
 Empty diff means you are in sync. The diff can be non-empty in **either** direction and they
-need opposite fixes, which is worth stating plainly because getting it backwards costs a day:
+need opposite fixes, and getting it backwards costs a day:
 
 - **Host has a variant this repo lacks.** Add it to `wit/v0/logging.wit` here and rebuild all
   plugins.
@@ -380,7 +380,7 @@ zeroclaw config set agents.demo.skill_bundles '["default"]'
   at risk are not secrets anyway. If you hold secrets elsewhere, keep the detector on and
   expect broken links until upstream grows an allowlist.
 - `shell` is auto-approved, which is the line in this posture a reviewer should push on
-  hardest, so here is the honest account rather than a reassurance. It is what lets the
+  hardest. It is what lets the
   agent run the pay-link generator and the earnings summarizer without a human in the loop
   on every order, and it is bounded by the workspace jail, which is a filesystem flag and
   not a sandbox. The reason that trade is acceptable HERE is the same reason stated above:

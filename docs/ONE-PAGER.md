@@ -52,7 +52,7 @@ the oldest signature is the account's own creation.
 | `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 898 | 0 | 12.7 d | 20.5 min | **61.5 min** |
 | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
 
-Both largest gaps are stated rather than smoothed. The ARM node's 61.5 minutes is its worst run in
+The ARM node's 61.5 minutes is its worst run in
 twelve days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
 node's figure is the point: a reader who runs the command finds both, and an outlier they discover
 for themselves discredits everything around it.
@@ -69,14 +69,13 @@ The ARM node is the one the durability claim rests on. Its key was generated on 
 `openssl rand -hex 32` and has never left it, so this workstation cannot forge a reading for it, and
 a `systemd --user` timer with lingering keeps it publishing with no laptop in the loop.
 
-The honest part, stated here rather than left for you to find. Zero failures is exact and covers
+Zero failures is exact and covers
 both devices: no transaction has ever errored. Continuity is where they differ. The node's largest
 gap is 61.5 minutes, one interruption across the span in the table above, so "every twenty minutes"
 is true at the median with one
 hour-long interruption. The second device is laptop-hosted and its largest gap is 36 hours, because
 a laptop sleeps. That is the reason the node exists, and the reason the headline claim is the node's
-rather than the pair's. Both are the sort of thing the call above would have shown you anyway, which
-is the only reason either is worth stating: a number you can check is worth more than a rounder one
+rather than the pair's. Both are the sort of thing the call above would have shown you anyway: a number you can check is worth more than a rounder one
 you cannot.
 
 ---

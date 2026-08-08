@@ -15,7 +15,7 @@ oracle program, where a separate consumer program reads it and acts. A `systemd`
 publishing with no laptop involved. The same node also sells that reading per request over x402,
 so the machine earns the gas it spends: `curl https://x402.perfpilot.dev/price` returns an HTTP
 402 challenge with two price tiers and a single-use nonce, and the nonce changes on every request.
-Two limits are worth stating here rather than leaving you to find them. The reading comes from a
+Two limits. The reading comes from a
 keyless public weather API on the current host rather than from a physical probe; a Raspberry Pi
 with a DHT11 is the hardware path, and the on-chain half is identical either way, because what is
 signed is the value and the device key, not the enclosure. And that x402 endpoint is a live
@@ -204,7 +204,7 @@ because it queries Kamino's REST API rather than an RPC, and Kamino runs on main
 its T1 successor and is what actually publishes the live feed. The reasoning for both calls is
 in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
-## The safety property worth knowing about
+## The safety property
 
 On-chain data is attacker-controlled. A token name or a memo can carry control characters,
 bidi overrides, or injection framing aimed at whatever reads it next, which for an agent is
