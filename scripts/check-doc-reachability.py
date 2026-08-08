@@ -42,7 +42,6 @@ MIN_DOCS = 10  # a walk finding fewer than this is broken, not clean
 ACCEPTED = {
     "docs/upstream/whatsapp-policy-fail-open.md": "a filed upstream report; its canonical home is the GitHub issue, which the write-up links",
     "wit/VERSIONING.md": "reference for anyone editing the vendored WIT; reached from that directory, not from prose",
-    "docs/SUBMISSION-CAPTURE-RIG.md": "shoot-production reference for whoever is behind the camera; the only surfaces that could route to it are judge-facing, where a link to our capture settings is process leakage rather than routing",
 }
 
 
@@ -111,6 +110,22 @@ def main() -> int:
             "      The discovery step is broken, so a clean result would mean nothing."
         )
         return 2
+
+    # An exception list is itself a claim, and it rots. An ACCEPTED entry naming an untracked
+    # path pre-excuses a document that does not exist, so if one is ever added there it is
+    # exempt by an entry nobody remembers writing. That is this gate's own thesis, one level up.
+    stale = [rel for rel in sorted(ACCEPTED) if rel not in set(docs)]
+    if stale:
+        print(
+            f"\n{len(stale)} ACCEPTED entr(ies) name a document that is not tracked:\n"
+        )
+        for rel in stale:
+            print(f"  ?  {rel}")
+        print(
+            "\n      Remove the entry, or track the document it names. An exception for a path\n"
+            "      nobody tracks silently exempts whatever is added there later."
+        )
+        return 1
 
     files, dirs = collect_links(docs)
     orphans = [r for r in sorted(docs) if why_reachable(r, files, dirs) is None]

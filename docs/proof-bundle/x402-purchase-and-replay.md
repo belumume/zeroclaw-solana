@@ -95,7 +95,7 @@ invalid: it is a real, settled, on-chain transaction. It is refused because its 
 HTTP 402. The refusal is not a dead end: it carries a fresh challenge, so an honest client that
 retried by accident can pay again correctly rather than being left stuck.
 
-This is the property worth reading twice. A settled payment is not a bearer token for unlimited
+A settled payment is not a bearer token for unlimited
 reads. The seller binds each payment to one challenge, so possession of a valid payment proves
 exactly one purchase.
 

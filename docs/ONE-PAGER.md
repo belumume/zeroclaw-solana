@@ -1,7 +1,7 @@
 # ZeroClaw on Solana: an agent bounded by the chain, and a node that pays its own gas
 
 **Two things run, both self-hosted, both auditable by a stranger in an evening.** A DePIN node that
-signs its own sensor readings on-chain and *sells* them per request, and a merchant terminal that
+signs its own readings on-chain and *sells* them per request, and a merchant terminal that
 takes an order in Portuguese and settles in USDC. Every claim below is checkable with one command
 or one link. Nothing here is a screenshot of something that used to work.
 
@@ -17,7 +17,8 @@ The node is an Ampere ARM instance on Oracle's free tier, not a board on a desk,
 here because the rest of this page asks you to trust what runs where. What the arrangement buys is
 the part that matters: its signing key was generated on that box and has never left it, and a
 `systemd --user` timer with lingering publishes on a schedule no laptop is in. A Raspberry Pi with
-a DHT11 is a drop-in for the reading source and the on-chain half is identical either way.
+a DHT11 is a drop-in for the reading source and the on-chain half is identical either way. Today the
+reading comes from a keyless public weather API on that host rather than from a physical probe.
 
 **A shop that takes money without holding keys.** A merchant agent on Telegram and WhatsApp
 quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in mainnet
@@ -51,7 +52,7 @@ the oldest signature is the account's own creation.
 | `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 898 | 0 | 12.7 d | 20.5 min | **61.5 min** |
 | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
 
-Both largest gaps are stated rather than smoothed. The ARM node's 61.5 minutes is its worst run in
+The ARM node's 61.5 minutes is its worst run in
 twelve days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
 node's figure is the point: a reader who runs the command finds both, and an outlier they discover
 for themselves discredits everything around it.
@@ -68,13 +69,13 @@ The ARM node is the one the durability claim rests on. Its key was generated on 
 `openssl rand -hex 32` and has never left it, so this workstation cannot forge a reading for it, and
 a `systemd --user` timer with lingering keeps it publishing with no laptop in the loop.
 
-The honest part, stated here rather than left for you to find. Zero failures is exact and covers
+Zero failures is exact and covers
 both devices: no transaction has ever errored. Continuity is where they differ. The node's largest
-gap is 61.5 minutes across 11.6 days, so "every twenty minutes" is true at the median with one
+gap is 61.5 minutes, one interruption across the span in the table above, so "every twenty minutes"
+is true at the median with one
 hour-long interruption. The second device is laptop-hosted and its largest gap is 36 hours, because
 a laptop sleeps. That is the reason the node exists, and the reason the headline claim is the node's
-rather than the pair's. Both are the sort of thing the call above would have shown you anyway, which
-is the only reason either is worth stating: a number you can check is worth more than a rounder one
+rather than the pair's. Both are the sort of thing the call above would have shown you anyway: a number you can check is worth more than a rounder one
 you cannot.
 
 ---

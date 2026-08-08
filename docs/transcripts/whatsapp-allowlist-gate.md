@@ -69,7 +69,7 @@ in full, unedited apart from line wrapping:
   "severity_text": "WARN", "service": { "name": "zeroclaw", "version": "0.8.3" } }
 ```
 
-They arrive in two shapes, and the difference between them is the interesting part:
+They arrive in two shapes:
 
 | shape | count | what it means |
 |---|---|---|
@@ -111,7 +111,7 @@ which is arithmetically correct, since 45 divided by 5.0827 is 8.8534, and the p
 carries ends in `&lang=pt`, so the Portuguese path is the one a Brazilian customer actually
 gets rather than one that merely exists in the code.
 
-The negative half of that observation is the part worth stating: **no refusal record was
+The negative half of that observation: **no refusal record was
 written for it.** The trace still ends at 12:00:41Z. So the admit is confirmed twice over, by
 the reply and by the absence of the warning that every denied message produces.
 
@@ -160,7 +160,7 @@ that track sender-key distribution to this device are all empty. A group message
 sender key each device must be given, and this device has never been given one, so the message
 cannot be decrypted and nothing surfaces to the handler to accept or refuse.
 
-That is a real isolation and it is worth knowing, but it is an artifact of how this session was
+That is a real isolation, but it is an artifact of how this session was
 paired rather than a control anyone designed, and it would evaporate if the distribution state ever
 syncs. It is recorded here as a mechanism, not claimed as a defence.
 
@@ -183,7 +183,7 @@ the service immediately, so the guard was observed failing and passing rather th
 Be precise about which claim that supports. It establishes that an operator **cannot deploy an
 open group posture on this host**, deterministically, before any model runs. It does not
 establish what the runtime does with a group message that arrives, and that remains unmeasured
-for a reason worth stating plainly rather than hiding behind the guard: no group message has
+for a plain reason: no group message has
 reached the handler, so there has been nothing for the runtime policy to act on.
 
 The group half therefore rests on two legs and openly lacks a third. The code path is read and

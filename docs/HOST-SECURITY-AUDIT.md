@@ -88,7 +88,7 @@ It cannot be inert, because the chain either rejected the transfer or it did not
 
 ## How the findings were verified
 
-The interesting part of this audit is not the count, it is the ratio.
+The ratio matters more than the count.
 
 | stage | candidates |
 |---|---|
@@ -146,7 +146,7 @@ or tested:
 No attacker is required. A DNS blip does it.
 
 The obvious rebuttal is that the leak detector would have caught it if it were wired onto that
-path. It would not, and this is the part worth reading twice. The detector's only Google pattern
+path. It would not. The detector's only Google pattern
 is `AIza[a-zA-Z0-9_-]{35}`, while keys issued by AI Studio today carry an `AQ.` prefix. That
 character class excludes `.`, so the pattern fails at the third character and cannot match a
 current key at all. Enabling the mitigation everyone assumes exists would have changed nothing

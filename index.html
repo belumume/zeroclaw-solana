@@ -91,8 +91,11 @@
   <h1>An agent bounded by the chain, and a node that pays its own gas</h1>
   <p class="lede">
     Two things run, both self-hosted, both auditable by a stranger in an evening. A DePIN node that
-    signs its own sensor readings on-chain and <em>sells</em> them per request, and a merchant
-    terminal that takes an order in Portuguese and settles in USDC.
+    signs its own readings on-chain and <em>sells</em> them per request, and a merchant
+    terminal that takes an order in Portuguese and settles in USDC. The reading comes from a keyless
+    public weather API on that host rather than from a physical probe; a Raspberry Pi with a DHT11 is
+    the hardware path, and the on-chain half is identical either way, because what is signed is the
+    value and the device key rather than the enclosure.
   </p>
   <p>
     Every claim on this page is checkable with one command or one link. Nothing here is a
@@ -161,9 +164,9 @@
   the feed account.
 </p>
 <p class="note">
-  <strong>The honest part, stated here rather than left for you to find.</strong> Zero failures is
-  exact and covers both devices: no transaction has ever errored. Continuity is where they differ,
-  and the difference is the interesting part. The ARM node's largest gap is <strong>61.5
+  Zero failures is
+  exact and covers both devices: no transaction has ever errored. Continuity is where they differ.
+  The ARM node's largest gap is <strong>61.5
   minutes</strong> across 12.5 days, so "every twenty minutes" is true at the median with one
   hour-long interruption. The second device was laptop-hosted, so it slept, and its largest gap
   inside its run was <strong>36 hours</strong>. It has since stopped for good, which is stated
@@ -273,7 +276,7 @@ python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</
   its own positive control stops passing, so a green result cannot come from a broken checker.
 </p>
 
-<h2><span class="n">05</span>Four things in the repo worth a minute each</h2>
+<h2><span class="n">05</span>Four things in the repo</h2>
 <p>
   These are not extras bolted on for a demo. Each one exists because a specific claim elsewhere on
   this page would otherwise rest on our word, and each is exercisable by a stranger.

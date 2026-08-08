@@ -140,7 +140,7 @@ The publish log could not settle it either. It holds no failure line for those h
 the script never executed far enough to write one. Absence of a complaint was being read as
 absence of a problem.
 
-The root cause is worth more than the outage. A laptop that was switched off and a publisher
+A laptop that was switched off and a publisher
 that ran and failed produce an identical signature: both simply stop appending. No amount of
 reading that log separates them, so the verifier could not have been fixed on its own. The
 evidence it needed did not exist yet. The launcher now records an attempt before it runs and the
@@ -176,11 +176,11 @@ stalled, exit 2 when the network would not answer and the run therefore has no o
 
 Two other networked scripts were left alone on purpose. The allowance reproduction harness sends
 through a library that already retries until blockhash expiry, and its remaining reads crash
-loudly instead of printing a false verdict, which is honest failure rather than a lie. The
+loudly instead of printing a false verdict. The
 certified broadcaster runs on a twenty minute cron where a missed cycle heals itself before
 anyone looks, and it is the one place where retrying is not obviously free.
 
-The distinction that made the fixes safe is worth more than the fixes. Retrying inside the RPC
+The distinction that made the fixes safe: retrying inside the RPC
 helper cannot launder a broken claim into a healthy one, and not because we were careful: a
 claim that stopped holding does not raise. It arrives as a successful response carrying a
 different value and is judged by the caller. The helper only ever sees the network refusing.

@@ -26,8 +26,7 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    because the command that reproduces the good numbers is the same command that finds them:
    `python demo/chain_history.py`. Re-derive rather than trusting this paragraph; the count only
    grows. You can message the node on Telegram to ask what it saw and why a reading was refused.
-   It also SELLS that feed rather than only publishing it, which is the half worth reading
-   twice: another agent asks for a reading, gets an HTTP 402 with a price menu, signs its own
+   It also SELLS that feed rather than only publishing it: another agent asks for a reading, gets an HTTP 402 with a price menu, signs its own
    stablecoin transfer, and is served. No human is in that loop at any point and no facilitator
    sits in the middle, because the buyer is the fee payer. The gate holds no key beyond its own
    receiving address, so its entire power is recognising a payment made to it. A replay against a
@@ -71,15 +70,14 @@ blast radius of a hacked agent capped by on-chain math, not vibes.
 ## What we had to build (and what fought us)
 **Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (RPC settlement verification conjoining amount, mint, destination and reference, through the OWASP-LLM01 response sanitizer, with optional independent-endpoint corroboration so one compromised RPC cannot fabricate a settled payment), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 120 host tests across four suites including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
 
-**The x402 earning-node (`x402-feed-gate`), the frontier piece.** The DePIN node does not just
+**The x402 earning-node (`x402-feed-gate`).** The DePIN node does not just
 publish its feed, it SELLS it. A client asks for a reading; the node answers HTTP 402 with a
 price menu; the client pays a stablecoin transfer on Solana and signs it themselves; the node
 verifies the payment from the transaction bytes, settles it, and serves the reading. Custody
 is T0/T1: the gate holds no key but its public receiving address and cannot move funds, only
 recognise a payment made to it, so there is nothing to prompt-inject into paying out. Because
 the client is the fee payer, no facilitator is required and verification is pure Solana RPC. An
-in-code per-payer daily cap bounds it, and that cap survives a restart, which is the part worth
-stating. A counter held only in process memory stops being a bound the moment the unit restarts,
+in-code per-payer daily cap bounds it, and that cap survives a restart. A counter held only in process memory stops being a bound the moment the unit restarts,
 and under `Restart=always` a crash loop hands every payer a fresh full allowance. Nothing in the
 output would reveal it: the gate keeps answering correctly and keeps running every check it
 advertises, against state that was silently zeroed. So the ledger is rebuilt at boot from the
@@ -95,7 +93,7 @@ Proven end to end on devnet: a 402 challenge, a signed
 payment, on-chain settlement, the reading served, and a replayed payment refused. A device that
 pays for its own gas.
 
-**And proven once with real money, which is worth stating precisely rather than rounding up.**
+**And proven once with real money.**
 Reading the feed and settling the payment are separate concerns, so they take separate RPC
 endpoints (`X402_READ_RPC_URL`, `X402_SETTLE_RPC_URL`, both defaulting to `X402_RPC_URL`). Pointed
 at mainnet-beta, the gate accepted a genuine payment and broadcast it:
@@ -130,8 +128,7 @@ overrides the code's CAIP-2 default with the v1 friendly form. Running the valid
 candidate configuration BEFORE the deploy is what caught it; running it after would have shipped a
 half-fix that looked deliberate.
 
-The honest limit, stated here rather than left for a reviewer to derive from the addresses:
-buyer and seller are distinct wallets but both are ours, so what is proven is the mechanism, not
+Buyer and seller are distinct wallets but both are ours, so what is proven is the mechanism, not
 demand. The asset is not a stand-in, though. The payment settles in Circle's devnet USDC
 (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`), the token a real buyer would hold. Every step a stranger would exercise is real, the payment is a
 genuine on-chain transfer the client signs, the verification reads the transaction bytes, and
@@ -360,8 +357,7 @@ list derived from the dependency graph rather than guessed. Three CI workflows k
 honest on a machine that is not ours, deliberately separate so a red badge says which thing
 broke.
 
-The honest limit, stated in `TESTING.md` rather than left for a reviewer to find: of the three
-real failures that document records, CI would have caught none of them on its own. One is now
+Of the three real failures `TESTING.md` records, CI would have caught none of them on its own. One is now
 covered by a drift workflow; the other two live outside this repository. `TESTING.md` carries
 the full picture, including what each layer cannot catch.
 
@@ -378,7 +374,7 @@ The page is running `solana_core::sanitize` compiled to WebAssembly, so it is th
 defense rather than a demonstration reimplementation of it. Presets cover a bidirectional
 override, a zero-width split, injection framing with nothing to strip, newline smuggling, an
 overlong field, and all of them together. The raw panel names each invisible character inline,
-which is the part worth seeing: the browser renders the override attack convincingly in the
+and the browser renders the override attack convincingly in the
 input box while the panel underneath shows the real character order. The page also states what
 the sanitizer refuses to do, since framing is labelled rather than deleted and the decision
 stays with the approval gate and the on-chain cap.
@@ -404,7 +400,7 @@ of 0.01 and receive a *truthful* PAID for a 0.01 payment. The check is honest; t
 was asked was not.
 
 This is the same attack a rival entrant built their submission around, pointed at the
-verification path rather than the signing path, and it is worth stating plainly because our
+verification path rather than the signing path, and our
 own write-up names that attack for signing and did not name it here. It is not fixable inside
 a read-only plugin: any T0 lens answers the question it is handed. Closing it needs the
 expected amount to come from an order ledger the agent cannot write, which is a design we have
@@ -582,7 +578,7 @@ The tiers in words:
   two fall back to ten minutes each, and the between-bytes bound resets on every frame, so a drip
   slower than the call and faster than the fallback runs on. Upstream measured a two-second drip
   holding one call open for eleven minutes.
-  The interface is not what is missing, which is worth stating because it makes this fixable
+  The interface is not what is missing, which makes this fixable
   rather than merely regrettable. `wasi:http`'s `request-options` already defines
   `set-first-byte-timeout` and `set-between-bytes-timeout` next to the connect one, and the
   second of those is specified as the timeout for receiving each further chunk of the response
@@ -665,8 +661,7 @@ equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches
 
 The decisions that shaped this are mostly decisions not to build something, and those are the
 ones a reviewer cannot see from the tree. The full set with its reasoning is in
-`docs/DECISIONS.md`, including the consequence each one carries. Four are worth stating here
-because they are the questions this submission most obviously invites.
+`docs/DECISIONS.md`, including the consequence each one carries. Four are the questions this submission most obviously invites.
 
 **A novel on-chain custody program.** This was the plan, and it was killed by evidence rather
 than by effort. A source-level check found that Swig wallet already ships on-chain program
@@ -765,8 +760,7 @@ the same failure class as an agent that can be talked into moving funds, and it 
 custody argument in this submission rests on an on-chain program rather than on anything the model
 says.
 
-**This SOP is where we hit the component boundary the bounty's trap 2 names, and the diagnosis is
-worth more than the fix.** For the whole life of this project, every WASM tool plugin failed to
+**This SOP is where we hit the component boundary the bounty's trap 2 names.** For the whole life of this project, every WASM tool plugin failed to
 instantiate with:
 
 ```

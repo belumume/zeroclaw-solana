@@ -1,11 +1,13 @@
 # zeroclaw-solana
 
-[![The ZeroClaw shop chat: a customer orders R$ 2, and the agent replies with a payment link and the conversion to 0.39 USDC on Solana mainnet at the quoted ECB rate](docs/assets/demo-poster.jpg)](https://youtu.be/a0jT0feuMAg)
-
-**[Watch the shop demo](https://youtu.be/a0jT0feuMAg)** (2:15, 4K) · **[Try it live](https://belumume.github.io/zeroclaw-solana/)**: the running system, including a checkout you can exercise yourself with no wallet and no funds.
-
 Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents, both running now, and the
 plugins, on-chain programs, skills and SOPs they run on.
+
+[![The ZeroClaw shop chat: a customer orders R$ 2, and the agent replies with a payment link and the conversion to 0.39 USDC on Solana mainnet at the quoted ECB rate](docs/assets/demo-poster.jpg)](https://youtu.be/a0jT0feuMAg)
+
+The still above links to a 2:15 demo. The [landing page](https://belumume.github.io/zeroclaw-solana/)
+covers the same ground in text and ends with three checkout links you can open yourself: one has a
+single character changed in the recipient, and the page refuses it. Loading any of them sends nothing.
 
 **A DePIN node that pays for itself.** An ARM box takes an ambient temperature reading for
 Madinah, signs it with a key generated on that box, and lands it in a typed account owned by our
@@ -13,7 +15,7 @@ oracle program, where a separate consumer program reads it and acts. A `systemd`
 publishing with no laptop involved. The same node also sells that reading per request over x402,
 so the machine earns the gas it spends: `curl https://x402.perfpilot.dev/price` returns an HTTP
 402 challenge with two price tiers and a single-use nonce, and the nonce changes on every request.
-Two limits are worth stating here rather than leaving you to find them. The reading comes from a
+Two limits. The reading comes from a
 keyless public weather API on the current host rather than from a physical probe; a Raspberry Pi
 with a DHT11 is the hardware path, and the on-chain half is identical either way, because what is
 signed is the value and the device key, not the enclosure. And that x402 endpoint is a live
@@ -38,8 +40,9 @@ the reference is an additional optional condition, not the check itself. A payme
 wrong amount, or of a token the payer minted themselves, does not settle an order. Brazilian
 orders are quoted in BRL at a stated rate and settled in USDC.
 
-**The feed has published to devnet every 20 minutes since 2026-07-25, and not one of its
-transactions has failed.** The account holds the `RegisterDevice` call that created it plus one
+**The feed has published to devnet since 2026-07-25 and not one of its transactions has failed.**
+Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.
+The account holds the `RegisterDevice` call that created it plus one
 per reading, so the transaction count and the sequence number move together and both only climb.
 They read 898 and 897 at 2026-08-07T00:10Z, and are higher by the time you run the commands below. One
 `getSignaturesForAddress` against `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every
@@ -80,7 +83,7 @@ claims separately, and names what it does not cover.
 | Eight things we believed that were wrong, and the measurement that killed each | [`docs/WHAT-WE-GOT-WRONG.md`](docs/WHAT-WE-GOT-WRONG.md) |
 | Ten verified defects found in the HOST this runs on, all reported upstream | [`docs/HOST-SECURITY-AUDIT.md`](docs/HOST-SECURITY-AUDIT.md) |
 | The agent refusing an attack, verbatim | [`docs/transcripts/`](docs/transcripts/) |
-| To poke the sanitizer yourself, no build needed | [`sanitizer-microworld/index.html`](sanitizer-microworld/index.html) |
+| To poke the sanitizer yourself, no build needed | [the live microworld](https://belumume.github.io/zeroclaw-solana/sanitizer-microworld/) |
 
 ## Custody, which is the part that matters
 
@@ -117,8 +120,7 @@ The two links below are the **devnet** pair, not the mainnet trio just described
 served by an endpoint that keeps roughly four days of history, so by the time you read this they
 have probably expired. That is why the mainnet evidence is bytes in the repo rather than a link:
 `python3 scripts/verify_proof_offline.py` verifies both bundles offline with no network and cannot
-rot. Until 2026-08-04 this paragraph opened "Both transactions are clickable" directly under the
-mainnet claim, so the nearest antecedent was the mainnet trio and the links were devnet.
+rot.
 
 Kept because one of them opens on a failed transaction on purpose. The
 [within-cap transfer settled](https://explorer.solana.com/tx/5qyr7jJi8zb6SjZjnA2QT5C9nuZYgSw6raAefjmWnDDMf3JRgkQX19zssE57EpFSHVCCPfbj5qyxcYSQcfEq9W3Z?cluster=devnet);
@@ -202,7 +204,7 @@ because it queries Kamino's REST API rather than an RPC, and Kamino runs on main
 its T1 successor and is what actually publishes the live feed. The reasoning for both calls is
 in [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
-## The safety property worth knowing about
+## The safety property
 
 On-chain data is attacker-controlled. A token name or a memo can carry control characters,
 bidi overrides, or injection framing aimed at whatever reads it next, which for an agent is

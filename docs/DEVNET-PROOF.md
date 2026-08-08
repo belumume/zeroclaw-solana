@@ -99,7 +99,7 @@ change is the durability claim's scope, so read it as continuous operation on in
 not control. A Raspberry Pi with a DHT11 is a drop-in for the reading source and the on-chain half
 is byte-identical either way.
 
-That was a deliberate reversal, and it is worth stating because the easier path was
+That was a deliberate reversal, and the easier path was
 available. The first plan was to copy this workstation's existing device seed to the node so
 the new feed would inherit the old one's sequence history. That would have made "the device
 signs its own readings" architecturally true and literally false, and anyone reading the

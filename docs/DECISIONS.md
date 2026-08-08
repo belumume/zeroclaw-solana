@@ -177,7 +177,7 @@ the hard part," listing the protocols that hand back a ready transaction over RE
 Tier 1 friends of anyone who does not want to construct one. That motivation does not apply
 here: building the transaction is the part this submission does byte-correctly, validated
 against the reference implementation, so a Blink would replace a verified path with an
-outsourced one. The test that settled it is the one worth stating, because it applies to any
+outsourced one. The test that settled it applies to any
 feature added because a rubric mentions it. Delete the feature and see what changes. Delete
 Blinks and the shop behaves identically, which makes it decoration rather than a solution to a
 problem this build has.
@@ -200,8 +200,7 @@ dead annotations and produce no signal here.
 
 **Rejected: a full deterministic-simulation rig.** It is the right tool for a distributed
 system with real concurrency, and the wrong shape for a mostly pure library with a thin IO
-edge. That rejection stands. The conclusion drawn alongside it did not, and correcting it is
-worth more than the original call. Rejecting the rig had quietly become "this whole approach is
+edge. That rejection stands. The conclusion drawn alongside it did not. Rejecting the rig had quietly become "this whole approach is
 out of reach here," which is a different and wrong claim. The search underneath it needs no
 hypervisor when the target is already deterministic, and a decode path with no clock, no
 threads and no IO is exactly that. So `differential-fuzz/` now mutates real transactions and

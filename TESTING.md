@@ -465,7 +465,7 @@ identifiers, internal task numbers, file-and-line citations and session referenc
 these documents as the submission, so prose the repository would not defend is a defect in the
 deliverable rather than a matter of taste.
 
-Two scoping decisions in it are worth stating, because both were failures first. Fenced code
+Two scoping decisions in it were failures first. Fenced code
 blocks and blockquote lines are exempt throughout: a code sample or a quoted upstream comment is
 evidence, and normalising it would falsify the artifact rather than improve it. Two vendored paths
 are bounded by their upstream marker counts rather than by zero, so the gate notices if our own
@@ -518,8 +518,8 @@ toolchain's unfixable transitive advisories is what fell out of it. The Anchor w
 under `onchain/` is a separate graph and is not part of the shipped plugin surface.
 
 If you open this repository's Security tab you will see open Dependabot alerts, and the honest
-reconciliation is worth stating rather than leaving you to wonder how that sits beside "comes back
-clean". The two tools ask different questions. `cargo deny` runs against the ten graphs that ship.
+reconciliation sits beside "comes back
+clean" like this. The two tools ask different questions. `cargo deny` runs against the ten graphs that ship.
 Dependabot scans every `Cargo.lock` in the tree, including the ones that exist only to test the
 things that ship.
 
@@ -553,7 +553,7 @@ restored enum variant made our vendored copy a different type, and every plugin 
 have failed to register on a judge's from-source host while every test stayed green. It
 was caught by reading a chat channel, which is not a control. This is the control.
 
-What CI buys is narrower than a green badge suggests, and worth stating: it catches the
+What CI buys is narrower than a green badge suggests: it catches the
 failure where something builds here and nowhere else, and it catches a lockfile drifting
 from the code. Of the three failures in the section above, it would have caught none of
 them on its own. The drift one is now covered by `host-drift.yml`; the dropped cargo
