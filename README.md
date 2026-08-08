@@ -2,7 +2,7 @@
 
 <video src="https://belumume.github.io/zeroclaw-solana/docs/assets/zeroclaw-demo-1080p.mp4" controls width="100%"></video>
 
-**[Watch the shop demo](https://youtu.be/a0jT0feuMAg)** (2:15, 4K) · **[Try it live](https://belumume.github.io/zeroclaw-solana/)** — the running system, including a checkout you can exercise yourself with no wallet and no funds.
+**[Watch the shop demo](https://youtu.be/a0jT0feuMAg)** (2:15, 4K) · **[Try it live](https://belumume.github.io/zeroclaw-solana/)**: the running system, including a checkout you can exercise yourself with no wallet and no funds.
 
 Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents, both running now, and the
 plugins, on-chain programs, skills and SOPs they run on.
