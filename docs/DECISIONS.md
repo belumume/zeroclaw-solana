@@ -187,10 +187,6 @@ node, where it buys something a single-track entrant cannot copy quickly.
 
 ## 8. The Antithesis SDK was rejected, its technique was not
 
-The heading here used to say proof assistants were skipped, which stopped being true the moment
-the Kani harnesses landed and stayed on the page for a while afterwards. A heading that
-contradicts its own body is worse than a stale note, because the heading is what gets read.
-
 **Chosen.** Known-answer tests against the reference implementation, then property tests, then
 a proof where the domain is small enough to walk, then a search for the disagreements none of
 those were written to find, then live devnet.

@@ -188,8 +188,7 @@ Every row links to the live thread, so click through; this table is a summary an
 counts below were re-read from the GitHub API on 2026-08-10, not recalled, and they
 move in both directions as the maintainers triage: **eighteen issues filed, sixteen rated
 `priority:p1`, seven carrying `status:accepted` and twelve `status:in-progress`**, plus five pull
-requests of which **#9354 is MERGED**. The same query on 2026-08-04 returned fourteen accepted, so
-that is the triage moving issues forward rather than a count falling. Re-derive rather than trusting
+requests of which **#9354 is MERGED**. Re-derive rather than trusting
 the sentence:
 `gh search issues --repo zeroclaw-labs/zeroclaw --author belumume --limit 100 --json labels,state`.
 That command returns issues only, so the pull-request half of the sentence needs a second
@@ -700,10 +699,9 @@ mechanism we already have, on clients our customers are not using. If this shop 
 distributed on X, the calculation changes and the endpoint is worth adding then.
 
 **PIX.** Named in the brief and genuinely wanted, and still a non-goal, though not for the
-reason an earlier draft of this document gave. That draft said PIX needs a licensed provider
-and a custodian, and that is wrong: a static BR Code payload is EMV TLV plus a CRC over the
-merchant's own key, buildable offline, and nobody holds anything. The real obstacle is on the
-other side. A bank transfer leaves no trace this software can read, so the only way to mark a
+reason usually given. PIX does not need a licensed provider or a custodian here: a static BR
+Code payload is EMV TLV plus a CRC over the merchant's own key, buildable offline, and nobody
+holds anything. The real obstacle is on the other side. A bank transfer leaves no trace this software can read, so the only way to mark a
 PIX invoice paid is for a human to say it was. Every other payment here is confirmed by
 checking amount, mint and destination against the chain, and the value of that is precisely
 that it does not rest on anyone's word. A leg that could only ever rest on someone's word
@@ -782,15 +780,13 @@ is the whole defect. Component-model interfaces match
 every plugin importing it dies at instantiation regardless of what else is correct. Copying the
 host's `logging.wit` over ours and rebuilding took 28 seconds and fixed **one** plugin.
 
-**The count, because an earlier draft of this paragraph claimed the fix took instantiation
-failures "from 14 to 0" and that was false.** Only `payment-watch` was rebuilt and redeployed. Six
-of the eight still carry the 38-case file and still fail to instantiate, so this box has run
-exactly one WASM tool plugin. The 14-to-0 figure came from a run that measured a real number about
-the wrong object: the rebuild had been written to a directory the daemon does not load from, so the
-loaded binary was still the old one while the count was read from a window that never contained a
-load of the deployed path. The corrected measurement is `payment-watch` absent from the failing
-list while six siblings remain on it, which is also the positive control proving the query still
-detects failures rather than returning an empty set.
+**The count.** Only `payment-watch` was rebuilt and redeployed. Six of the eight still carry the
+38-case file and still fail to instantiate, so this box has run exactly one WASM tool plugin. The
+measurement to trust is `payment-watch` absent from the failing list while six siblings remain on
+it, which doubles as the positive control proving the query still detects failures rather than
+returning an empty set. A trap worth naming for anyone reproducing this: a rebuild written to a
+directory the daemon does not load from leaves the loaded binary stale, so a failure count read
+across that window comes back clean while nothing has actually changed.
 
 This is trap 2 and trap 4 in one defect. Trap 4 says:
 
