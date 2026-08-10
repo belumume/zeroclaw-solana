@@ -15,7 +15,9 @@ oracle program, where a separate consumer program reads it and acts. A `systemd`
 publishing with no laptop involved. The same node also sells that reading per request over x402,
 so the machine earns the gas it spends: `curl https://x402.perfpilot.dev/price` returns an HTTP
 402 challenge with two price tiers and a single-use nonce, and the nonce changes on every request.
-Two limits. The reading comes from a
+Three limits. That ARM box is a rented virtual machine rather than a board anyone owns: an Ampere
+A1 on Oracle's free tier, measured at 0.00 EUR. Ampere Altra is genuinely ARM, so the word is
+accurate, and naming which kind costs nothing. The reading comes from a
 keyless public weather API on the current host rather than from a physical probe; a Raspberry Pi
 with a DHT11 is the hardware path, and the on-chain half is identical either way, because what is
 signed is the value and the device key, not the enclosure. And that x402 endpoint is a live
