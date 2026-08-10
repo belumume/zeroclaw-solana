@@ -16,13 +16,13 @@ were all found, plus the pull requests that followed. Read live from the API rat
 here, since both figures move as maintainers triage:
 
 ```
-gh search issues --repo zeroclaw-labs/zeroclaw --author @me --limit 100 --json labels,state
-gh search prs    --repo zeroclaw-labs/zeroclaw --author @me --limit 50  --json state,title
+gh search issues --repo zeroclaw-labs/zeroclaw --author belumume --limit 100 --json labels,state
+gh search prs    --repo zeroclaw-labs/zeroclaw --author belumume --limit 50  --json state,title
 ```
 
-At the last read that returned eighteen issues, fourteen carrying `status:accepted`, sixteen rated
-`priority:p1`, and five pull requests of which one is merged. If a figure elsewhere disagrees with
-what those commands print, the commands are right.
+At the last read, 2026-08-10, that returned eighteen issues, sixteen rated `priority:p1`, seven
+carrying `status:accepted` and twelve `status:in-progress`, and five pull requests of which one is
+merged. If a figure elsewhere disagrees with what those commands print, the commands are right.
 
 Audited at `zeroclaw-labs/zeroclaw` commit `63f432da` (v0.8.3-182), a Rust workspace of 1064 source
 files across 31 crates.

@@ -185,14 +185,16 @@ the whole of it: a later audit of the host found ten more, and that is a separat
 lower down.
 
 Every row links to the live thread, so click through; this table is a summary and can go stale. The
-counts below were re-read from the GitHub API on 2026-08-04, not recalled, and they
-move in both directions as the maintainers triage: **eighteen issues filed, fourteen carrying
-`status:accepted`, sixteen rated `priority:p1`**, plus five pull requests of which **#9354 is
-MERGED**. Re-derive rather than trusting the sentence:
-`gh search issues --repo zeroclaw-labs/zeroclaw --author @me --limit 100 --json labels,state`.
+counts below were re-read from the GitHub API on 2026-08-10, not recalled, and they
+move in both directions as the maintainers triage: **eighteen issues filed, sixteen rated
+`priority:p1`, seven carrying `status:accepted` and twelve `status:in-progress`**, plus five pull
+requests of which **#9354 is MERGED**. The same query on 2026-08-04 returned fourteen accepted, so
+that is the triage moving issues forward rather than a count falling. Re-derive rather than trusting
+the sentence:
+`gh search issues --repo zeroclaw-labs/zeroclaw --author belumume --limit 100 --json labels,state`.
 That command returns issues only, so the pull-request half of the sentence needs a second
-line to be checkable at all: `gh search prs --repo zeroclaw-labs/zeroclaw --author @me --limit 100
---json number,state`.
+line to be checkable at all: `gh search prs --repo zeroclaw-labs/zeroclaw --author belumume
+--limit 100 --json number,state`.
 
 This paragraph previously read "if #9354 has merged by the time you read it, that is the
 outcome we were after". That was a conditional about something which had already happened,
@@ -240,8 +242,8 @@ The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM. We
   work, and string work does not need a sandbox. So the live shop uses the `solana-pay` SKILL,
   and the plugin remains only as evidence of the reasoning.
 
-  **The original justification for that demotion was wrong, and the correction is the part
-  that generalises.** We wrote that the worst failure of a malformed URL is a payment that
+  **The original justification for that demotion was wrong.** We wrote that the worst failure
+  of a malformed URL is a payment that
   never starts, so no funds are at risk. An audit pointed out the real failure is a
   *well-formed* URL carrying somebody else's recipient. That routes around every custody
   control rather than defeating one: no key is touched, nothing is signed, no approval fires,
@@ -660,7 +662,8 @@ equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches
 
 The decisions that shaped this are mostly decisions not to build something, and those are the
 ones a reviewer cannot see from the tree. The full set with its reasoning is in
-`docs/DECISIONS.md`, including the consequence each one carries. Four are the questions this submission most obviously invites.
+`docs/DECISIONS.md`, including the consequence each one carries. Four of them answer the questions
+this submission most obviously invites.
 
 **A novel on-chain custody program.** This was the plan, and it was killed by evidence rather
 than by effort. A source-level check found that Swig wallet already ships on-chain program
