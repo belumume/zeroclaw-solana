@@ -39,7 +39,7 @@ python3 scripts/verify-proof.py          # stdlib only, no install, no key
 That checks the live claims. To count the history yourself, the underlying call is
 `getSignaturesForAddress` on a feed account, which any devnet RPC will answer unauthenticated.
 
-**Two independent devices, 1,886 publishes between them, zero failed.** That is the DePIN claim
+**Two independent devices, 1,937 publishes between them, zero failed.** That is the DePIN claim
 rather than a gadget claim: the same on-chain oracle program serves both, each device holds its own
 key, and neither can sign for the other.
 
@@ -49,11 +49,11 @@ the oldest signature is the account's own creation.
 
 | Feed account | Publishes | Failed | Span | Median gap | Largest gap |
 |---|---|---|---|---|---|
-| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 1,107+ | 0 | 15.8 d | 20.5 min | **61.5 min** |
+| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 1,158+ | 0 | 16.5 d | 20.5 min | **61.5 min** |
 | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
 
 The ARM node's 61.5 minutes is its worst run in
-fourteen days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
+sixteen days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
 node's figure is the point: a reader who runs the command finds both, and an outlier they discover
 for themselves discredits everything around it.
 
