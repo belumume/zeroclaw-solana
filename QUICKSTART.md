@@ -260,8 +260,8 @@ keys, custody tier and threat model. Six of the eight carry a captured prompt-in
 transcript. The two that do not, `token-risk-check` and `lending-health`, carry the threat
 model without a captured attack, because an injection reaching them has nothing to redirect.
 
-Being read-only is not what decides that, and this page used to say it was. Three plugins
-are T0 read-only, not two: `token-risk-check`, `lending-health` and `payment-watch`.
+Being read-only is not what decides that. Three plugins are T0 read-only:
+`token-risk-check`, `lending-health` and `payment-watch`.
 `payment-watch` holds no key and signs nothing, and it carries a transcript anyway, because
 the verdict it returns is what a shop acts on when it hands over goods, and the on-chain
 memo it reads back is attacker-controlled. What predicts a transcript is whether an
@@ -298,7 +298,7 @@ create a scheduled job while taking an order, and a cron entry is persistence th
 the turn it was planted in. `cron_list` is a read and stays. The DePIN publisher uses an OS
 scheduler rather than `zeroclaw cron`, so nothing loses a capability.
 
-### The payment watcher needs no network override, and this page used to say it did
+### The payment watcher needs no network override
 
 **Read this if you followed an earlier copy of this page.** Until 2026-08-05 this section
 told you to point `payment_watch` at devnet and to pass a devnet mint on every call. Both

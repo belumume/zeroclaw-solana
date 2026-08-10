@@ -201,20 +201,16 @@ python3 scripts/verify-proof.py
 
 It prints the current reading, sequence and age, and exits non-zero if the feed has gone quiet.
 
-Two honesty notes about this table, because both were wrong here until an audit caught them:
+Two notes on how to read this table:
 
-- These rows deliberately come from `JEtuZk…`, **not** from `CfWaZA…`. An earlier version of
-  this section proved "yours, running" using the agent-driven feed, which the table above marks
-  historical and whose last transaction landed **2026-07-24 13:47:28Z**. A document cannot cite a
-  dead feed as evidence of a live one. This bullet read "has not published in over a day" until
-  2026-08-05, which was true when written and understated the gap roughly tenfold by the time
-  anyone read it, in the one sentence whose job is calling out dead evidence. A relative duration
-  in a document that outlives the day it was written is a claim that rots on its own; the absolute
-  timestamp does not. Re-derive with `getSignaturesForAddress` on that feed rather than trusting
-  this line.
-- The cadence is 20 minutes. Earlier rows here showed gaps of two to nine hours, which was the
-  irregular hand-run era before the timer existed, presented under a heading that claimed a
-  schedule.
+- These rows come from `JEtuZk…`, **not** from `CfWaZA…`. The table above marks `CfWaZA…`
+  historical, and its last transaction landed **2026-07-24 13:47:28Z**, so it cannot stand as
+  evidence of a live feed. That timestamp is absolute on purpose: a relative duration in a
+  document that outlives the day it was written rots on its own, and it rots fastest in the one
+  sentence whose job is calling out dead evidence. Re-derive with `getSignaturesForAddress` on
+  that feed rather than trusting this line.
+- The cadence is 20 minutes. Gaps of two to nine hours belong to the irregular hand-run era
+  before the timer existed.
 
 (The device signs each reading inside the wasm sandbox; the host completes the fee-payer slot
 and broadcasts. Replay of a signed publish is refused on-chain by the strictly-increasing
@@ -431,14 +427,11 @@ now returns a sequence above both, because the node did not stop when the camera
 those agreed exactly it would mean nothing had been running in between. Do not reconcile them;
 check the live one, and treat the gap between them as the evidence.
 
-The CLAIM COUNT is the one number where a gap is not evidence but staleness, because it measures
-what the verifier can check rather than how long the node has run. The beat was re-shot for exactly
-that reason: it showed two live claims against a verifier that derives four, which understated the
-system on the axis this document exists to support. Raising the caption alone was refused, since
-the terminal in frame printed the old count and a caption disagreeing with the output beneath it is
-worse than the understatement.
+Everywhere else a gap is the evidence. The CLAIM COUNT is the exception: it measures what the
+verifier can check, so a gap there means this page has fallen behind the tool. The cut and the
+verifier both give four, so on that number they should agree.
 
-Prove that gate works rather
+Prove the feed-age gate works rather
 than trusting it: `MAX_FEED_AGE_MIN=0 python3 scripts/verify-proof.py` turns the live check red
 and exits 1 while all ten static claims stay green.
 - **By hand:** open any link above with the explorer cluster set to devnet. The programs are

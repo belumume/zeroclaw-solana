@@ -15,9 +15,9 @@ oracle program, where a separate consumer program reads it and acts. A `systemd`
 publishing with no laptop involved. The same node also sells that reading per request over x402,
 so the machine earns the gas it spends: `curl https://x402.perfpilot.dev/price` returns an HTTP
 402 challenge with two price tiers and a single-use nonce, and the nonce changes on every request.
-Three limits. That ARM box is a rented virtual machine rather than a board anyone owns: an Ampere
-A1 on Oracle's free tier, measured at 0.00 EUR. Ampere Altra is genuinely ARM, so the word is
-accurate, and naming which kind costs nothing. The reading comes from a
+Three limits. That ARM box is an Ampere A1 on Oracle's free tier, measured at 0.00 EUR. Nobody
+owns that board; it is rented. Ampere Altra is genuinely ARM, so the word is accurate, and naming
+which kind costs nothing. The reading comes from a
 keyless public weather API on the current host rather than from a physical probe; a Raspberry Pi
 with a DHT11 is the hardware path, and the on-chain half is identical either way, because what is
 signed is the value and the device key, not the enclosure. And that x402 endpoint is a live
@@ -88,16 +88,18 @@ claims separately, and names what it does not cover.
 | The agent refusing an attack, verbatim | [`docs/transcripts/`](docs/transcripts/) |
 | To poke the sanitizer yourself, no build needed | [the live microworld](https://belumume.github.io/zeroclaw-solana/sanitizer-microworld/) |
 
-## Custody, which is the part that matters
+## Custody
 
-No plugin here holds a key that can move funds. Every plugin that builds a spend emits it
+**The use cases run no fund-signing key at all.** No plugin here holds a key that can move
+funds. Every plugin that builds a spend emits it
 **unsigned**, for a human to approve. One component signs, and naming it is more honest than
 the blanket claim: `oracle-publish` holds a fund-less device seed and emits a device-**signed**
 transaction with the fee-payer slot left empty, so a reading is attributable to the device
 while the signature that actually pays is still the operator's. Spends are additionally
 bounded on chain by the audited Solana Foundation Allowances program.
 
-The demonstration deliberately does the
+**The cap demonstration uses one on purpose**, bounded on chain, so the guarantee can be shown
+failing closed. It deliberately does the
 opposite of avoiding a key, because avoiding one proves nothing about what happens when an
 agent has one. A delegated session key, held by the agent, **signs** an over-cap transfer, and
 the audited program rejects it with custom error `0x12c` (300, `AmountExceedsLimit`, defined in the
@@ -106,10 +108,6 @@ The chain refused the transfer; no
 plugin, no prompt and no operator had to be right for that to happen. A within-cap transfer
 signed by the same key settles normally, which is the control that stops the rejection being
 read as the key simply not working.
-
-Read the two sentences above together, because they are easy to mistake for a contradiction.
-The **use cases** run no fund-signing key at all. The **cap demonstration** uses one on
-purpose, bounded on chain, so the guarantee can be shown failing closed.
 
 **The same refusal now holds on mainnet with real USDC**, because a rejection that costs nothing
 is a weaker claim than one that does. A 0.5 USDC cap, a 0.4 USDC spend that settled and moved
