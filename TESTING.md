@@ -515,9 +515,9 @@ wire format is decoded by hand. Decoding it by hand was a constraint, and not in
 toolchain's unfixable transitive advisories is what fell out of it. The Anchor workspace
 under `onchain/` is a separate graph and is not part of the shipped plugin surface.
 
-If you open this repository's Security tab you will see open Dependabot alerts, and the honest
-reconciliation sits beside "comes back
-clean" like this. The two tools ask different questions. `cargo deny` runs against the ten graphs that ship.
+If you open this repository's Security tab you will see open Dependabot alerts, which sits badly
+beside a supply-chain gate that comes back clean. The two tools ask different questions.
+`cargo deny` runs against the ten graphs that ship.
 Dependabot scans every `Cargo.lock` in the tree, including the ones that exist only to test the
 things that ship.
 
@@ -635,7 +635,7 @@ wider. Both scopes are derived from git now, which is what puts the rest of the 
 
 `sanitizer-microworld/index.html` opens straight out of a clone, no server and no build step,
 and runs `solana_core::sanitize` compiled to WebAssembly. It is the shipped function, not a
-demonstration reimplementation, which is the distinction that matters: a JavaScript
+demonstration reimplementation: a JavaScript
 lookalike would be a claim about the sanitizer rather than the sanitizer. The module is pure
 with no imports, which is why compiling it for the browser is possible at all.
 

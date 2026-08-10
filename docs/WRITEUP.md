@@ -179,20 +179,22 @@ else choosing to pay for the data.
 This is the part we did not plan and would rather have as evidence than as an argument. The
 submission's whole posture is that a security control which is not configured should deny
 rather than permit. Building on ZeroClaw surfaced places where the platform does the opposite.
-The three below are the ones the shop hit in production rather than found by looking, they sit
-in one file, and each was reported with source citations rather than described. They are not
+The three below surfaced in production; we were not auditing for them. They sit in one file,
+and each was filed with the source cited line by line. They are not
 the whole of it: a later audit of the host found ten more, and that is a separate section
 lower down.
 
-Every row links to the live thread, so click through rather than trusting this table. The
-counts below were re-read from the GitHub API on 2026-08-04 rather than recalled, and they
-move in both directions as the maintainers triage: **eighteen issues filed, fourteen carrying
-`status:accepted`, sixteen rated `priority:p1`**, plus five pull requests of which **#9354 is
-MERGED**. Re-derive rather than trusting the sentence:
-`gh search issues --repo zeroclaw-labs/zeroclaw --author @me --limit 100 --json labels,state`.
+Every row links to the live thread, so click through; this table is a summary and can go stale. The
+counts below were re-read from the GitHub API on 2026-08-10, not recalled, and they
+move in both directions as the maintainers triage: **eighteen issues filed, sixteen rated
+`priority:p1`, seven carrying `status:accepted` and twelve `status:in-progress`**, plus five pull
+requests of which **#9354 is MERGED**. The same query on 2026-08-04 returned fourteen accepted, so
+that is the triage moving issues forward rather than a count falling. Re-derive rather than trusting
+the sentence:
+`gh search issues --repo zeroclaw-labs/zeroclaw --author belumume --limit 100 --json labels,state`.
 That command returns issues only, so the pull-request half of the sentence needs a second
-line to be checkable at all: `gh search prs --repo zeroclaw-labs/zeroclaw --author @me --limit 100
---json number,state`.
+line to be checkable at all: `gh search prs --repo zeroclaw-labs/zeroclaw --author belumume
+--limit 100 --json number,state`.
 
 This paragraph previously read "if #9354 has merged by the time you read it, that is the
 outcome we were after". That was a conditional about something which had already happened,
@@ -201,7 +203,7 @@ as uncertainty about the one claim that is settled.
 
 | Upstream | What it is | State |
 |---|---|---|
-| [#9348](https://github.com/zeroclaw-labs/zeroclaw/issues/9348) | Under `mode = "business"` the WhatsApp Web transport never consults `dm_policy` or `group_policy`, and an empty `allowed_groups` permits every group rather than none. The shop answered a real group because of it. | Maintainer-triaged `priority:p1`, `status:accepted`, `risk:high` |
+| [#9348](https://github.com/zeroclaw-labs/zeroclaw/issues/9348) | Under `mode = "business"` the WhatsApp Web transport never consults `dm_policy` or `group_policy`, and an empty `allowed_groups` permits every group, not none. The shop answered a real group because of it. | Maintainer-triaged `priority:p1`, `status:accepted`, `risk:high` |
 | [#9354](https://github.com/zeroclaw-labs/zeroclaw/pull/9354) | A warning when those policies cannot take effect. Deliberately the least opinionated of three shapes offered: no runtime change, so it cannot break a deployment. | **Merged 2026-08-01.** The maintainer called it "the right compatibility-safe v0.8.4 slice" |
 | [#9366](https://github.com/zeroclaw-labs/zeroclaw/issues/9366) | `approval_timeout_secs` validates on both WhatsApp transports and is read by only one. Filed separately at the maintainer's request. | Open |
 
@@ -212,7 +214,7 @@ get`, and governs nothing.
 Two things follow, and the second is the one that matters.
 
 The obvious one is that our own configuration had to be hardened against the first of these
-before the shop was safe, and that fix is in the reproduction rather than described in prose.
+before the shop was safe, and that fix ships in the reproduction, where you can run it.
 
 The less obvious one is that a competing entrant independently found the same shape in a
 different subsystem, in ZeroClaw's x402 verifiable-intent checker, where an empty `{}` also
@@ -223,7 +225,7 @@ instead of being a sentence in a threat model.
 
 We also found the third instance in our own repo, in the same week, pointed the other way: a
 merchant address that lived in prose with nothing enforcing it. Same failure, our code. It is
-recorded in Correct layering above rather than quietly fixed, because a submission arguing for
+recorded in Correct layering above instead of quietly fixed, because a submission arguing for
 enforced invariants should show where it was not yet enforcing one.
 4. Streaming modes have correctness consequences, not just UX: in `partial` mode the final
    segment replaces the draft, which silently ate the payment URL mid-conversation.
@@ -240,8 +242,8 @@ The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM. We
   work, and string work does not need a sandbox. So the live shop uses the `solana-pay` SKILL,
   and the plugin remains only as evidence of the reasoning.
 
-  **The original justification for that demotion was wrong, and the correction is the part
-  that generalises.** We wrote that the worst failure of a malformed URL is a payment that
+  **The original justification for that demotion was wrong.** We wrote that the worst failure
+  of a malformed URL is a payment that
   never starts, so no funds are at risk. An audit pointed out the real failure is a
   *well-formed* URL carrying somebody else's recipient. That routes around every custody
   control rather than defeating one: no key is touched, nothing is signed, no approval fires,
@@ -660,7 +662,8 @@ equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches
 
 The decisions that shaped this are mostly decisions not to build something, and those are the
 ones a reviewer cannot see from the tree. The full set with its reasoning is in
-`docs/DECISIONS.md`, including the consequence each one carries. Four are the questions this submission most obviously invites.
+`docs/DECISIONS.md`, including the consequence each one carries. Four of them answer the questions
+this submission most obviously invites.
 
 **A novel on-chain custody program.** This was the plan, and it was killed by evidence rather
 than by effort. A source-level check found that Swig wallet already ships on-chain program
