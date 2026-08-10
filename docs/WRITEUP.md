@@ -179,13 +179,13 @@ else choosing to pay for the data.
 This is the part we did not plan and would rather have as evidence than as an argument. The
 submission's whole posture is that a security control which is not configured should deny
 rather than permit. Building on ZeroClaw surfaced places where the platform does the opposite.
-The three below are the ones the shop hit in production rather than found by looking, they sit
-in one file, and each was reported with source citations rather than described. They are not
+The three below surfaced in production; we were not auditing for them. They sit in one file,
+and each was filed with the source cited line by line. They are not
 the whole of it: a later audit of the host found ten more, and that is a separate section
 lower down.
 
-Every row links to the live thread, so click through rather than trusting this table. The
-counts below were re-read from the GitHub API on 2026-08-04 rather than recalled, and they
+Every row links to the live thread, so click through; this table is a summary and can go stale. The
+counts below were re-read from the GitHub API on 2026-08-04, not recalled, and they
 move in both directions as the maintainers triage: **eighteen issues filed, fourteen carrying
 `status:accepted`, sixteen rated `priority:p1`**, plus five pull requests of which **#9354 is
 MERGED**. Re-derive rather than trusting the sentence:
@@ -201,7 +201,7 @@ as uncertainty about the one claim that is settled.
 
 | Upstream | What it is | State |
 |---|---|---|
-| [#9348](https://github.com/zeroclaw-labs/zeroclaw/issues/9348) | Under `mode = "business"` the WhatsApp Web transport never consults `dm_policy` or `group_policy`, and an empty `allowed_groups` permits every group rather than none. The shop answered a real group because of it. | Maintainer-triaged `priority:p1`, `status:accepted`, `risk:high` |
+| [#9348](https://github.com/zeroclaw-labs/zeroclaw/issues/9348) | Under `mode = "business"` the WhatsApp Web transport never consults `dm_policy` or `group_policy`, and an empty `allowed_groups` permits every group, not none. The shop answered a real group because of it. | Maintainer-triaged `priority:p1`, `status:accepted`, `risk:high` |
 | [#9354](https://github.com/zeroclaw-labs/zeroclaw/pull/9354) | A warning when those policies cannot take effect. Deliberately the least opinionated of three shapes offered: no runtime change, so it cannot break a deployment. | **Merged 2026-08-01.** The maintainer called it "the right compatibility-safe v0.8.4 slice" |
 | [#9366](https://github.com/zeroclaw-labs/zeroclaw/issues/9366) | `approval_timeout_secs` validates on both WhatsApp transports and is read by only one. Filed separately at the maintainer's request. | Open |
 
@@ -212,7 +212,7 @@ get`, and governs nothing.
 Two things follow, and the second is the one that matters.
 
 The obvious one is that our own configuration had to be hardened against the first of these
-before the shop was safe, and that fix is in the reproduction rather than described in prose.
+before the shop was safe, and that fix ships in the reproduction, where you can run it.
 
 The less obvious one is that a competing entrant independently found the same shape in a
 different subsystem, in ZeroClaw's x402 verifiable-intent checker, where an empty `{}` also
@@ -223,7 +223,7 @@ instead of being a sentence in a threat model.
 
 We also found the third instance in our own repo, in the same week, pointed the other way: a
 merchant address that lived in prose with nothing enforcing it. Same failure, our code. It is
-recorded in Correct layering above rather than quietly fixed, because a submission arguing for
+recorded in Correct layering above instead of quietly fixed, because a submission arguing for
 enforced invariants should show where it was not yet enforcing one.
 4. Streaming modes have correctness consequences, not just UX: in `partial` mode the final
    segment replaces the draft, which silently ate the payment URL mid-conversation.
