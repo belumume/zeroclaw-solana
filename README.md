@@ -1,7 +1,16 @@
 # zeroclaw-solana
 
-Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents, both running now, and the
-plugins, on-chain programs, skills and SOPs they run on.
+Two self-hosted [ZeroClaw](https://github.com/zeroclaw-labs) agents, both running now. One takes
+shop orders on WhatsApp and Telegram and settles them in mainnet USDC. The other publishes
+device-signed sensor readings into a typed on-chain account and sells them to other machines for
+stablecoin, per request. This repo is those two agents plus the plugins, on-chain programs, skills
+and SOPs they run on.
+
+**Reproducing it takes three commands.** They need stdlib Python 3 and nothing else: no install,
+no key, no account. Together they run in 13 to 35 seconds, and two of the three never touch the
+network.
+[`QUICKSTART.md`](QUICKSTART.md#fastest-path-three-checks-nothing-installed-13-to-35-seconds)
+opens with them.
 
 [![The ZeroClaw shop chat: a customer orders R$ 2, and the agent replies with a payment link and the conversion to 0.39 USDC on Solana mainnet at the quoted ECB rate](docs/assets/demo-poster.jpg)](https://youtu.be/a0jT0feuMAg)
 
