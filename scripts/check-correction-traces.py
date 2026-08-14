@@ -189,6 +189,7 @@ def _selftest_wiring() -> tuple[int, int]:
     ever calls it. This does: it plants one file carrying one trace, then moves the exit code
     through all three outcomes by changing nothing but the carve-out list.
     """
+    import shutil
     import tempfile
 
     saved = (REPO, JUDGE_FACING, ALLOW, TRACE, CONTROL_SAMPLES, sys.argv)
@@ -258,6 +259,9 @@ def _selftest_wiring() -> tuple[int, int]:
             globals()["CONTROL_SAMPLES"],
             sys.argv,
         ) = saved
+        # Otherwise every local run leaves a directory behind. Harmless in CI, untidy on a
+        # developer machine, and the kind of thing that accumulates unnoticed for months.
+        shutil.rmtree(tmp, ignore_errors=True)
     return failed, len(cases) + 1
 
 

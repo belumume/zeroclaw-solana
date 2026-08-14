@@ -21,6 +21,7 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import shutil
 import sys
 import tempfile
 
@@ -56,7 +57,16 @@ def run_with(gate_names: list[str], tmp: pathlib.Path, min_gates: int = 0):
 
 
 def main() -> int:
+    # Cleaned up at the end rather than left behind; a local run should not accumulate
+    # directories, and an untidy control is one people stop running.
     tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        return _run(tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _run(tmp: pathlib.Path) -> int:
     (tmp / "scripts").mkdir()
     for name, body in GATE_BODIES.items():
         (tmp / "scripts" / name).write_text(body, encoding="utf-8", newline="\n")
