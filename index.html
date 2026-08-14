@@ -169,11 +169,11 @@
   The ARM node's largest gap is <strong>61.5
   minutes</strong> across 16.5 days, so "every twenty minutes" is true at the median with one
   hour-long interruption. The second device was laptop-hosted, so it slept, and its largest gap
-  inside its run was <strong>36 hours</strong>. It has since stopped for good, which is stated here
-  because the command cannot tell you: it measures gaps between consecutive publishes, so once a
-  feed stops, its largest gap freezes at the last value it reached instead of growing to reflect the
-  silence. Read this page in a month and it still says 36 hours, with nothing in the number marking
-  the device as gone. That is a limit of the metric, so the prose has to carry it. Its job was to show the
+  inside its run was <strong>36 hours</strong>. It has since stopped for good, and the command
+  cannot tell you that: it measures gaps between consecutive publishes, so once a feed stops its
+  largest gap freezes at the last value it reached instead of growing to reflect the silence.
+  Re-run it in a month and it still reports 36 hours, with nothing in the number marking the
+  device as gone. Its job was to show the
   same program accepting signed readings from a second independent device with a second key, and a
   completed run of 779 publishes at zero failures did that. Continuity rests on the node alone.
   The command above shows you both anyway, which is the only reason either is worth writing down:
