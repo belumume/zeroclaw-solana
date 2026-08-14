@@ -195,10 +195,8 @@ That command returns issues only, so the pull-request half of the sentence needs
 line to be checkable at all: `gh search prs --repo zeroclaw-labs/zeroclaw --author belumume
 --limit 100 --json number,state`.
 
-This paragraph previously read "if #9354 has merged by the time you read it, that is the
-outcome we were after". That was a conditional about something which had already happened,
-so it understated the strongest fact available here. A hedge is not free, because it reads
-as uncertainty about the one claim that is settled.
+#9354 is merged. Stating that as a condition would understate the strongest fact available
+here, and a hedge is not free: it reads as uncertainty about the one claim that is settled.
 
 | Upstream | What it is | State |
 |---|---|---|
@@ -241,10 +239,9 @@ The ladder says a Tier-1 solution to a Tier-1 problem beats unnecessary WASM. We
   work, and string work does not need a sandbox. So the live shop uses the `solana-pay` SKILL,
   and the plugin remains only as evidence of the reasoning.
 
-  **The original justification for that demotion was wrong.** We wrote that the worst failure
-  of a malformed URL is a payment that
-  never starts, so no funds are at risk. An audit pointed out the real failure is a
-  *well-formed* URL carrying somebody else's recipient. That routes around every custody
+  **The original justification for that demotion was wrong.** It rested on the worst failure of
+  a malformed URL being a payment that never starts, so no funds are at risk. The real failure
+  is a *well-formed* URL carrying somebody else's recipient. That routes around every custody
   control rather than defeating one: no key is touched, nothing is signed, no approval fires,
   and the money that moves is the customer's, so the on-chain allowance cap and the approval
   gate are not even on the path.
