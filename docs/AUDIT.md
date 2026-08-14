@@ -97,18 +97,20 @@ transcript is a real live test; this specific one is not.
 
 ## What the audit did not find
 
-Recorded so they are not raised again, with one retraction below, because a section written to
-stop a question from being re-asked is the worst place for a wrong answer to sit.
+Recorded so they are not raised again. A section written to stop a question from being re-asked is
+the worst place for a wrong answer to sit, so each entry below states the reason that actually
+holds rather than the reason a reader would most readily supply.
 
 The shell jail is real and was confirmed live. The reference-only-match vulnerability is refuted
 with code and driven cases. A long list of counts and claims checked out.
 
 Leak detection is correctly disabled, and re-enabling it would fix nothing while breaking payment
-links. RETRACTED 2026-07-27: the reason given here was "the agent has no secret to leak", and that
-is false. The agent holds a provider API key, and `docs/HOST-SECURITY-AUDIT.md` records issue
-#9386, filed by this project, in which that key travels in a request URL, survives error
-sanitization, and is posted into the originating chat. The conclusion survives on a different and
-stronger reason the same document already carries: the detector's only Google pattern is
+links. The obvious justification for that is wrong, and worth naming because it is the one a
+reader is likely to supply: it is NOT that the agent has no secret to leak. The agent holds a
+provider API key, and `docs/HOST-SECURITY-AUDIT.md` records issue #9386, filed by this project, in
+which that key travels in a request URL, survives error sanitization, and is posted into the
+originating chat. The reason that does hold is different and stronger: the detector's only Google
+pattern is
 `AIza[a-zA-Z0-9_-]{35}`, while keys issued by AI Studio today carry an `AQ.` prefix, and that
 character class excludes the dot, so the pattern fails at the third character and cannot match a
 live key at all. The mitigation everyone assumes exists would not fire. That path is closed at the

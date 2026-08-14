@@ -272,3 +272,6 @@ served from this repo at
 [captions](assets/zeroclaw-demo.vtt), so it plays without depending on a third party.
 **Injection transcript:** [docs/transcripts/injection-refund-redirect.md](transcripts/injection-refund-redirect.md)
 **Mainnet custody proof:** [docs/MAINNET-PROOF.md](MAINNET-PROOF.md)
+**How it is tested, including what the tests cannot show:** [TESTING.md](../TESTING.md)
+**Every on-chain claim with its transaction:** [docs/DEVNET-PROOF.md](DEVNET-PROOF.md)
+**A fail-open we shipped, found, and closed:** [docs/transcripts/whatsapp-allowlist-gate.md](transcripts/whatsapp-allowlist-gate.md)
