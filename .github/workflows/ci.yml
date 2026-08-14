@@ -401,6 +401,15 @@ jobs:
       - name: the correction-trace carve-out controls actually gate
         run: python3 scripts/check-correction-traces.py --selftest
 
+      # check-all is the reporter every other gate is read through, so a defect in its counting
+      # is invisible by construction: a wrong summary looks exactly like a right one. It once
+      # read "all 10 gate(s) pass" where eight passed and two never executed, one of them the
+      # custody check, which reads the wasm import table and is a scored axis. Synthetic gates
+      # drive all three outcomes, and a mutation control reverts the counting and requires the
+      # inflated summary to come back, so these cases cannot pass for an unrelated reason.
+      - name: the check-all summary distinguishes pass, fail and could-not-run
+        run: python3 scripts/test_check_all.py
+
       # Internal docs reaching the public tree is this repo's most-repeated defect: caught and
       # reverted across eleven commits on nine dates, every time by a human noticing. Gitignore is
       # a claim about a path; this is a claim about content, and the two drift whenever a file is
