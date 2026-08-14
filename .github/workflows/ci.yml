@@ -381,6 +381,30 @@ jobs:
       - name: every runtime claim in a doc has a runtime path
         run: python3 scripts/check-claim-coherence.py
 
+      # The edit process is not part of the artifact. This gate refuses a judge-facing document
+      # that narrates what a claim used to say, when it was fixed, or who caught it. The test is
+      # the sentence's SUBJECT: text-as-subject is a trace and goes, system-as-subject is product
+      # honesty and stays, which is why the checker carries an ALLOW list rather than a blanket ban.
+      #
+      # It existed for four days under .tools/, gitignored and invoked by nothing, and could not
+      # fire in any case: its patterns open with a lowercase determiner and it matched
+      # case-sensitively, so a sentence-initial trace was invisible, and its positive control was
+      # an any() across twelve patterns, so one live pattern certified eleven dead ones. Each
+      # pattern now carries its own probe and is asserted individually.
+      - name: no correction traces on judge-facing surfaces
+        run: python3 scripts/check-correction-traces.py
+
+      # Internal docs reaching the public tree is this repo's most-repeated defect: caught and
+      # reverted across eleven commits on nine dates, every time by a human noticing. Gitignore is
+      # a claim about a path; this is a claim about content, and the two drift whenever a file is
+      # renamed or created somewhere nobody thought to ignore. Its own selftest found a defect
+      # before it shipped, so that runs here too rather than only on a developer machine.
+      - name: no tracked file declares itself internal
+        run: python3 scripts/check-internal-not-tracked.py
+
+      - name: the internal-marker controls actually gate
+        run: python3 scripts/check-internal-not-tracked.py --selftest
+
       # Its controls, which every sibling gate in scripts/ already had and this one did not.
       # Case 1 is the motivating incident verbatim: a certifier credited with a runtime role
       # sitting in the same paragraph as a self-test the reader is told to run. The first
