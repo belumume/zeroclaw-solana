@@ -54,6 +54,12 @@ JUDGE_FACING = [
     "docs/HOST-SECURITY-AUDIT.md",
     "docs/DECISIONS.md",
     "docs/DEVNET-PROOF.md",
+    # Reachable from a judge surface, so in scope: AUDIT.md is linked from the README's document
+    # table, and the transcript and the skill are linked from ONE-PAGER's proof list. A document
+    # is in scope because a reader can WALK to it, never because of where it sits in the tree.
+    "docs/AUDIT.md",
+    "docs/transcripts/injection-battery.md",
+    "skills/solana-pay/SKILL.md",
 ]
 
 TRACE = [
