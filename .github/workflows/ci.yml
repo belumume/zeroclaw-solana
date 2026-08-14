@@ -131,12 +131,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # CORRECTED 2026-08-04. This said "full history is not needed", which was true
-      # when this job held only index-reading gates and became false the moment the
-      # identifier gate joined it: that one walks commit METADATA, which is the single
-      # surface a tree scan and a blob-level history rewrite both structurally miss.
-      # Left as it was, the fix on the line below would have sat under a comment
-      # flatly contradicting it, and the next reader would have believed the comment.
+      # Full history is required here, though most gates in this job only read the index.
+      # The identifier gate walks commit METADATA, which is the one surface a tree scan and a
+      # blob-level history rewrite both structurally miss: a name scrubbed from every file still
+      # sits in the author field of the commit that scrubbed it. At depth 1 that gate passes
+      # while seeing nothing, which is the failure mode this whole job exists to prevent.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # the leak gate walks commit metadata; depth 1 hides it
@@ -393,6 +392,14 @@ jobs:
       # pattern now carries its own probe and is asserted individually.
       - name: no correction traces on judge-facing surfaces
         run: python3 scripts/check-correction-traces.py
+
+      # A carve-out anchors on a span of prose, so it goes inert the moment that span moves: it
+      # then waives nothing, never appears under --all, and cannot be audited by the mechanism the
+      # gate exists to provide. An inert carve-out therefore fails the gate. This step drives the
+      # real main() through all three exit codes, proving main() consults that check rather than
+      # merely defining it, and that carve-out index 0 waives instead of falling through.
+      - name: the correction-trace carve-out controls actually gate
+        run: python3 scripts/check-correction-traces.py --selftest
 
       # Internal docs reaching the public tree is this repo's most-repeated defect: caught and
       # reverted across eleven commits on nine dates, every time by a human noticing. Gitignore is

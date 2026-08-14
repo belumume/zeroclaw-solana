@@ -25,14 +25,18 @@ THE LINE THIS ENFORCES, because the two are easy to conflate and only one is a d
 The discriminator is the SUBJECT: if the sentence's subject is the text itself (a paragraph, a
 row, a claim, a figure, an earlier version) rather than the system being described, it is a trace.
 
-Usage:  python .tools/check-correction-traces.py [--all]
+Usage:  python scripts/check-correction-traces.py [--all | --selftest]
         --all also prints the spans it deliberately allowed, so the carve-outs stay auditable.
+        --selftest proves the inert-carve-out detector fires and stays silent when it should.
+
+A carve-out that waives nothing is reported as a FAILURE rather than ignored. An exclusion
+nobody can see is the rot this file exists to prevent, and the only way to notice one is to
+make the gate refuse to pass while it is there.
 """
 
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -112,30 +116,139 @@ CONTROL_SAMPLES = {
 
 # Spans that MATCH a pattern above and are deliberately kept, each with the reason.
 # A carve-out is only legitimate when the sentence is about the SYSTEM, not about the document.
-ALLOW = [
-    (
-        "docs/WRITEUP.md",
-        "The original justification for that demotion was wrong",
-        "product-level: discloses a reasoning error in the SECURITY MODEL, which the custody axis "
-        "explicitly scores. The subject is the design decision, not the document.",
-    ),
-]
+#
+# EMPTY ON PURPOSE, and an entry that stops matching is a FAILURE rather than a shrug. There was
+# one entry here, waiving the WRITEUP sentence "The original justification for that demotion was
+# wrong". The prose around it was rewritten, no pattern fires near it any more, and the carve-out
+# sat inert: waiving nothing, invisible to --all, unauditable by the mechanism this file promises.
+# The sentence itself is still there and still must stay; the docstring above quotes it verbatim
+# as the canonical KEEP example, which protects it better than an exclusion nobody can see.
+ALLOW: list[tuple[str, str, str]] = []
 
 
 def normalise(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def allowed(path: str, window: str) -> str | None:
-    for a_path, a_span, why in ALLOW:
+def allowed(path: str, window: str) -> int | None:
+    """Index of the carve-out covering this span, so a run can tell which ones actually fired."""
+    for i, (a_path, a_span, _why) in enumerate(ALLOW):
         if a_path == path and a_span in window:
-            return why
+            return i
     return None
 
 
+def inert_carve_outs(allow: list, fired: set[int]) -> list[int]:
+    """Carve-outs that waived nothing this run.
+
+    Pure, so --selftest can drive it both ways without touching the corpus. An empty ALLOW is
+    vacuously clean; an entry whose target text moved is the rot case and must be reported.
+    """
+    return [i for i in range(len(allow)) if i not in fired]
+
+
+def _selftest_wiring() -> tuple[int, int]:
+    """Drive the REAL main() against a planted corpus, so the wiring is proven, not just the logic.
+
+    The pure-function cases below prove the detector decides correctly. They cannot prove main()
+    ever calls it. This does: it plants one file carrying one trace, then moves the exit code
+    through all three outcomes by changing nothing but the carve-out list.
+    """
+    import tempfile
+
+    saved = (REPO, JUDGE_FACING, ALLOW, sys.argv)
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "planted.md").write_text(
+        "The box is rented. An audit found the citation was dead, which is why THE ANCHOR SPAN "
+        "stays. Nothing else here matters.\n",
+        encoding="utf-8",
+    )
+    live = ("planted.md", "THE ANCHOR SPAN", "control")
+    cases = [
+        ("an unwaived trace is a finding", [], 1),
+        ("a LIVE carve-out waives it and passes", [live], 0),
+        (
+            "an INERT carve-out fails the gate",
+            [("planted.md", "TEXT THAT MOVED", "c")],
+            2,
+        ),
+        # Index 0 specifically: a bare `if idx` would route carve-out 0's spans into findings.
+        ("carve-out at index 0 waives rather than falling through", [live], 0),
+    ]
+
+    failed = 0
+    try:
+        for label, allow, expect in cases:
+            globals()["REPO"] = tmp
+            globals()["JUDGE_FACING"] = ["planted.md"]
+            globals()["ALLOW"] = allow
+            sys.argv = ["check-correction-traces"]
+            import io
+            import contextlib
+
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                rc = main()
+            ok = rc == expect
+            failed += not ok
+            print(
+                f"  {'ok  ' if ok else 'FAIL'}  {label}"
+                + ("" if ok else f"  (rc={rc}, expected {expect})")
+            )
+    finally:
+        globals()["REPO"], globals()["JUDGE_FACING"], globals()["ALLOW"], sys.argv = (
+            saved
+        )
+    return failed, len(cases)
+
+
+def selftest() -> int:
+    print("wiring (drives the real main()):")
+    wiring_failed, wiring_total = _selftest_wiring()
+
+    print("\ndetector logic:")
+    cases = [
+        (
+            "an entry that waived nothing is reported",
+            [("a.md", "x", "why")],
+            set(),
+            [0],
+        ),
+        ("an entry that waived something is silent", [("a.md", "x", "why")], {0}, []),
+        (
+            "one live and one dead reports only the dead",
+            [("a", "x", "w"), ("b", "y", "w")],
+            {0},
+            [1],
+        ),
+        ("an empty carve-out list is vacuously clean", [], set(), []),
+    ]
+    failed = wiring_failed
+    for label, allow, fired, expected in cases:
+        got = inert_carve_outs(allow, fired)
+        ok = got == expected
+        failed += not ok
+        print(
+            f"  {'ok  ' if ok else 'FAIL'}  {label}" + ("" if ok else f"  (got {got})")
+        )
+    total = len(cases) + wiring_total
+    if failed:
+        print(f"\n{failed}/{total} selftest case(s) failed.", file=sys.stderr)
+        return 2
+    print(
+        f"\nOK  {total}/{total}; main() consults the inert-carve-out detector, "
+        f"and the detector fires and stays silent as it should."
+    )
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
+
     show_all = "--all" in sys.argv
     findings, waived, missing = [], [], []
+    fired: set[int] = set()
 
     for rel in JUDGE_FACING:
         p = REPO / rel
@@ -151,8 +264,14 @@ def main() -> int:
             for m in re.finditer(pat, text, re.I):
                 lo = max(0, m.start() - 110)
                 window = text[lo : m.end() + 110]
-                why = allowed(rel, window)
-                (waived if why else findings).append((rel, name, window.strip(), why))
+                idx = allowed(rel, window)
+                # `is not None`, never a truth test: carve-out 0 is a legitimate index and a
+                # bare `if idx` would silently route the FIRST carve-out's spans into findings.
+                if idx is None:
+                    findings.append((rel, name, window.strip(), None))
+                else:
+                    fired.add(idx)
+                    waived.append((rel, name, window.strip(), ALLOW[idx][2]))
 
     if missing:
         print(f"NOTE: {len(missing)} listed surface(s) absent: {', '.join(missing)}")
@@ -178,9 +297,24 @@ def main() -> int:
             )
             return 2
 
+    # An exclusion that waives nothing is the failure this file names in its own docstring:
+    # invisible to --all, so it cannot be audited by the mechanism that is supposed to audit it.
+    # Reported rather than tolerated, so a carve-out whose target text moves fails loudly.
+    inert = inert_carve_outs(ALLOW, fired)
+    if inert:
+        for i in inert:
+            a_path, a_span, _ = ALLOW[i]
+            print(
+                f"FAIL  carve-out {i} ({a_path}: {a_span!r}) waived nothing this run. "
+                f"Either its target text moved, or no pattern fires there any more. "
+                f"Delete it, or re-anchor it on the span it is meant to protect.",
+                file=sys.stderr,
+            )
+        return 2
+
     print(
         f"scanned {len(JUDGE_FACING) - len(missing)} judge-facing surface(s); "
-        f"positive control fires"
+        f"positive control fires; {len(ALLOW)} carve-out(s), all live"
     )
 
     if show_all and waived:
