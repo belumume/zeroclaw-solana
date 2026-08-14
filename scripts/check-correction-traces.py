@@ -54,9 +54,11 @@ JUDGE_FACING = [
     "docs/HOST-SECURITY-AUDIT.md",
     "docs/DECISIONS.md",
     "docs/DEVNET-PROOF.md",
-    # Reachable from a judge surface, so in scope: AUDIT.md is linked from the README's document
-    # table, and the transcript and the skill are linked from ONE-PAGER's proof list. A document
-    # is in scope because a reader can WALK to it, never because of where it sits in the tree.
+    # Reachable from a judge surface, so in scope. Each route was resolved by grep rather than
+    # assumed: AUDIT.md from the README's document table, the skill from the README's component
+    # table, and the transcript from WRITEUP prose. ONE-PAGER's proof list links a DIFFERENT
+    # transcript (injection-refund-redirect.md) and does not reach either of the other two.
+    # A document is in scope because a reader can WALK to it, never because of where it sits.
     "docs/AUDIT.md",
     "docs/transcripts/injection-battery.md",
     "skills/solana-pay/SKILL.md",
@@ -68,9 +70,18 @@ TRACE = [
         r"\b(?:this|the)\s+(?:paragraph|sentence|section|row|line|page|figure|table|claim|number|count|README|write-?up)\s+"
         r"(?:previously|originally|once|formerly|used to)\s+(?:read|said|stated|claimed)\b",
     ),
+    # SPLIT BY NOUN, because "an earlier version" is ambiguous and the two readings need
+    # opposite verdicts. "draft" and "revision" can only describe a document, so they need no
+    # qualifier and catch the bare form ("withdrawn from an earlier draft when ..."). "version"
+    # and "pass" describe SOFTWARE at least as often, and on this repo they do: two judge-facing
+    # surfaces say "an earlier version restarted the day on every boot", which is a real defect
+    # in a shipped release and exactly the product honesty this gate must never touch. So those
+    # two only fire when a document noun follows them.
+    ("earlier-draft", r"\ban earlier (?:draft|revision)\b"),
     (
         "earlier-version",
-        r"\ban earlier (?:version|draft|pass|revision) (?:of this|said|read|claimed)\b",
+        r"\ban earlier (?:version|pass)\s+(?:of\s+this|of\s+the\s+"
+        r"(?:page|document|file|section|paragraph|row|claim)|said|read|claimed)\b",
     ),
     ("corrected-on", r"\b(?:CORRECTED|Corrected|corrected)\s+\d{4}-\d{2}-\d{2}\b"),
     ("retracted-on", r"\b(?:RETRACTED|Retracted|retracted)\s+\d{4}-\d{2}-\d{2}\b"),
@@ -107,7 +118,9 @@ TRACE = [
 # is exactly the shape the case-sensitive matcher used to miss.
 CONTROL_SAMPLES = {
     "previously-read": "This paragraph previously read something weaker.",
-    "earlier-version": "An earlier draft said the opposite.",
+    # The bare form, which is what the qualified pattern missed on a live judge surface.
+    "earlier-draft": "The claim was withdrawn from an earlier draft when the trace refused it.",
+    "earlier-version": "An earlier version of this page said the opposite.",
     "corrected-on": "CORRECTED 2026-08-14 after the figure moved.",
     "retracted-on": "Retracted 2026-08-14 once the premise failed.",
     "was-first-written": "The count was originally written as nine.",
@@ -119,6 +132,22 @@ CONTROL_SAMPLES = {
     "the-old-number": "The old figure understated the interruption.",
     "used-to-say": "It used to say the device was live.",
 }
+
+# The over-correction control. CONTROL_SAMPLES proves each pattern can FIRE; without these, a
+# pattern widened until it matches everything would still pass every check above. Each is a
+# verbatim sentence from a live surface that MUST stay silent, and the first two are the reason
+# the earlier-version pattern is split by noun: they describe a real defect in a shipped release
+# of the x402 ledger, which is product honesty on a scored axis and not a document's history.
+MUST_NOT_FIRE = [
+    "The ledger is durable: restarting the process does not re-open a spent allowance. "
+    "An earlier version restarted the day on every boot, which is a cap in name only.",
+    "The ledger is durable, so restarting the process does not re-open a spent allowance. "
+    "An earlier version restarted the day on every boot, which is a cap in name only.",
+    "An earlier version of the Solana Pay spec used a different field name.",
+    "That ARM box is a rented VM, not a device on a windowsill.",
+    "The original justification for that demotion was wrong: the real failure is a well-formed "
+    "URL carrying somebody else's recipient.",
+]
 
 # Spans that MATCH a pattern above and are deliberately kept, each with the reason.
 # A carve-out is only legitimate when the sentence is about the SYSTEM, not about the document.
@@ -162,7 +191,7 @@ def _selftest_wiring() -> tuple[int, int]:
     """
     import tempfile
 
-    saved = (REPO, JUDGE_FACING, ALLOW, sys.argv)
+    saved = (REPO, JUDGE_FACING, ALLOW, TRACE, CONTROL_SAMPLES, sys.argv)
     tmp = Path(tempfile.mkdtemp())
     (tmp / "planted.md").write_text(
         "The box is rented. An audit found the citation was dead, which is why THE ANCHOR SPAN "
@@ -182,15 +211,34 @@ def _selftest_wiring() -> tuple[int, int]:
         ("carve-out at index 0 waives rather than falling through", [live], 0),
     ]
 
+    # The OVER-CORRECTION control, which is what stops a pattern being widened until it eats the
+    # product honesty this gate must protect. Injected through globals rather than anchored on a
+    # source string, so it cannot rot into a no-op the way a text substitution does. It carries
+    # its own positive control, so the only path to rc=2 left is MUST_NOT_FIRE firing.
+    over_broad = [("earlier-draft", r"an earlier")]
+    over_broad_samples = {"earlier-draft": "an earlier draft"}
+
     failed = 0
     try:
-        for label, allow, expect in cases:
+        for label, allow, expect, trace, samples in [
+            (lbl, a, e, saved[3], saved[4]) for lbl, a, e in cases
+        ] + [
+            (
+                "a pattern widened onto product honesty is refused",
+                [],
+                2,
+                over_broad,
+                over_broad_samples,
+            )
+        ]:
             globals()["REPO"] = tmp
             globals()["JUDGE_FACING"] = ["planted.md"]
             globals()["ALLOW"] = allow
+            globals()["TRACE"] = trace
+            globals()["CONTROL_SAMPLES"] = samples
             sys.argv = ["check-correction-traces"]
-            import io
             import contextlib
+            import io
 
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
@@ -202,10 +250,15 @@ def _selftest_wiring() -> tuple[int, int]:
                 + ("" if ok else f"  (rc={rc}, expected {expect})")
             )
     finally:
-        globals()["REPO"], globals()["JUDGE_FACING"], globals()["ALLOW"], sys.argv = (
-            saved
-        )
-    return failed, len(cases)
+        (
+            globals()["REPO"],
+            globals()["JUDGE_FACING"],
+            globals()["ALLOW"],
+            globals()["TRACE"],
+            globals()["CONTROL_SAMPLES"],
+            sys.argv,
+        ) = saved
+    return failed, len(cases) + 1
 
 
 def selftest() -> int:
@@ -302,6 +355,18 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 2
+
+    # And prove no pattern has been widened into the product-honesty it must never touch.
+    for sample in MUST_NOT_FIRE:
+        for name, pat in TRACE:
+            if re.search(pat, normalise(sample), re.I):
+                print(
+                    f"FAIL  pattern {name!r} fired on a sentence that must stay silent. "
+                    f"It describes the SYSTEM, not the document, and cutting it would remove "
+                    f"honesty this listing scores.\n      {sample[:150]}",
+                    file=sys.stderr,
+                )
+                return 2
 
     # An exclusion that waives nothing is the failure this file names in its own docstring:
     # invisible to --all, so it cannot be audited by the mechanism that is supposed to audit it.

@@ -97,8 +97,9 @@ transcript is a real live test; this specific one is not.
 
 ## What the audit did not find
 
-Recorded so they are not raised again, with one retraction below, because a section written to
-stop a question from being re-asked is the worst place for a wrong answer to sit.
+Recorded so they are not raised again. A section written to stop a question from being re-asked is
+the worst place for a wrong answer to sit, so each entry below states the reason that actually
+holds rather than the reason a reader would most readily supply.
 
 The shell jail is real and was confirmed live. The reference-only-match vulnerability is refuted
 with code and driven cases. A long list of counts and claims checked out.
