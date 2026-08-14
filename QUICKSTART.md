@@ -289,9 +289,9 @@ zeroclaw config set --no-interactive risk_profiles.demo.auto_approve \
   '["token_risk_check","kamino_lending_health","payment_watch","oracle_publish_reading","shell","memory_recall","memory_store","cron_list","glob_search","file_read","http_request","web_fetch","calculator"]'
 ```
 This is the list the running shop actually uses, regenerated from the live config rather
-than written from memory. An audit found the two drifting: the documented list was missing
-the two read-only risk tools that were live, which meant a reviewer auditing the documented
-posture was auditing a posture nobody ran.
+than written from memory. The two drift: the documented list omitted two read-only risk
+tools that were live, so a reviewer auditing the documented posture would be auditing a
+posture nobody ran. Regenerating it from the live config is what keeps them equal.
 
 `cron_add` is deliberately **not** here, though it used to be. A shop agent has no reason to
 create a scheduled job while taking an order, and a cron entry is persistence that outlives
