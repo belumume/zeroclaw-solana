@@ -48,6 +48,11 @@ docs/USE-CASES.md
 goal.txt
 HANDOFF-POST-COMPACT.md
 docs/HANDOFF-ARCHIVE.md
+# Internal working state for the upstream-contribution arc. Untracked AND un-ignored
+# until 2026-08-14, so a bulk `git add -A` would have staged it into a public repo
+# carrying the Windows username in three clone paths. Its siblings above are all
+# ignored; it was the one that never got the line.
+UPSTREAM-PR-RESCUE.md
 id.json
 onchain-build.sh
 onchain-pin.sh
