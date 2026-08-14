@@ -53,6 +53,8 @@ docs/HANDOFF-ARCHIVE.md
 # carrying the Windows username in three clone paths. Its siblings above are all
 # ignored; it was the one that never got the line.
 UPSTREAM-PR-RESCUE.md
+# Outbound channel for things only the operator can do. Operator-facing, not a judge surface.
+OPERATOR-INBOX.md
 id.json
 onchain-build.sh
 onchain-pin.sh
