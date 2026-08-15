@@ -58,9 +58,15 @@ def instructed(para, name):
     motivating case. Its control caught that; re-reading it never would have.
     """
     esc = re.escape(name)
+    # The directory alternation must match SCRIPT_REF's, or the two halves disagree: a doc that
+    # legitimately tells the reader to run a demo/ or deploy/ script would be recognised as a
+    # CLAIM and not as an INSTRUCTION, and reported as a finding for doing the right thing.
+    # Widening the matcher without widening this is the same half-fix that made the directory
+    # capture a no-op, one function along.
+    d = r"(?:scripts|deploy|demo)/"
     return (
-        re.search(r"python3?\s+scripts/" + esc, para, re.I) is not None
-        or re.search(r"run\s+`?scripts/" + esc, para, re.I) is not None
+        re.search(r"python3?\s+" + d + esc, para, re.I) is not None
+        or re.search(r"run\s+`?" + d + esc, para, re.I) is not None
     )
 
 
