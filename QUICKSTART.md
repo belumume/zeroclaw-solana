@@ -340,8 +340,16 @@ is not a reviewable one:
 zeroclaw config set --no-interactive risk_profiles.depin.auto_approve \
   '["oracle_publish_reading","http_request","web_fetch","shell","memory_recall","memory_store","file_read","glob_search","calculator"]'
 ```
-Egress for both is allowlisted rather than left open, because an unset allowlist defaults to
-`["*"]` and these are the only four hosts anything here contacts:
+Egress for the two built-in fetch tools is allowlisted rather than left open, because an unset
+allowlist defaults to `["*"]`. These four are every host those two tools may reach.
+
+They are NOT every host the agent contacts, and the distinction is the whole point of reading
+this rather than trusting it. The Solana plugins do not call out through these tools at all:
+each one's compiled wasm imports `network-http` and makes its own outbound request, which you
+can read out of the shipped artifact with `python3 scripts/check-custody-tier.py`. Four of them
+default to mainnet. Per the host's own sandboxing chapter these gates are tool-specific, so this
+allowlist governs the two tools named below and does not govern plugin egress. Constrain a
+plugin's endpoint with its `rpc_url` override, not with this list.
 ```
 zeroclaw config set --no-interactive http_request.allowed_domains \
   '["api.frankfurter.dev","api.devnet.solana.com","api.rugcheck.xyz","api.kamino.finance"]'
