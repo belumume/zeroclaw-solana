@@ -55,7 +55,7 @@ orders are quoted in BRL at a stated rate and settled in USDC.
 Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.
 The account holds the `RegisterDevice` call that created it plus one
 per reading, so the transaction count and the sequence number move together and both only climb.
-They read at least 1,516 and 1,514, measured 2026-08-15T19:50Z, and are higher by the time you run
+They read at least 1,516 and 1,514, measured 2026-08-15T19:41Z, and are higher by the time you run
 the commands below. The two differ by two rather than one because a consumer program has also read
 this feed once on chain, which is a transaction against the account that advances no sequence. One
 `getSignaturesForAddress` against `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every
@@ -253,7 +253,8 @@ HEAD, because the interface is unfrozen and drifting away from it once already c
 making every plugin fail to register; it runs daily at 05:41 UTC and has been running since
 2026-07-25, so unlike the other two it reports on a moving target we do not control. Count its
 runs yourself rather than believing this sentence:
-`gh run list --workflow=host-drift.yml --limit 100 --json conclusion --jq 'length'`. See [`TESTING.md`](TESTING.md) for what each of those can and cannot catch.
+`gh run list --workflow=host-drift.yml --limit 100 --json conclusion --jq 'length'`.
+See [`TESTING.md`](TESTING.md) for what each of those can and cannot catch.
 
 Building the ZeroClaw host needs three feature flags, and one of them removes a channel in
 silence if omitted. That is step 1 of [`QUICKSTART.md`](QUICKSTART.md), worth reading before
