@@ -19,8 +19,8 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    signs each reading with a device key the host never exposes, and publishes a
    typed on-chain feed another program consumes. Two publish paths share the same device
    signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
-   publisher runs the durable feed on a schedule. As of 2026-08-08T06:05Z that feed carries **at least 986
-   publishes and zero failures across 14.1 days**, unbroken since 2026-07-25, at a median gap of
+   publisher runs the durable feed on a schedule. As of 2026-08-15T19:41Z that feed carries **at least 1,514
+   publishes and zero failures across 21.6 days**, unbroken since 2026-07-25, at a median gap of
    20.5 minutes. Its largest gap is 61.5 minutes, and a second publisher running the same path from
    a laptop has a largest gap of 36 hours because the laptop sleeps. Both outliers are named
    because the command that reproduces the good numbers is the same command that finds them:
@@ -851,7 +851,7 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   **Only the ARM node feed is still live, and that is deliberate.** The second device was a
   laptop, so it slept, and the 36-hour gap in the table below is what that looks like on chain.
   Its job was to show the same program accepting signed readings from a second independent
-  device with a second key, and 779 publishes over 12.4 days with zero failures did that. A
+  device with a second key, and 778 publishes over 12.4 days with zero failures did that. A
   control that has finished is a result; a control that depends on someone's laptop staying
   awake through a two-week judging window is a liability. The claim this submission makes about
   continuous operation rests on the node, which runs on hardware we do not switch off.
