@@ -158,9 +158,13 @@ def main() -> int:
 
             # 3. zero wallets -> the existing message, no picker
             results.append(("no wallets -> no picker", btns0 == [], f"got {btns0}"))
-            results.append(
-                ("no wallets -> message shown", "wallet" in st0.lower(), st0[:60])
-            )
+            # LANGUAGE-AGNOSTIC ON PURPOSE. The harness loads the page with `lang=pt`, so
+            # asserting the English word "wallet" was testing the page's language rather than
+            # its behaviour: it passed only while that string had no translation, and went red
+            # the moment one was added. The behaviour under test is that a wallet-less browser
+            # is TOLD SO, in whatever language the link requested, so accept either noun.
+            named_a_wallet = any(w in st0.lower() for w in ("wallet", "carteira"))
+            results.append(("no wallets -> message shown", named_a_wallet, st0[:60]))
 
             # 4. exactly one -> no picker, straight through
             _, _, btns1, st1 = run(["Phantom"])
