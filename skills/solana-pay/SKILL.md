@@ -173,18 +173,34 @@ wrong to the customer before they approve it rather than after.
 
 ## BRL invoicing (Brazil-first flow)
 
-When the operator or customer quotes an amount in BRL (reais, R$), do not guess the rate:
-1. Fetch the current USD/BRL rate with the built-in http_request tool from
-   `https://api.frankfurter.dev/v1/latest?base=USD&symbols=BRL` (the old api.frankfurter.app host 301-redirects and the http tool does not follow redirects, so use the .dev host exactly) (keyless, ECB reference rates).
-2. Compute the USDC amount as `BRL amount / rate`, rounded to 2 decimals, half-up (state the
-   rounding). Treat 1 USDC = 1 USD and SAY so.
-3. Build the payment URL in USDC as usual, and state the conversion transparently in the
-   reply: "R$ X at rate Y (ECB, <date>) = Z USDC".
-3b. **Pass the order value and the rate to `pay_link.py` so the division is re-derived in code:**
-   `python3 tools/pay_link.py '<the full URL>' <lang> --brl <BRL amount> --rate <rate>`
-   The script recomputes `BRL / rate` at 2 decimals half-up, compares it to the `amount=` in the
-   URL, and REFUSES to produce a link if they disagree. Both flags are required together; one
-   alone is refused, because one alone verifies nothing.
+When the operator or customer quotes an amount in BRL (reais, R$):
+
+**YOUR RATE IS A PROPOSAL, NOT THE PRICE.** `pay_link.py` fetches the published rate itself, from
+Brazil's central bank (BCB PTAX) corroborated by the ECB, and re-derives the amount from that. If
+your figure disagrees it REFUSES and no link is produced. So a rate you got wrong, or were talked
+into, cannot reach a customer. Do not treat your own number as authoritative and do not report it
+as the rate that priced the order.
+
+1. Fetch a USD/BRL rate to propose an amount with, using the built-in http_request tool:
+   `https://api.frankfurter.dev/v1/latest?base=USD&symbols=BRL` (the old api.frankfurter.app host
+   301-redirects and the http tool does not follow redirects, so use the .dev host exactly).
+2. Compute the USDC amount as `BRL amount / rate`, rounded to 2 decimals, half-up. Treat
+   1 USDC = 1 USD and SAY so.
+3. Build the payment URL in USDC as usual. Do NOT state the conversion in your reply yet: the
+   figures you would quote are the unverified ones. Step 3b prints the published rate and date it
+   actually used, on stderr, and THAT is what you quote: "R$ X at rate Y (BCB PTAX, <date>) =
+   Z USDC".
+3b. **Pass the order value to `pay_link.py`, which fetches the published rate and re-derives:**
+   `python3 tools/pay_link.py '<the full URL>' <lang> --brl <BRL amount>`
+   The script fetches BCB PTAX, corroborates it against the ECB, recomputes `BRL / published rate`
+   at 2 decimals half-up, compares that to the `amount=` in the URL, and REFUSES to produce a link
+   if they disagree. It prints the rate and date it used on stderr; quote those, not yours.
+   `--rate` is optional and is a CROSS-CHECK, never a source: the figure used is always the
+   published one, so passing your rate can only add a refusal, never relax anything. `--rate`
+   without `--brl` is refused, because there is no order value to price.
+   IT FAILS CLOSED. If the rate sources are unreachable, disagree by more than 2.5%, report
+   different dates, or return an implausible number, NO LINK IS PRODUCED. That is deliberate: a
+   fallback to a last-known rate would reinstate the hole exactly when someone can induce it.
    Why this exists: you are the only thing computing this figure. On 2026-07-27 the agent reached
    for the `calculator` tool for exactly this division and the host refused the call on a schema
    mismatch, so the arithmetic was done in-context and nothing downstream re-derived it. The

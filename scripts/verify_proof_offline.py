@@ -596,7 +596,9 @@ def main() -> int:
     # fewer bundles than exist is exactly how a sweep reports green while checking less
     # than it claims.
     if len(bundles) < 2:
-        print(f"FAIL  found {len(bundles)} bundle(s) in {BUNDLE.parent}; expected at least 2")
+        print(
+            f"FAIL  found {len(bundles)} bundle(s) in {BUNDLE.parent}; expected at least 2"
+        )
         return 2
 
     worst = 0
