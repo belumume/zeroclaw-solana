@@ -251,10 +251,14 @@ mint_values = [
 mint = mint_values[0].strip() if mint_values else ""
 
 if len(mint_values) > 1:
+    # The reason stated here was that the pay page reads the last value. Measured: it reads the
+    # FIRST, via `URLSearchParams.get`, so the page and this parser agree. The exposure is the
+    # OTHER consumers: this URI is also scanned as a QR and deep-linked into phone wallets whose
+    # parsers nobody here controls, and first-wins, last-wins and reject are all defensible.
     sys.exit(
         f"REFUSED: pay link carries {len(mint_values)} spl-token parameters. "
-        f"This parser reads the first and the pay page reads the last, so a duplicate "
-        f"is a smuggling shape rather than a typo. No link was produced."
+        f"A duplicated key is read differently by different wallets and is never a legitimate "
+        f"request, so it is a smuggling shape rather than a typo. No link was produced."
     )
 
 # The refusal is split because the two failures are not the same failure, and pinning
@@ -350,11 +354,17 @@ if brl_arg is not None:
             )
     # Read the amount back out of the URL rather than trusting a second copy of it.
     #
-    # DUPLICATES ARE REFUSED, for the same reason the spl-token guard above refuses them and
-    # not as a tidy-up: this parser would read the FIRST `amount=` and the pay page reads the
-    # LAST, so a second one smuggles a different figure past the very check that exists to
-    # re-derive it. Verifying `amount=15.32` while the customer is shown `amount=1532` is worse
-    # than not verifying at all, because the refusal that should fire never does.
+    # DUPLICATES ARE REFUSED, and the reason is NOT the one the spl-token guard above gives.
+    # That guard says the pay page reads the last value while this parser reads the first.
+    # Measured: it does not. The page builds a `URLSearchParams` and calls `.get('amount')`,
+    # which returns the FIRST value (`new URLSearchParams('amount=15.32&amount=1532').get(...)`
+    # -> `15.32`), so against the page alone the two agree and a duplicate changes nothing.
+    #
+    # The real exposure is that the pay page is NOT the only consumer. This same `solana:` URI
+    # is rendered as a QR and deep-linked into phone wallets, and those are parsers nobody here
+    # controls or tests: first-wins, last-wins and reject-outright are all defensible readings
+    # of a duplicated key, and the Solana Pay spec does not settle it. A duplicate is never a
+    # legitimate request either way, so refusing costs nothing and removes the divergence.
     query = url.split("?", 1)[1] if "?" in url else ""
     amount_values = [
         pair.split("=", 1)[1]
