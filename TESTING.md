@@ -380,8 +380,15 @@ not have, so running it there would assert nothing while looking like coverage.
 
 The `check-*` lines are pre-publish gates rather than tests. Their number is deliberately not
 restated here, because a count in prose is exactly the defect these gates exist to close: nobody
-recounts it after the list it describes grows. The list directly above is the authority, and
-`git ls-files scripts/check-*.py` is what re-derives it.
+recounts it after the list it describes grows.
+
+The block above is a walkthrough, not the roster. It interleaves gates with mutation scripts and
+control suites, and it names only some of the `check-*.py` files. The authority is
+`scripts/check-all.py`, which discovers them with `git ls-files scripts/check-*.py` and refuses to
+report a result if that walk returns fewer than its floor, so a broken discovery step fails loudly
+instead of reading as a clean repo. `ci.yml` invokes them individually, and its hermetic job
+asserts that every tracked gate is either invoked by a workflow or declared unable to run offline
+with the reason. Run `python3 scripts/check-all.py` for the current set and count.
 `check-doc-links.py` deliberately
 does not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
 signature that does not exist, so a status-code checker would report a confident pass on a dead
