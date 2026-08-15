@@ -424,6 +424,15 @@ jobs:
       - name: the rate reader accepts a rate blob and rejects the rest
         run: python3 scripts/rate_from_feed.py --selftest
 
+      # check-config-drift was the ONE tracked gate never shown to fail. It compares the
+      # documented posture against the LIVE agent config, and no runner and no developer
+      # machine has that config, so it returns 2 (cannot check) everywhere and its pass and
+      # drift branches had never executed. A checker whose failing path has never run is a
+      # hypothesis. ZC_CONFIG points it at synthetic configs, so all three verdicts run here
+      # offline: absent, agreeing, and four distinct shapes of drift.
+      - name: the config-drift gate can actually report drift
+        run: python3 scripts/test_check_config_drift.py
+
       # Internal docs reaching the public tree is this repo's most-repeated defect: caught and
       # reverted across eleven commits on nine dates, every time by a human noticing. Gitignore is
       # a claim about a path; this is a claim about content, and the two drift whenever a file is
