@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """Ten checks answering one question: is this cut safe to export, and safe to post?
 
-WHY IT LIVES IN demo/ AND NOT scripts/. `scripts/**` belongs to MAIN per the cross-session
-`PROTOCOL.md` in the `.zcx-sync/` channel beside this checkout, and this branch must not
-write there. (That path is named relatively on purpose: spelling it absolutely put the
-operator's account name into this file, and `check-identifier-leaks.py` caught it here on
-the first run after staging -- in the very file whose job is screening frames for it.) Every
-sibling of this file (take.py, x402_earnings.py, chain_history.py, verify_qr_scannable.py)
-is submission-branch work in demo/, so this joins them. Consequence worth stating rather
-than discovering: `scripts/check-all.py` discovers gates from `git ls-files scripts/check-*.py`,
+WHY IT LIVES IN demo/ AND NOT scripts/. It sits with the other demo tooling (take.py,
+x402_earnings.py, chain_history.py, verify_qr_scannable.py) because it is part of the same
+capture-and-export path. Consequence worth stating rather than discovering:
+`scripts/check-all.py` discovers gates from `git ls-files scripts/check-*.py`,
 so this gate is NOT in that sweep and has to be run by name. It runs check-all itself as
 check 9, so the relationship is one-directional and deliberate.
 
@@ -33,7 +29,7 @@ coverage. "No slides" is not mechanically gated: a terminal beat holding output 
 for seconds at a time and any frozen-frame threshold that catches a slide also fails a good
 take. "Real voice, not synthetic" is not gated either -- check 4 refuses the one known
 synthetic artifact by content hash, which is a fact about that file and not a detector for
-the class. Both remain human judgement, and PLAN Part 10 owns them.
+the class. Both remain human judgement and are checked by a person before export.
 
   python demo/pre_export_gate.py <video.mp4>
   python demo/pre_export_gate.py <video.mp4> --fps 2 --no-network
