@@ -76,7 +76,15 @@ DISCLOSURE = re.compile(
     re.IGNORECASE,
 )
 
-SCRIPT_REF = re.compile(r"scripts/([\w.-]+\.(?:py|sh))")
+# WIDENED 2026-08-15. This matched `scripts/` only, so a doc could credit a `deploy/` or
+# `demo/` script with a runtime role nothing invokes and this gate stayed silent. That is
+# exactly what happened: a README sentence claimed the x402 gate's /health endpoint runs
+# deploy/box_selfcheck.py, when /health shells `systemctl --user is-active` and never touches
+# it. A reviewer caught what this was structurally unable to see.
+#
+# The capture group keeps only the basename so the rest of the module is unchanged; the
+# directory is matched but not captured.
+SCRIPT_REF = re.compile(r"(scripts|deploy|demo)/([\w.-]+\.(?:py|sh))")
 MIN_DOCS = 10  # floor: a walk finding fewer than this is broken, not clean
 
 
@@ -138,14 +146,14 @@ def main() -> int:
             # earlier caveat silence a later claim.
             if any(DISCLOSURE.search(p) for p in paras[i : i + 3]):
                 continue  # honest about the unverifiable wiring, here or immediately after
-            for name in names:
-                if not (ROOT / "scripts" / name).exists():
+            for d, name in names:
+                if not (ROOT / d / name).exists():
                     continue
                 if instructed(para, name):
                     continue  # the reader is told to run THIS one
                 if callers_of(name, tracked):
                     continue  # something invokes it
-                findings.append((rel, name, " ".join(para.split())[:110]))
+                findings.append((rel, f"{d}/{name}", " ".join(para.split())[:110]))
 
     print(
         f"surfaces read: {len(docs)} tracked document(s), {len(tracked)} tracked file(s)"
@@ -159,7 +167,7 @@ def main() -> int:
 
     print(f"\n{len(findings)} claim(s) with no runtime path and no disclosure:\n")
     for rel, name, quote in findings:
-        print(f"  {rel}  ->  scripts/{name}")
+        print(f"  {rel}  ->  {name}")
         print(f"      {quote}")
     print(
         "\nA doc crediting a script with a runtime role, where nothing invokes it, describes a\n"
