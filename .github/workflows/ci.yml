@@ -410,6 +410,20 @@ jobs:
       - name: the check-all summary distinguishes pass, fail and could-not-run
         run: python3 scripts/test_check_all.py
 
+      # scripts/rate_from_feed.py hardcodes the DeviceFeed byte offsets rather than importing
+      # them, because it is meant to run inside the channel's workspace jail. Its docstring
+      # justified that with "A test asserts both decoders agree on the same bytes" and no such
+      # test existed, on a path that prices real money. This is that test: planted bytes, the
+      # sibling's offsets read from feed_heartbeat.py's source rather than restated, and a
+      # one-byte-shift control. Offline and deterministic, so it belongs on every run.
+      - name: both DeviceFeed decoders agree on planted bytes
+        run: python3 scripts/check-feed-decoders.py
+
+      # And the reader's own guards, driven offline in both directions. One case pins that the
+      # plausibility band does NOT catch a temperature reading, because only the unit pin does.
+      - name: the rate reader accepts a rate blob and rejects the rest
+        run: python3 scripts/rate_from_feed.py --selftest
+
       # Internal docs reaching the public tree is this repo's most-repeated defect: caught and
       # reverted across eleven commits on nine dates, every time by a human noticing. Gitignore is
       # a claim about a path; this is a claim about content, and the two drift whenever a file is
