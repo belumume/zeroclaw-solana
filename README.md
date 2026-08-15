@@ -51,6 +51,15 @@ the reference is an additional optional condition, not the check itself. A payme
 wrong amount, or of a token the payer minted themselves, does not settle an order. Brazilian
 orders are quoted in BRL at a stated rate and settled in USDC.
 
+That rate is the one money-touching input a language model could otherwise invent, so it is
+taken off the model: [`scripts/rate_crosscheck.py`](scripts/rate_crosscheck.py) reads the
+Brazilian central bank's published USD rate and refuses unless a second source agrees within a
+stated band, and it fails closed rather than guessing.
+[`check-pay-link-rate-agreement.py`](scripts/check-pay-link-rate-agreement.py) holds the pay
+path's copy of those constants to the original, because the deployed workspace gets exactly one
+file and cannot import the rest. **The shop on the node has not picked this up yet**, so today it
+still does that arithmetic itself; the enforcement is in the repo and the deploy is what remains.
+
 **The feed has published to devnet since 2026-07-25 and not one of its transactions has failed.**
 Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.
 The account holds the `RegisterDevice` call that created it plus one
@@ -77,6 +86,14 @@ on chain, so `verify-proof.py` can go red on it. The shop is a Telegram and What
 with no inbound port, and its trace is traffic-driven, so from outside a quiet shop and a
 stopped one look identical. That half is asserted here and machine-checked by a `/health`
 endpoint on the x402 gate, which asks systemd on the node directly.
+
+A second and stronger check runs beside it, and the direction is the interesting part.
+[`deploy/box_selfcheck.py`](deploy/box_selfcheck.py) runs **on** the node, compares the deployed
+bytes against the manifest written at deploy time, and pushes a verdict outward through the same
+tunnel. Every inbound route is shut, so nothing reaches in and the box reports on itself, which
+also lets it see deployed bytes and running services that an external prober cannot. The checker
+that consumes that verdict is not tracked here, so what a stranger can read in this repo is the
+self-check and its reasoning rather than a live drift result.
 
 Live on-chain evidence, all clickable, is in
 [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md). The verifier above reports static and live
