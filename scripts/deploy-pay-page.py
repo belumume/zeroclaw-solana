@@ -46,7 +46,12 @@ SERVE = ("index.html", "_headers")
 # Patterns that name nobody in particular. A denylist has to name what it blocks,
 # so a hardcoded account would make THIS tracked file the compact, labelled copy of
 # the very strings it exists to keep off a public origin.
-GENERIC = (rb"C:\Users", b"C:/Users", b"/home/", b"OneDrive")
+# `/Users/` covers macOS, and it is here for parity rather than for this machine:
+# the deploy directory is whatever tree a contributor runs this from, so a cache
+# left by a Mac would otherwise carry an absolute path past a scan that only knew
+# about Windows and Linux. It also matches the repo's own identifier gate, which
+# already reports a `[macos home]` class.
+GENERIC = (rb"C:\Users", b"C:/Users", b"/Users/", b"/home/", b"OneDrive")
 
 
 def identifiers() -> tuple[bytes, ...]:
@@ -256,9 +261,28 @@ def selftest() -> int:
             "identifiers() derives the running account and keeps the generics",
             Path.home().name.encode() in derived and all(g in derived for g in GENERIC),
         )
+        # Keyed on the full HOME PATH rather than the bare account, which is what
+        # the repo's own identifier gate treats as a finding and the only form that
+        # cannot collide by accident. A bare account is not safe to assert on: one
+        # named `test` or `self` is a substring of `selftest`, `testacct` and
+        # `self_contained` already in this file, so the case would fail for a reason
+        # that has nothing to do with a hardcoded path.
+        own = Path(__file__).read_bytes()
+        home_forms = {
+            str(Path.home()).encode(),
+            str(Path.home()).replace("\\", "/").encode(),
+        }
         case(
-            "no account name is hardcoded in this file's source",
-            Path(__file__).read_bytes().count(Path.home().name.encode()) == 0,
+            "no home path is hardcoded in this file's source",
+            all(f not in own for f in home_forms),
+        )
+        # The control, because a check that has only ever returned clean has not
+        # been shown to be capable of returning anything else.
+        planted = root / "planted.py"
+        planted.write_bytes(b"CACHED_ROOT = r'" + str(Path.home()).encode() + b"'")
+        case(
+            "control: the same check catches a planted home path",
+            any(f in planted.read_bytes() for f in home_forms),
         )
 
         # 3. self_contained(): a local ref is reported, remote/inline are not.
@@ -287,7 +311,6 @@ def selftest() -> int:
         (good / "build.py").write_text("# not served", encoding="utf-8")
         cache = good / ".ruff_cache"
         cache.mkdir()
-        # Shaped exactly like a real ruff cache entry, with a synthetic account.
         # Shaped exactly like a real ruff cache entry: an absolute source path.
         (cache / "0").write_bytes(str(fake_home / "webshop-pay" / "build.py").encode())
         out = stage(good, root / "out")
