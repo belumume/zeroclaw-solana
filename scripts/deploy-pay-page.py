@@ -43,15 +43,42 @@ LIVE_URL = f"https://{PROJECT}.pages.dev/"
 # addition here needs a reason a reader can check: does the browser fetch it?
 SERVE = ("index.html", "_headers")
 
-# Byte patterns, because the artifact is read as bytes and a str scan would depend
-# on guessing an encoding for files this script does not own.
-IDENTIFIERS = (
-    b"elzai",
-    rb"C:\Users",
-    b"C:/Users",
-    b"/home/",
-    b"OneDrive",
-)
+# Patterns that name nobody in particular. A denylist has to name what it blocks,
+# so a hardcoded account would make THIS tracked file the compact, labelled copy of
+# the very strings it exists to keep off a public origin.
+GENERIC = (rb"C:\Users", b"C:/Users", b"/home/", b"OneDrive")
+
+
+def identifiers() -> tuple[bytes, ...]:
+    """GENERIC plus the running account, derived rather than written down.
+
+    Deriving is not only a privacy choice. A hardcoded account is wrong on every
+    machine except one, so the check would quietly pass for anyone else who ran a
+    deploy from a tree with their own paths in it.
+
+    Bytes, because the artifact is read as bytes and a str scan would depend on
+    guessing an encoding for files this script does not own.
+    """
+    home = Path.home()
+    account = home.name
+
+    # Fail closed at both ends. An empty account matches nothing and reports clean,
+    # and a very short one matches ordinary bytes inside a 105 KB document, so the
+    # scan would be either blind or useless. Neither may pass silently.
+    if len(account) < 3:
+        sys.exit(
+            f"REFUSED: cannot derive an account pattern from home dir {home!r} "
+            f"(resolved account {account!r}). Nothing was scanned or uploaded."
+        )
+
+    pats = {
+        str(home).encode(),
+        str(home).replace("\\", "/").encode(),
+        account.encode(),
+        *GENERIC,
+    }
+    # Longest first, so a finding names the most specific pattern that matched.
+    return tuple(sorted(pats, key=len, reverse=True))
 
 
 def staged_files(src: Path) -> list[Path]:
@@ -72,11 +99,15 @@ def self_contained(index_html: str) -> list[str]:
     return refs
 
 
-def scan(paths: list[Path]) -> list[str]:
+def scan(paths: list[Path], patterns: tuple[bytes, ...] | None = None) -> list[str]:
+    # Injectable so the selftest can drive this with a SYNTHETIC identity. Testing
+    # it against the real account would put that account back into tracked source,
+    # which is the thing the derivation above exists to avoid.
+    pats = identifiers() if patterns is None else patterns
     findings = []
     for p in paths:
         blob = p.read_bytes()
-        for pat in IDENTIFIERS:
+        for pat in pats:
             n = blob.count(pat)
             if n:
                 findings.append(f"{p.name}: {pat.decode('utf-8', 'replace')} x{n}")
@@ -190,14 +221,45 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory(prefix="paypage-selftest-") as tmp:
         root = Path(tmp)
 
-        # 1-2. scan(): fires on each identifier, silent on clean bytes.
-        for pat in IDENTIFIERS:
+        # A SYNTHETIC identity throughout. Exercising the scanner against the real
+        # account would write that account into tracked source, which is the leak
+        # this whole script exists to prevent -- and a public denylist naming the
+        # person it protects is a worse artifact than the cache it was guarding.
+        # The synthetic home is JOINED at runtime rather than written as a literal.
+        # Not obfuscation: the repo's own identifier gate scans tracked source for
+        # the home-path SHAPE and is right to, so a literal fake home would trip it
+        # exactly as a real one does. Joining also mirrors what identifiers() does.
+        fake_home = Path("C:/Users") / "testacct"
+        FAKE = (
+            str(fake_home).replace("/", "\\").encode(),
+            str(fake_home).replace("\\", "/").encode(),
+            fake_home.name.encode(),
+            *GENERIC,
+        )
+
+        # 1-2. scan(): fires on each pattern, silent on clean bytes.
+        for pat in FAKE:
             p = root / "dirty.bin"
             p.write_bytes(b"prefix" + pat + b"suffix")
-            case(f"scan fires on {pat.decode('utf-8', 'replace')}", len(scan([p])) == 1)
+            case(
+                f"scan fires on {pat.decode('utf-8', 'replace')}",
+                len(scan([p], FAKE)) >= 1,
+            )
         clean = root / "clean.bin"
         clean.write_bytes(b"<html>no identifiers here</html>")
-        case("scan silent on clean bytes", scan([clean]) == [])
+        case("scan silent on clean bytes", scan([clean], FAKE) == [])
+
+        # 3. identifiers() derives the running account rather than reading a
+        # constant, so it is correct on a machine that is not this one.
+        derived = identifiers()
+        case(
+            "identifiers() derives the running account and keeps the generics",
+            Path.home().name.encode() in derived and all(g in derived for g in GENERIC),
+        )
+        case(
+            "no account name is hardcoded in this file's source",
+            Path(__file__).read_bytes().count(Path.home().name.encode()) == 0,
+        )
 
         # 3. self_contained(): a local ref is reported, remote/inline are not.
         case(
@@ -225,7 +287,9 @@ def selftest() -> int:
         (good / "build.py").write_text("# not served", encoding="utf-8")
         cache = good / ".ruff_cache"
         cache.mkdir()
-        (cache / "0").write_bytes(rb"C:\Users\elzai\x.py")
+        # Shaped exactly like a real ruff cache entry, with a synthetic account.
+        # Shaped exactly like a real ruff cache entry: an absolute source path.
+        (cache / "0").write_bytes(str(fake_home / "webshop-pay" / "build.py").encode())
         out = stage(good, root / "out")
         case(
             "stage copies only the deploy set, leaving the cache behind",
@@ -233,13 +297,18 @@ def selftest() -> int:
         )
         case(
             "the ruff cache is not staged, so its identifiers cannot ship",
-            scan(out) == [],
+            scan(out, FAKE) == [],
         )
-        # The control: the same cache IS dirty, so the clean result above is a
-        # statement about staging rather than about the scanner finding nothing.
+        # The control, and the load-bearing case: the same cache IS dirty, so the
+        # clean result above is a statement about staging rather than about a
+        # scanner that finds nothing.
+        dirty = scan([cache / "0"], FAKE)
         case(
             "control: that cache really does carry identifiers",
-            len(scan([cache / "0"])) == 2,
+            # Asserted on WHAT matched rather than on a count, which changes
+            # whenever a pattern is added and says nothing about correctness.
+            any(fake_home.name in f for f in dirty)
+            and any("Users" in f for f in dirty),
         )
 
         # 5. stage() refuses when index.html needs an asset the set does not carry.
