@@ -444,6 +444,17 @@ jobs:
       - name: the internal-marker controls actually gate
         run: python3 scripts/check-internal-not-tracked.py --selftest
 
+      # A Brazilian customer short on USDC read a sentence half in each language, on the money
+      # path, at the moment the payment stopped. Three instances of that one shape were found
+      # separately by a human or a reviewer and never by anything that runs, which is what
+      # earns a gate rather than a note. It also checks that every key a lookup asks for
+      # exists, because a missing key renders English while reading as localised in the source.
+      - name: every customer-facing message routes through the locale lookup
+        run: python3 scripts/check-i18n-coverage.py
+
+      - name: the i18n controls actually gate
+        run: python3 scripts/check-i18n-coverage.py --selftest
+
       # Its controls, which every sibling gate in scripts/ already had and this one did not.
       # Case 1 is the motivating incident verbatim: a certifier credited with a runtime role
       # sitting in the same paragraph as a self-test the reader is told to run. The first
