@@ -140,11 +140,18 @@ def tracked_python():
 
 
 def scan(text):
-    """Return [(label, matched_text)] for every marker present."""
+    """Return [(label, matched_text, offset)] for every marker present.
+
+    The OFFSET is carried out of `finditer` rather than recovered afterwards by searching for
+    the matched text. Recovering it finds the FIRST literal occurrence anywhere in the file, so
+    a marker appearing twice reported both hits at the first one's line, and a marker whose text
+    also occurs in unrelated context pointed at that instead. A leak report naming the wrong line
+    makes a real finding look like a false one, which is how a gate stops being trusted.
+    """
     found = []
     for label, pattern, _probe in MARKERS:
         for m in re.finditer(pattern, text):
-            found.append((label, m.group(0)))
+            found.append((label, m.group(0), m.start()))
     return found
 
 
@@ -226,8 +233,8 @@ def main():
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for label, hit in scan(text):
-            line = text[: text.find(hit)].count("\n") + 1
+        for label, hit, offset in scan(text):
+            line = text[:offset].count("\n") + 1
             findings.append((path.relative_to(REPO), line, label, hit))
 
     print(
