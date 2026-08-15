@@ -43,6 +43,25 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
+# check-all.py reads this exit code as COULD NOT CHECK and refuses to count it as a
+# pass, which is the only honest verdict when the gate cannot see its own inputs.
+CANNOT_CHECK = 2
+
+# A floor rather than a zero test, matching every sibling gate here (MIN_DOCS in
+# check-claim-coherence and check-doc-reachability, MIN_GATES in check-all). A floor
+# is the stronger instrument: a returncode check catches git failing, and this also
+# catches git succeeding while returning almost nothing, which a returncode cannot
+# see. The repo tracks 80 .py files, so 40 is well clear of ordinary movement while
+# still refusing a walk that has collapsed.
+MIN_SOURCE = 40
+
+# The wiring selftest swaps REPO to a temp dir, where `git ls-files` legitimately fails.
+# Before the discovery guard below existed that returned an empty list in silence, which is
+# the exact defect the guard closes, so the test had been resting on it. This seam lets the
+# test declare "no source in scope" explicitly instead of arriving there through a failure.
+SOURCE_PROVIDER = None  # set to tracked_source once it is defined
+
+
 # The surfaces a judge reaches from the submission. Internal files are excluded on purpose:
 # the handoff and the ledgers SHOULD carry correction history, that is their whole job.
 JUDGE_FACING = [
@@ -173,17 +192,47 @@ SOURCE_EXCLUDED = {
 }
 
 
-def tracked_source() -> list[str]:
-    """Tracked .py files, from git's index rather than a walk, minus the two self-referential gates."""
-    out = subprocess.run(
+def tracked_source(run=subprocess.run) -> list[str]:
+    """Tracked .py files, from git's index rather than a walk, minus the two self-referential gates.
+
+    `run` is injectable so the selftest can drive the two refusal paths without
+    breaking the repo's git, which is the only other way to reach them.
+    """
+    out = run(
         ["git", "-C", str(REPO), "ls-files", "*.py"],
         capture_output=True,
         text=True,
         encoding="utf-8",
     )
-    return [
+    # A gate that cannot enumerate its own file set must not report clean. Without
+    # this, a failed `git ls-files` -- no .git because the tree arrived as an archive,
+    # git absent from PATH, a sparse checkout -- leaves stdout empty, so the list is
+    # empty, every later loop finds nothing, and the gate prints OK and exits 0 having
+    # read no source at all. The sibling this function is modelled on, tracked_python
+    # in check-source-comment-leaks.py, guards the same call for the same reason.
+    if out.returncode != 0:
+        print(
+            f"NOT CHECKED: git ls-files exited {out.returncode}, so the tracked source "
+            f"set is unknown. This is not a pass.",
+            file=sys.stderr,
+        )
+        sys.exit(CANNOT_CHECK)
+
+    files = [
         f for f in out.stdout.split() if f.replace("\\", "/") not in SOURCE_EXCLUDED
     ]
+    if len(files) < MIN_SOURCE:
+        print(
+            f"NOT CHECKED: walk found {len(files)} tracked source file(s); expected at "
+            f"least {MIN_SOURCE}. The discovery step is broken, so a clean result here "
+            f"would mean nothing. This is not a pass.",
+            file=sys.stderr,
+        )
+        sys.exit(CANNOT_CHECK)
+    return files
+
+
+SOURCE_PROVIDER = tracked_source
 
 
 # Spans whose SUBJECT is the system rather than the text, so they are design rationale and stay.
@@ -245,7 +294,8 @@ def _selftest_wiring() -> tuple[int, int]:
     import shutil
     import tempfile
 
-    saved = (REPO, JUDGE_FACING, ALLOW, TRACE, CONTROL_SAMPLES, sys.argv)
+    saved = (REPO, JUDGE_FACING, ALLOW, TRACE, CONTROL_SAMPLES, sys.argv,
+             SOURCE_PROVIDER)
     tmp = Path(tempfile.mkdtemp())
     (tmp / "planted.md").write_text(
         "The box is rented. An audit found the citation was dead, which is why THE ANCHOR SPAN "
@@ -290,6 +340,9 @@ def _selftest_wiring() -> tuple[int, int]:
             globals()["ALLOW"] = allow
             globals()["TRACE"] = trace
             globals()["CONTROL_SAMPLES"] = samples
+            # No tracked source in a planted corpus. Declared, not inherited from a
+            # git failure, so the discovery guard stays armed for real runs.
+            globals()["SOURCE_PROVIDER"] = lambda: []
             sys.argv = ["check-correction-traces"]
             import contextlib
             import io
@@ -311,6 +364,7 @@ def _selftest_wiring() -> tuple[int, int]:
             globals()["TRACE"],
             globals()["CONTROL_SAMPLES"],
             sys.argv,
+            globals()["SOURCE_PROVIDER"],
         ) = saved
         # Otherwise every local run leaves a directory behind. Harmless in CI, untidy on a
         # developer machine, and the kind of thing that accumulates unnoticed for months.
@@ -318,9 +372,56 @@ def _selftest_wiring() -> tuple[int, int]:
     return failed, len(cases) + 1
 
 
+def _selftest_discovery() -> tuple[int, int]:
+    """Both refusal paths of tracked_source().
+
+    Neither is reachable without breaking the repo's own git, which is why the
+    injectable runner exists. A discovery step that fails open is the worst defect
+    a gate can have, because the resulting silence is byte-identical to a clean
+    corpus, so these two cases are the control on every other result this gate
+    prints.
+    """
+
+    class Fake:
+        def __init__(self, rc: int, out: str) -> None:
+            self.returncode, self.stdout = rc, out
+
+    checks: list[tuple[str, bool]] = []
+
+    try:
+        tracked_source(run=lambda *a, **k: Fake(128, ""))
+        checks.append(("a git failure refuses rather than reporting clean", False))
+    except SystemExit as e:
+        checks.append(
+            (
+                "a git failure refuses rather than reporting clean",
+                e.code == CANNOT_CHECK,
+            )
+        )
+
+    try:
+        tracked_source(run=lambda *a, **k: Fake(0, "a.py\nb.py\n"))
+        checks.append(("a collapsed walk refuses even at exit 0", False))
+    except SystemExit as e:
+        checks.append(
+            ("a collapsed walk refuses even at exit 0", e.code == CANNOT_CHECK)
+        )
+
+    checks.append(
+        ("a healthy walk returns the tracked set", len(tracked_source()) >= MIN_SOURCE)
+    )
+
+    for label, good in checks:
+        print(f"  {'ok  ' if good else 'FAIL'}  {label}")
+    return sum(1 for _, good in checks if not good), len(checks)
+
+
 def selftest() -> int:
     print("wiring (drives the real main()):")
     wiring_failed, wiring_total = _selftest_wiring()
+
+    print("\ndiscovery guards:")
+    disc_failed, disc_total = _selftest_discovery()
 
     print("\ndetector logic:")
     cases = [
@@ -339,7 +440,7 @@ def selftest() -> int:
         ),
         ("an empty carve-out list is vacuously clean", [], set(), []),
     ]
-    failed = wiring_failed
+    failed = wiring_failed + disc_failed
     for label, allow, fired, expected in cases:
         got = inert_carve_outs(allow, fired)
         ok = got == expected
@@ -347,7 +448,7 @@ def selftest() -> int:
         print(
             f"  {'ok  ' if ok else 'FAIL'}  {label}" + ("" if ok else f"  (got {got})")
         )
-    total = len(cases) + wiring_total
+    total = len(cases) + wiring_total + disc_total
     if failed:
         print(f"\n{failed}/{total} selftest case(s) failed.", file=sys.stderr)
         return 2
@@ -366,7 +467,8 @@ def main() -> int:
     findings, waived, missing = [], [], []
     fired: set[int] = set()
 
-    for rel in JUDGE_FACING + tracked_source():
+    source_files = SOURCE_PROVIDER()
+    for rel in JUDGE_FACING + source_files:
         p = REPO / rel
         if not p.exists():
             missing.append(rel)
@@ -442,7 +544,7 @@ def main() -> int:
 
     print(
         f"scanned {len(JUDGE_FACING) - len(missing)} judge-facing surface(s) and "
-        f"{len(tracked_source())} tracked source file(s); "
+        f"{len(source_files)} tracked source file(s); "
         f"positive control fires; {len(ALLOW)} carve-out(s), all live"
     )
 

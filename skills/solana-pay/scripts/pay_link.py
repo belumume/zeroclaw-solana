@@ -239,9 +239,10 @@ if recipient != MERCHANT:
     )
 
 # MINT. Same parse discipline as the recipient: split the query off first so a crafted
-# value cannot smuggle anything past the comparison. Read only the first `spl-token`,
-# because a duplicated parameter is itself a smuggling shape and the page's own parser
-# takes the last one.
+# value cannot smuggle anything past the comparison. Read only the first `spl-token`, and
+# refuse a duplicate outright, for the reason set out at the amount check below: the page
+# reads the first value as this parser does, but the same URI is handed to QR scanners and
+# phone wallets whose behaviour on a repeated key is neither uniform nor specified.
 query = url[len("solana:") :].split("?", 1)[1] if "?" in url else ""
 mint_values = [
     pair.split("=", 1)[1]
@@ -373,8 +374,8 @@ if brl_arg is not None:
     if len(amount_values) > 1:
         sys.exit(
             f"REFUSED: pay link carries {len(amount_values)} amount parameters. "
-            f"This parser reads the first and the pay page reads the last, so a duplicate "
-            f"is a smuggling shape rather than a typo. No link was produced."
+            f"A repeated key is never a legitimate request, and wallets and QR scanners "
+            f"do not agree on which copy wins. No link was produced."
         )
     stated = amount_values[0] if amount_values else None
     if stated is None:
