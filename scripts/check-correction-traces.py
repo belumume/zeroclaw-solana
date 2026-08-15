@@ -37,6 +37,7 @@ make the gate refuse to pass while it is there.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -158,7 +159,59 @@ MUST_NOT_FIRE = [
 # sat inert: waiving nothing, invisible to --all, unauditable by the mechanism this file promises.
 # The sentence itself is still there and still must stay; the docstring above quotes it verbatim
 # as the canonical KEEP example, which protects it better than an exclusion nobody can see.
-ALLOW: list[tuple[str, str, str]] = []
+# TRACKED SOURCE IS IN SCOPE TOO. A judge clones the repo, so a comment is as readable as a
+# document, and the prose list above cannot see a single `.py` file. That is the same blind spot
+# `check-source-comment-leaks.py` was written to close for internal identifiers: every slop gate
+# here listed prose suffixes, so source was green by never being scanned. Measured over 80 tracked
+# files, this found four real traces in two of them, and they are fixed rather than waived.
+SOURCE_EXCLUDED = {
+    # A gate that forbids a phrase has to contain the phrase, in its pattern table and in the
+    # samples proving each pattern fires. Both of these hold 20+ self-matches. The exclusion is
+    # exactly one file wide each, and the selftest pins that so it cannot quietly widen.
+    "scripts/check-correction-traces.py": "its own pattern table and control samples",
+    "scripts/check-source-comment-leaks.py": "its own probe strings",
+}
+
+
+def tracked_source() -> list[str]:
+    """Tracked .py files, from git's index rather than a walk, minus the two self-referential gates."""
+    out = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "*.py"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    return [
+        f for f in out.stdout.split() if f.replace("\\", "/") not in SOURCE_EXCLUDED
+    ]
+
+
+# Spans whose SUBJECT is the system rather than the text, so they are design rationale and stay.
+# Each is waived by exact span, and `inert_carve_outs` reports any that stops matching, so a
+# waiver cannot outlive the sentence it was written for.
+ALLOW: list[tuple[str, str, str]] = [
+    (
+        "demo/take.py",
+        "the gate it tests was added after an audit found",
+        "why the gate exists: an outcome-gate misbehaved. Subject is the gate, not the comment.",
+    ),
+    (
+        "scripts/check-config-drift.py",
+        "An audit found the two had drifted",
+        "a fact about the config, which is what this gate reports. Subject is the system.",
+    ),
+    (
+        "scripts/rate_from_feed.py",
+        "An earlier version of this reader",
+        "a SOFTWARE version that printed a wrong value, not a draft of the text. This file's own "
+        "doctrine already notes that 'version' describes software at least as often.",
+    ),
+    (
+        "scripts/check-all.py",
+        "earned the hard way in the same session",
+        "a design decision and why it was taken; the session reference is incidental to it.",
+    ),
+]
 
 
 def normalise(text: str) -> str:
@@ -313,7 +366,7 @@ def main() -> int:
     findings, waived, missing = [], [], []
     fired: set[int] = set()
 
-    for rel in JUDGE_FACING:
+    for rel in JUDGE_FACING + tracked_source():
         p = REPO / rel
         if not p.exists():
             missing.append(rel)
@@ -388,7 +441,8 @@ def main() -> int:
         return 2
 
     print(
-        f"scanned {len(JUDGE_FACING) - len(missing)} judge-facing surface(s); "
+        f"scanned {len(JUDGE_FACING) - len(missing)} judge-facing surface(s) and "
+        f"{len(tracked_source())} tracked source file(s); "
         f"positive control fires; {len(ALLOW)} carve-out(s), all live"
     )
 
@@ -398,7 +452,9 @@ def main() -> int:
             print(f"  {rel} [{name}]\n     ...{window[:150]}...\n     KEPT: {why}")
 
     if not findings:
-        print("\nOK  no correction traces on judge-facing surfaces.")
+        print(
+            "\nOK  no correction traces on judge-facing surfaces or in tracked source."
+        )
         return 0
 
     print(
