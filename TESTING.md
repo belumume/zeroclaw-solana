@@ -24,12 +24,8 @@ about behaviour over time. A KAT is one point.
 
 **Unit tests.** 89 in `solana-core`, plus 19 in `oracle-publish`, 41 in
 `payment-watch`, 26 in `x402-feed-gate`. These cover branches, error variants, and
-the specific adversarial cases we thought of. The middle two read 17 and 29 until
-2026-07-27, having been written before those suites grew; the last has now been
-wrong twice for the same reason, reading 10 until 2026-08-04 and then 21 until the
-v2-conformance tests landed with the challenge cutover. `QUICKSTART.md` and
-`x402-feed-gate/README.md` both said 26 while this line still said 21, which is the
-tell worth keeping: a figure repeated on three surfaces goes stale on whichever one
+the specific adversarial cases we thought of. Every one of these counts drifts as its
+suite grows, and a figure repeated across three surfaces goes stale on whichever one
 nobody re-derived. Each is `grep -c '^\s*#\[test\]'` over that crate's sources, so
 the command rather than the memory is the record.
 
@@ -382,11 +378,10 @@ scheduled onto the judging window and read as a known residual rather than as a 
 `check-config-drift.py` compares against a config on the operator's machine, which a runner does
 not have, so running it there would assert nothing while looking like coverage.
 
-The six `check-*` lines are pre-publish gates rather than tests. That count read four until
-2026-07-27 and five until 2026-08-01, each time one short of the list directly above it, which is
-the same class of defect these gates exist to close: a number nobody recounts after the list it
-describes grows. It has now been wrong twice in the paragraph that documents it being wrong, so
-prose counts drift by default and the list is the authority.
+The `check-*` lines are pre-publish gates rather than tests. Their number is deliberately not
+restated here, because a count in prose is exactly the defect these gates exist to close: nobody
+recounts it after the list it describes grows. The list directly above is the authority, and
+`git ls-files scripts/check-*.py` is what re-derives it.
 `check-doc-links.py` deliberately
 does not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
 signature that does not exist, so a status-code checker would report a confident pass on a dead
