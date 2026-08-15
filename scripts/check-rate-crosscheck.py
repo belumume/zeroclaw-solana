@@ -32,20 +32,25 @@ Run: python3 scripts/check-rate-crosscheck.py
 
 from __future__ import annotations
 
-import importlib.util
 import pathlib
 import sys
+import types
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TARGET = ROOT / "scripts" / "rate_crosscheck.py"
 
 
 def load():
-    """Exec the SOURCE, never a cached .pyc.
+    """Exec the SOURCE, never an importable module, so no bytecode cache can be consulted.
 
-    The sibling gate learned this the hard way: `spec_from_file_location` served a stale
-    bytecode file after a mutation control restored the source at the same size inside one
-    filesystem tick, and manufactured a disagreement that did not exist. mtime is not a version.
+    `spec_from_file_location` is deliberately NOT used, and `sys.dont_write_bytecode` is not a
+    substitute for avoiding it: that flag stops a cache being WRITTEN and does nothing about one
+    already on disk being READ. The sibling gate hit the consequence during development. A
+    mutation control rewrote a file and restored it at the same size inside one filesystem tick,
+    so size and mtime both matched the cached bytecode of the MUTATED version, and the gate
+    reported a disagreement that did not exist while the source read correctly throughout. A
+    cache keyed on (size, mtime) cannot see a same-tick same-size rewrite, which is exactly what
+    restoring a mutation looks like. Compiling the text read from disk has no such window.
     """
     if not TARGET.is_file():
         print(
@@ -53,13 +58,13 @@ def load():
             file=sys.stderr,
         )
         sys.exit(1)
-    spec = importlib.util.spec_from_file_location("_rate_crosscheck_under_test", TARGET)
-    if spec is None or spec.loader is None:
-        print(f"FAIL  cannot load {TARGET} as a module.", file=sys.stderr)
-        sys.exit(1)
-    mod = importlib.util.module_from_spec(spec)
-    sys.dont_write_bytecode = True
-    spec.loader.exec_module(mod)
+    # A real ModuleType, not a synthetic class, because the end-to-end cases below REBIND
+    # `_get_json` to plant responses. Functions exec'd into a namespace take that dict as their
+    # globals, so assigning onto a `type(...)` wrapper would set an attribute `main()` never
+    # consults and the planted cases would quietly reach the live network instead.
+    mod = types.ModuleType("_rate_crosscheck_under_test")
+    mod.__file__ = str(TARGET)
+    exec(compile(TARGET.read_text(encoding="utf-8"), str(TARGET), "exec"), mod.__dict__)
     return mod
 
 
