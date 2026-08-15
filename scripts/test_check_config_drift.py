@@ -120,10 +120,24 @@ def main() -> int:
     )
 
     # 3. DRIFT -> 1. The finding path, the whole reason the gate exists.
-    drifted = agreeing.replace(f'"{four[-1]}"', '"api.evil.example"')
+    #
+    # count=1 is load-bearing and its absence was a real defect in the first version of this
+    # case. `agreeing` embeds the identical host list for BOTH tools, so a bare .replace()
+    # mutates both and the case silently exercises two simultaneous drifts while calling itself
+    # a single swapped host. The assertions passed either way, which is precisely what makes a
+    # fixture that does not match its own name dangerous: it reads as covering the isolated
+    # case and covers something else. Swapping ONE host in ONE tool also tests something the
+    # both-drifted version cannot, that the untouched tool is left alone.
+    drifted = agreeing.replace(f'"{four[-1]}"', '"api.evil.example"', 1)
+    assert drifted.count("api.evil.example") == 1, (
+        "the swap was meant to hit exactly one tool"
+    )
     rc, out = run(drifted)
+    check("a host swapped in ONE tool is caught", rc == 1, f"rc={rc}\n{out[-300:]}")
     check(
-        "a host swapped in the live config is caught", rc == 1, f"rc={rc}\n{out[-300:]}"
+        "and the UNTOUCHED tool still reports PASS",
+        "PASS  web_fetch.allowed_domains" in out,
+        out[-300:],
     )
     check(
         "and the offending tool is named",
