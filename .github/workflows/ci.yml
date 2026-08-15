@@ -466,6 +466,27 @@ jobs:
       - name: the source-comment controls actually gate
         run: python3 scripts/check-source-comment-leaks.py --selftest
 
+      # THE RATE ON THE MONEY PATH. Both of these are offline by construction: the first plants
+      # responses rather than fetching, the second parses two files as text. A BCB or ECB outage
+      # cannot redden either, which is the property that lets them be required rather than
+      # advisory.
+      - name: the rate cross-check still refuses what it must
+        run: python3 scripts/check-rate-crosscheck.py
+
+      - name: the cross-check tool's own controls
+        run: python3 scripts/rate_crosscheck.py --selftest
+
+      # The rate constants exist in two copies because deploy/deploy-targets.json puts exactly
+      # one file from scripts/ into the agent workspace, and it is pay_link.py, so importing the
+      # original on the box is impossible. This asserts the copy still prices identically.
+      - name: the two rate copies agree
+        run: python3 scripts/check-pay-link-rate-agreement.py
+
+      # The pay path's own suite, which plants the rate so it neither reaches the network nor
+      # rots as the published rate moves.
+      - name: pay-link invariants, recipient, mint, amount and rate
+        run: python3 skills/solana-pay/scripts/test_pay_link.py
+
       # Its controls, which every sibling gate in scripts/ already had and this one did not.
       # Case 1 is the motivating incident verbatim: a certifier credited with a runtime role
       # sitting in the same paragraph as a self-test the reader is told to run. The first

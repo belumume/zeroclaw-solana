@@ -12,10 +12,9 @@ thread is the remaining candidate, and purging memory cannot reach that because 
 context is not memory. The fix that holds is an instruction never to source these fields from
 anything but this file.
 
-CORRECTED 2026-08-06: this paragraph originally asserted the string existed in NO file on the box.
-A case-insensitive sweep found it twice, as prose, in the evening-reconciliation SOP. That is a
-different string in a different role and it does not explain a `label=` value, so the conclusion
-stands, but the absolute claim was wrong and it is withdrawn here rather than softened silently.
+The string is NOT absent from the box: a case-insensitive sweep finds it twice, as prose, in the
+evening-reconciliation SOP. That is a different string in a different role and it does not explain
+a `label=` value, so the conclusion below holds, but it does not rest on the string being absent.
 
 Every replacement asserts its anchor. A MISS is reported per anchor and exits non-zero, because a
 silent no-op on a live payment skill is the failure this whole class keeps producing.
@@ -67,11 +66,10 @@ while this file was already correct: three memory rows held a stale mint, and a 
 reached a customer's wallet. A customer was quoted a real mainnet charge under a sentence saying
 the shop runs on devnet.
 
-CORRECTED, and this payload is superseded by the repo's own copy in skills/solana-pay/SKILL.md.
-An earlier draft here claimed the stale label appeared in no file on the machine. A
-case-insensitive sweep found it twice, as prose, in the evening-reconciliation SOP. Different
-string, different role, and it does not explain a `label=` value, but the absolute claim was
-wrong. Take the wording from the repo file, not from this constant.
+This payload is superseded by the repo's own copy in skills/solana-pay/SKILL.md; take the
+wording from that file, not from this constant. Note the stale label DOES appear on the machine:
+a case-insensitive sweep finds it twice, as prose, in the evening-reconciliation SOP. That is a
+different string in a different role and it does not explain a `label=` value.
 
     recipient   C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ
     mint        EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v   (mainnet USDC)
