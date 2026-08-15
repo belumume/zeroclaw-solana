@@ -69,8 +69,8 @@ from typing import NoReturn
 # The offsets are duplicated rather than imported because this runs inside the channel's
 # workspace jail, which cannot reach repo root. scripts/check-feed-decoders.py asserts this
 # decoder and feed_heartbeat.py's agree on a planted blob, so the duplication cannot drift
-# silently. That gate is real; an earlier version of this docstring claimed such a test existed
-# when none did, which is the same defect this project has reported upstream ten times.
+# silently. That gate exists and runs in CI, which is what makes this sentence checkable rather
+# than a claim enforced by no runtime path.
 OFF_AUTHORITY = 8
 OFF_DEVICE = 40
 OFF_KIND = 72
@@ -84,8 +84,8 @@ OFF_BUMP = 118
 MIN_LEN = 119
 
 # Verified against three independent sources rather than recalled: lib.rs:36 declare_id!,
-# broadcast_certified.py and verify_proof_offline.py. An earlier draft carried an INVENTED
-# pubkey here, which would have rejected every genuine feed while looking like a working guard.
+# broadcast_certified.py and verify_proof_offline.py. A wrong pubkey here rejects every genuine
+# feed while looking exactly like a working guard, so it is checked rather than remembered.
 ORACLE_PROGRAM = "EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn"
 RPC = "https://api.devnet.solana.com"
 MAX_AGE_SECONDS = 30 * 60
