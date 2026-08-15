@@ -14,10 +14,9 @@ Construct a [Solana Pay](https://docs.solanapay.com/spec) transfer-request URL a
 can open or scan. This is deliberately a SKILL, not a plugin: building a `solana:` URL is
 string work, and string work does not need a sandbox.
 
-**The tier is right; the reason first written here was not, and the correction matters more
-than the decision.** This file used to say the worst failure of a malformed URL is a payment
-that never starts, so no funds are at risk. The real failure is a WELL-FORMED URL carrying
-somebody else's recipient. That routes around every custody control instead of defeating one:
+**The tier is right. The original justification for it was wrong.** That justification held
+that a malformed URL fails safe: the payment never starts, so no funds are at risk. The real
+failure is a WELL-FORMED URL carrying somebody else's recipient. That routes around every custody control instead of defeating one:
 no key is touched, nothing is signed, no approval fires, and the money that moves is the
 customer's, so the on-chain cap and the approval gate are not even on the path. A sandbox
 would not have caught it either, because the URL is valid. What was missing was an invariant,
@@ -132,11 +131,11 @@ the shop runs on devnet.
 
 On the label, state only what was measured. The exact value the wallet displayed appears in no
 file, and the memory store returns zero hits for it, so an earlier reply in the same thread is the
-remaining candidate and it is the reason conversation context is named above. What it is NOT is
-established: an earlier draft of this clause asserted the phrase appeared nowhere on the machine,
-and a case-insensitive sweep found it twice as prose in the evening-reconciliation SOP. That is a
-different string in a different role and it does not explain a `label=` value, but the absolute
-claim was wrong and is withdrawn rather than quietly softened.
+remaining candidate and it is the reason conversation context is named above. It is a candidate,
+not a finding, and no stronger claim is available: the phrase does occur elsewhere on the machine,
+twice, as prose, in the evening-reconciliation SOP. That is a different string in a different role
+and it does not explain a `label=` value, so it is not the source either. Nothing here establishes
+where the displayed value came from.
 
     recipient   C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ
     mint        EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v   (mainnet USDC)

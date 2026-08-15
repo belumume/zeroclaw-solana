@@ -28,7 +28,10 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MIN_GATES = 7  # below this the discovery walk is broken; see the docstring
+MIN_GATES = 13  # below this the discovery walk is broken; see the docstring.
+# Raised from 7 when check-correction-traces joined. A floor slack by five gates cannot detect
+# a discovery break, which is the only thing it exists to catch. The number is what discovery
+# RETURNS, which excludes check-all.py itself, so it is one below the tracked file count.
 
 # Declared exclusions, each with the reason it cannot run unattended on a clean machine.
 # Only what CANNOT self-report. A gate that can tell us it is unrunnable does so with exit 2,

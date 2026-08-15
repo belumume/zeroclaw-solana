@@ -183,3 +183,7 @@ docs/RESUME-PROMPT.md
 docs/SHOWCASE-FINAL.md
 docs/SHOWCASE-PASTE.md
 docs/PASTE-THESE-EIGHT.md
+# Internal working state for the upstream-contribution arc. Carries home paths.
+UPSTREAM-PR-RESCUE.md
+# Outbound channel for things only the operator can do. Operator-facing, not a judge surface.
+OPERATOR-INBOX.md
