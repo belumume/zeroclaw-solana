@@ -407,6 +407,10 @@ mkdir -p ~/.zeroclaw/agents/demo/workspace/tools
 cp skills/solana-pay/scripts/gen_reference.py ~/.zeroclaw/agents/demo/workspace/tools/
 cp skills/solana-pay/scripts/pay_link.py ~/.zeroclaw/agents/demo/workspace/tools/  # wraps solana: -> tappable pay-page link
 cp x402-feed-gate/scripts/summarize_earnings.py ~/.zeroclaw/agents/demo/workspace/tools/  # x402 earnings report (SOP reads it)
+cp demo/confirm_settlements.py ~/.zeroclaw/agents/demo/workspace/tools/  # settlement verdicts read off the chain, never composed
+# Two SOPs, not three. `payment-confirmation` is deliberately NOT installed: its confirmation step
+# is a sentence telling the model not to invent a settlement, which is not a binding, and on
+# 2026-07-26 the agent reported one from a substitute script when the tool was missing.
 for s in evening-reconciliation node-earnings-report; do
   cp -r sops/$s ~/.zeroclaw/agents/demo/workspace/sops/
   cp -r sops/$s ~/.zeroclaw/data/sops/                          # CLI tooling reads here

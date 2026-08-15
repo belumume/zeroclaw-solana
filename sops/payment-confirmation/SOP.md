@@ -1,5 +1,24 @@
 # Payment confirmation
 
+> **DO NOT INSTALL THIS SOP. It is kept as the worked example of a defect, not as a running
+> procedure, and `QUICKSTART.md` deliberately installs the other two and not this one.**
+>
+> Step 4 below says "never claim an order paid without a `payment_watch` confirmation". That is a
+> sentence addressed to a model, and a model can satisfy it by asserting it complied. Nothing here
+> carries the tool's output into the message or the ledger line: step 4 has the model COMPOSE the
+> announcement and step 5 has it COMPOSE five fields including the settlement signature. On
+> 2026-07-26 that is exactly what happened. With `payment_watch` unavailable the agent hunted for a
+> substitute, ran a different script, and reported a settlement verdict from it.
+>
+> A prohibition is not a binding. The deterministic replacement reads every field out of a
+> `getTransaction` response and cannot compose one:
+> [`demo/confirm_settlements.py`](../../demo/confirm_settlements.py), driven by
+> [`deploy/announce_settlements.sh`](../../deploy/announce_settlements.sh), which bypasses this SOP
+> rather than fixing it. `deterministic` execution mode is what this job wants and the host does not
+> yet reach it, which is why the replacement lives outside the SOP engine.
+>
+> Read the steps below for the shape of the job. Do not run them against real money.
+
 Announces each payment to the owner's channel within about a minute of it settling on-chain.
 This is the beat the listing storyboards: *"A customer wallet pays it. Forty seconds later the
 agent posts 'Invoice #412 paid' in the owner's channel."*
