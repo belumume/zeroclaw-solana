@@ -14,8 +14,8 @@ schedule, and gates the same feed behind x402: a machine that wants the reading 
 per request, and the node covers its own gas. That is the whole loop.
 
 The node is an Ampere ARM instance on Oracle's free tier, not a board on a desk, and it is named
-here because the rest of this page asks you to trust what runs where. What the arrangement buys is
-the part that matters: its signing key was generated on that box and has never left it, and a
+here because the rest of this page asks you to trust what runs where. What the arrangement buys:
+its signing key was generated on that box and has never left it, and a
 `systemd --user` timer with lingering publishes on a schedule no laptop is in. A Raspberry Pi with
 a DHT11 is a drop-in for the reading source and the on-chain half is identical either way. Today the
 reading comes from a keyless public weather API on that host rather than from a physical probe.
@@ -79,7 +79,7 @@ rather than the pair's. Both are the sort of thing the call above would have sho
 
 ---
 
-## The custody argument, which is the part that does not depend on trusting us
+## Custody: the limit is enforced on chain, not in our code
 
 An approval prompt is not a boundary. The sentence a human reads before approving was written
 by the model, so influencing the model influences the description. An attacker needs no key,
