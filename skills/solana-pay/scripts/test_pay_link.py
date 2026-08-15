@@ -215,6 +215,26 @@ def main():
     # first case the cross-check could be refusing everything; without the rest it could be
     # refusing nothing. A supplied rate can only ever ADD a refusal: the figure used is always
     # the published one, so passing a rate cannot relax anything.
+    # DUPLICATE amount=, the smuggling shape the spl-token guard already refuses. This parser
+    # reads the first and the pay page reads the last, so without the guard the check verifies
+    # one figure while the customer is shown another. Both orders are planted, because a guard
+    # that only catches "correct first" would pass whichever way the attacker writes it.
+    for desc, amt_qs, must_accept in [
+        ("duplicate amount, correct one first", "amount=15.32&amount=1532", False),
+        ("duplicate amount, correct one last", "amount=1532&amount=15.32", False),
+        ("CONTROL single amount still accepted", "amount=15.32", True),
+    ]:
+        u = f"solana:{MERCHANT}?{amt_qs}&spl-token={USDC_MAINNET}"
+        rc, out = run(u, ["--brl", "80"], planted_rate="5.2236")
+        ok = (
+            (rc == 0 and PAGE_OK(out, u))
+            if must_accept
+            else (rc != 0 and "REFUSED" in out)
+        )
+        print(f"{'PASS' if ok else 'FAIL'}  amount-dup: {desc}")
+        if not ok:
+            failures.append(f"amount-dup/{desc}: got rc={rc} out={out.strip()[:160]!r}")
+
     URL_80 = f"solana:{MERCHANT}?amount=15.74&spl-token={USDC_MAINNET}"
     for desc, extra, planted, must_accept in [
         (

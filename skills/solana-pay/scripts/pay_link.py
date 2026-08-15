@@ -349,13 +349,25 @@ if brl_arg is not None:
                 f"No link was produced."
             )
     # Read the amount back out of the URL rather than trusting a second copy of it.
+    #
+    # DUPLICATES ARE REFUSED, for the same reason the spl-token guard above refuses them and
+    # not as a tidy-up: this parser would read the FIRST `amount=` and the pay page reads the
+    # LAST, so a second one smuggles a different figure past the very check that exists to
+    # re-derive it. Verifying `amount=15.32` while the customer is shown `amount=1532` is worse
+    # than not verifying at all, because the refusal that should fire never does.
     query = url.split("?", 1)[1] if "?" in url else ""
-    stated = None
-    for pair in query.split("&"):
-        key, _, value = pair.partition("=")
-        if key == "amount":
-            stated = value
-            break
+    amount_values = [
+        pair.split("=", 1)[1]
+        for pair in query.split("&")
+        if pair.split("=", 1)[0] == "amount" and "=" in pair
+    ]
+    if len(amount_values) > 1:
+        sys.exit(
+            f"REFUSED: pay link carries {len(amount_values)} amount parameters. "
+            f"This parser reads the first and the pay page reads the last, so a duplicate "
+            f"is a smuggling shape rather than a typo. No link was produced."
+        )
+    stated = amount_values[0] if amount_values else None
     if stated is None:
         sys.exit("REFUSED: --brl given but the URL carries no amount= to verify.")
     try:
