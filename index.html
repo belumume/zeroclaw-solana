@@ -133,13 +133,13 @@
 
 <h2><span class="n">01</span>It has been running, not demoed</h2>
 <div class="stats">
-  <div class="stat"><b>1,937+</b><span>publishes on chain</span></div>
+  <div class="stat"><b>2,292+</b><span>publishes on chain</span></div>
   <div class="stat good"><b>0</b><span>failed</span></div>
   <div class="stat"><b>2</b><span>independent devices</span></div>
   <div class="stat"><b>20.5<small>m</small></b><span>median gap</span></div>
 </div>
 <p>
-  Read at 2026-08-09T23:15Z, and carried as a floor because the ARM node publishes every twenty
+  Read at 2026-08-15T19:41Z, and carried as a floor because the ARM node publishes every twenty
   minutes or so; the second device's count is final. Re-derive both rather than believing this page. It is an unauthenticated
   call against a public devnet RPC, no key and no account:
 </p>
@@ -151,11 +151,11 @@
 </p>
 <ul class="links">
   <li><b><code>JEtuZk&hellip;Vveg</code></b>
-      <span>the ARM node. 1,158+ publishes, 0 failed, 16.5 days, median gap 20.5&nbsp;min. Its key was
+      <span>the ARM node. 1,514+ publishes, 0 failed, 21.6 days, median gap 20.5&nbsp;min. Its key was
       generated on that box and has never left it, so this workstation cannot forge a reading for
       it.</span></li>
   <li><b><code>3aMsPj&hellip;Vx8K</code></b>
-      <span>a second device, 779 publishes, 0 failed, over a <strong>completed</strong> 12.4-day
+      <span>a second device, 778 publishes, 0 failed, over a <strong>completed</strong> 12.4-day
       run ending 2026-08-06. Deterministic publisher, no model in its path. It was laptop-hosted
       and it has stopped, which is why the continuity claim below rests on the node alone.</span></li>
 </ul>
@@ -167,7 +167,7 @@
   Zero failures is
   exact and covers both devices: no transaction has ever errored. Continuity is where they differ.
   The ARM node's largest gap is <strong>61.5
-  minutes</strong> across 16.5 days, so "every twenty minutes" is true at the median with one
+  minutes</strong> across 21.6 days, so "every twenty minutes" is true at the median with one
   hour-long interruption. The second device was laptop-hosted, so it slept, and its largest gap
   inside its run was <strong>36 hours</strong>. It has since stopped for good, and the command
   cannot tell you that: it measures gaps between consecutive publishes, so once a feed stops its
@@ -175,7 +175,7 @@
   Re-run it in a month and it still reports 36 hours, with nothing in the number marking the
   device as gone. Its job was to show the
   same program accepting signed readings from a second independent device with a second key, and a
-  completed run of 779 publishes at zero failures did that. Continuity rests on the node alone.
+  completed run of 778 publishes at zero failures did that. Continuity rests on the node alone.
   The command above shows you both anyway, which is the only reason either is worth writing down:
   a number you can check beats a rounder one you cannot.
 </p>

@@ -29,7 +29,7 @@ not qualify.
 Built for a small operator who wants an agent touching money without handing it a signing key.
 
 **And it has been running, not demoed.** The rubric asks whether a stranger would still be running
-this in a month. Read as of 2026-08-09T23:15Z, and re-derive it yourself rather than believing the
+this in a month. Read as of 2026-08-15T19:41Z, and re-derive it yourself rather than believing the
 figures, because they move every twenty minutes:
 
 ```bash
@@ -39,28 +39,28 @@ python3 scripts/verify-proof.py          # stdlib only, no install, no key
 That checks the live claims. To count the history yourself, the underlying call is
 `getSignaturesForAddress` on a feed account, which any devnet RPC will answer unauthenticated.
 
-**Two independent devices, 1,937 publishes between them, zero failed.** That is the DePIN claim
+**Two independent devices, 2,292 publishes between them, zero failed.** That is the DePIN claim
 rather than a gadget claim: the same on-chain oracle program serves both, each device holds its own
 key, and neither can sign for the other.
 
-**Measured 2026-08-09T23:15Z, and the publish counts only climb.** Do not read them as current;
+**Measured 2026-08-15T19:41Z, and the publish counts only climb.** Do not read them as current;
 re-derive with one `getSignaturesForAddress` per account, which returns the complete history because
 the oldest signature is the account's own creation.
 
 | Feed account | Publishes | Failed | Span | Median gap | Largest gap |
 |---|---|---|---|---|---|
-| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 1,158+ | 0 | 16.5 d | 20.5 min | **61.5 min** |
-| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
+| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 1,514+ | 0 | 21.6 d | 20.5 min | **61.5 min** |
+| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 778 | 0 | 12.4 d | 20.0 min | **36.0 h** |
 
 The ARM node's 61.5 minutes is its worst run in
-sixteen days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
+the span above. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
 node's figure is the point: a reader who runs the command finds both, and an outlier they discover
 for themselves discredits everything around it.
 
 **The second device's run is finished, and its row is a completed result rather than a running
 counter.** It stopped on 2026-08-06 and the numbers above will not grow. Its purpose was to show
 the same on-chain program accepting signed readings from a second independent device holding a
-second key, which 779 publishes at zero failures over 12.4 days establishes. **Only the ARM node
+second key, which 778 publishes at zero failures over 12.4 days establishes. **Only the ARM node
 is still publishing**, and every continuity claim in this submission rests on that row alone. A
 reader checking this a fortnight from now will find the node's count higher and the second
 device's identical, which is what these two rows are each supposed to mean.
