@@ -91,9 +91,9 @@ A second and stronger check runs beside it, and the direction is the interesting
 [`deploy/box_selfcheck.py`](deploy/box_selfcheck.py) runs **on** the node, compares the deployed
 bytes against the manifest written at deploy time, and pushes a verdict outward through the same
 tunnel. Every inbound route is shut, so nothing reaches in and the box reports on itself, which
-also lets it see deployed bytes and running services that an external prober cannot. Its
-consumer, `check_box_drift.py`, is not tracked in this repo, so what a stranger can read here is
-the checker and its reasoning rather than a live drift verdict.
+also lets it see deployed bytes and running services that an external prober cannot. The checker
+that consumes that verdict is not tracked here, so what a stranger can read in this repo is the
+self-check and its reasoning rather than a live drift result.
 
 Live on-chain evidence, all clickable, is in
 [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md). The verifier above reports static and live
