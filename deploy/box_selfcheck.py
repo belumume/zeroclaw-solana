@@ -72,8 +72,8 @@ B58 = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
 
 # A line that FORBIDS a network necessarily names it, so the network-prose check has to tell a
 # prohibition apart from an assertion to the customer. Deliberately a small, boring marker set:
-# this is a semantic distinction and regex does those badly (measured F1 ~0.22-0.33 for the class),
-# so the honest posture is a narrow list plus a stated ceiling rather than a clever pattern.
+# this is a semantic distinction and regex does those badly, so the honest posture is a narrow
+# list plus a stated ceiling rather than a clever pattern.
 #
 # CEILING, so nobody reads a green as stronger than it is: a prohibition phrased with none of these
 # markers still reads as an assertion and FALSE-POSITIVES, and an assertion that happens to carry

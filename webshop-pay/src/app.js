@@ -46,6 +46,16 @@ var STR={pt:{
  failed:'O pagamento não foi concluído: ',
  explorer:'Ver no explorer',
  holds:'Esta carteira tem ',
+ // The shortfall line is built from four fragments and only the first was ever translated, so a
+ // pt-BR customer who is short on USDC read "Esta carteira tem 0.0002 USDC, needs 0.39. Fund this
+ // wallet on Solana mainnet, then retry." Half a sentence in each language, on the money path, at
+ // the moment the payment stops. Same defect the build journal records for SKILL.md step 4b.
+ nowallet:'Nenhuma extensão de carteira Solana detectada neste navegador. Instale a Phantom ou a Solflare (no computador), ou escaneie o QR acima com a carteira do celular.',
+ choosewallet:'Escolha uma carteira.',
+ lastused:'última usada',
+ oftoken:' do token pedido',
+ needs:', precisa de ',
+ fundmsg:'. Adicione fundos a esta carteira na mainnet da Solana e tente de novo.',
  hint:'No computador: clique em <b>Conectar carteira e pagar</b> (extensão Phantom ou Solflare). No celular: escaneie o QR com o app da sua carteira. Esta loja funciona na mainnet: o pagamento é em USDC de verdade e a carteira precisa de um pouco de SOL para a taxa.'
 }};
 var LANG=(function(){
@@ -547,7 +557,7 @@ function renderWalletPicker(list){
 }
 async function connectAndPay(){
   var list=enumerateWallets();
-  if(!list.length){status('No Solana wallet extension detected in this browser. Install Phantom or Solflare (desktop), or scan the QR above with a phone wallet.','err');return;}
+  if(!list.length){status(T('nowallet','No Solana wallet extension detected in this browser. Install Phantom or Solflare (desktop), or scan the QR above with a phone wallet.'),'err');return;}
   // One wallet is not a choice. A picker with a single option is a pointless extra click.
   if(list.length===1)return payWith(list[0]);
   status(T('choosewallet','Choose a wallet.'));
@@ -597,7 +607,7 @@ async function payWith(w){
         var needStr=(Number(amt)/Math.pow(10,mintInfo.decimals)).toString();
         // No faucet line on mainnet: there is no faucet, and pointing a customer at one for
         // real USDC would be advice that cannot be followed. State the shortfall and stop.
-        status(T('holds','This wallet holds ')+haveStr+(knownName?' '+knownName:' of the requested token')+', needs '+needStr+'. Fund this wallet on Solana mainnet, then retry.','err');
+        status(T('holds','This wallet holds ')+haveStr+(knownName?' '+knownName:T('oftoken',' of the requested token'))+T('needs',', needs ')+needStr+T('fundmsg','. Fund this wallet on Solana mainnet, then retry.'),'err');
         el('pay').disabled=false;return;
       }
       // ensure the recipient's token account exists (idempotent; payer funds the tiny rent) so

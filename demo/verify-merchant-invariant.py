@@ -439,7 +439,7 @@ def main() -> int:
                     page.screenshot(path=str(out))
                     print(f"  frame: {shown(out)}")
 
-                # The alignment number the beat-1 overlay is keyed to. Only the refused card
+                # The alignment number the checkout overlay is keyed to. Only the refused card
                 # carries both addresses, so only it can be measured. Diagnostic: it reports,
                 # it never gates, so the correctness verdict is unchanged in both viewports.
                 if want_refused:

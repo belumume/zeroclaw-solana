@@ -19,7 +19,7 @@ not appear is a failed take even if every command succeeded.
   python demo/take.py --beat feed-heartbeat
   python demo/take.py --beat feed-heartbeat --dry-run    # run the command, skip the capture
 
-Durations below were measured by agents that ran each command, not estimated.
+Durations below were measured on real runs, not estimated.
 """
 
 from __future__ import annotations
