@@ -381,7 +381,7 @@ jobs:
         run: python3 scripts/check-claim-coherence.py
 
       # The edit process is not part of the artifact. This gate refuses a judge-facing document
-      # that narrates what a claim used to say, when it was fixed, or who caught it. The test is
+      # that narrates a claim's earlier wording, when it was fixed, or who caught it. The test is
       # the sentence's SUBJECT: text-as-subject is a trace and goes, system-as-subject is product
       # honesty and stays, which is why the checker carries an ALLOW list rather than a blanket ban.
       #
@@ -454,6 +454,17 @@ jobs:
 
       - name: the i18n controls actually gate
         run: python3 scripts/check-i18n-coverage.py --selftest
+
+      # Every slop and leak gate lists four prose suffixes and none of them is .py, so tracked
+      # source was green by never being scanned. Five internal references were live on the
+      # default branch when this was added, readable by anyone who clones. The marker set was
+      # narrowed by measurement over 151 tracked files: two obvious candidates were dropped
+      # because they fire on working code and on legitimate privacy descriptions.
+      - name: no tracked source names a private artifact, channel, or process
+        run: python3 scripts/check-source-comment-leaks.py
+
+      - name: the source-comment controls actually gate
+        run: python3 scripts/check-source-comment-leaks.py --selftest
 
       # Its controls, which every sibling gate in scripts/ already had and this one did not.
       # Case 1 is the motivating incident verbatim: a certifier credited with a runtime role
