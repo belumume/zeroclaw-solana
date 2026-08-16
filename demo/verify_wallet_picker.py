@@ -33,12 +33,32 @@ from __future__ import annotations
 
 import base64
 import http.server
+import json
 import socketserver
 import sys
 import threading
 from pathlib import Path
 
 SHOP = Path(__file__).resolve().parent.parent / "webshop-pay"
+
+# THE OPERATOR'S MEASURED ENVIRONMENT, as data rather than as constants in this file. It is loaded
+# rather than hardcoded because this harness's whole failure history is fixtures that described an
+# imagined machine: the wallet list was invented twice before it was measured once, and both times
+# every assertion here passed while a defect was live on the deployed page. A number in test code
+# is indistinguishable from a number someone picked; a number in a profile carries its provenance
+# and its measurement date with it.
+#
+# REFUSES rather than falling back. A default would silently restore exactly the invented fixture
+# this file exists to eliminate, and the failure would look like a pass.
+PROFILE_PATH = Path(__file__).resolve().parent / "operator-profile.json"
+try:
+    OPERATOR_PROFILE = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+except Exception as exc:
+    raise SystemExit(
+        f"cannot read {PROFILE_PATH.name}: {exc}\n"
+        "This harness asserts geometry against the operator's real environment and refuses to\n"
+        "invent one. Restore the profile rather than adding a default here."
+    ) from exc
 
 PAYABLE = (
     "solana:C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
@@ -219,19 +239,40 @@ def main() -> int:
             # viewport. His window happened to be 982 tall and cleared it by ten pixels, which is
             # the only reason he did not hit it. The phone path must stay reachable after the
             # picker opens, however many wallets are installed.
-            # MEASURED 2026-08-16 in the operator's own profile, replacing an invented set.
-            # "Brave Wallet" was never installed; the eighth is Petra. Read live off the pay page
-            # by dispatching wallet-standard:app-ready and collecting what registered.
-            EIGHT = [
-                "Backpack",
-                "Phantom",
-                "MetaMask",
-                "Solflare",
-                "Jupiter",
-                "Magic Eden",
-                "Glow",
-                "Petra",
-            ]
+            # READ FROM THE PROFILE, not written here. `demo/operator-profile.json` carries the
+            # measured environment with its provenance, so re-measuring is a data edit the harness
+            # picks up rather than a code change, and so a reader can tell a measured number from
+            # one somebody chose. The list was invented twice before it was measured once.
+            # SHAPE, checked the same way the file read is. A profile that parses as JSON but has
+            # the wrong structure would otherwise surface as a raw KeyError, which reads as a bug
+            # in this harness rather than as a bad profile, and sends the reader to the wrong file.
+            try:
+                registered = OPERATOR_PROFILE["wallets"]["registered"]
+                if not isinstance(registered, list) or not all(
+                    isinstance(w, str) for w in registered
+                ):
+                    raise TypeError("wallets.registered must be a list of strings")
+            except (KeyError, TypeError) as exc:
+                raise SystemExit(
+                    f"{PROFILE_PATH.name} parsed but is not shaped as a profile: {exc}\n"
+                    "Expected wallets.registered to be a list of wallet-name strings."
+                ) from exc
+            EIGHT = list(registered)
+
+            # THE PROFILE MUST BE BIG ENOUGH TO SEE THE DEFECT, and this guard is the whole reason
+            # the profile is data rather than a constant. Deriving the count assertion from the
+            # profile is right, but on its own it makes a SHRUNKEN profile pass: two wallets, two
+            # rows, QR comfortably in view, green. That is exactly the blindness this harness was
+            # built after -- the fixture had two wallets against his eight, the list grows 67px per
+            # row, and a below-the-fold defect is unreachable until about four rows. A profile that
+            # cannot exercise the failure is not a smaller test, it is a test of nothing.
+            MIN_WALLETS_TO_SEE_THE_DEFECT = 4
+            if len(EIGHT) < MIN_WALLETS_TO_SEE_THE_DEFECT:
+                raise SystemExit(
+                    f"operator-profile.json lists {len(EIGHT)} wallet(s); the tall-list geometry "
+                    f"is unreachable below {MIN_WALLETS_TO_SEE_THE_DEFECT}, so this run would pass "
+                    "without testing anything. Re-measure rather than lowering this floor."
+                )
             for vw, vh in ((1280, 900), (390, 844)):
                 ctx = b.new_context(viewport={"width": vw, "height": vh})
                 p8 = ctx.new_page()
@@ -247,14 +288,16 @@ def main() -> int:
                   return {n: document.querySelectorAll('.wallet-btn').length,
                           bottom: r ? r.bottom : null, vh: window.innerHeight};
                 }""")
+                # Count derived from the profile, not written as 8, so a re-measurement that finds
+                # nine wallets tests nine. The floor above is what stops that becoming permissive.
                 ok = (
-                    geo["n"] == 8
+                    geo["n"] == len(EIGHT)
                     and geo["bottom"] is not None
                     and geo["bottom"] <= geo["vh"]
                 )
                 results.append(
                     (
-                        f"8 wallets -> QR still fully in view at {vw}x{vh}",
+                        f"{len(EIGHT)} wallets -> QR still fully in view at {vw}x{vh}",
                         ok,
                         f"{geo['n']} listed, qr bottom {geo['bottom']} vs vh {geo['vh']}",
                     )
