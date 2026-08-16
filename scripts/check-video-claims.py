@@ -129,9 +129,13 @@ def audit(root: pathlib.Path, data: dict) -> list[str]:
         # plugins/payment-watch` names a real directory and is still not runnable as written,
         # because each plugin is its own workspace and the cd is unstated. Every path a reader
         # needs belongs in the command. A comment that names no path is fine and stays fine.
+        # A `#` only opens a comment at the start of a word, which is the shell's own rule. Without
+        # that, an explorer URL's fragment (`.../tx/ABC#cluster=mainnet`) reads as a comment and
+        # anything after it gets scanned, so the gate would fire on a perfectly good command.
         verify = str(c.get("verify") or "")
-        if "#" in verify:
-            comment = verify.split("#", 1)[1]
+        opens = re.search(r"(?:^|\s)#(.*)$", verify)
+        if opens:
+            comment = opens.group(1)
             hidden = PATH_RE.findall(comment) + re.findall(
                 r"\b(?:plugins|crates|skills|demo|scripts)/[A-Za-z0-9_.-]+", comment
             )
@@ -269,6 +273,17 @@ def selftest() -> int:
             one(
                 lambda d: d["claims"][0].update(
                     verify="python3 scripts/real.py   # stdlib only, no network"
+                )
+            ),
+            [],
+        )
+        # A URL fragment is not a comment. Without the shell's start-of-word rule this fires, and a
+        # gate that flags a good command is the shape that gets routed around rather than followed.
+        check(
+            "a URL fragment is not read as a comment",
+            one(
+                lambda d: d["claims"][0].update(
+                    verify="curl -s https://x.example/tx/ABC#cluster=scripts/real.py"
                 )
             ),
             [],
