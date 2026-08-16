@@ -133,6 +133,23 @@ class Result:
         return bool(self.checks) and all(c["ok"] for c in self.checks)
 
 
+def is_commit_sha(value: object) -> bool:
+    """A full 40-character hex commit id, and nothing that merely resembles one.
+
+    A LENGTH TEST IS NOT ENOUGH HERE, and the counterexample is already in this repo:
+    `make_invariants.py` writes the literal string `"unknown"` into `repo_commit` when
+    `git rev-parse HEAD` fails, and `"unknown"` is exactly seven characters. A `len >= 7` guard
+    therefore accepts the one value that means "no commit at all" and republishes it as a
+    corroborated vintage, which is the exact failure this whole check exists to remove, wearing
+    a different disguise. Requiring 40 hex digits rejects it on both counts.
+    """
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(c in "0123456789abcdef" for c in value.lower())
+    )
+
+
 def check_vintage_agreement(inv: dict, r: Result) -> None:
     """TWO RECORDS OF THE DEPLOY VINTAGE EXIST. Assert they still agree.
 
@@ -160,12 +177,26 @@ def check_vintage_agreement(inv: dict, r: Result) -> None:
     except OSError:
         label = None
 
-    if not isinstance(generated, str) or len(generated) < 7:
+    if not is_commit_sha(generated):
         r.add(
             "deploy-vintage",
             False,
             f"the invariants file carries no usable repo_commit ({generated!r}), so the "
             f"commit its hashes belong to cannot be named",
+        )
+        return
+
+    # A DIRTY TREE AT GENERATION MEANS THE COMMIT DOES NOT IDENTIFY THE CONTENT, which
+    # `make_invariants.py` already warns about at generation time and nothing carried onto the
+    # box. The hashes are still right, because they were taken from the files themselves; what is
+    # wrong is the NAME attached to them, which is this check's whole subject.
+    if inv.get("repo_dirty") is True:
+        r.add(
+            "deploy-vintage",
+            False,
+            f"repo_commit {generated[:12]} was generated from a DIRTY tree, so it names a "
+            f"commit whose content is not what was deployed. The hashes are still authoritative; "
+            f"the commit is not. Redeploy from a clean checkout.",
         )
         return
     if label is None:
@@ -568,7 +599,10 @@ def build_verdict(r: Result) -> dict:
         pass
     inv = load_invariants() or {}
     generated = inv.get("repo_commit")
-    have_generated = isinstance(generated, str) and len(generated) >= 7
+    # Same strictness as check_vintage_agreement, deliberately sharing one predicate: publishing
+    # the "unknown" sentinel under `deployed_sha_source: repo_commit` would label a non-commit as
+    # the corroborated baseline, which is worse than publishing the hand label it replaced.
+    have_generated = is_commit_sha(generated)
     sha = generated if have_generated else label
     return {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -1030,6 +1064,37 @@ def self_test() -> int:
         r = Result()
         check_vintage_agreement({}, r)
         report("vintage: absent repo_commit FAILS", r.checks[0]["ok"] is False)
+
+        # THE "unknown" SENTINEL, which `make_invariants.py` writes when `rev-parse HEAD` fails
+        # and which is exactly seven characters long. A length-based guard accepts it and labels
+        # a non-commit as the corroborated baseline.
+        DEPLOYED_SHA.write_text(agreeing, encoding="utf-8")
+        r = Result()
+        check_vintage_agreement({"repo_commit": "unknown"}, r)
+        report("vintage: the 'unknown' sentinel FAILS", r.checks[0]["ok"] is False)
+        report(
+            "vintage: a real 40-hex sha is still accepted",
+            is_commit_sha(agreeing) is True,
+        )
+        report(
+            "vintage: a short sha is rejected", is_commit_sha(agreeing[:12]) is False
+        )
+        report(
+            "vintage: a 40-char non-hex string is rejected",
+            is_commit_sha("z" * 40) is False,
+        )
+
+        # A DIRTY tree at generation time: the hashes are right and the commit does not name the
+        # content they came from, which is the same class of wrong baseline.
+        r = Result()
+        check_vintage_agreement({"repo_commit": agreeing, "repo_dirty": True}, r)
+        report("vintage: a dirty-tree generation FAILS", r.checks[0]["ok"] is False)
+        r = Result()
+        check_vintage_agreement({"repo_commit": agreeing, "repo_dirty": False}, r)
+        report(
+            "vintage: a clean-tree generation passes (over-correction control)",
+            r.checks[0]["ok"] is True,
+        )
 
         # THE PUBLISHED FIELD, which is what a remote reader and every gate actually consume.
         # Before this change it carried the hand label, so it served the stale commit.

@@ -110,5 +110,30 @@ jobs:
       # `continue-on-error` is deliberately NOT set. A stale deploy on the money path is the
       # alarm this workflow exists to raise, and a step allowed to fail quietly is a step
       # nobody reads.
+      #
+      # RETRIED THE SAME WAY THE DEVNET STEP ABOVE IS, and for the reason in this file's own
+      # header: a third-party outage must never turn the badge red. The gate already separates
+      # the two cases by exit code, so the retry keys on that rather than on its prose: 2 is
+      # "the endpoint did not answer", which is retryable and says nothing about the deploy, and
+      # 1 is a real drift finding that must fail on the first attempt rather than being tried
+      # three times as though the box might change its mind.
       - name: the box is running the content on main
-        run: python3 scripts/check-deploy-content-staleness.py
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            python3 scripts/check-deploy-content-staleness.py
+            rc=$?
+            case "$rc" in
+              0) exit 0 ;;
+              2)
+                echo "Could not reach the box on attempt $attempt; retrying."
+                sleep 20
+                ;;
+              *)
+                echo "The box is not running the content on main. Not a transport problem."
+                exit 1
+                ;;
+            esac
+          done
+          echo "the box self-check endpoint was unreachable on three attempts"
+          exit 1
