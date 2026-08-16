@@ -102,6 +102,50 @@ CASES = [
         f"solana:{MERCHANT}x?amount=25",
         False,
     ),
+    # LABEL. Until this shipped it was the one pinned constant with nothing enforcing it, and
+    # SKILL.md said so in its own words. A stale one reached a customer's approval screen on
+    # 2026-08-06. The wallet renders `label` as WHO IS BEING PAID, so a wrong value misnames the
+    # shop on the last screen before money moves.
+    (
+        "the correct label passes",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}&label=ZeroClaw%20Shop",
+        True,
+    ),
+    (
+        "the correct label in the + encoding also passes",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}&label=ZeroClaw+Shop",
+        True,
+    ),
+    (
+        "the placeholder name that reached a real customer is REFUSED",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}&label=Demo%20Shop",
+        False,
+    ),
+    (
+        "a plausible near-miss on the shop's own name is REFUSED",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}&label=ZeroClaw%20Store",
+        False,
+    ),
+    (
+        "a duplicated label is REFUSED, like a duplicated mint or amount",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}"
+        f"&label=ZeroClaw%20Shop&label=Attacker",
+        False,
+    ),
+    # THE OVER-CORRECTION CONTROLS. The check is deliberately split so that ABSENT is not treated
+    # as WRONG: `label` is optional in the Solana Pay spec and a wallet then shows the recipient
+    # address, which is less informative and is not misleading. If either of these ever starts
+    # failing, the guard was widened into refusing legitimate links.
+    (
+        "an ABSENT label still passes, because absent is not wrong",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}",
+        True,
+    ),
+    (
+        "a bare merchant link with no query at all still passes",
+        f"solana:{MERCHANT}",
+        True,
+    ),
 ]
 
 

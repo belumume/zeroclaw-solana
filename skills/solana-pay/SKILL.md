@@ -141,9 +141,15 @@ where the displayed value came from.
     label       ZeroClaw Shop
     network     mainnet. Real money. Say mainnet, never devnet.
 
-`pay_link.py` refuses a link whose recipient or mint is not the pair above, so a drifted value
-fails loudly rather than reaching a customer. The label and the network sentence have no such
-guard, which is why they are your responsibility here.
+`pay_link.py` refuses a link whose recipient, mint or label is not the value above, so a drifted
+one fails loudly rather than reaching a customer. An ABSENT label is allowed through, because the
+field is optional in the spec and a wallet then shows the recipient address, which is less
+informative and is not misleading; a WRONG one is refused every time.
+
+The NETWORK SENTENCE is the one constant here still carried by prose alone, and it is yours. No
+code can check it, because it is a claim you make in a message rather than a field in a link. On
+2026-08-06 a customer was quoted a real mainnet charge under a sentence saying the shop runs on
+devnet, and nothing in the pay path could have caught that.
 
 **`label` is the MERCHANT, `message` is the ORDER.** That is the Solana Pay spec, and the wallet
 renders `label` as who is being paid. Putting the table or the order number there is what put a
