@@ -835,6 +835,33 @@ jobs:
       # a plain cdylib for wasm32-unknown-unknown, so the target has to be added explicitly.
       - name: add the browser wasm target
         run: rustup target add wasm32-unknown-unknown
+      # BUILD rather than check, because the wasm is the input to the page generator and the drift
+      # step below cannot run without it. sanitizer.wasm is deliberately not committed.
       - name: sanitizer-microworld compiles for the browser
         working-directory: sanitizer-microworld
-        run: cargo check --locked --target wasm32-unknown-unknown
+        run: cargo build --release --locked --target wasm32-unknown-unknown
+
+      # index.html is GENERATED and committed, so it drifts from its generator in both directions:
+      # an edit to build_page.py that nobody rebuilds ships nothing, and an edit to the page is
+      # erased by the next build. webshop-pay has this same step for the same reason, after that
+      # page and its generator drifted once.
+      - name: the microworld page matches its generator
+        working-directory: sanitizer-microworld
+        run: |
+          # The artifact name and the target dir are build.sh's, copied rather than re-guessed:
+          # the crate is sanitizer-microworld so cargo emits sanitizer_microworld.wasm, and
+          # CARGO_TARGET_DIR may be redirected by the cache action. Running from this directory
+          # is what makes the relative default correct, exactly as build.sh does.
+          TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+          WASM="$TARGET_DIR/wasm32-unknown-unknown/release/sanitizer_microworld.wasm"
+          test -f "$WASM" || { echo "no artifact at $WASM"; ls -R "$TARGET_DIR" | head -40; exit 1; }
+          cp "$WASM" ./sanitizer.wasm
+          python3 build_page.py --check
+
+      # The page invites a judge to beat the sanitizer and says BEATEN if they do. A banner that
+      # can only ever say CONTRACT HOLDS is an uncalibrated instrument, and worse than no banner
+      # because it invites a challenge it cannot honour. This extracts the page's own clause
+      # checker and plants one violation per clause, with a positive control so a check that
+      # always fails cannot satisfy it. Offline: it reads the generated file and runs node.
+      - name: the microworld's win condition can actually say BEATEN
+        run: node sanitizer-microworld/check_verdict.js

@@ -26,6 +26,16 @@
   }
   button:hover { border-color: var(--accent); color: var(--accent); }
   .note { color: var(--dim); font-size: 13px; min-height: 34px; margin: 4px 2px 14px; }
+  .verdict {
+    border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 16px 0 0;
+    background: var(--panel); font-size: 13px; line-height: 1.55;
+  }
+  .verdict .v { font-weight: 600; letter-spacing: .04em; }
+  .verdict.hold .v { color: var(--accent); }
+  .verdict.beaten { border-color: #e2564d; }
+  .verdict.beaten .v { color: #e2564d; }
+  .verdict ul { margin: 8px 0 0; padding-left: 18px; color: var(--dim); }
+  .verdict li.bad { color: #e2564d; }
   textarea {
     width: 100%; min-height: 92px; background: var(--panel); color: var(--ink);
     border: 1px solid var(--line); border-radius: 8px; padding: 12px;
@@ -66,6 +76,18 @@
   <div class="presets" id="presets"></div>
   <div class="note" id="note">Pick an attack above, or type your own.</div>
 
+  <div class="prov">
+    <b>Try to beat it.</b> The win condition is not a slogan, it is the contract the property
+    tests assert, and this page re-checks all six clauses against the real output on every
+    keystroke. You have beaten it if the panel below ever says BEATEN: that means an input
+    reached output that is over the 96-character cap, or still carries a control, format, bidi
+    or zero-width character, or has a leading space, a trailing space or a doubled space, or is
+    not idempotent. The same clauses run as
+    <code>assert_output_contract</code> in <code>crates/solana-core/tests/properties.rs</code>
+    over 1,024 generated cases per property, so beating it here means those tests are wrong.
+    Where we have already been wrong is published in <code>docs/WHAT-WE-GOT-WRONG.md</code>.
+  </div>
+
   <textarea id="in" spellcheck="false"></textarea>
 
   <div class="grid">
@@ -80,6 +102,8 @@
   </div>
 
   <div class="stats" id="stats"></div>
+
+  <div class="verdict hold" id="verdict"></div>
 
   <div class="limits">
     <h2>What this deliberately does not do</h2>
@@ -129,11 +153,19 @@ async function boot() {
   setValue(PRESETS[0].value, PRESETS[0].note);
 }
 
+// ONE definition of the cap. It is passed to the wasm call in `run` AND checked by the bounded
+// clause further down, and nothing kept the two in step when they were separate literals:
+// changing the call would have left the clause silently asserting the wrong bound. Declared
+// ABOVE `run` rather than below it, because `boot` is async and calls through to `run`, so
+// relying on the const being initialised by then would be reasoning about the temporal dead zone
+// instead of removing the question.
+const CAP = 96;
+
 function run(text) {
   const enc = new TextEncoder().encode(text);
   const ptr = wasm.alloc(enc.length);
   new Uint8Array(wasm.memory.buffer, ptr, enc.length).set(enc);
-  const res = wasm.sanitize(ptr, enc.length, 96);
+  const res = wasm.sanitize(ptr, enc.length, CAP);
   const len = new DataView(wasm.memory.buffer).getUint32(res, true);
   const body = new Uint8Array(wasm.memory.buffer, res + 4, len);
   return JSON.parse(new TextDecoder().decode(body));
@@ -168,6 +200,38 @@ function stat(label, value, tone) {
   return d;
 }
 
+// THE WIN CONDITION, checked rather than asserted. Every clause below is one line of
+// `assert_output_contract` in crates/solana-core/tests/properties.rs, plus the idempotence
+// property next to it. It is deliberately checked against r.text, the sanitized field, and NOT
+// against r.labelled: the label is a prefix this page adds around the field, so checking the
+// labelled string would test the wrong thing and could report a false BEATEN.
+function forbidden(ch) {
+  const c = ch.codePointAt(0);
+  return c < 0x20 || (c >= 0x7f && c <= 0x9f)          // control (Cc)
+    || c === 0x2028 || c === 0x2029                     // line / paragraph separator
+    || c === 0x200b || c === 0x200c || c === 0x200d || c === 0xfeff
+    || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)
+    || c === 0x200e || c === 0x200f;                    // bidi / zero-width
+}
+function contract(out) {
+  const chars = [...out];
+  const bad = chars.filter(forbidden).map(
+    (c) => "U+" + c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0"));
+  // Idempotence: a second pass must change nothing and strip nothing.
+  const again = run(out);
+  return [
+    ["bounded to " + CAP + " characters", chars.length <= CAP,
+     chars.length + " chars"],
+    ["no control, format, bidi or zero-width survives", bad.length === 0,
+     bad.length ? bad.join(" ") : "none present"],
+    ["no leading space", !out.startsWith(" "), ""],
+    ["no trailing space", !out.endsWith(" "), ""],
+    ["no doubled space", !out.includes("  "), ""],
+    ["idempotent: a second pass changes nothing",
+     again.text === out && again.stripped === 0, ""],
+  ];
+}
+
 function update() {
   const text = document.getElementById("in").value;
   const r = run(text);
@@ -184,6 +248,28 @@ function update() {
     stat("injection framing", r.injection_suspected ? "labelled" : "none",
          r.injection_suspected ? "warn" : ""),
   );
+
+  const clauses = contract(r.text);
+  const beaten = clauses.some(([, ok]) => !ok);
+  const v = document.getElementById("verdict");
+  v.className = "verdict " + (beaten ? "beaten" : "hold");
+  v.textContent = "";
+  const head = document.createElement("div");
+  const tag = document.createElement("span");
+  tag.className = "v";
+  tag.textContent = beaten ? "BEATEN" : "CONTRACT HOLDS";
+  head.append(tag, document.createTextNode(
+    beaten
+      ? ". This input broke a clause the property tests assert. That is a real finding."
+      : ". All six clauses, re-checked on the output above."));
+  const ul = document.createElement("ul");
+  for (const [label, ok, detail] of clauses) {
+    const li = document.createElement("li");
+    if (!ok) li.className = "bad";
+    li.textContent = (ok ? "✓ " : "✗ ") + label + (detail ? " (" + detail + ")" : "");
+    ul.appendChild(li);
+  }
+  v.append(head, ul);
 }
 
 function setValue(v, note) {
