@@ -112,6 +112,12 @@ jobs:
               "check-all.py":
                   "the local aggregate runner, not a gate; it would pull check-doc-links.py "
                   "onto the runner.",
+              "check-root-divergence.py":
+                  "compares the two WORKING ROOTS, and a runner clones exactly one, so it "
+                  "would SKIP on every run. A step that can only ever skip is a green check "
+                  "asserting nothing. Its control, test_check_root_divergence.py, builds its "
+                  "own synthetic pair in a temp dir and DOES run in ci.yml, so the checker's "
+                  "behaviour is verified here even though the checker cannot run here.",
           }
 
           tracked = subprocess.run(

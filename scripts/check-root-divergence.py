@@ -79,6 +79,17 @@ def same(a: pathlib.Path, b: pathlib.Path) -> bool:
     ab, bb = a.read_bytes(), b.read_bytes()
     if ab == bb:
         return True
+
+    # LINE ENDINGS ARE NOT CONTENT, and this was found by running the gate rather than by
+    # reasoning about it. `scripts/check-host-compat.sh` reported as divergent across the roots
+    # while being IDENTICAL: 228 CR in one checkout and 0 in the other, a byte delta of exactly
+    # 228, equal the moment endings are normalised. Under `core.autocrlf` the same blob is two
+    # different byte sequences in two working copies, so a byte comparison between working trees
+    # measures the checkout rather than the file. Same class as the JSON case below, and it would
+    # have produced a permanent false FAIL on a must-match path.
+    if ab.replace(b"\r\n", b"\n") == bb.replace(b"\r\n", b"\n"):
+        return True
+
     # Parsed equality for JSON, so a serialisation-only difference is not reported as data drift.
     if a.suffix == ".json":
         try:

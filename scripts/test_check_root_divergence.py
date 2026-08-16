@@ -36,6 +36,11 @@ AGREE, DIVERGED, CANNOT = 0, 1, 2
 # plants filler. Named so the floor itself is visibly satisfied rather than accidentally.
 FILLER = 200
 
+# Named rather than written inline, because a backslash escape in a bytes literal is what a
+# shell heredoc mangles, and this file has already been rewritten once for that reason.
+NL = bytes([10])
+CRNL = bytes([13, 10])
+
 
 def _force_rw(func, path, exc):
     """rmtree onexc handler: drop the read-only attribute git sets, then retry once."""
@@ -126,6 +131,23 @@ def other_root_absent(a, b):
     (b / ".git").rename(b / ".notgit")
 
 
+def crlf_only(a, b):
+    """The real defect: a must-match path identical apart from checkout line endings."""
+    src = (a / "scripts" / "check-example.py").read_bytes()
+    # Normalised FIRST. `write_text` in build_pair already applied the platform ending on
+    # Windows, so a bare NL->CRNL replace produces CR CR LF and plants a real difference
+    # rather than an ending-only one. The fixture hit the exact trap the gate now handles.
+    (b / "scripts" / "check-example.py").write_bytes(src.replace(CRNL, NL).replace(NL, CRNL))
+
+
+def crlf_plus_real_change(a, b):
+    """Over-correction control: normalising endings must not swallow a real change."""
+    src = (a / "scripts" / "check-example.py").read_bytes()
+    (b / "scripts" / "check-example.py").write_bytes(
+        src.replace(CRNL, NL).replace(NL, CRNL).replace(b"gate", b"OLD gate")
+    )
+
+
 def floor_broken(a, b):
     for i in range(FILLER):
         (b / f"f{i:03d}.txt").unlink()
@@ -158,6 +180,18 @@ CASES = [
         divergent_ordinary,
         AGREE,
         "INFO",
+    ),
+    (
+        "a must-match path differing ONLY in line endings is not reported",
+        crlf_only,
+        AGREE,
+        None,
+    ),
+    (
+        "normalising endings does NOT swallow a real change (over-correction control)",
+        crlf_plus_real_change,
+        DIVERGED,
+        "check-example.py",
     ),
     # Not-applicable and could-not-check, kept distinct from both agree and diverged.
     (
