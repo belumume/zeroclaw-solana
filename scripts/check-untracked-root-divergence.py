@@ -76,6 +76,19 @@ MIN_SHARED = 6
 # DECLARED DIVERGENCES. Each entry is a path that is EXPECTED to differ, with the reason. A path
 # not listed here that differs FAILS, because untracked files never merge and nothing else will
 # ever surface the difference.
+#
+# `.claude/MANDATE.md` IS DELIBERATELY ABSENT FROM THIS LIST, and adding it would remove a
+# detector rather than silence a false positive. The two roots share one inode for it, so while
+# the hardlink is healthy it is byte-identical by construction and this gate is silent about it
+# for free. If the link ever breaks the two paths drift apart and the gate reports it as an
+# ordinary undeclared divergence, which makes this a second and independent guard on a failure
+# whose only other check runs at SessionStart.
+#
+# THE BREAK IS INVISIBLE TO ANY CHEAP PRE-FILTER, which is why the comparison below is borrowed
+# whole rather than short-circuited on size or mtime. An in-place append keeps the link; an atomic
+# write-then-rename silently breaks it, and the Edit tool does the latter. In the measured break
+# both paths held the SAME NUMBER OF BYTES with different content, so a size or mtime comparison
+# reports healthy. Do not add one as an optimisation.
 DECLARED = {
     "CLAUDE.local.md": (
         "Per-root always-loaded entry point. Each root imports ITS OWN goal, handoff and "

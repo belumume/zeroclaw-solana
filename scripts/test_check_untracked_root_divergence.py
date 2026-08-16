@@ -78,6 +78,9 @@ def build_pair(tmp: pathlib.Path, mutate) -> tuple[pathlib.Path, pathlib.Path]:
         # A real DECLARED key, so the allowlist cases exercise the shipped allowlist rather than
         # a fixture-only path that could pass while the real entry was wrong.
         (r / "CLAUDE.local.md").write_text("root state\n", encoding="utf-8")
+        # The hardlinked mandate. Written as BYTES so the two roots are byte-identical whatever
+        # the platform does to newlines, which is the property the real hardlink guarantees.
+        (r / ".claude" / "MANDATE.md").write_bytes(b"the operator's own words\n")
         (r / "docs" / "listing-verbatim.json").write_text(
             json.dumps({"deadline": "2026-08-07", "title": "zeroclaw"}),
             encoding="utf-8",
@@ -132,6 +135,22 @@ def json_reserialised(a, b):
         json.dumps({"title": "zeroclaw", "deadline": "2026-08-07"}, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def hardlink_broke(a, b):
+    """The measured signature of a broken hardlink: SAME byte count, different content.
+
+    `.claude/MANDATE.md` is one inode shared by both roots, so it is identical by construction and
+    deliberately absent from DECLARED: while the link holds this gate says nothing, and if it
+    breaks the gate becomes a second detector for free. An in-place append keeps the link; an
+    atomic write-then-rename breaks it, which is what the Edit tool does. The break that was
+    actually observed left both paths the SAME SIZE, so this case exists to keep anyone from
+    adding a size or mtime pre-filter as an optimisation. Byte counts are asserted equal here so
+    the fixture cannot silently stop testing that.
+    """
+    p, q = a / ".claude" / "MANDATE.md", b / ".claude" / "MANDATE.md"
+    q.write_bytes(b"the operator's OWN words\n")
+    assert len(p.read_bytes()) == len(q.read_bytes()), "fixture must be size-identical"
 
 
 def crlf_only(a, b):
@@ -207,6 +226,12 @@ CASES = [
         declared_json_differs,
         AGREE,
         "listing-verbatim.json",
+    ),
+    (
+        "a broken hardlink is caught even though both copies are the SAME SIZE",
+        hardlink_broke,
+        DIVERGED,
+        "MANDATE.md",
     ),
     (
         "a JSON document differing only in SERIALISATION is not reported",
