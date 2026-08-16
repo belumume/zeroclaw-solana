@@ -36,7 +36,7 @@
 //!             airdrop is rate-limited); absent -> airdrop (localnet).
 
 use payment_watch::watch::Verdict;
-use solana_client::rpc_client::RpcClient;
+use solana_rpc_client::rpc_client::RpcClient;
 use solana_core::{Commitment, RpcError, RpcTransport, SolanaRpc};
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::signature::{Keypair, Signature, Signer};

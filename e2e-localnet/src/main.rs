@@ -13,7 +13,7 @@
 
 #![allow(dead_code, clippy::needless_range_loop)]
 use borsh::BorshDeserialize;
-use solana_client::rpc_client::RpcClient;
+use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;

@@ -16,7 +16,7 @@
 //!   FEED_VALUE          i64 reading at scale -2 (e.g. 4190 = 41.90 C)
 //!   FEED_OBSERVED_AT    unix seconds i64
 use borsh::BorshDeserialize;
-use solana_client::rpc_client::RpcClient;
+use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
