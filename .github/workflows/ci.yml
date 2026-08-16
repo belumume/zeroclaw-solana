@@ -524,6 +524,22 @@ jobs:
       - name: the manifest generator refuses every bad input it claims to
         run: python3 deploy/make_invariants.py --self-test
 
+      # THE DEPLOYER, whose suite was wired into nothing for the same reason the two above were.
+      # It is the half that had never existed at all: the map declared where every artifact
+      # belongs, the checker verified whether it was there, and until 2026-08-16 nothing read the
+      # map to COPY anything, so drift was guaranteed rather than accidental.
+      - name: the deployer's copy and compare logic can fail in every direction
+        run: python3 deploy/sync_workspace.py --selftest
+
+      # The one above cannot reach main(), where the order of the refusals lives and where the
+      # not-a-live-deployment guard fires before every other path. This builds a fake box and
+      # drives the real thing end to end. Its load-bearing case corrupts the DEPLOYED checker and
+      # requires the checker's own manifest check to name it, which was impossible until
+      # box_selfcheck.py entered the deploy map: a file absent from `files` is one the comparison
+      # never looks at, so the drift detector was the single artifact exempt from drift detection.
+      - name: a deployed box verifies itself, including its own checker
+        run: python3 deploy/test_sync_deployment.py
+
       # check-all is the reporter every other gate is read through, so a defect in its counting
       # is invisible by construction: a wrong summary looks exactly like a right one. It once
       # read "all 10 gate(s) pass" where eight passed and two never executed, one of them the

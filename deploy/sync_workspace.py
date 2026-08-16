@@ -47,12 +47,46 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 
-from make_invariants import resolve_map, sha256_file  # noqa: E402
+from make_invariants import git, git_ls, resolve_map, sha256_file  # noqa: E402
 
 # Resolved EXACTLY as box_selfcheck.py:69 resolves it. If these two ever disagree the sync writes
 # to a tree nothing verifies, which is the failure this whole script exists to remove.
 ZC = Path(os.environ.get("ZEROCLAW_HOME", str(Path.home() / ".zeroclaw")))
 TARGETS = HERE / "deploy-targets.json"
+
+# THE THREE ARTIFACTS THE MAP CANNOT CARRY, each for a different structural reason, and every one
+# of them established the box's IDENTITY rather than its content -- which is why all three could be
+# stale while the manifest check compared 19 files and reported all match.
+#
+#   SHOP-INVARIANTS.json  the checker's INPUT. Generated rather than tracked, and `resolve_map`
+#                         lists tracked files only, so no map entry can ever reach it. It was
+#                         copied by hand, and `grep -rn 'SHOP-INVARIANTS' --include=*.md` returned
+#                         ZERO hits repo-wide: the documented install path generates it into
+#                         deploy/ and never moves it, so following QUICKSTART literally produced a
+#                         box whose checker could not find its input.
+#
+#   DEPLOYED_SHA          the version label the served verdict carries and `scripts/verify-proof.py`
+#                         prints as the provenance of a drift claim. It had NO PRODUCER: the only
+#                         two references to it anywhere in the repo were both the reader. A
+#                         hand-typed string verified by nothing, describing what a stranger is told
+#                         is running. It is written here, by the step that actually copies the
+#                         bytes, so it records a deploy that happened rather than a memory.
+#
+#   the unit FILES        every map `dst` is relative to ZEROCLAW_HOME and units install under
+#                         ~/.config/systemd/user, so the map's grammar cannot address them at all.
+#                         Measured: PR #74 edited zc-announce.service to add ZC_CHANNEL and no
+#                         automated path carries that edit to the box, while the `services` check
+#                         still reports "all healthy" because the OLD unit is loaded and active. A
+#                         unit-file edit is invisible to every check we have.
+#
+# Overridable so the selftest can drive the real code paths against a temp tree instead of
+# asserting on a reimplementation of them.
+SYSTEMD_DIR = Path(
+    os.environ.get("ZC_SYSTEMD_DIR", str(Path.home() / ".config" / "systemd" / "user"))
+)
+INVARIANTS_NAME = "SHOP-INVARIANTS.json"
+DEPLOYED_SHA_NAME = "DEPLOYED_SHA"
+UNIT_SUFFIXES = ("*.service", "*.timer")
 
 # Below this the map resolved to almost nothing, which means a prefix was renamed rather than the
 # tree being small. Same floor reasoning as check-all and the fmt job. 19 pairs when written.
@@ -100,6 +134,59 @@ def apply_one(src: Path, dst: Path, stamp: str) -> str:
     return f"  {ok}  {dst} -> {got[:12]}{note}"
 
 
+def head_sha(root: Path) -> tuple[str, bool]:
+    """(commit, dirty) for the checkout being deployed FROM."""
+    _, out = git(root, "rev-parse", "HEAD")
+    _, dirty = git(root, "status", "--porcelain")
+    return out.strip() or "unknown", bool(dirty.strip())
+
+
+def unit_pairs(root: Path) -> list[tuple[str, str]]:
+    """(repo_rel, unit filename) for every tracked systemd unit under deploy/.
+
+    DERIVED rather than declared, for the same reason the file map is: a unit added to git should
+    appear here without anyone remembering to list it. deploy-targets.json's `units` key is a
+    different thing and must not be reused -- it names units that must be RUNNING, most of which
+    have no file in this repo at all. Measured at the time of writing, the two sets overlap by
+    exactly one of six: the repo tracks zc-announce.{service,timer} and zc-selfcheck.{service,timer},
+    while the checked list is zc-shop.service, zc-feed.{timer,service}, x402-feed-gate.service,
+    x402-tunnel.service and zc-announce.timer. Deploying against the checked list would have tried
+    to place five files that do not exist and skipped three that do.
+    """
+    out: list[tuple[str, str]] = []
+    for rel in git_ls(root, *[f"deploy/{s}" for s in UNIT_SUFFIXES]):
+        out.append((rel, Path(rel).name))
+    return sorted(set(out))
+
+
+def manifest_refusal(inv: Path, sha: str) -> str | None:
+    """None when the manifest was generated from `sha`; otherwise why it must not be placed.
+
+    THIS IS THE COHERENCE GUARD, and it is the one that makes the other three writes safe. Placing
+    files from one commit beside a manifest generated from another produces a box whose checker
+    compares fresh bytes against stale hashes, and the resulting verdict is not merely wrong, it is
+    UNINTERPRETABLE: a DRIFTED report no longer distinguishes "the box is behind" from "the manifest
+    is behind", which is exactly the ambiguity a drift gate exists to remove. Refusing here means
+    the files, the hashes and the recorded sha on the box always describe one single commit.
+    """
+    if not inv.is_file():
+        return (
+            f"{inv.name} has not been generated. Run `python3 deploy/make_invariants.py` first; "
+            "without it the checker has no input and reports that it cannot read its manifest."
+        )
+    try:
+        got = json.loads(inv.read_text(encoding="utf-8")).get("repo_commit")
+    except Exception as exc:
+        return f"{inv.name} is not readable JSON ({exc}), so its provenance cannot be established"
+    if got != sha:
+        return (
+            f"{inv.name} was generated from {str(got)[:12]} but this checkout is at {sha[:12]}, so "
+            "placing both would leave the box comparing one commit's files against another's "
+            "hashes. Re-run `python3 deploy/make_invariants.py`."
+        )
+    return None
+
+
 def selftest() -> int:
     """Drive classify and apply_one against a temporary tree, both directions."""
     cases, failures = 0, []
@@ -138,9 +225,14 @@ def selftest() -> int:
                 apply_one(repo / repo_rel, box / box_rel, stamp)
         after = {b: s for _, b, s in classify(pairs, repo, box)}
         check("apply converges every file to SAME", sorted(set(after.values())), [SAME])
+        # Read DEFENSIVELY. This raised rather than reported when a mutation control gutted
+        # classify: with nothing ever applied the backup is absent, and a suite that dies on an
+        # exception cannot tell "the assertion failed" from "the harness could not start", which
+        # is the one distinction a mutation control depends on.
+        bak = box / "d" / f"diff.txt.bak-{stamp}"
         check(
             "the overwritten file's old bytes are preserved",
-            (box / "d" / f"diff.txt.bak-{stamp}").read_text(encoding="utf-8"),
+            bak.read_text(encoding="utf-8") if bak.is_file() else "(no backup written)",
             "old",
         )
         check(
@@ -157,6 +249,136 @@ def selftest() -> int:
             DIFFERS,
         )
 
+    # ------------------------------------------------------------------------------------
+    # THE COHERENCE GUARD. Every case here is paired with its opposite, because a refusal
+    # function that refuses everything and one that refuses nothing both look correct from a
+    # single-direction test, and only one of them is a guard.
+    # ------------------------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        inv = tmp / INVARIANTS_NAME
+
+        inv.write_text(json.dumps({"repo_commit": "a" * 40}), encoding="utf-8")
+        check(
+            "a manifest generated from THIS commit is accepted",
+            manifest_refusal(inv, "a" * 40),
+            None,
+        )
+        # CONTROL. Without this the case above proves only that the function returns None.
+        got = manifest_refusal(inv, "b" * 40)
+        check(
+            "a manifest from a DIFFERENT commit is refused",
+            bool(got) and "was generated from" in got,
+            True,
+        )
+        check(
+            "the refusal names both commits so the operator can see the split",
+            bool(got) and "aaaaaaaaaaaa" in got and "bbbbbbbbbbbb" in got,
+            True,
+        )
+        got = manifest_refusal(tmp / "absent.json", "a" * 40)
+        check(
+            "an ungenerated manifest is refused rather than skipped",
+            bool(got) and "make_invariants" in got,
+            True,
+        )
+        inv.write_text("{not json", encoding="utf-8")
+        check(
+            "an unparseable manifest is refused rather than treated as coherent",
+            bool(manifest_refusal(inv, "a" * 40)),
+            True,
+        )
+        # A manifest with NO repo_commit must refuse too: `.get` returning None against a real
+        # sha is a mismatch, and reading that as "no claim, so fine" would accept any manifest
+        # written by something other than the generator.
+        inv.write_text(json.dumps({"files": {}}), encoding="utf-8")
+        check(
+            "a manifest with no repo_commit at all is refused",
+            bool(manifest_refusal(inv, "a" * 40)),
+            True,
+        )
+
+    # ------------------------------------------------------------------------------------
+    # UNIT FILES. The copy half is exercised here; the systemctl half cannot be and is printed
+    # rather than claimed. Driven against a systemd dir that is NOT the box root, because the
+    # whole reason units were unreachable is that they live outside ZEROCLAW_HOME.
+    # ------------------------------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        repo, sysd = tmp / "repo", tmp / "sysd"
+        (repo / "deploy").mkdir(parents=True)
+        sysd.mkdir()
+        (repo / "deploy" / "a.service").write_text("[Service]\nnew\n", encoding="utf-8")
+        (repo / "deploy" / "a.timer").write_text("[Timer]\nsame\n", encoding="utf-8")
+        (sysd / "a.service").write_text("[Service]\nold\n", encoding="utf-8")
+        (sysd / "a.timer").write_text("[Timer]\nsame\n", encoding="utf-8")
+        upairs = [("deploy/a.service", "a.service"), ("deploy/a.timer", "a.timer")]
+
+        states = {u: s for _, u, s in classify(upairs, repo, sysd)}
+        check("an edited unit file is DIFFERS", states["a.service"], DIFFERS)
+        check("an unchanged unit file is SAME", states["a.timer"], SAME)
+
+        for repo_rel, unit_rel, st in classify(upairs, repo, sysd):
+            if st != SAME:
+                apply_one(repo / repo_rel, sysd / unit_rel, "TEST")
+        check(
+            "applying converges every unit file",
+            sorted({s for _, _, s in classify(upairs, repo, sysd)}),
+            [SAME],
+        )
+        ubak = sysd / "a.service.bak-TEST"
+        check(
+            "the replaced unit's old bytes survive as a backup",
+            ubak.read_text(encoding="utf-8")
+            if ubak.is_file()
+            else "(no backup written)",
+            "[Service]\nold\n",
+        )
+        # CONTROL. Convergence above would be equally true of a classify that says SAME to
+        # everything, which is the exact defect that let a unit edit sit unlanded while the
+        # services check reported healthy.
+        (repo / "deploy" / "a.service").write_text(
+            "[Service]\nnewer\n", encoding="utf-8"
+        )
+        check(
+            "a unit edited AFTER a clean sync is still detected",
+            {u: s for _, u, s in classify(upairs, repo, sysd)}["a.service"],
+            DIFFERS,
+        )
+
+    # ------------------------------------------------------------------------------------
+    # unit_pairs derives from git rather than from deploy-targets.json's `units` key. Driven
+    # against the REAL repo, because the bug being guarded is a set-membership one and a
+    # synthetic tree cannot exhibit it.
+    # ------------------------------------------------------------------------------------
+    derived = {u for _, u in unit_pairs(ROOT)}
+    check(
+        "every tracked unit file is derived, none missed",
+        derived,
+        {
+            "zc-announce.service",
+            "zc-announce.timer",
+            "zc-selfcheck.service",
+            "zc-selfcheck.timer",
+        },
+    )
+    # CONTROL for the set the deployer must NOT have used. deploy-targets.json's `units` names
+    # what must be RUNNING; five of its six entries have no file in this repo, so deploying
+    # against it would place nothing and skip three real files.
+    try:
+        checked = {
+            u["unit"]
+            for u in json.loads(TARGETS.read_text(encoding="utf-8")).get("units", [])
+        }
+        check(
+            "the checked-units set is NOT the deployable set, so the two must stay distinct",
+            len(derived & checked) < len(derived),
+            True,
+        )
+    except Exception as exc:  # pragma: no cover - only if the map is unreadable
+        failures.append(f"could not read the units key for the control: {exc}")
+        cases += 1
+
     for f in failures:
         print(f"  FAIL  {f}")
     print(f"selftest: {cases - len(failures)}/{cases}")
@@ -169,6 +391,11 @@ def main() -> int:
         "--apply", action="store_true", help="write the changes (default is a dry run)"
     )
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="deploy from a dirty tree, recording the sha with a -dirty suffix on the box",
+    )
     args = ap.parse_args()
     if args.selftest:
         return selftest()
@@ -208,19 +435,62 @@ def main() -> int:
         )
         return CANNOT_CHECK
 
-    rows = classify(pairs, ROOT, ZC)
+    # WHICH COMMIT IS BEING DEPLOYED. Everything below is anchored to this one answer, so that the
+    # mapped files, the manifest's hashes and the sha recorded on the box cannot describe three
+    # different states. A dirty tree has no honest answer: the bytes about to be copied are not any
+    # commit, so the sha would be a claim the box cannot support. Refusing by default and recording
+    # `-dirty` under an explicit flag follows the generator's own --allow-stale-binaries idiom:
+    # the escape hatch turns the dishonesty into a FACT ON THE BOX rather than a silent lie.
+    sha, dirty = head_sha(ROOT)
+    if dirty and not args.allow_dirty:
+        print(
+            f"REFUSING: the working tree is dirty, so the bytes about to be copied are not "
+            f"{sha[:12]} or any other commit, and {DEPLOYED_SHA_NAME} would name a commit the box "
+            f"does not carry. Commit first, or pass --allow-dirty to record {sha[:12]}-dirty."
+        )
+        return 1
+    recorded_sha = f"{sha}-dirty" if dirty else sha
+
+    refusal = manifest_refusal(HERE / INVARIANTS_NAME, sha)
+    if refusal:
+        print(f"REFUSING: {refusal}")
+        return 1
+
+    # The manifest rides through the SAME classify/apply path as everything else rather than a
+    # bespoke copy, so it inherits the backup, the read-back and the convergence check for free.
+    file_pairs = list(pairs) + [(f"{HERE.name}/{INVARIANTS_NAME}", INVARIANTS_NAME)]
+    rows = classify(file_pairs, ROOT, ZC)
+    urows = classify(unit_pairs(ROOT), ROOT, SYSTEMD_DIR)
     todo = [r for r in rows if r[2] != SAME]
-    print(f"map resolves {len(pairs)} file(s) under {ZC}")
+    utodo = [r for r in urows if r[2] != SAME]
+
+    try:
+        sha_on_box = (ZC / DEPLOYED_SHA_NAME).read_text(encoding="utf-8").strip()
+    except Exception:
+        sha_on_box = ""
+    sha_todo = sha_on_box != recorded_sha
+
+    print(f"deploying {recorded_sha[:12]}")
+    print(f"map resolves {len(file_pairs)} file(s) under {ZC}")
     print(f"  {sum(1 for r in rows if r[2] == SAME)} already match")
     for repo_rel, box_rel, st in todo:
         print(f"  {st.upper():<13} {box_rel}   <- {repo_rel}")
+    print(f"{len(urows)} tracked unit file(s) under {SYSTEMD_DIR}")
+    for repo_rel, unit_rel, st in utodo:
+        print(f"  {st.upper():<13} {unit_rel}   <- {repo_rel}")
+    if sha_todo:
+        print(
+            f"  {'STALE' if sha_on_box else 'ABSENT':<13} {DEPLOYED_SHA_NAME}   "
+            f"<- {sha_on_box or '(nothing)'}"
+        )
 
-    if not todo:
-        print("\nnothing to do: every mapped file on the box matches the repo")
+    if not (todo or utodo or sha_todo):
+        print("\nnothing to do: the box already matches this commit")
         return 0
     if not args.apply:
         print(
-            f"\nDRY RUN. {len(todo)} file(s) would change. Re-run with --apply to write them."
+            f"\nDRY RUN. {len(todo)} mapped file(s), {len(utodo)} unit file(s) and "
+            f"{int(sha_todo)} version marker would change. Re-run with --apply to write them."
         )
         return 0
 
@@ -232,12 +502,43 @@ def main() -> int:
         print(line)
         if "MISMATCH" in line:
             bad += 1
+    for repo_rel, unit_rel, _ in utodo:
+        line = apply_one(ROOT / repo_rel, SYSTEMD_DIR / unit_rel, stamp)
+        print(line)
+        if "MISMATCH" in line:
+            bad += 1
 
-    after = [r for r in classify(pairs, ROOT, ZC) if r[2] != SAME]
-    if after or bad:
-        print(f"\nFAIL  {len(after)} file(s) still differ after the copy")
+    # THE FULL-TREE RE-VERIFICATION RUNS FIRST, and DEPLOYED_SHA is written only after it
+    # passes. `bad` is the per-file write-back check, which is narrower: it sees what THIS run
+    # wrote and cannot see a file some other process touched mid-apply. Writing the sha on `bad`
+    # alone left a window where the run correctly reported FAIL and exited 1 while the box had
+    # already recorded the commit as deployed, so the NEXT run would read the sha as current with
+    # a file still differing. Ordering it after `after`/`uafter` closes that, and makes the
+    # comment above it true rather than aspirational.
+    after = [r for r in classify(file_pairs, ROOT, ZC) if r[2] != SAME]
+    uafter = [r for r in classify(unit_pairs(ROOT), ROOT, SYSTEMD_DIR) if r[2] != SAME]
+    if after or uafter or bad:
+        print(f"\nFAIL  {len(after) + len(uafter)} file(s) still differ after the copy")
         return 1
-    print(f"\nall {len(pairs)} mapped file(s) now match the repo")
+
+    (ZC / DEPLOYED_SHA_NAME).write_text(recorded_sha + "\n", encoding="utf-8")
+    print(f"  OK  {ZC / DEPLOYED_SHA_NAME} -> {recorded_sha}")
+    print(
+        f"\nall {len(file_pairs)} mapped and {len(urows)} unit file(s) now match {sha[:12]}"
+    )
+
+    # NEVER CLAIM THE RELOAD RAN. Copying a unit file changes nothing until systemd re-reads it,
+    # and a copied-but-unloaded unit is the worst state available: the file on disk says one thing
+    # and the running daemon does another, which is precisely how a PR #74 unit edit could sit
+    # unlanded while the services check reported "all healthy". These are printed rather than
+    # executed because this script cannot verify a systemctl on a box it is not running on.
+    if utodo:
+        print("\nUnit files changed. They are INERT until systemd reloads them:")
+        print("  systemctl --user daemon-reload")
+        for _, unit_rel, _ in utodo:
+            if unit_rel.endswith(".timer"):
+                print(f"  systemctl --user enable --now {unit_rel}")
+        print("  systemctl --user restart zc-announce.service   # if its unit changed")
     print("Verify from OUTSIDE rather than from this exit code:")
     print("  python3 deploy/box_selfcheck.py   then re-fetch /selfcheck")
     return 0

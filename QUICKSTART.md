@@ -447,6 +447,12 @@ Note `~/zeroclaw` is the **host** clone from step 2, not this repo, so the unit 
 script there. The copy above is what gives it a fixed path, and the script reads nothing relative to
 its own directory, so it behaves identically from either location.
 
+Both `cp` lines are also covered by `python3 deploy/sync_workspace.py --apply` in the drift-gate
+section below, which is the maintained path: it copies from the same map the checker verifies
+against, so a file placed by hand here and a file the checker looks for cannot diverge. Use the
+explicit copies if you are installing the announcer alone; use the deployer once you want the box to
+stay in step with a commit.
+
 A minute is affordable because most runs end at the first step with nothing to announce, and it is
 what makes "the owner hears within about a minute of settlement" true rather than aspirational.
 
@@ -471,15 +477,30 @@ outside prober can produce, because it can see deployed bytes and running servic
 if something schedules it and something retrieves it.
 
 ```
-mkdir -p ~/.zeroclaw/bin ~/.config/systemd/user
 python3 deploy/make_invariants.py                      # writes the manifest the check compares against
-cp deploy/box_selfcheck.py ~/.zeroclaw/bin/
-cp deploy/zc-selfcheck.service deploy/zc-selfcheck.timer ~/.config/systemd/user/
+python3 deploy/sync_workspace.py                       # dry run: what on the box differs from this commit
+python3 deploy/sync_workspace.py --apply               # places the checker, the manifest and the units
 systemctl --user daemon-reload
 systemctl --user enable --now zc-selfcheck.timer
 systemctl --user start zc-selfcheck.service
 cat ~/.zeroclaw/state/box-selfcheck.json | head -20    # the verdict the gate publishes
 ```
+
+The two `python3` lines replace a `cp` sequence that was wrong in a way nothing could report. It
+copied `box_selfcheck.py` and the units by hand and **never copied the manifest at all**, so
+following it literally produced a box whose checker could not find its input. It also left the
+checker outside the deploy map, which made it the one file on the box that could drift with nothing
+able to notice: the manifest check compares the files in `files`, and the checker was not among
+them. Both are closed now, and the second one is visible in the count: the manifest pins 22 files
+where it used to pin 21, and corrupting the deployed checker makes its own `manifest` check report
+`bin/box_selfcheck.py: <a> != <b>`.
+
+`sync_workspace.py` refuses rather than guessing whenever the deploy would be incoherent: a dirty
+working tree (the bytes are not any commit, so the sha it records would be a claim the box cannot
+support), a manifest generated from a different commit than the files being copied, or a manifest
+that was never generated. It writes `~/.zeroclaw/DEPLOYED_SHA` last, so the box never advertises a
+commit whose files failed to land, and it prints the `systemctl` commands rather than running them,
+because a copied unit file is inert until systemd reloads it.
 
 The gate serves it at `/selfcheck`, over the tunnel it already runs, so nothing has to reach into
 the box. Three responses, and the status code carries the meaning rather than the body: **200** with
