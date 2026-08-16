@@ -194,7 +194,7 @@
 </p>
 <p>
   Demonstrated on <strong>mainnet</strong>, and the program that does the
-  refusing is <strong>not ours</strong> &mdash; that is the point. Solana Foundation's audited
+  refusing is <strong>not ours</strong>. Solana Foundation's audited
   Allowances program (<code>De1egAFMk&hellip;</code>, on mainnet since June 2026, audited by Cantina) rejected an over-cap transfer with custom error <code>0x12c</code>, signed by a
   freshly generated agent session key. The same key moved a within-cap transfer normally, settling
   0.4 USDC. Three mainnet transactions in all, captured as raw bytes in the repo, verifying offline
@@ -223,6 +223,23 @@
   finalized on mainnet-beta. The goods stay on devnet because a <code>DeviceFeed</code> account is
   owned by our <code>zeroclaw_oracle</code> program, deployed on devnet only, so a mainnet feed is a
   program deployment rather than a config flag. The hosted endpoint above runs the devnet default.
+</p>
+<p>
+  <strong>The exchange rate is off the model as well.</strong> A Brazilian order carries one
+  money-touching number a language model could simply state, with nothing checking it: the rate.
+  It is now fetched in code from Brazil's central bank (BCB PTAX) and refused unless the ECB's
+  published figure agrees within a stated band. Both sources are keyless, and there is no
+  last-known value to fall back on, so an unreachable source stops the quote instead of ageing
+  one. On 2026-08-14 the two sat 0.91% apart, which is the margin a single source would have
+  carried silently.
+</p>
+<pre><code>python3 scripts/rate_crosscheck.py                  # the corroborated rate, or a refusal
+python3 scripts/check-pay-link-rate-agreement.py   # the pay path's copy still matches</code></pre>
+<p class="note">
+  What this does not close: the order <em>value</em> is still supplied by the caller, so
+  "table 4, R$ 0.05" passes every check here. This removes one free parameter of two. The shop on
+  the node has not picked the change up yet, so the enforcement is in the repo and the deploy is
+  what remains.
 </p>
 
 <h2><span class="n">03</span>The customer's own page refuses, in their language</h2>

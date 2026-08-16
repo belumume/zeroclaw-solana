@@ -84,7 +84,7 @@ A link below that returns nothing is therefore expected, not a broken claim. Che
 | Device feed PDA (deterministic, LLM-free, laptop-hosted) | `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` | https://explorer.solana.com/address/3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K?cluster=devnet |
 | Device feed PDA (agent-driven, historical) | `CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU` | https://explorer.solana.com/address/CfWaZAQ9mG1WbAhNCSQJz284MR1NC8fvfiHRaNvyQ9sU?cluster=devnet |
 
-The first of those three is the one that matters for "yours, running." Its device keypair was
+The ARM-node feed is the one behind "yours, running." Its device keypair was
 generated **on the ARM node itself** with `openssl rand -hex 32` and has never left that box,
 so this workstation cannot produce a signature for that feed. A `systemd --user` timer with
 lingering enabled publishes on a schedule with no laptop in the loop.
@@ -150,7 +150,7 @@ are simulations, so neither costs anything or needs a funded key; `--send` is wh
 A gate that has only ever been observed passing has not been shown to work, which is why the
 refusing direction is the one written down first.
 
-**Honest scope.** Before this transaction the deployed consumer had read the *historical*
+**Scope.** Before this transaction the deployed consumer had read the *historical*
 `CfWaZA…` feed once, on 2026-07-21, four days before the ARM feed existed. So the consumability
 argument was sound and had never been exercised against the feed it was being made about. It has
 now, and the bytes are in `docs/proof-bundle/devnet-transactions.json` rather than behind an
@@ -419,7 +419,7 @@ and a claim reporting PENDING is never counted as verified. A number written her
 either overstate today or need remembering later, which is how this sentence came to say two when
 the verifier had printed four for some time.
 
-**The demo video will show SMALLER numbers than a run today, and that is the point.** It is a
+**The demo video will show SMALLER numbers than a run today.** It is a
 recording, so every frame is a snapshot of the moment it was captured. The verifier beat was
 re-shot on 2026-08-01 and shows ten static claims, four live ones, and the feed at sequence 539.
 The heartbeat beat earlier in the cut is an older take and shows sequence 80. Running the verifier
