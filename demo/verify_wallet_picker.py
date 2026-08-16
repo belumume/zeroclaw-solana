@@ -205,20 +205,28 @@ def main() -> int:
 
             # 4c. EIGHT wallets must not push the QR out of view, and the two-wallet cases above
             # are structurally blind to this: the list grows ~50px per wallet, so the defect only
-            # appears past about four. Measured in the operator's own Brave, which registers eight:
+            # appears past about four. RE-MEASURED 2026-08-16 against the live page in his own
+            # profile: 67px per row, not 50, so eight rows occupy about 536px rather than 400.
+            # Only SEVEN of the eight render, because MetaMask is correctly filtered as
+            # non-Solana; at a 743px fold the last row's bottom edge landed at 650, so the
+            # defect does NOT reproduce there. That is one viewport, not a general clearance.
+            # The original Brave measurement below stands on its own conditions:
             # the card grew 887 -> 1286 and the QR's bottom edge landed at 972 against a 900-tall
             # viewport. His window happened to be 982 tall and cleared it by ten pixels, which is
             # the only reason he did not hit it. The phone path must stay reachable after the
             # picker opens, however many wallets are installed.
+            # MEASURED 2026-08-16 in the operator's own profile, replacing an invented set.
+            # "Brave Wallet" was never installed; the eighth is Petra. Read live off the pay page
+            # by dispatching wallet-standard:app-ready and collecting what registered.
             EIGHT = [
                 "Backpack",
-                "Brave Wallet",
                 "Phantom",
                 "MetaMask",
-                "Magic Eden",
                 "Solflare",
                 "Jupiter",
+                "Magic Eden",
                 "Glow",
+                "Petra",
             ]
             for vw, vh in ((1280, 900), (390, 844)):
                 ctx = b.new_context(viewport={"width": vw, "height": vh})
