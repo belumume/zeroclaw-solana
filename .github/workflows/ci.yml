@@ -278,6 +278,21 @@ jobs:
       - name: the link gate still skips illustrations and still checks real links
         run: python3 scripts/test_check_doc_links.py
 
+      # This suite was TRACKED and invoked by nothing. Of the thirteen tracked
+      # scripts/test_*.py it was the only one absent from this file, so it ran when
+      # someone remembered to type it and protected nothing during judging -- the
+      # same failure the two comments above call out, sitting one file away from
+      # them. It is pure classification over strings with no network, so a runner is
+      # exactly where it belongs.
+      #
+      # What it guards is a distinction that has produced a wrong verdict here
+      # before: a TRANSPORT failure is not a claim that stopped holding. An RPC
+      # timeout or an HTTP 429 means the check could not run, and reporting that as
+      # a failed claim turns a healthy system red and trains a reader to ignore the
+      # colour.
+      - name: transport failures are classified apart from failed claims
+        run: python3 scripts/test_verify_proof_transport.py
+
       # The on-chain evidence outlives the links to it. Public devnet RPC prunes
       # after about four days, so every explorer link in DEVNET-PROOF is dead well
       # before judging. This verifies the captured raw transactions instead:

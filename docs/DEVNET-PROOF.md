@@ -419,13 +419,12 @@ and a claim reporting PENDING is never counted as verified. A number written her
 either overstate today or need remembering later, which is how this sentence came to say two when
 the verifier had printed four for some time.
 
-**The demo video will show SMALLER numbers than a run today.** It is a
-recording, so every frame is a snapshot of the moment it was captured. The verifier beat was
-re-shot on 2026-08-01 and shows ten static claims, four live ones, and the feed at sequence 539.
-The heartbeat beat earlier in the cut is an older take and shows sequence 80. Running the verifier
-now returns a sequence above both, because the node did not stop when the camera did. If any two of
-those agreed exactly it would mean nothing had been running in between. Do not reconcile them;
-check the live one, and treat the gap between them as the evidence.
+**A recording is a snapshot, so any counter it shows is smaller than a run today.** The shipped cut
+puts neither the verifier nor the feed sequence on screen, so there is nothing in it to reconcile
+against a live run. Where a recording does show a counter, the rule is the same: checking now
+returns a higher number, because the node did not stop when the camera did, and two figures agreeing
+exactly would mean nothing had been running in between. Check the live one and treat the gap as the
+evidence.
 
 Everywhere else a gap is the evidence. The CLAIM COUNT is the exception: it measures what the
 verifier can check, so a gap there means this page has fallen behind the tool. The cut and the
