@@ -23,9 +23,13 @@ SELF-EXCLUSION is exactly one file wide: this checker has to contain the pattern
 order to search for them, and its own docstring quotes the stale `5/5` to explain the incident.
 Every other tracked file is in scope, which the self-test pins.
 
-HONEST CEILING. It only reads the surfaces named in SURFACES. A doc that quotes the score and is
-not on that list is invisible. It also cannot tell a live claim from a historical one, which is why
-`docs/HANDOFF-ARCHIVE.md` is deliberately absent: that file records what was true at the time.
+HONEST CEILING, three of them. It only reads the surfaces named in SURFACES, so a doc that quotes
+the score and is not on that list is invisible. It cannot tell a live claim from a historical one,
+which is why `docs/HANDOFF-ARCHIVE.md` is deliberately absent: that file records what was true at
+the time. And it only matches the PHRASINGS below, so a rewording slips past: `SHAPES` needs
+"N injection/injected shapes" and `REFUSALS` needs a trailing "are", so "Five refusals total" is
+not caught. That last constraint is load-bearing rather than laziness, and the comment on REFUSALS
+says which real sentence it protects.
 
 HOW SURFACES MUST BE BUILT. From a grep with NO PATHSPEC. An extension filter such as
 `git grep ... -- '*.md' '*.py' '*.yml'` cannot see `index.html` whatever it holds, and
