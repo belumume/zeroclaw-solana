@@ -142,7 +142,14 @@ IMPERSONAL_EMAIL = re.compile(
 # `git log --all` in an Actions checkout, is not part of this repo's history, and cannot
 # be rewritten by anyone here, so without this the gate fails on EVERY pull request by
 # construction. It went unnoticed only because work had been pushed straight to main.
-IMPERSONAL_EXACT = frozenset({"noreply@github.com"})
+#
+# `00000000000@s.whatsapp.net` is the reserved synthetic JID for test fixtures. It has to be an
+# EXACT entry rather than a domain rule: `@s.whatsapp.net` is a phone number, unlike `@g.us` above
+# which is a room id, so clearing the whole domain would disable this gate for the single case it
+# most exists to catch. An all-zero local part is not dialable and cannot collide with a person.
+# A fixture asserting that a recipient gets redacted must contain a matching address to assert
+# anything at all, so the alternative to this entry is a redaction path with no test.
+IMPERSONAL_EXACT = frozenset({"noreply@github.com", "00000000000@s.whatsapp.net"})
 
 
 def git(*args, check=True):
@@ -179,7 +186,10 @@ def scan_line(line):
             yield shape, hit
     for m in EMAIL_RE.finditer(line):
         addr = m.group(0)
-        if IMPERSONAL_EMAIL.search(addr):
+        # Both allowlists, matching the metadata scan below. They disagreed until now: an address
+        # cleared as impersonal in commit metadata was still reported in file content, so the same
+        # string meant two different things depending on which surface carried it.
+        if addr.lower() in IMPERSONAL_EXACT or IMPERSONAL_EMAIL.search(addr):
             continue
         yield "personal email", addr
 

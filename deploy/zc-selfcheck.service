@@ -1,0 +1,40 @@
+# Recompute the box's own drift verdict and leave it where the gate can serve it.
+#
+# WHY A UNIT EXISTS AT ALL. box_selfcheck.py's docstring states the design and then states, plainly,
+# that it was only half built: "nothing schedules the run and nothing retrieves the result ... the
+# inversion is a design that works when invoked by hand rather than a gate". This is the schedule
+# half. The gate's /selfcheck route is the retrieval half.
+#
+# Type=oneshot, because this is a check that finishes. Note a SUCCEEDED oneshot reports
+# ActiveState=inactive, which reads as dead to a naive check; box_selfcheck.py itself already
+# encodes that distinction for the units it inspects, and the same applies to this one.
+#
+# EXIT 1 IS NOT A MISCONFIGURATION AND MUST NOT BE PAPERED OVER. box_selfcheck returns 1 when the
+# box has DRIFTED, so systemd will mark this unit failed and `systemctl --user list-units --failed`
+# becomes a second, local signal that costs nothing. There is deliberately no SuccessExitStatus=1
+# here: adding one would make the alarm silent and leave the published verdict as the only witness.
+# The verdict file is written BEFORE that return, so a drifted run still publishes what it found.
+#
+# NOT ENABLED BY THIS FILE. Installing it is a separate deliberate act on the box; the reproduction
+# doc carries the commands.
+
+[Unit]
+Description=Recompute the box drift verdict the gate publishes
+Documentation=file:%h/.zeroclaw/bin/box_selfcheck.py
+After=network-online.target
+
+[Service]
+Type=oneshot
+
+# The same fixed-path reasoning as zc-announce: a unit cannot locate a repo the way a script can
+# locate itself, and %h/zeroclaw is the UPSTREAM host clone rather than this one. %h/.zeroclaw/bin
+# is fixed and matches how the reproduction doc installs every other component.
+ExecStart=/usr/bin/python3 %h/.zeroclaw/bin/box_selfcheck.py --quiet
+
+# The default --out is %h/.zeroclaw/state/box-selfcheck.json, which is exactly where the gate's
+# /selfcheck route reads from. Left implicit rather than repeated here, so the two cannot drift
+# apart: the script owns that path and this unit does not restate it.
+
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal

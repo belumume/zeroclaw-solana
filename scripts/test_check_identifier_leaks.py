@@ -212,6 +212,27 @@ case(
     author="someone_real@github.com",
 )
 
+# The reserved synthetic JID, cleared in FILE CONTENT and not only in commit metadata. Those two
+# scans disagreed until now, so the same string meant two different things depending on which
+# surface carried it. A fixture proving a recipient gets redacted has to contain a matching
+# address, so without this entry the redaction path could not be tested at all.
+case(
+    "the reserved all-zero JID is not a person, in file content",
+    CLEAN,
+    {
+        "deploy/thing.py": 'r.add("p", False, "would send to 00000000000@s.whatsapp.net")\n'
+    },
+)
+# OVER-CORRECTION CONTROL. `@s.whatsapp.net` is a PHONE NUMBER, unlike `@g.us` which is a room
+# id, so the fix has to be an exact address and never a domain rule. A dialable number at that
+# same domain must still fire. If this goes CLEAN, the allowlist was widened into a hole and the
+# gate has stopped covering the leak it most exists to catch.
+case(
+    "a dialable number at the same domain still fires",
+    FIRE,
+    {"deploy/thing.py": 'RECIPIENT = "5511987654321@s.whatsapp.net"\n'},
+)
+
 # --------------------------------------------------------------------- the FLOORS
 # These deliberately do NOT lower the floors. Without them the floor itself is untested,
 # because every case above overrides it to run against a small fixture -- which is exactly
