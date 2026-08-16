@@ -55,6 +55,13 @@
       "why": "The deterministic settlement announcer, and the literal ExecStart target of zc-announce.service (`%h/.zeroclaw/bin/announce_settlements.sh`). It exists to REPLACE the prose SOP whose reporting step let a model compose settlement fields: on 2026-08-06 that produced four fabricated ledger rows, two with a literal ellipsis where an 88-char signature belongs and two sharing one signature across different orders and amounts, none of which matched any of the merchant ATA's twelve lifetime signatures. The unit was written and this file never carried the script, so the deployer could not place it and the checker could not miss it, and a unit whose ExecStart does not exist fails 203/EXEC every tick while the prose path stays the only thing that would run. That is the whole defect class this map exists to close, landing on the one path that touches money."
     },
     {
+      "src": "deploy",
+      "dst": "bin",
+      "include": "box_selfcheck.py",
+      "flatten": true,
+      "why": "THE CHECKER ITSELF, and the literal ExecStart target of zc-selfcheck.service (`%h/.zeroclaw/bin/box_selfcheck.py`). It was absent from this map until 2026-08-16, which made it the one file on the box that could drift with nothing able to report it: the deployer does not copy what the map does not list, and the manifest check cannot compare a file that is not in `files`, so the drift detector was the single artifact exempt from drift detection. Adding it here closes both halves at once -- sync_workspace places it, and its hash lands in the manifest, so a stale checker running against a fresh manifest now reports ITSELF as differing. Measured at the time: the live box served a verdict whose mint-prohibition wording (`unexpected address` for a state target, and a detail line with no finding count) belongs to a box_selfcheck that predates the denylist rewrite, while every one of the 19 files it compared reported match. The checker was four commits stale and its own output was the only evidence."
+    },
+    {
       "src": "demo",
       "dst": "agents/demo/workspace/tools",
       "include": "confirm_settlements.py",
