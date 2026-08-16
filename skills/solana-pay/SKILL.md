@@ -76,10 +76,9 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
    message segments, in this order:
    a. the `https://` pay-page link verbatim, as a BARE URL on its own line. Do NOT put it in a
       code block or backticks: chat clients auto-link a bare URL, and a code block renders as
-      monospace that the customer has to select and copy by hand. A code block is not tappable on
-      any chat client this shop serves, so putting the link in one costs every customer a manual
-      copy. Never send only a summary like "link's ready" (streaming drafts are replaced; a URL
-      only in a draft is lost).
+      monospace that the customer has to select and copy by hand. A code block is not tappable, so
+      putting the link in one costs every customer a manual copy. Never send only a summary like
+      "link's ready" (streaming drafts are replaced; a URL only in a draft is lost).
    b. one how-to-pay line, written in the SAME language the customer is using. The WHOLE reply
       must be in the customer's language; never leave an English fragment inside a non-English
       reply. Use the matching version:
