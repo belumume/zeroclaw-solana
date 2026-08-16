@@ -81,7 +81,10 @@ SILENCE_LUFS = -60.0
 # NOT_CHECKED and not a pass.
 VOID_CUT = REPO / ".demo-assets" / "cut" / "zeroclaw-solana-demo.mp4"
 
-# C2 forbids filming or linking a devnet EXPLORER PAGE. It does NOT forbid devnet, and the
+# THE RULE, stated rather than cited: do not film or link a devnet EXPLORER PAGE. It was carried
+# here as "C2", a label in a plan document that is gitignored and reaches no clone, so a reader
+# outside this machine had a constraint referenced and no way to resolve it.
+# It does NOT forbid devnet, and the
 # distinction is load-bearing: the submission's honest claim is mainnet settlement over
 # devnet data, so several beats legitimately print the word. Gating on bare "devnet" would
 # fail good takes -- the over-broad-matcher trap this repo has hit repeatedly. These are
@@ -117,8 +120,12 @@ LINK_SURFACES = (
     "docs/ONE-PAGER.md",  # submission form field 4
     "index.html",  # the landing page, form field 5
     "README.md",  # what a judge reaches from the repo link
-    "docs/SUBMISSION-PLAN.md",  # the form-field map itself
 )
+# `docs/SUBMISSION-PLAN.md` WAS listed here and is removed rather than restored. It is gitignored
+# and absent from this root, so on a fresh clone this sweep silently covered two surfaces instead
+# of three -- and silently is the whole problem, because the loop below used to `continue` past a
+# missing file. A curated list may only name surfaces a CLONE receives; anything else is a hole
+# that reads as coverage. The check below makes that structural rather than remembered.
 # Floor, same reasoning as the sibling gates: a broken extraction returns an empty set, the
 # loop is skipped, and the result is byte-identical to a clean sweep. Live count is ~12.
 MIN_LINKS = 5
@@ -263,12 +270,22 @@ def ocr(png: Path) -> str:
 
 
 def judge_links() -> list[str]:
+    # A NAMED SURFACE THAT IS ABSENT IS A DEFECT, NOT A SKIP. This used to `continue`, so a
+    # surface that was gitignored or renamed dropped out of the sweep and the result was
+    # byte-identical to a clean one. That is the same shape as the MIN_LINKS floor below and
+    # needs the same treatment: refuse to report rather than report over a smaller scope.
+    missing = [rel for rel in LINK_SURFACES if not (REPO / rel).is_file()]
+    if missing:
+        raise SystemExit(
+            f"NOT CHECKED: link surface(s) named but absent: {', '.join(missing)}. "
+            "Either the file moved or it is not in the clone. Refusing to sweep a partial "
+            "set, because a smaller scope produces the same output as a clean one."
+        )
     seen: dict[str, None] = {}
     for rel in LINK_SURFACES:
-        p = REPO / rel
-        if not p.is_file():
-            continue
-        for m in URL_RE.finditer(p.read_text(encoding="utf-8", errors="replace")):
+        for m in URL_RE.finditer(
+            (REPO / rel).read_text(encoding="utf-8", errors="replace")
+        ):
             seen.setdefault(m.group(0).rstrip(URL_TRAILING), None)
     return sorted(seen)
 
