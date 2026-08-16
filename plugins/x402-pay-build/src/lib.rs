@@ -24,8 +24,8 @@
 //!         cargo build --target wasm32-wasip2 --release
 #![deny(unsafe_code)]
 
-pub mod build;
+pub mod compose;
 pub mod pay;
 
-pub use build::{build_unsigned, transfer_fixed_ix, Resolved};
+pub use compose::{atomic_to_ui, compose, SpendArgs};
 pub use pay::{authorise, AuthorisedPayment, Challenge, PayConfig, PriceExtra, PriceOption};
