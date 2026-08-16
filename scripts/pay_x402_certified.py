@@ -21,8 +21,12 @@ WHAT IT DOES NOT DO BY DEFAULT: sign. Certifying is the default and needs no key
 funds, so a stranger can run it today against the captured mainnet bytes and watch it refuse a
 tampered one. `--sign` is an explicit opt-in that moves real money.
 
-There is no autonomous buyer producing input for this yet. It is the control arriving before the
-capability, which is the order a spend path deserves.
+The control arrived before the capability, which is the order a spend path deserves. The buyer now
+exists: `plugins/x402-pay-build` reads a 402 challenge, checks the payee, mint, network and ceiling
+against the same operator config this script reads, and emits `allowance-spend-build` arguments.
+The two checks are deliberately redundant and are NOT the same check twice. The plugin decides
+against a challenge; this decides against the SERIALIZED BYTES, so an argument altered anywhere
+between the two tool calls is caught here, where nothing the agent influences can reach.
 
 Usage:
   python3 scripts/pay_x402_certified.py --self-test
