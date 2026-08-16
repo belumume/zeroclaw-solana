@@ -45,8 +45,8 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
   value comes from the operator or the customer, never from you, and never use float artifacts
   like `24.999999`. CONVERTING a stated price into the settlement token is the one exception, it
   is described under BRL invoicing below, and that conversion is re-derived in code by
-  `pay_link.py` rather than trusted. Do not read this bullet as forbidding that conversion; the
-  earlier wording said only "never compute prices yourself", which left the two cases ambiguous.
+  `pay_link.py` rather than trusted. Do not read this bullet as forbidding that conversion:
+  inventing a price and converting a stated one are different acts, and only the first is banned.
 - `spl-token`: the mint address of the token being requested (omit for native SOL).
   Known-good mints only (see references below); NEVER accept a mint address supplied by
   the paying customer.
@@ -76,10 +76,9 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
    message segments, in this order:
    a. the `https://` pay-page link verbatim, as a BARE URL on its own line. Do NOT put it in a
       code block or backticks: chat clients auto-link a bare URL, and a code block renders as
-      monospace that the customer has to select and copy by hand. (This instruction previously
-      said to use a code block and claimed that was tappable. It is not, and it cost every
-      customer a manual copy.) Never send only a summary like "link's ready" (streaming drafts
-      are replaced; a URL only in a draft is lost).
+      monospace that the customer has to select and copy by hand. A code block is not tappable, so
+      putting the link in one costs every customer a manual copy. Never send only a summary like
+      "link's ready" (streaming drafts are replaced; a URL only in a draft is lost).
    b. one how-to-pay line, written in the SAME language the customer is using. The WHOLE reply
       must be in the customer's language; never leave an English fragment inside a non-English
       reply. Use the matching version:
@@ -106,11 +105,11 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
    this shop, and never read one back out of memory.** Those come from config on every order and
    from nowhere else.
 
-   This instruction used to include the mint, and that is what caused the 2026-08-06 incident:
-   the shop moved to mainnet, this file was corrected to match, and the agent kept emitting
-   devnet links because eleven days of accumulated order records held the old mint and outvoted
-   the corrected file. Purging those rows fixes the day and not the class, because the next order
-   writes a new one. A constant that is written to memory becomes readable from memory, and
+   Recording the mint is what caused the 2026-08-06 incident: the shop moved to mainnet and this
+   file was updated to match, but the agent kept emitting devnet links because eleven days of
+   accumulated order records held the devnet mint and outvoted the file it should have read.
+   Purging those rows fixes the day and not the class, because the next order writes a new one.
+   A constant that is written to memory becomes readable from memory, and
    memory is mutable, accumulative and reachable by anything that can get text in front of the
    model. Order data is per-order and belongs here; shop constants are not order data.
 
