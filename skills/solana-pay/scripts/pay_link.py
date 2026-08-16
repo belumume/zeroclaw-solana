@@ -32,6 +32,7 @@ import json
 import sys
 import urllib.request
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from urllib.parse import unquote_plus
 
 PAGE = "https://zeroclaw-shop-pay.pages.dev/"
 
@@ -75,6 +76,13 @@ MERCHANT = "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
 # roughly seventy-fold overcharge to a real customer. A SOL path, if this shop ever
 # wants one, needs an explicit flag that says so.
 MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+# The LABEL is the third constant of this shop, and SKILL.md pins the same value. Kept here as
+# well rather than imported, for the reason the other two are here: this script runs inside the
+# channel's workspace jail and cannot reach repo root, so a shared constant is not available to
+# it. `scripts/check-pay-link-rate-agreement.py` is the pattern for binding a duplicated constant
+# by reading the other copy's SOURCE rather than restating it.
+LABEL = "ZeroClaw Shop"
 
 # ---------------------------------------------------------------- THE EXCHANGE RATE
 # The rate is FETCHED HERE, for the same reason the merchant and the mint are pinned here:
@@ -295,6 +303,51 @@ if not mint and has_amount:
         f"No link was produced. Either name the mint or drop the amount and let the "
         f"customer's wallet set it."
     )
+
+# LABEL. The third of the four constants, and until now the only one of them with nothing
+# enforcing it. SKILL.md pins all four and then says so in its own words: "pay_link.py refuses
+# a link whose recipient or mint is not the pair above, so a drifted value fails loudly rather
+# than reaching a customer. The label and the network sentence have no such guard, which is why
+# they are your responsibility here." A responsibility assigned in prose to a model is not a
+# constraint on it, which is the argument this whole shop is built on, so the sentence describes
+# a hole rather than a design.
+#
+# It drifted on 2026-08-06 alongside the recipient and the mint, with no attacker: a stale
+# placeholder name reached a real customer's approval screen. Per the Solana Pay spec `label` is
+# the MERCHANT and the wallet renders it as WHO IS BEING PAID, so a wrong one is display spoofing
+# on the last screen before money moves, not a cosmetic defect.
+#
+# SPLIT for the same reason the mint check is split, because absent and wrong are different
+# failures. A WRONG label is always refused. An ABSENT label is NOT: the field is optional in the
+# spec and a wallet then shows the recipient address instead, which is less informative and is not
+# misleading, so refusing it would break a legitimate link to prevent nothing.
+label_values = [
+    pair.split("=", 1)[1]
+    for pair in query.split("&")
+    if pair.split("=", 1)[0] == "label" and "=" in pair
+]
+
+if len(label_values) > 1:
+    sys.exit(
+        f"REFUSED: pay link carries {len(label_values)} label parameters. "
+        f"A duplicated key is read differently by different wallets and is never a legitimate "
+        f"request, so it is a smuggling shape rather than a typo. No link was produced."
+    )
+
+if label_values:
+    # Compared DECODED, because the wallet displays the decoded form. `ZeroClaw%20Shop` and
+    # `ZeroClaw+Shop` are the same label to a customer, and a byte comparison would refuse one
+    # encoding of the correct name while a spoof only has to pick the other.
+    got_label = unquote_plus(label_values[0].strip())
+    if got_label != LABEL:
+        sys.exit(
+            f"REFUSED: pay link names a different merchant.\n"
+            f"  expected: {LABEL}\n"
+            f"  got:      {got_label}\n"
+            f"No link was produced. The wallet renders this as who is being paid, so a drifted "
+            f"value misnames the shop on the approval screen. Check the agent's memory store the "
+            f"same way a wrong recipient would be checked."
+        )
 
 # AMOUNT. The recipient check above exists because the recipient once came only from
 # prose and went wrong. The amount had the same shape and no guard at all: it rode
