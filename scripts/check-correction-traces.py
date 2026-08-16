@@ -135,7 +135,7 @@ TRACE = [
     # ("previously read", "corrected on", "an audit found"). This family keys on the document
     # pointing at ITSELF as a unit of text -- this sentence, that bullet, the earlier wording,
     # the reason this file gave -- which is the same defect with the history left implicit, and
-    # it was invisible to all thirteen. Measured: five live spans across two judge-facing
+    # it was invisible to all thirteen. Measured: six live spans across two judge-facing
     # surfaces while the gate reported clean.
     #
     # THE NOUN LISTS ARE DELIBERATELY NARROW, and "section" and "page" are absent from all four.
