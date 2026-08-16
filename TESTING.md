@@ -519,7 +519,9 @@ things that ship.
 
 Counted from the API on 2026-08-01, all nineteen: seven in `e2e-track-a`, seven in `e2e-localnet`,
 four in `differential-fuzz`, one in `onchain`. **Zero on `solana-core`, zero on any of the eight
-plugins, zero on the x402 gate.** The packages are `rustls-webpki`, `ed25519-dalek`,
+plugins that existed at that date, zero on the x402 gate.** A NINTH plugin, `x402-pay-build`, landed
+after this count and is therefore not covered by it; the number stays at eight because rewriting a
+dated survey to a later total would make the count false rather than current. The packages are `rustls-webpki`, `ed25519-dalek`,
 `curve25519-dalek`, `rand` and `atty`, which is the standard Solana toolchain transitive set that
 every project in this ecosystem carries and that no simple bump resolves, because `solana-program`
 pins the version.

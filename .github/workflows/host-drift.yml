@@ -65,9 +65,9 @@ jobs:
             n=$((n + 1))
           done
           echo "built $n component(s)"
-          if [ "$n" -lt 8 ]; then
-            echo "discovery found $n plugins, fewer than the 8 that existed when this floor" \
-                 "was written; the walk is broken, refusing to report parity" >&2
+          if [ "$n" -lt 9 ]; then
+            echo "discovery found $n plugins, fewer than the 9 that exist today; the walk is" \
+                 "broken, refusing to report parity" >&2
             exit 1
           fi
 
