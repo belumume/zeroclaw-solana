@@ -604,6 +604,16 @@ jobs:
       - name: the two rate copies agree
         run: python3 scripts/check-pay-link-rate-agreement.py
 
+      # The demo video is frozen and submitted, so its claims cannot be corrected and the claims
+      # map is the only remaining way to make them checkable. That makes the MAP judge-facing: a
+      # claim pointing at a renamed script reads as a verification route and is a dead end, which
+      # is worse than no map. Offline: it reads JSON and stats paths.
+      - name: the video claims map points at things that exist
+        run: python3 scripts/check-video-claims.py
+
+      - name: that map's own controls
+        run: python3 scripts/check-video-claims.py --selftest
+
       # Five judge-facing surfaces quote the certifier's score in prose. When a sixth case was
       # added they all kept saying 5/5, and nothing noticed: the certifier's self-test passes at
       # any N, the step above only reads its exit code, and take.py asserts on "cases correct"
