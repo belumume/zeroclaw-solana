@@ -16,7 +16,7 @@ The box is not reachable from here, so every claim below is driven against a FIX
 a FAKE binary that records its own argv. What that buys is the thing a green suite usually does
 not: the exact command the next box contact should expect, established before the contact.
 
-FOUR LAYERS, because a control on one proves nothing about the others.
+FIVE LAYERS, because a control on one proves nothing about the others.
 
   1. RESOLUTION, through --dry-run: which instance, which type, which alias, which recipient,
      which channel-id, and whether a retry id exists at all.
@@ -29,6 +29,14 @@ FOUR LAYERS, because a control on one proves nothing about the others.
      copy of the script and the matching case is REQUIRED to flip. Each asserts its target
      string is present in the source FIRST, so a control gone stale fails loudly instead of
      certifying an unmodified script.
+
+  5. WHAT IT HANDS THE CONFIRMER. Two things the argv on that side has to get right: the
+     scan cache flags, and the --only narrowing on the commit. The narrowing is the one
+     that matters -- an unnarrowed commit re-derives from chain and appends everything it
+     finds, so a payment settling during the sends is recorded having never been sent, and
+     is then never announced. The RPC-cost half of the cache claim is not provable here,
+     because the confirmer is faked; it is proved in demo/test_confirm_settlements.py
+     against the real code with a counting RPC.
 
 No network, no python3 dependency in the child: the "python3" the script invokes is a shim in
 the test's own PATH that runs the fake confirmer.
@@ -81,6 +89,11 @@ SEND_LINE_C = (
     "at 2026-08-07T15:44:20Z (signature "
     "5Zk9RPAffYmo9zzgXZuGrHJ8bV9Y2rnbE3ZdsPiMqzjEDWVQN2dWieiPu1VpGUMX2d4SNBt4Quqs9ewHdk3eAvbm)"
 )
+
+# A SEND line with no `(signature ...)` field. Not a shape the real confirmer emits, which
+# is the point: it stands for the confirmer's format drifting away from the script's parse.
+# The script must refuse to commit rather than fall back to an unnarrowed pass.
+SEND_LINE_NOSIG = "SEND: payment received: 0.39 USDC from EpzuUPXwMR2oWqL3MCUTjvvpfdrZXforkMt85ZCSowo3"
 
 # A line unique to the remedy block, used to COUNT it. Kept as a fragment of the real sentence
 # rather than a paraphrase, so rewording the remedy breaks the count rather than silently
@@ -190,10 +203,34 @@ FAKE_CONFIRMER = """\
 dry=0
 for a in "$@"; do [ "$a" = "--dry-run" ] && dry=1; done
 if [ "$dry" -eq 1 ]; then
+  printf '%s\\n' "$*" >> "$SCANLOG"
   printf '%s\\n' "$SEND_LINES"
   exit 0
 fi
-echo COMMITTED >> "$COMMITLOG"
+printf '%s\\n' "$*" >> "$COMMITLOG"
+exit 0
+"""
+
+# A confirmer of the PREVIOUS deployed vintage: it scans fine and rejects --only the way
+# argparse does. This is the split-deploy shape -- the script synced, its confirmer did not --
+# and it is the same class of failure as the incident this whole path was written for, where a
+# component's deployed vintage did not match what called it.
+FAKE_CONFIRMER_NO_ONLY = """\
+#!/usr/bin/env bash
+dry=0
+for a in "$@"; do [ "$a" = "--dry-run" ] && dry=1; done
+if [ "$dry" -eq 1 ]; then
+  printf '%s\\n' "$*" >> "$SCANLOG"
+  printf '%s\\n' "$SEND_LINES"
+  exit 0
+fi
+for a in "$@"; do
+  if [ "$a" = "--only" ]; then
+    echo "error: unrecognized arguments: --only" >&2
+    exit 2
+  fi
+done
+printf '%s\\n' "$*" >> "$COMMITLOG"
 exit 0
 """
 
@@ -227,7 +264,12 @@ class Box:
     """A throwaway fixture box: fake binary, fake confirmer, fixture config."""
 
     def __init__(
-        self, config: str, fake: str, send_lines: list[str], script: Path = SCRIPT
+        self,
+        config: str,
+        fake: str,
+        send_lines: list[str],
+        script: Path = SCRIPT,
+        confirmer: str | None = None,
     ):
         self.dir = Path(tempfile.mkdtemp(prefix="announce-test-"))
         self.script = script
@@ -235,13 +277,14 @@ class Box:
         self.bin.mkdir()
         self.zclog = self.dir / "zc-argv.log"
         self.commitlog = self.dir / "committed.log"
+        self.scanlog = self.dir / "scanned.log"
         self.config = self.dir / "config.toml"
         self.config.write_text(config, encoding="utf-8")
         self.zbin = self.dir / "zeroclaw"
         self._write_exec(self.zbin, fake)
         self.confirmer = self.dir / "tools" / "confirm_settlements.py"
         self.confirmer.parent.mkdir()
-        self._write_exec(self.confirmer, FAKE_CONFIRMER)
+        self._write_exec(self.confirmer, confirmer or FAKE_CONFIRMER)
         self._write_exec(self.bin / "python3", PY_SHIM)
         self.send_lines = "\n".join(send_lines)
 
@@ -262,11 +305,13 @@ class Box:
                 "ZC_CHANNEL": "whatsapp.shop",
                 "ZCLOG": str(self.zclog),
                 "COMMITLOG": str(self.commitlog),
+                "SCANLOG": str(self.scanlog),
                 "SEND_LINES": self.send_lines,
             }
         )
         env.pop("ZC_RECIPIENT", None)
         env.pop("ZC_CHANNEL_ID", None)
+        env.pop("ZC_SCAN_CACHE", None)
         for key, value in overrides.items():
             if value is None:
                 env.pop(key, None)
@@ -291,6 +336,21 @@ class Box:
 
     def committed(self) -> bool:
         return self.commitlog.exists()
+
+    def _argv(self, log: Path) -> str:
+        """The argv of the last confirmer invocation of that kind, or ''."""
+        if not log.exists():
+            return ""
+        lines = [
+            ln for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()
+        ]
+        return lines[-1] if lines else ""
+
+    def commit_args(self) -> str:
+        return self._argv(self.commitlog)
+
+    def scan_args(self) -> str:
+        return self._argv(self.scanlog)
 
     def cleanup(self) -> None:
         shutil.rmtree(self.dir, ignore_errors=True)
@@ -677,6 +737,176 @@ def test_mutations() -> None:
         shutil.rmtree(mutant.parent, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# 5. WHAT IT HANDS THE CONFIRMER -- cache flags, and the commit narrowing
+# ---------------------------------------------------------------------------
+
+
+def sig_of(send_line: str) -> str:
+    return send_line.rsplit("(signature ", 1)[1].rstrip(")")
+
+
+def test_confirmer_argv() -> None:
+    print("\n5. CONFIRMER ARGV -- scan cache flags and the --only commit narrowing")
+
+    # THE NARROWING. Both settlements land, so the commit runs -- and it must name exactly
+    # the two signatures that were announced. An unnarrowed commit re-derives the window and
+    # appends whatever settled during the sends, which is a receipt nobody was ever sent.
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A, SEND_LINE_B])
+    try:
+        r = box.run()
+        args = box.commit_args()
+        check("both sends land, so the run exits 0", r.returncode == 0, r.stderr)
+        check(
+            "the commit names --only once per announced payment",
+            args.count("--only") == 2,
+            args,
+        )
+        check(
+            "and names the exact signatures from the SEND lines",
+            all(
+                f"--only {sig_of(line)}" in args for line in (SEND_LINE_A, SEND_LINE_B)
+            ),
+            args,
+        )
+        check(
+            "the commit still targets the same ledger",
+            "--ledger" in args,
+            args,
+        )
+    finally:
+        box.cleanup()
+
+    # A run that announced NOTHING never reaches the commit, so there is nothing to narrow.
+    box = Box(CONFIG_SHOP, FAKE_OLD_HOST, [SEND_LINE_A])
+    try:
+        box.run()
+        check("a failed run commits nothing at all", not box.committed())
+    finally:
+        box.cleanup()
+
+    # A SEND line the script cannot parse a signature out of must not be committed blind.
+    # Committing unnarrowed there would restore the swallow on exactly the run where the
+    # script has already shown it does not understand its own input.
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A, SEND_LINE_NOSIG])
+    try:
+        r = box.run()
+        check("an unparseable SEND line refuses to commit", r.returncode == 1, r.stdout)
+        check("and writes no ledger record", not box.committed())
+        check(
+            "and says why, naming the mismatch",
+            "refusing to commit" in r.stderr
+            and "parsed 1 signature(s) from 2" in r.stderr,
+            r.stderr,
+        )
+        check(
+            "while both messages were still DELIVERED (the send half is unaffected)",
+            len(box.sends()) == 2,
+            box.sends(),
+        )
+    finally:
+        box.cleanup()
+
+    # SPLIT DEPLOY. An older confirmer rejects --only. The run must name that specifically
+    # rather than dying on `set -e` with no explanation, and must not commit -- so the
+    # receipts re-announce, which is the recoverable direction.
+    box = Box(
+        CONFIG_SHOP,
+        FAKE_ACCEPT,
+        [SEND_LINE_A],
+        confirmer=FAKE_CONFIRMER_NO_ONLY,
+    )
+    try:
+        r = box.run()
+        check(
+            "a confirmer that rejects --only fails the run", r.returncode == 1, r.stdout
+        )
+        check("and commits nothing", not box.committed())
+        check(
+            "and never claims the ledger was committed",
+            "ledger committed" not in r.stdout,
+            r.stdout,
+        )
+        check(
+            "and names the deploy pair as the remedy",
+            "unrecognized --only" in r.stderr and "deploy-targets.json" in r.stderr,
+            r.stderr,
+        )
+    finally:
+        box.cleanup()
+
+    # THE CACHE FLAGS. Unset means the confirmer's own default path applies, which is the
+    # deployed posture -- the script must not invent a --cache of its own.
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        box.run()
+        check(
+            "with ZC_SCAN_CACHE unset the scan passes no cache flag",
+            "--cache" not in box.scan_args() and "--no-cache" not in box.scan_args(),
+            box.scan_args(),
+        )
+    finally:
+        box.cleanup()
+
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        box.run(ZC_SCAN_CACHE="/tmp/zc-scan-cache.json")
+        check(
+            "a set ZC_SCAN_CACHE becomes --cache <path>",
+            "--cache /tmp/zc-scan-cache.json" in box.scan_args(),
+            box.scan_args(),
+        )
+    finally:
+        box.cleanup()
+
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        box.run(ZC_SCAN_CACHE="")
+        check(
+            "an EMPTY ZC_SCAN_CACHE becomes --no-cache, not an empty --cache",
+            "--no-cache" in box.scan_args() and "--cache " not in box.scan_args(),
+            box.scan_args(),
+        )
+    finally:
+        box.cleanup()
+
+    # OVER-CORRECTION CONTROL for the narrowing. Removing --only must restore the
+    # unnarrowed commit, or "the commit is narrowed" is a claim about a flag nobody reads.
+    mutant = mutated_script(
+        """  if ! python3 "$CONFIRM" --ledger "$LEDGER" "${ONLY[@]}" >/dev/null; then""",
+        """  if ! python3 "$CONFIRM" --ledger "$LEDGER" >/dev/null; then""",
+    )
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A, SEND_LINE_B], script=mutant)
+    try:
+        box.run()
+        check(
+            "removing --only DOES restore the unnarrowed commit (the narrowing is real)",
+            box.committed() and "--only" not in box.commit_args(),
+            box.commit_args(),
+        )
+    finally:
+        box.cleanup()
+        shutil.rmtree(mutant.parent, ignore_errors=True)
+
+    # And the count guard must be what refuses, not something incidental: disable it and
+    # the unparseable case commits a narrowing that is missing a payment.
+    mutant = mutated_script(
+        """  if [ "${#ONLY[@]}" -ne $((COUNT * 2)) ]; then""",
+        """  if false; then""",
+    )
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A, SEND_LINE_NOSIG], script=mutant)
+    try:
+        r = box.run()
+        check(
+            "removing the count guard DOES let a short narrowing commit (guard is real)",
+            r.returncode == 0 and box.commit_args().count("--only") == 1,
+            box.commit_args(),
+        )
+    finally:
+        box.cleanup()
+        shutil.rmtree(mutant.parent, ignore_errors=True)
+
+
 def main() -> int:
     if BASH is None:
         print("FAIL  no bash on PATH; this suite drives a shell script and cannot run")
@@ -689,6 +919,7 @@ def main() -> int:
     test_send()
     test_refusal()
     test_mutations()
+    test_confirmer_argv()
     print(f"\n{CHECKS - FAILS}/{CHECKS} checks passed")
     return 1 if FAILS else 0
 

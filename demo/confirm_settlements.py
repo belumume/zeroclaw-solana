@@ -28,10 +28,41 @@ reads and an append. It also does not know order numbers, because knowing them w
 mean trusting the surface this exists to route around; it names the amount and the
 signature, and a human maps those to an order.
 
+THE SCAN CACHE, and why it caches only NEGATIVES.
+
+The scan is not two RPC reads. It is two, plus one `getTransaction` for every signature
+in the window that the ledger has not recorded. Measured on the box 2026-08-16, on a
+window of 21: 6 in the ledger, 11 that are not incoming settlements, 4 that are -- so 15
+`getTransaction` calls per run, and 8,126 RPC calls a day at the observed tick rate.
+
+The 11 are the point. A finalized transaction is immutable, so "this signature is not an
+incoming settlement to the merchant" is a PERMANENT verdict, and re-deriving it costs a
+network round trip every single tick forever. That is true in the healthy steady state,
+not only during an outage: those 11 never enter the ledger (only settlements do), so
+nothing ever stops re-fetching them. Caching that verdict takes the steady-state scan
+from 13 reads to 2.
+
+POSITIVES ARE NEVER CACHED, and that is the whole safety argument. Every field of every
+announced receipt still comes from a `getTransaction` issued on the run that announces
+it. A cache that stored amounts and payers would move the composition of a money message
+off the chain and into a local file, which is the surface this tool exists to remove --
+it would differ from the model that fabricated the 2026-08-06 records only in being a
+worse-supervised author. So the cache can make the tool do LESS work; it cannot make it
+say anything.
+
+The residual risk runs the other way: a corrupted or tampered negative entry suppresses a
+real settlement, and a swallowed confirmation is the failure that cannot be recovered.
+Three things bound it. An entry is written only for a transaction that was actually
+FETCHED and definitively classified, never for one that could not be read. Anything
+malformed on load is dropped, so the cache's own failure mode is a full re-fetch, which
+is exactly the pre-cache behaviour. And the default path is under ~/.zeroclaw/state/,
+OUTSIDE the agent's workspace jail -- unlike the ledger, which sits inside it.
+
 Usage:
     python demo/confirm_settlements.py --dry-run
     python demo/confirm_settlements.py
     python demo/confirm_settlements.py --seed        # adopt current history, announce none
+    python demo/confirm_settlements.py --no-cache    # re-derive every verdict from chain
 
 Exit codes:
     0  ran and verified (any SEND lines printed are chain-confirmed)
@@ -82,9 +113,63 @@ def default_ledger() -> Path:
     )
 
 
+def default_cache() -> Path:
+    """Where the negative-classification cache lives.
+
+    ~/.zeroclaw/state/ rather than beside the ledger, deliberately. The ledger sits at
+    ~/.zeroclaw/agents/demo/workspace/, INSIDE the agent's workspace jail, so the agent
+    can write it. The state dir is outside, which is where a file that can suppress an
+    announcement belongs.
+    """
+    return Path.home() / ".zeroclaw" / "state" / "settlement-scan-cache.json"
+
+
 def is_signature(value: object) -> bool:
     """True only for a string shaped like a real base58 transaction signature."""
     return isinstance(value, str) and 86 <= len(value) <= 88 and not (set(value) - _B58)
+
+
+def load_cache(path: Path) -> set[str]:
+    """Signatures already proven NOT to be incoming settlements.
+
+    Every failure mode returns the empty set, which degrades to the pre-cache behaviour
+    of fetching everything. That direction is deliberate: an unreadable cache must cost
+    RPC calls, never a missed receipt. Entries are re-validated with is_signature() on
+    the way in, so junk in the file cannot shadow a real signature.
+    """
+    if path is None or not path.exists():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+    entries = payload.get("not_settlements")
+    if not isinstance(entries, list):
+        return set()
+    return {entry for entry in entries if is_signature(entry)}
+
+
+def save_cache(path: Path, signatures: set[str]) -> None:
+    """Persist the negative verdicts. Best effort: a cache that cannot be written is a
+    slower next run, never a wrong one, so a failure here is swallowed rather than
+    escalated into a refusal to announce."""
+    payload = {
+        "version": 1,
+        "note": (
+            "Signatures proven not to be incoming settlements to the merchant. Derived "
+            "data: delete this file at any time and the next run rebuilds it from chain."
+        ),
+        "not_settlements": sorted(signatures),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8", newline="\n"
+        )
+    except OSError:
+        pass
 
 
 def make_rpc(urls=RPCS, timeout: float = 20.0):
@@ -268,29 +353,69 @@ def settlement_from_tx(
 
 
 def collect_settlements(
-    rpc, known: set[str], limit: int, merchant: str = MERCHANT, mint: str = USDC
+    rpc,
+    known: set[str],
+    limit: int,
+    merchant: str = MERCHANT,
+    mint: str = USDC,
+    cached_negative: frozenset = frozenset(),
+    only: frozenset | None = None,
 ):
     """Find chain-confirmed settlements the ledger has not recorded.
 
-    Returns (settlements_oldest_first, stats). settlements is None when the chain could
-    not be reached at all, which the caller must treat as 'announce nothing'.
+    Returns (settlements_oldest_first, stats, negatives). settlements is None when the
+    chain could not be reached at all, which the caller must treat as 'announce nothing'.
+
+    `cached_negative` skips the fetch for signatures already proven not to be incoming
+    settlements. `negatives` comes back pruned to the current window, so the cache file
+    tracks the scan rather than growing without bound.
+
+    `only` restricts the whole pass to a given set of signatures. It exists for the
+    commit step of deploy/announce_settlements.sh: that step used to re-derive from
+    chain and append EVERYTHING it found, so a payment landing between the announce and
+    the commit was written to the ledger without ever being sent, and the next run then
+    read it as already recorded. That is a swallowed confirmation, which is the one
+    outcome the whole send-first/commit-after ordering exists to prevent. Restricting
+    the commit to the signatures actually announced closes it. `only` can only ever
+    narrow what is appended, so its own failure mode is a duplicate announcement.
     """
-    stats = {"scanned": 0, "already_known": 0, "unverifiable": 0, "not_a_settlement": 0}
+    stats = {
+        "scanned": 0,
+        "already_known": 0,
+        "unverifiable": 0,
+        "not_a_settlement": 0,
+        "cache_hits": 0,
+        "fetched": 0,
+        "outside_only": 0,
+    }
 
     account = merchant_token_account(rpc, merchant, mint)
     if account is None:
-        return None, stats
+        return None, stats, set()
 
     signatures = recent_signatures(rpc, account, limit)
     if signatures is None:
-        return None, stats
+        return None, stats, set()
 
     stats["scanned"] = len(signatures)
     found = []
+    negatives: set[str] = set()
 
     for signature in signatures:
         if signature in known:
             stats["already_known"] += 1
+            continue
+
+        if only is not None and signature not in only:
+            stats["outside_only"] += 1
+            continue
+
+        # A finalized transaction cannot change its mind about being a settlement, so a
+        # verdict already reached is re-used rather than re-fetched. Positives are never
+        # cached, so this branch can only ever skip work, never supply an announced field.
+        if signature in cached_negative:
+            stats["cache_hits"] += 1
+            negatives.add(signature)
             continue
 
         tx = rpc(
@@ -300,21 +425,24 @@ def collect_settlements(
                 {"maxSupportedTransactionVersion": 0, "encoding": "jsonParsed"},
             ],
         )
+        stats["fetched"] += 1
         if tx is None:
             # Could not verify it. Leave it unannounced and unrecorded; the next run
-            # picks it up because it never entered the ledger.
+            # picks it up because it never entered the ledger. Deliberately NOT cached:
+            # caching an unread transaction would make a transport blip permanent.
             stats["unverifiable"] += 1
             continue
 
         record = settlement_from_tx(tx, signature, merchant, mint)
         if record is None:
             stats["not_a_settlement"] += 1
+            negatives.add(signature)
             continue
         found.append(record)
 
     # getSignaturesForAddress returns newest first; announce in the order things happened.
     found.reverse()
-    return found, stats
+    return found, stats, negatives
 
 
 def send_line(record: dict) -> str:
@@ -343,13 +471,35 @@ def main(argv: list[str] | None = None) -> int:
         "--limit", type=int, default=25, help="signatures to scan (default 25)"
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="print what would be sent, write nothing"
+        "--dry-run",
+        action="store_true",
+        help="print what would be sent and append no LEDGER records (the scan cache, "
+        "which holds only derived negative verdicts, is still updated)",
     )
     parser.add_argument(
         "--seed",
         action="store_true",
         help="record current history WITHOUT announcing it, so a first run does not "
         "announce every historical payment at once",
+    )
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        default=None,
+        help="path to the negative-classification cache (default ~/.zeroclaw/state/)",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="ignore and do not write the cache; re-derive every verdict from chain",
+    )
+    parser.add_argument(
+        "--only",
+        action="append",
+        default=None,
+        metavar="SIGNATURE",
+        help="restrict the pass to these signatures (repeatable). Used by the commit "
+        "step so it appends only what was actually announced.",
     )
     args = parser.parse_args(argv)
 
@@ -359,6 +509,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run and args.seed:
         print("--dry-run and --seed together would do nothing", file=sys.stderr)
         return 1
+
+    only = None
+    if args.only is not None:
+        bad = [value for value in args.only if not is_signature(value)]
+        if bad:
+            print(
+                f"--only takes base58 transaction signatures; rejected {len(bad)}: "
+                f"{bad[0][:24]}...",
+                file=sys.stderr,
+            )
+            return 1
+        only = frozenset(args.only)
 
     ledger = args.ledger if args.ledger is not None else default_ledger()
     known, ledger_stats = load_ledger(ledger)
@@ -373,8 +535,19 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
 
+    # A commit pass narrowed by --only examines only part of the window, so it must not
+    # rewrite a cache pruned to what it happened to look at. Scanning runs own the cache.
+    cache_path = (
+        None
+        if (args.no_cache or only is not None)
+        else (args.cache if args.cache is not None else default_cache())
+    )
+    cached_negative = frozenset(load_cache(cache_path)) if cache_path else frozenset()
+
     rpc = make_rpc()
-    settlements, stats = collect_settlements(rpc, known, args.limit)
+    settlements, stats, negatives = collect_settlements(
+        rpc, known, args.limit, cached_negative=cached_negative, only=only
+    )
 
     if settlements is None:
         print(
@@ -384,14 +557,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    # The fetch count is reported next to the scan count on purpose. A cache that has
+    # silently stopped working looks exactly like a healthy one from the outside -- same
+    # verdict, same output -- and the only thing that distinguishes them is how many
+    # transactions had to be read to reach it.
     print(
         f"scanned {stats['scanned']} signature(s): "
         f"{stats['already_known']} already recorded, "
+        f"{stats['cache_hits']} skipped by cache, "
         f"{stats['not_a_settlement']} not an incoming settlement, "
         f"{stats['unverifiable']} could not be fetched (left for the next run), "
-        f"{len(settlements)} new",
+        f"{len(settlements)} new "
+        f"[{stats['fetched']} transaction(s) fetched"
+        + (f", {stats['outside_only']} outside --only" if only is not None else "")
+        + "]",
         file=sys.stderr,
     )
+
+    if cache_path is not None:
+        save_cache(cache_path, negatives)
 
     if args.seed:
         append_records(ledger, settlements)

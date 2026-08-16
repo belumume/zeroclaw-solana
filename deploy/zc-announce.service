@@ -44,6 +44,14 @@ Environment=ZC_CHANNEL=whatsapp.shop
 # Environment=ZC_TOOLS=%h/.zeroclaw/agents/demo/workspace/tools
 # Environment=ZC_LEDGER=%h/.zeroclaw/agents/demo/workspace/confirmed-payments-v2.jsonl
 #
+# ZC_SCAN_CACHE relocates the confirmer's negative-verdict cache; empty disables it entirely and
+# every verdict is re-derived from chain. Left UNSET on purpose, so the confirmer's own default
+# applies: %h/.zeroclaw/state/settlement-scan-cache.json. That location is load-bearing rather than
+# incidental -- it is outside the agent's workspace jail, whereas ZC_LEDGER above is inside it, and
+# a file that can suppress an announcement should not be one the jailed agent can write. The cache
+# is derived data holding no announced field; delete it and the next run rebuilds it.
+# Environment=ZC_SCAN_CACHE=%h/.zeroclaw/state/settlement-scan-cache.json
+#
 # ZC_RECIPIENT IS DELIBERATELY ABSENT, and this note exists because the obvious completion of the
 # list above is to add it. The script reads the recipient from the channel's OWN allowlist rather
 # than from a variable, so it carries no phone number and cannot drift away from the channel it

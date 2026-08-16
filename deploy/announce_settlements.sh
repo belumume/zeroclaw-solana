@@ -142,8 +142,24 @@ if [ "$DRY_RUN" -eq 1 ]; then
   fi
 fi
 
-# 1. Ask the chain what is unannounced. Writes nothing.
-PENDING="$(python3 "$CONFIRM" --ledger "$LEDGER" --dry-run | grep '^SEND: ' || true)"
+# 1. Ask the chain what is unannounced. Appends no ledger records.
+#
+# The confirmer keeps a cache of signatures already proven NOT to be incoming settlements,
+# under ~/.zeroclaw/state/ by default. That is what stops this step re-reading the same
+# dozen unrelated transactions from the chain on every tick; see the confirmer's own header
+# for why only negative verdicts are ever cached. ZC_SCAN_CACHE relocates it; setting it to
+# the empty string disables it and forces every verdict to be re-derived.
+CACHE_ARGS=()
+if [ -n "${ZC_SCAN_CACHE+x}" ]; then
+  if [ -n "$ZC_SCAN_CACHE" ]; then
+    CACHE_ARGS=(--cache "$ZC_SCAN_CACHE")
+  else
+    CACHE_ARGS=(--no-cache)
+  fi
+fi
+
+PENDING="$(python3 "$CONFIRM" --ledger "$LEDGER" \
+  ${CACHE_ARGS[@]+"${CACHE_ARGS[@]}"} --dry-run | grep '^SEND: ' || true)"
 
 if [ -z "$PENDING" ]; then
   echo "nothing to announce"
@@ -205,14 +221,26 @@ send_one() {
 
 # 2. Send each line verbatim. Count failures rather than aborting, so one bad send does not
 #    strand the others -- they are independent payments.
+#
+# The signature of each ANNOUNCED payment is collected as we go, and step 3 commits exactly
+# those. See the note there for why re-deriving instead would swallow a receipt.
 FAILED=0
 COUNT=0
+ONLY=()
 while IFS= read -r line; do
   [ -n "$line" ] || continue
   COUNT=$((COUNT + 1))
   MSG="${line#SEND: }"
+  # `...(signature <sig>)` is the confirmer's own trailing field. Strip to the last
+  # occurrence so a payer or amount could never be mistaken for it.
+  SIG="${MSG##*(signature }"
+  SIG="${SIG%)}"
   if send_one "$MSG"; then
     [ "$DRY_RUN" -eq 1 ] || echo "sent: $MSG"
+    case "$SIG" in
+      "$MSG"|*[!0-9A-Za-z]*|"") ;;   # unparsed, or not bare base58: leave it out
+      *) ONLY+=(--only "$SIG") ;;
+    esac
   else
     echo "SEND FAILED, will retry next run: $MSG" >&2
     FAILED=$((FAILED + 1))
@@ -225,8 +253,40 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 # 3. Commit ONLY if every send landed. A partial commit is the one outcome that loses a receipt.
+#
+# THE COMMIT IS NARROWED TO WHAT WAS ACTUALLY ANNOUNCED, and the un-narrowed version had a
+# hole. This step re-derives from chain, and it used to append EVERYTHING it found. Between
+# the scan in step 1 and this call sit N `channel send` round trips, so a payment settling in
+# that window -- seconds, not milliseconds -- was written to the ledger having never been
+# sent. The next run then read it as already recorded and never announced it. That is a
+# swallowed confirmation, the single outcome the send-first/commit-after ordering exists to
+# prevent, arriving through the commit rather than through a failed send.
+#
+# Passing --only for each announced signature closes it: a payment that lands mid-run is
+# simply not appended, so the next tick announces it normally. Every field written is still
+# read from the chain on THIS call; --only restricts which records are kept, never their
+# contents. A signature that failed to parse above is left out of the list, so the narrowing
+# can only ever be tighter than reality, and a too-tight commit costs a duplicate receipt --
+# which the header of this file calls recoverable, unlike the swallow it replaces.
 if [ "$FAILED" -eq 0 ]; then
-  python3 "$CONFIRM" --ledger "$LEDGER" >/dev/null
+  if [ "${#ONLY[@]}" -ne $((COUNT * 2)) ]; then
+    echo "refusing to commit: parsed $(( ${#ONLY[@]} / 2 )) signature(s) from $COUNT announced" >&2
+    echo "message(s). Committing an unnarrowed pass here can swallow a payment that settled" >&2
+    echo "mid-run, so nothing is written and all $COUNT re-announce on the next tick." >&2
+    exit 1
+  fi
+  # DEPLOY ORDERING. --only is newer than this script's first deployed version, so a box that
+  # received this file without the matching confirmer would have argparse reject the flag. That
+  # is a real shape here: the pair is synced together from deploy/deploy-targets.json, and the
+  # last incident on this path was precisely a component whose deployed vintage did not match
+  # what called it. `set -e` would abort on the failure and say nothing about the cause, so it
+  # is caught and named instead. Nothing is committed either way, so the receipts re-announce.
+  if ! python3 "$CONFIRM" --ledger "$LEDGER" "${ONLY[@]}" >/dev/null; then
+    echo "the confirmer rejected the commit; ledger NOT written, so all $COUNT re-announce." >&2
+    echo "If it reported an unrecognized --only, this script is newer than the deployed" >&2
+    echo "$CONFIRM. Sync both from deploy/deploy-targets.json; they are one pair." >&2
+    exit 1
+  fi
   echo "announced $COUNT, ledger committed"
   exit 0
 fi
