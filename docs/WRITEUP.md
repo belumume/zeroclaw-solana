@@ -355,14 +355,14 @@ list derived from the dependency graph rather than guessed. Three CI workflows k
 honest on a machine that is not ours, deliberately separate so a red badge says which thing
 broke.
 
-Of the three real failures `TESTING.md` records, CI would have caught none of them on its own. One is now
-covered by a drift workflow; the other two live outside this repository. `TESTING.md` carries
+Of the three real failures [`TESTING.md`](../TESTING.md) records, CI would have caught none of them on its own. One is now
+covered by a drift workflow; the other two live outside this repository. [`TESTING.md`](../TESTING.md) carries
 the full picture, including what each layer cannot catch.
 
 Testing is what we thought to check. Three reviewers then read the repository cold and found
 fourteen defects the suites could not, because every one of them sat between what a document
 asserted and what the code enforced, which is the gap a self-review structurally cannot see.
-`docs/AUDIT.md` is that list: what was broken, what changed, the two hypotheses that turned
+[`docs/AUDIT.md`](AUDIT.md) is that list: what was broken, what changed, the two hypotheses that turned
 out to be wrong, and the three items still open. The merchant address had been a sentence in a
 prompt with nothing in code holding it, and it is now an invariant with tests.
 
@@ -477,7 +477,7 @@ The tiers in words:
   sign readings (kind allowlist, range gates, monotonic sequence, deny_unknown_fields);
   the session key only pays fees. No auto-signing spend path exists in code.
 - Spends: a human checkpoint, then the audited on-chain Allowances program as the structural
-  cap. The refund-redirect injection transcript (`docs/transcripts/injection-refund-redirect.md`)
+  cap. The refund-redirect injection transcript ([`docs/transcripts/injection-refund-redirect.md`](transcripts/injection-refund-redirect.md))
   has a chat message impersonating the owner demanding an immediate 25 USDC refund to an
   attacker wallet with no approval:
 
@@ -495,7 +495,7 @@ The tiers in words:
   while the shop is emptied. Every family is graded against the runtime trace rather than against
   the model's own reply, and no fund-building tool was started on any of them. The one turn that
   names a fund tool called `escalate_to_human` instead, which ends the attack and tells the
-  operator it happened. See `docs/transcripts/injection-battery.md` for the whole battery, run by
+  operator it happened. See [`docs/transcripts/injection-battery.md`](transcripts/injection-battery.md) for the whole battery, run by
   run, and for what each trace does and does not support.
 
   No message talks past the layers that apply, and which apply depends on the
@@ -706,7 +706,7 @@ in the repo and the deploy is what remains.
 
 The decisions that shaped this are mostly decisions not to build something, and those are the
 ones a reviewer cannot see from the tree. The full set with its reasoning is in
-`docs/DECISIONS.md`, including the consequence each one carries. Four of them answer the questions
+[`docs/DECISIONS.md`](DECISIONS.md), including the consequence each one carries. Four of them answer the questions
 this submission most obviously invites.
 
 **A novel on-chain custody program.** This was the plan, and it was killed by evidence rather
@@ -878,16 +878,11 @@ custody proofs with no network at all. [`docs/transcripts/`](transcripts/) holds
 refusing a live attack, verbatim. [`sanitizer-microworld/index.html`](../sanitizer-microworld/index.html)
 lets you poke the sanitizer with no build.
 
-This section was titled "Reproducibility (links)" and contained no links until 2026-08-04. It
-described the reproduction accurately in prose, which is why nothing looked wrong: the words
-were true and the one thing the requirement actually asks for was absent. A reader could learn
-that SOPs exist and still not reach one.
-
 ## Links
 Repo (plugins + solana-core + onchain programs + skills + e2e harnesses + x402-feed-gate):
 https://github.com/belumume/zeroclaw-solana
 
-Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`):
+Live devnet proof, all clickable (full explorer links in [`docs/DEVNET-PROOF.md`](DEVNET-PROOF.md)):
 - oracle program `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn`, consumer
   `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`; three device feed PDAs, all owned by the
   oracle: `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (the ARM node, publishing 24/7 on its
@@ -923,7 +918,7 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   up as a probe. The earlier plan was to transport this
   machine's existing seed so the new feed would inherit the old sequence history; that would
   have made the claim architecturally true and literally false, so the copy was shredded
-  unused and the node made its own. `docs/DEVNET-PROOF.md` carries the full reasoning.
+  unused and the node made its own. [`docs/DEVNET-PROOF.md`](DEVNET-PROOF.md) carries the full reasoning.
 - the feed account stores only the latest reading, so the monotonic sequence is the on-chain
   publish ledger, the proof the node keeps running. `scripts/verify-proof.py` checks all three
   feeds and additionally asserts the node feed is FRESH, since an owned-but-dead feed would
@@ -941,7 +936,7 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   against the live feed, so neither costs anything nor needs a funded key, and `--send` is what
   broadcasts. Until 2026-08-05 this program had only ever read
   the historical `CfWaZA…` feed, so the claim was sound and unexercised against the feed it was
-  made about; `docs/DEVNET-PROOF.md` states that scope.
+  made about; [`docs/DEVNET-PROOF.md`](DEVNET-PROOF.md) states that scope.
 - x402 settlement `EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE`
   (err None, devnet USDC, buyer on a different machine from the node); a replayed payment refused
   NonceReused.
@@ -950,5 +945,5 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   also matching; a wrong amount, a foreign mint, or a wrong reference each return NOT_YET), reference
   `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`.
 
-Reproduction: `QUICKSTART.md` (host + plugins + skill + SOP + both channels + the x402 node).
+Reproduction: [`QUICKSTART.md`](../QUICKSTART.md) (host + plugins + skill + SOP + both channels + the x402 node).
 

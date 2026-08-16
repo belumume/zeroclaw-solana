@@ -179,6 +179,18 @@ TRACE = [
         r"\b(?:this|that)\s+(?:sentence|paragraph|line|row|passage|bullet|instruction|note)\s+"
         r"was\s+(?:written|worded|phrased|drafted|rewritten)\b",
     ),
+    (
+        # A text unit narrating its own FORMER NAME. Every sibling above misses it: `section` is
+        # deliberately absent from their noun lists so a migration notice survives, and no verb
+        # list carries `titled`. It reached a judge surface for exactly that reason.
+        #
+        # `section` IS safe here, and only here, because these verbs can take no other subject:
+        # only a text unit is "titled". A migration notice addresses the READER ("if you followed
+        # an earlier copy of this page"), so it cannot match, and that shape is pinned below.
+        "this-section-was-titled",
+        r"\b(?:this|that)\s+(?:section|chapter|page|document|file|heading|appendix)\s+"
+        r"was\s+(?:titled|called|named|headed|labelled|labeled)\b",
+    ),
 ]
 
 # One probe per pattern, so each is proven to fire on its own rather than riding on a sibling.
@@ -204,6 +216,9 @@ CONTROL_SAMPLES = {
     "the-earlier-wording": "The earlier wording said only that prices are never computed.",
     "the-reason-this-file-gave": "The reason this file gave for it was stale.",
     "how-this-text-was-written": "A note on how that sentence was written, for the record.",
+    # The span that reached docs/WRITEUP.md, verbatim apart from the quoted heading. If this
+    # stops firing the gate is blind to the class again.
+    "this-section-was-titled": 'This section was titled "Reproducibility (links)" and contained no links.',
     "this-line-named-until": "The count this line named until the recount was lower.",
 }
 
