@@ -76,7 +76,7 @@ MAX_WALKBACK_DAYS = 4
 
 # Divergence band. Its job is catching a BROKEN or WRONG-CURRENCY read, not calibrating the
 # normal spread between a central-bank ask and an ECB reference midpoint. One live observation
-# (2026-08-14: PTAX venda 5.2236 vs ECB 5.1762) put that spread at 0.92%; this is one sample and
+# (2026-08-14: PTAX venda 5.2236 vs ECB 5.1762) put that spread at 0.91%; this is one sample and
 # is deliberately NOT presented as a distribution. 2.5% leaves room for a wider day while still
 # rejecting anything structurally wrong.
 MAX_DIVERGENCE = 0.025

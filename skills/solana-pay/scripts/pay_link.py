@@ -85,7 +85,7 @@ MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 # BCB PTAX is the source of truth: Brazil's central bank, and the rate Brazilian invoices are
 # legally referenced against. ECB via Frankfurter is a CORROBORATOR with no authority to set
 # the price and only the power to refuse by disagreeing. Both are keyless. Measured 2026-08-14:
-# the two sit 0.92% apart on the same day, which is why one alone is not enough.
+# the two sit 0.91% apart on the same day, which is why one alone is not enough.
 #
 # THESE CONSTANTS ARE DUPLICATED FROM scripts/rate_crosscheck.py ON PURPOSE and must not drift.
 # The deploy map copies only this file into the agent workspace (deploy/deploy-targets.json),
