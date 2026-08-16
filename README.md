@@ -301,7 +301,7 @@ cargo build --target wasm32-wasip2 --release          # the shipped component
 ```
 
 All of that runs on a clean runner on every push, plus the fail-closed certification
-self-test and all eight components in a matrix, with `--locked` throughout so a green run
+self-test and all nine components in a matrix, with `--locked` throughout so a green run
 also proves the committed lockfiles are the ones that work. A second workflow re-verifies the
 published on-chain claims twice a day. A third re-checks interface parity against upstream
 HEAD, because the interface is unfrozen and drifting away from it once already came close to

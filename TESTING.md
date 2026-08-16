@@ -481,7 +481,7 @@ carve out an exception, since the exception would blind the gate to the real cas
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
 in `crates/solana-core`, which executes all four suites there for 120 tests, clippy with
 warnings as errors on both the host and `wasm32-wasip2`, the release build of the shipped
-wasm target, the fail-closed certification self-test, then all eight plugin components in a
+wasm target, the fail-closed certification self-test, then all nine plugin components in a
 matrix.
 Everything is offline and deterministic, and `--locked` throughout, so a green run also
 proves the committed lockfiles are the ones that work. That is the claim a reproducibility
@@ -490,7 +490,7 @@ promise actually rests on, and it now rests on a clean runner rather than on thi
 `ci.yml` also gates the supply chain with `cargo deny`, and the allow-list in `deny.toml`
 is derived rather than guessed: it is the exact set of distinct licenses in the graph, all
 eleven of them permissive, with no GPL, LGPL, AGPL, MPL or SSPL anywhere. Advisories, licenses
-and sources come back clean across solana-core, all eight components and the x402 gate, and the
+and sources come back clean across solana-core, all nine components and the x402 gate, and the
 CI matrix now runs all ten graphs rather than a sample. That distinction was worth fixing rather
 than rewording: each plugin is its own workspace with its own dependency graph, and the six that
 were previously ungated are not redundant with the three that were. `token-risk-check` and
@@ -519,7 +519,9 @@ things that ship.
 
 Counted from the API on 2026-08-01, all nineteen: seven in `e2e-track-a`, seven in `e2e-localnet`,
 four in `differential-fuzz`, one in `onchain`. **Zero on `solana-core`, zero on any of the eight
-plugins, zero on the x402 gate.** The packages are `rustls-webpki`, `ed25519-dalek`,
+plugins that existed at that date, zero on the x402 gate.** A NINTH plugin, `x402-pay-build`, landed
+after this count and is therefore not covered by it; the number stays at eight because rewriting a
+dated survey to a later total would make the count false rather than current. The packages are `rustls-webpki`, `ed25519-dalek`,
 `curve25519-dalek`, `rand` and `atty`, which is the standard Solana toolchain transitive set that
 every project in this ecosystem carries and that no simple bump resolves, because `solana-program`
 pins the version.

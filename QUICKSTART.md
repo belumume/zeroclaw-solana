@@ -233,7 +233,7 @@ linker error on `zeroclaw:plugin/logging`) even though `cargo build` and every t
 Two commands settle it rather than trusting either side:
 ```
 strings <plugin>.wasm | grep -c memory-audit    # expect 1; a stale build gives 0
-./scripts/check-host-compat.sh <path-to-host>   # compares all four wit files + all 8 components
+./scripts/check-host-compat.sh <path-to-host>   # compares all four wit files + all 9 components
 ```
 `check-host-compat.sh` is the one to run if you only run one. It refuses a COMPATIBLE verdict
 while any plugin is unbuilt, so it cannot pass you on partial evidence.
@@ -257,9 +257,10 @@ hyphens in its name turned to underscores, so `payment-watch` produces `payment_
 That is the path the `strings <plugin>.wasm` check in step 1 wants.
 
 Each plugin dir carries `manifest.toml` (minimal permissions) and a README with its config
-keys, custody tier and threat model. Six of the eight carry a captured prompt-injection
-transcript. The two that do not, `token-risk-check` and `lending-health`, carry the threat
-model without a captured attack, because an injection reaching them has nothing to redirect.
+keys, custody tier and threat model. Seven of the nine plugins carry a captured
+prompt-injection transcript. The two that do not, `token-risk-check` and `lending-health`,
+carry the threat model without a captured attack, because an injection reaching them has
+nothing to redirect.
 
 Being read-only is not what decides that. Three plugins are T0 read-only:
 `token-risk-check`, `lending-health` and `payment-watch`.

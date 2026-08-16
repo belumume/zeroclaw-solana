@@ -673,6 +673,20 @@ jobs:
       - name: that gate's own controls
         run: python3 scripts/check-certify-count-agreement.py --selftest
 
+      # The same shape one axis over: judge-facing prose quoting a COUNT that the tree can move
+      # underneath it. A ninth plugin landed and six sentences still said eight. This derives the
+      # count from `git ls-files plugins` rather than from a number someone typed, and requires a
+      # totality marker before flagging, so subset prose like "Three plugins are T0 read-only"
+      # is not a finding. Offline: it reads the tree and the docs, nothing else.
+      #
+      # WIRED HERE BECAUSE A GATE NO WORKFLOW INVOKES PROTECTS NOTHING. This gate shipped
+      # unwired and the orphan-gate step below caught it, which is exactly what that step is for.
+      - name: the docs quote the real plugin count
+        run: python3 scripts/check-plugin-count-agreement.py
+
+      - name: that gate's own controls
+        run: python3 scripts/check-plugin-count-agreement.py --selftest
+
       # The pay path's own suite, which plants the rate so it neither reaches the network nor
       # rots as the published rate moves.
       - name: pay-link invariants, recipient, mint, amount and rate

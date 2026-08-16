@@ -897,7 +897,7 @@ worked example of the layering argument above: it is a skill rather than a plugi
 tier test said so.
 
 **Code.** [`crates/solana-core`](../crates/solana-core) is the pure core with the 120 host
-tests. [`plugins/`](../plugins) holds the eight components. [`x402-feed-gate`](../x402-feed-gate)
+tests. [`plugins/`](../plugins) holds all nine components. [`x402-feed-gate`](../x402-feed-gate)
 is the earning node.
 
 **Check it rather than believing it.** [`scripts/verify-proof.py`](../scripts/verify-proof.py)

@@ -3,7 +3,7 @@
 
 WHY THIS EXISTS. The bounty's stated non-negotiable is that every showcase declares its
 custody tier, and it carries 25 of 100 points. Until this gate landed, ours were declared
-in PROSE, in three different formats across eight components: a manifest comment, README
+in PROSE, in three different formats across all nine components: a manifest comment, README
 prose, and a source doc-comment. `plugins/payment-watch/manifest.toml` ended with the
 sentence "There is no code path that signs or moves funds." That is a falsifiable claim
 about a compiled binary, asserted in a comment, checked by nothing. This project has filed
