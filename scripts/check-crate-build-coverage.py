@@ -20,14 +20,14 @@ is covered when some workflow names its DIRECTORY (`working-directory: e2e-track
 `manifest-path`, a cache `workspaces:` entry); or names the WORKSPACE ROOT it belongs to, since
 building a workspace builds its members, which is how the two on-chain programs are reached; or
 lists its basename as a bare MATRIX ENTRY (`- depin-attest` under `plugin:`), which is how the
-plugin matrix addresses its eight.
+plugin matrix addresses its nine.
 
 Each form is bounded, and the bounds were earned by the selftest failing on the first run rather
 than reasoned out in advance. Comment lines are stripped, because a plain substring match counted
 `onchain` as covered on the strength of a COMMENT mentioning it. Path matches are bounded on both
 sides, so `onchain` does not match `onchain-extras` while `crates/solana-core/Cargo.toml` still
 matches. And only real `[workspace]` roots cover their children: treating any ancestor as covering
-would let the bare string `plugins` cover all eight plugins at once and gut the check.
+would let the bare string `plugins` cover every plugin at once and gut the check.
 
 WHAT THIS DOES NOT CLAIM. That the build is meaningful, or that a referenced crate is compiled
 rather than merely cached or formatted. It answers one question, "does any workflow name this
@@ -124,7 +124,7 @@ def workspace_roots() -> set[str]:
 
     Building a workspace builds its members, so a member is covered when its ROOT is named. Only
     real workspace roots count: treating any ancestor as covering would let the string `plugins`
-    cover all eight plugins at once and gut the check.
+    cover every plugin at once and gut the check.
     """
     roots = set()
     for rel in tracked_manifests() or []:
