@@ -6,16 +6,24 @@ tell you any of them is doing work: delete a condition and a suite whose negativ
 really exercised by it goes on printing green. So each check here is neutered in a copy of the
 source, the copy's own self-test is run, and the run is REQUIRED to fail.
 
-Two properties this file needs to be worth anything, both of which have silently broken elsewhere
-in this repo:
+FOUR PROPERTIES THIS FILE NEEDS TO BE WORTH ANYTHING, each of which has silently broken somewhere
+in this repo or in an earlier draft of this very file:
 
   the substitution must APPLY. An anchor keyed on source text rots the moment that line is edited,
   after which the "mutant" is byte-identical to the original and the control certifies nothing
-  while passing. Every row asserts its anchor exists before mutating.
+  while passing. Every row asserts its anchor exists, exactly once, before mutating.
 
   the harness must be able to produce GREEN. A control that only ever reports failure cannot
   distinguish a load-bearing check from a broken runner, so an unmutated copy is run first and is
   required to pass.
+
+  a CRASHING mutant is not a caught case. A mutant that dies also exits non-zero, so reading exit
+  codes alone records "could not start" as "the check fired". Verdict rows require a red CASE.
+
+  a check cited as the REASON another is only diagnostic must itself be anchored. Otherwise the
+  pair is mutually redundant with neither half proven, and deleting the backstop leaves the whole
+  suite green. An adversarial review found exactly that here: the recurring-pull row was justified
+  by the discriminator check, and the discriminator check had no row.
 
 Mutations replace a CONDITION, never a line, so indentation is untouched and the mutant always
 compiles. A mutant that fails to parse would be recorded as "did not pass" for the wrong reason.
@@ -37,20 +45,41 @@ MUTANT = HERE / "_mutant_certify_x402.py"
 # unique to the code path it guards rather than to a message a rewording would move.
 #
 # `effect` is what removing the check costs, and the distinction is the point rather than
-# bookkeeping. "verdict" means the certifier would ACCEPT a transaction it must refuse, so the
-# mutant's suite has to go red. "diagnostic" means another check still refuses and only the reason
-# is lost, so the mutant's suite legitimately stays green and what must change is the OUTPUT.
+# bookkeeping. "verdict" means the certifier would ACCEPT something it must refuse, so a CASE has
+# to go red. "diagnostic" means another check still refuses and only the reason is lost, so the
+# suite legitimately stays green and what must change is the OUTPUT.
 #
-# Recording a check as diagnostic is a claim that it is redundant for safety, so it is asserted
-# rather than assumed: the row still fails if the mutant's output is byte-identical, which is what
-# a check that does nothing at all would produce.
+# Recording a row as diagnostic is a claim that the check is redundant for safety. It is asserted
+# rather than assumed twice over: the row fails if the output is byte-identical, and the check
+# named as its backstop carries a verdict row of its own.
 MUTATIONS = [
+    # --- where the money goes
     (
         "the credited-account check",
         "at(A_RECEIVER_ATA) != want_ata",
         "False",
         "verdict",
     ),
+    # --- where the money comes from
+    (
+        "the funding-delegation check",
+        "at(A_DELEGATION) != delegation",
+        "False",
+        "verdict",
+    ),
+    (
+        "the payload-delegator check",
+        "data[DATA_DELEGATOR_SLICE] != delegator",
+        "False",
+        "verdict",
+    ),
+    (
+        "the debited-token-account check",
+        "at(A_DELEGATOR_ATA) != derive_ata(delegator, mint, token_prog)",
+        "False",
+        "verdict",
+    ),
+    # --- what is being moved
     ("the mint-account check", "at(A_TOKEN_MINT) != mint", "False", "verdict"),
     (
         "the token-program check",
@@ -58,36 +87,123 @@ MUTATIONS = [
         "False",
         "verdict",
     ),
+    (
+        "the trailing self-CPI program check",
+        "at(A_SUBSCRIPTIONS_PROGRAM) != allowance",
+        "False",
+        "verdict",
+    ),
     ("the payload-mint check", "data[DATA_MINT_SLICE] != mint", "False", "verdict"),
-    ("the program allowlist", 'ix["program"] not in allowed', "False", "verdict"),
-    ("the single-spend check", "len(spends) != 1", "False", "verdict"),
-    # Falls through to the `!= IX_TRANSFER_FIXED` check, which refuses anyway. Its value is
-    # telling the operator a recurring delegation was pulled rather than reporting an
-    # unrecognised discriminator.
+    ("the local spend ceiling", "amount > max_amount_base_units", "False", "verdict"),
+    # --- what kind of spend it is
+    (
+        "the transferFixed discriminator check",
+        "data[0] != IX_TRANSFER_FIXED",
+        "False",
+        "verdict",
+    ),
+    # Falls through to the discriminator row above, which is anchored, so only the reason is
+    # lost: the operator would be told the byte is unrecognised rather than that a recurring
+    # delegation was pulled.
     (
         "the recurring-pull refusal",
         "data[0] == IX_TRANSFER_RECURRING",
         "False",
         "diagnostic",
     ),
-    # Removing this lets nothing bad through; it lets the positional reads run off the end of a
-    # short account list. Failing closed BEFORE that read is the whole job, so the mutant raises
-    # rather than mis-certifying, and the row asserts exactly that.
+    ("the payload-length check", "len(data) != TRANSFER_DATA_LEN", "False", "verdict"),
     (
         "the account-count check",
         'len(spend["accounts"]) != len(ACCT_NAMES)',
         "False",
-        "crash",
+        "verdict",
     ),
-    ("the local spend ceiling", "amount > max_amount_base_units", "False", "verdict"),
-    ("the challenge-nonce memo check", "expected_memo is not None", "False", "verdict"),
-    ("the versioned-message refusal", "msg and msg[0] & 0x80", "False", "verdict"),
+    ("the single-spend check", "len(spends) != 1", "False", "verdict"),
+    # --- what else rides along. A permitted PROGRAM is not a permitted ACTION.
+    (
+        "the program allowlist's final else",
+        'raise CertificationError(f"ix{k} invokes an unexpected program {who}{hint}")',
+        "pass",
+        "verdict",
+    ),
+    # Falls through to the nonce-identity check, which is anchored: with no nonce configured
+    # every account fails that comparison. Only the reason is lost.
+    ("the System-with-no-nonce refusal", "nonce is None", "False", "diagnostic"),
+    (
+        "the AdvanceNonceAccount data check",
+        'ix["data"] != SYS_ADVANCE_NONCE',
+        "False",
+        "verdict",
+    ),
+    (
+        "the nonce-account identity check",
+        'not ix["accounts"] or ix["accounts"][0] != nonce',
+        "False",
+        "verdict",
+    ),
+    ("the priority-fee ceiling", "fee > max_priority_lamports", "False", "verdict"),
+    (
+        "the ATA CreateIdempotent check",
+        'not ix["data"] or ix["data"][0] != IX_CREATE_IDEMPOTENT',
+        "False",
+        "verdict",
+    ),
+    (
+        "the ATA target check",
+        'len(ix["accounts"]) < 4 or ix["accounts"][1] != want_ata',
+        "False",
+        "verdict",
+    ),
+    # --- flags are part of what executes
+    (
+        "the delegatee-is-signer check",
+        'not spend["signer"][A_DELEGATEE]',
+        "False",
+        "verdict",
+    ),
+    ("the writable-slot check", 'not spend["writable"][slot]', "False", "verdict"),
+    # --- the memo binds the payment to one challenge
+    ("the memo-count check", "len(memos) != 1", "False", "verdict"),
+    (
+        "the memo-equality check",
+        'memos[0]["data"] != expected_memo',
+        "False",
+        "verdict",
+    ),
+    ("the unconfigured-memo refusal", "if memos:", "if False:", "verdict"),
+    # --- the parser refuses what it cannot read exactly
+    # Falls through to the trailing-bytes check, which is anchored: a lookup entry is at
+    # least 34 bytes, so a non-zero count always leaves an unconsumed tail.
+    ("the v0 address-table-lookup refusal", "if n_lookups:", "if False:", "diagnostic"),
+    ("the trailing-bytes check", "i != len(msg)", "False", "verdict"),
+    (
+        # An unknown version puts the header at the wrong offset, which the anchored bounds
+        # and trailing-bytes checks then catch. Only the reason is lost.
+        "the message-version check",
+        "versioned and (msg[0] & 0x7F) != 0",
+        "False",
+        "diagnostic",
+    ),
+    ("the account-index bound", "a >= n_keys", "False", "crash"),
+    # Python slices truncate silently, so every short read yields a value that fails an
+    # anchored equality downstream. This turns that luck into an explicit refusal.
+    ("the truncation check", "i + n > len(b)", "False", "diagnostic"),
+    # --- config is required, and must be an address
     (
         "the both-receiver-forms refusal",
         "expected_receiver_b58 and expected_receiver_ata_b58",
         "False",
         "verdict",
     ),
+    (
+        "the delegation-required check",
+        "not expected_delegation_b58",
+        "False",
+        "crash",
+    ),
+    # A short decode fails whichever anchored positional comparison it feeds. This says so
+    # at the config boundary instead, where the operator can act on it.
+    ("the address-length check", "len(out) != 32", "False", "diagnostic"),
     # Not a check but the derivation the positional check rests on. Corrupting the PDA marker
     # must break the calibration against the real on-chain token account.
     (
@@ -118,7 +234,7 @@ def main() -> int:
         nonlocal passed, failed
         print(
             f"{'PASS' if ok else 'FAIL'}  {name}"
-            + (f"  ({detail[:90]})" if detail else "")
+            + (f"  ({detail[:88]})" if detail else "")
         )
         if ok:
             passed += 1
@@ -142,16 +258,16 @@ def main() -> int:
                 check(
                     f"{label}: anchor is unique",
                     False,
-                    f"found {n} occurrences of {anchor!r}; a stale or ambiguous anchor "
-                    f"certifies nothing while passing",
+                    f"found {n} occurrence(s); a stale or ambiguous anchor certifies nothing "
+                    f"while passing",
                 )
                 continue
             MUTANT.write_text(src.replace(anchor, repl), encoding="utf-8", newline="\n")
             rc, out = run(MUTANT)
             fails = [ln for ln in out.splitlines() if ln.startswith("FAIL")]
             if effect == "verdict":
-                # rc alone is not enough: a mutant that CRASHES also exits non-zero, and
-                # "could not start" would then be recorded as "the check fired".
+                # rc alone is not enough: a crashing mutant also exits non-zero, and "could not
+                # start" would then be recorded as "the check fired".
                 check(
                     f"{label} changes the VERDICT",
                     rc != 0 and len(fails) >= 1,
@@ -164,16 +280,20 @@ def main() -> int:
                     ),
                 )
             elif effect == "crash":
+                # Some checks prevent an EXCEPTION rather than a mis-certification: without them
+                # the gate raises something a caller catching CertificationError would not
+                # handle. Still fail-closed, and a different claim from "a case went red", so it
+                # is asserted separately rather than folded in.
                 check(
-                    f"{label} prevents an out-of-range read",
-                    rc != 0 and not fails and "IndexError" in out,
-                    "the mutant raised IndexError, so the check is what fails closed first"
-                    if "IndexError" in out
-                    else f"expected an IndexError, got rc={rc} with {len(fails)} red case(s)",
+                    f"{label} prevents an unhandled exception",
+                    rc != 0 and not fails,
+                    "the mutant raised instead of certifying"
+                    if rc != 0
+                    else "SUITE STILL GREEN, so it prevents nothing",
                 )
             else:
                 check(
-                    f"{label} changes the DIAGNOSTIC (another check still refuses)",
+                    f"{label} changes the DIAGNOSTIC (an anchored check still refuses)",
                     out != baseline,
                     "the refusal reason changed"
                     if out != baseline
