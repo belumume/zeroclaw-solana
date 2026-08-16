@@ -35,7 +35,6 @@ Run ON THE BOX, from a checkout of this repo:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -48,7 +47,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 
-from make_invariants import resolve_map  # noqa: E402
+from make_invariants import resolve_map, sha256_file  # noqa: E402
 
 # Resolved EXACTLY as box_selfcheck.py:69 resolves it. If these two ever disagree the sync writes
 # to a tree nothing verifies, which is the failure this whole script exists to remove.
@@ -64,7 +63,8 @@ SAME, DIFFERS, ABSENT = "same", "differs", "absent-on-box"
 
 
 def sha(p: Path) -> str:
-    return hashlib.sha256(p.read_bytes()).hexdigest()
+    """The generator's own streaming hash, so the two never disagree on what a file hashes to."""
+    return sha256_file(p)
 
 
 def classify(
