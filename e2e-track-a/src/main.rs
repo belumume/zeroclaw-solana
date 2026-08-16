@@ -212,7 +212,13 @@ fn main() {
         url: rpc_url.clone(),
     };
     let verdict = detect_paid(&watch_transport, &vw);
-    let report = payment_watch::watch::compose_report(&vw, &verdict);
+    // NotConfigured is the CORRECT value here rather than a placeholder to satisfy the arity.
+    // This harness builds exactly one transport, so there is no independent endpoint to
+    // corroborate with, and that variant is the documented single-source posture: it permits
+    // settlement and makes the report say SINGLE SOURCE rather than implying an agreement nobody
+    // gave. Passing Agrees would be a lie about a second endpoint that does not exist.
+    let corr = payment_watch::watch::Corroboration::NotConfigured;
+    let report = payment_watch::watch::compose_report(&vw, &verdict, &corr);
     match &verdict {
         Verdict::Paid(p) => {
             assert_eq!(
@@ -246,7 +252,7 @@ fn main() {
     );
     println!(
         "[4] payment-watch (wrong reference) -> {}",
-        payment_watch::watch::compose_report(&vw_wrong, &verdict_wrong)
+        payment_watch::watch::compose_report(&vw_wrong, &verdict_wrong, &corr)
     );
 
     if cluster == "devnet" {

@@ -95,11 +95,26 @@ endpoint on the x402 gate, which asks systemd on the node directly.
 
 A second and stronger check runs beside it, and the direction is the interesting part.
 [`deploy/box_selfcheck.py`](deploy/box_selfcheck.py) runs **on** the node, compares the deployed
-bytes against the manifest written at deploy time, and pushes a verdict outward through the same
-tunnel. Every inbound route is shut, so nothing reaches in and the box reports on itself, which
-also lets it see deployed bytes and running services that an external prober cannot. The checker
-that consumes that verdict is not tracked here, so what a stranger can read in this repo is the
-self-check and its reasoning rather than a live drift result.
+bytes against the manifest written at deploy time, and publishes a verdict outward through the same
+tunnel at `/selfcheck`. Nothing reaches in, and the box reports on itself, which lets it see
+deployed bytes and running services that an external prober cannot. Inbound is not shut so much as
+impractical to automate: port 22 is blocked network-wide from the operator's location, and the one
+route that does work needs a browser and a session that expires, which is a cost rather than a wall.
+
+Both halves of that are tracked and readable here. An hourly timer
+([`deploy/zc-selfcheck.timer`](deploy/zc-selfcheck.timer)) recomputes the verdict, and
+[`scripts/verify-proof.py`](scripts/verify-proof.py) consumes it, distinguishing four outcomes by
+status code: a build predating the route prints PENDING and does not gate, a live route with no
+verdict FAILS because the timer stopped, and a stale verdict FAILS on an age derived from the file's
+mtime rather than from any field the writer controls.
+[`scripts/verify_proof_selfcheck_control.py`](scripts/verify_proof_selfcheck_control.py) drives all
+eight branches from a loopback server, so the claim is known to be capable of going red.
+
+**The node is still running the build that predates that route**, so today the check prints PENDING
+and the live claim count stays at four rather than five. That is the designed state and not a gap:
+the number is derived from what actually gated, so a pending claim can never be tallied as a
+verified one, and it rises on its own when the deploy lands. Run `scripts/verify-proof.py` and the
+PENDING line says so in as many words.
 
 Live on-chain evidence, all clickable, is in
 [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md). The verifier above reports static and live
