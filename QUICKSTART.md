@@ -463,7 +463,10 @@ quietly.
 
 `deploy/box_selfcheck.py` runs on the box and asserts that the deployed skills and tools are
 byte-identical to a named commit, that the network-bearing config fields still say mainnet, and that
-no funds-critical constant has drifted into state. That verdict is worth more than anything an
+no retired mint has drifted into agent state. That last one is a prohibition on known-bad values
+rather than a scan for anything unfamiliar, because a Solana Pay reference key is a fresh random
+address per order and agent memory legitimately fills with them; the deployed files, which we write
+and hash, are still held to the stricter "nothing unfamiliar" rule. That verdict is worth more than anything an
 outside prober can produce, because it can see deployed bytes and running services. That only holds
 if something schedules it and something retrieves it.
 

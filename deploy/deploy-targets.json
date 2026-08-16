@@ -94,8 +94,24 @@
     {
       "path": "data/memory/brain.db",
       "enabled": true,
-      "why": "The 2026-08-06 incident surface: the skill on disk was already correct while three brain.db rows still held the devnet mint, so a file-to-file comparison could never have seen it. THE PATH WAS WRONG UNTIL 2026-08-16 and this entry scanned nothing: it read agents/demo/workspace/memory/, a directory that does not exist on the box, while the live database is at data/memory/brain.db (245,760 B, with -wal and -shm siblings, and a brain.db.bak-premint dated the morning of that same incident). The check failed MISSING rather than passing, which is the honest direction, and it is also why nobody chased it: a red that never changes reads as a known issue. Included deliberately even though box_selfcheck's mint scan has a known open defect (it matches any base58 token against a static allowlist, and a fresh reference key per order is that shape). If this proves noisy in steady state the fix is to populate known_other or to disable this entry WITH the reason, never to drop the scan silently."
+      "policy": "denylist",
+      "why": "The 2026-08-06 incident surface: the skill on disk was already correct while three brain.db rows still held the devnet mint, so a file-to-file comparison could never have seen it. THE PATH WAS WRONG UNTIL 2026-08-16 and this entry scanned nothing: it read agents/demo/workspace/memory/, a directory that does not exist on the box, while the live database is at data/memory/brain.db (245,760 B, with -wal and -shm siblings, and a brain.db.bak-premint dated the morning of that same incident). The check failed MISSING rather than passing, which is the honest direction, and it is also why nobody chased it: a red that never changes reads as a known issue.",
+      "why_denylist": "Once the path was corrected the scan ran for the first time and MEASURED the noise premise the previous note only suspected: 27 distinct unexpected base58 tokens, each appearing exactly ONCE in real content, all of them one-off Solana Pay reference keys. (The probe's 54 occurrences are memories_fts mirroring memories; box_selfcheck reads bytes and dedupes per file, so the index mirror was never the noise.) An allowlist over agent memory is unbounded BY CONSTRUCTION, because a reference key is a fresh random address per order and the legitimate set grows with every sale. So the polarity is inverted here and only here: this target is scanned for KNOWN-RETIRED mints, which is what a check named mint-prohibition should always have meant, and which is finite and auditable. The 2026-08-06 mint is retired, so the incident is still caught; box_selfcheck --self-test drives both directions against a synthetic brain.db with this table shape. Do NOT fix future noise by populating known_other with observed tokens: that would bless the current state including drift. The two honest levers are retiring an address in retired_mints_extra, or disabling this entry WITH the reason."
     }
+  ],
+
+  "retired_mints_extra": [],
+  "_retired_mints_extra_doc": [
+    "Extra addresses the state scan must treat as prohibited, beyond the ones already derived.",
+    "The generator derives the base list from its MINT_NETWORK table minus the configured mint,",
+    "so the devnet USDC mint is prohibited without being listed here. This is for an address",
+    "that was never in that table: a rotated merchant wallet, a mint from a superseded",
+    "deployment.",
+    "",
+    "Entries are validated as base58 and refused if they name the configured mint, because a",
+    "typo here is a prohibition that matches nothing and reports clean forever. Like",
+    "allowed_addresses, it is never auto-populated: a denylist harvested from the box would",
+    "inherit exactly the failure mode of the allowlist it replaced."
   ],
 
   "allowed_addresses": [],
@@ -112,8 +128,10 @@
 
   "known_other": [],
   "_known_other_doc": [
-    "Consumed by box_selfcheck's mint scan as a second suppression list. Empty on purpose: see",
-    "the note on brain.db above. Populating it is a judgement call about live box state, which",
-    "cannot be made from this repo."
+    "Consumed by box_selfcheck's ALLOWLIST scan over deployed files as a second suppression",
+    "list. Empty on purpose, and it should stay that way: the allowlist now covers only files",
+    "this repo writes and hashes, where measurement found no foreign tokens at all, so a",
+    "suppression there would be hiding real drift rather than real noise. It no longer applies",
+    "to brain.db, which is scanned with the opposite polarity."
   ]
 }
