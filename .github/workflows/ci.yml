@@ -46,7 +46,7 @@ jobs:
         run: cargo build --target wasm32-wasip2 --release --locked
 
       # The custody claim, checked rather than asserted: a good publish tx is
-      # certified and four injection shapes are refused.
+      # certified and five injection shapes are refused.
       - name: Fail-closed action certification self-test
         run: python3 scripts/certify_publish_tx.py
 
@@ -603,6 +603,19 @@ jobs:
       # original on the box is impossible. This asserts the copy still prices identically.
       - name: the two rate copies agree
         run: python3 scripts/check-pay-link-rate-agreement.py
+
+      # Five judge-facing surfaces quote the certifier's score in prose. When a sixth case was
+      # added they all kept saying 5/5, and nothing noticed: the certifier's self-test passes at
+      # any N, the step above only reads its exit code, and take.py asserts on "cases correct"
+      # without the number. QUICKSTART was the worst, promising a stranger the literal string
+      # their first command would print. This RUNS the certifier and compares, so the script is
+      # the source of truth rather than a number someone once believed. Offline, like the two
+      # above, because the certifier only builds and inspects bytes in memory.
+      - name: the docs quote the certifier's real score
+        run: python3 scripts/check-certify-count-agreement.py
+
+      - name: that gate's own controls
+        run: python3 scripts/check-certify-count-agreement.py --selftest
 
       # The pay path's own suite, which plants the rate so it neither reaches the network nor
       # rots as the published rate moves.
