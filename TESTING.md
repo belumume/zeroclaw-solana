@@ -479,10 +479,10 @@ checker, from naming it to say it is there. The way through is to reword the sen
 carve out an exception, since the exception would blind the gate to the real case it exists for.
 
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
-in `crates/solana-core`, which executes all four suites there for 120 tests rather than the
-89 unit tests and 23 properties this line named until 2026-07-27, clippy with warnings as
-errors on both the host and `wasm32-wasip2`, the release build of the shipped wasm target,
-the fail-closed certification self-test, then all eight plugin components in a matrix.
+in `crates/solana-core`, which executes all four suites there for 120 tests, clippy with
+warnings as errors on both the host and `wasm32-wasip2`, the release build of the shipped
+wasm target, the fail-closed certification self-test, then all eight plugin components in a
+matrix.
 Everything is offline and deterministic, and `--locked` throughout, so a green run also
 proves the committed lockfiles are the ones that work. That is the claim a reproducibility
 promise actually rests on, and it now rests on a clean runner rather than on this machine.

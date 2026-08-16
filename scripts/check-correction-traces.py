@@ -145,8 +145,20 @@ TRACE = [
     # nouns would eat it.
     (
         "this-text-previously",
+        # "first" demands a speech verb rather than standing beside the others. Alone it has no
+        # backward-looking sense at all, so it would fire on any procedure describing its own
+        # steps ("this instruction first checks the mint, then the amount"), which is pinned
+        # below. The other five adverbs are unambiguous and need no verb.
         r"\b(?:this|that)\s+(?:sentence|bullet|instruction|note|clause|heading|entry|caption|"
-        r"footnote)\s+(?:previously|originally|once|formerly|used to|first)\b",
+        r"footnote)\s+(?:(?:previously|originally|once|formerly|used to)\b|"
+        r"first\s+(?:read|said|named|stated|claimed|told)\b)",
+    ),
+    (
+        # A text noun that spoke UNTIL a point in time. It narrates the edit without using any of
+        # the adverbs above, so every other pattern in this family misses it.
+        "this-line-named-until",
+        r"\b(?:this|that)\s+(?:line|sentence|row|paragraph|bullet|entry|figure|table|column)\s+"
+        r"(?:named|said|read|claimed|stated|carried|listed|reported|gave)\s+until\b",
     ),
     (
         "the-earlier-wording",
@@ -192,6 +204,7 @@ CONTROL_SAMPLES = {
     "the-earlier-wording": "The earlier wording said only that prices are never computed.",
     "the-reason-this-file-gave": "The reason this file gave for it was stale.",
     "how-this-text-was-written": "A note on how that sentence was written, for the record.",
+    "this-line-named-until": "The count this line named until the recount was lower.",
 }
 
 # The over-correction control. CONTROL_SAMPLES proves each pattern can FIRE; without these, a
@@ -199,6 +212,31 @@ CONTROL_SAMPLES = {
 # verbatim sentence from a live surface that MUST stay silent, and the first two are the reason
 # the earlier-version pattern is split by noun: they describe a real defect in a shipped release
 # of the x402 ledger, which is product honesty on a scored axis and not a document's history.
+
+# The two pins below claim to be quoted from a live surface, and `drifted_pins` proves it on every
+# run. Without that check they are the inert-carve-out rot one field over: ALLOW entries are tied
+# to live spans by `inert_carve_outs`, MUST_NOT_FIRE strings are tied to nothing, so a pin can
+# quietly become a sentence the repo does not ship and go on passing forever. A pin that differs
+# from its page by three words in the middle of a long sentence is invisible to every other check
+# in this file, and it still proves nothing, which is the gap this one closes.
+PIN_README = (
+    "The reason first given for that call was wrong, and the correction is in "
+    "[`docs/DECISIONS.md`](docs/DECISIONS.md): the failure that matters is a well-formed URL "
+    "carrying the wrong recipient, which a sandbox would not catch, so the guard is a hardcoded "
+    "invariant in `pay_link.py`."
+)
+
+PIN_QUICKSTART = (
+    "**Read this if you followed an earlier copy of this page.** Until 2026-08-05 this section "
+    "told you to point `payment_watch` at devnet and to pass a devnet mint on every call. Both "
+    "instructions are now wrong, and following them is the exact failure the old text warned "
+    "about, with the chain the other way round: the watcher would poll devnet for a payment that "
+    "settled on mainnet, the order would sit at NOT_YET forever, and nothing would error."
+)
+
+# Which surface each quoted pin is quoted FROM, so the claim is checkable rather than asserted.
+PIN_SOURCES = {PIN_README: "README.md", PIN_QUICKSTART: "QUICKSTART.md"}
+
 MUST_NOT_FIRE = [
     "The ledger is durable: restarting the process does not re-open a spent allowance. "
     "An earlier version restarted the day on every boot, which is a cap in name only.",
@@ -208,20 +246,19 @@ MUST_NOT_FIRE = [
     "That ARM box is a rented VM, not a device on a windowsill.",
     "The original justification for that demotion was wrong: the real failure is a well-formed "
     "URL carrying somebody else's recipient.",
-    # Verbatim from README. Product honesty about a SECURITY decision, and the nearest miss for
-    # the-reason-this-file-gave, which is why it is pinned beside that pattern rather than trusted
-    # to stay clear of it.
-    "The reason first given for that call was wrong, and the correction is in docs/DECISIONS.md: "
-    "the failure that matters is a well-formed URL carrying somebody else's recipient.",
-    # Verbatim from QUICKSTART. A MIGRATION NOTICE, which is the one shape that looks exactly like
-    # a trace and must survive: it exists to stop a reader who is holding stale config from
-    # following instructions that now lose money. Its subject is what the reader's system is doing,
-    # not what this document used to say, and cutting it would take a real safety warning with it.
-    "**Read this if you followed an earlier copy of this page.** Until 2026-08-05 this section "
-    "told you to point `payment_watch` at devnet and to pass a devnet mint on every call. Both "
-    "instructions are now wrong, and following them is the exact failure the old text warned "
-    "about, with the chain the other way round: the watcher would poll devnet for a payment that "
-    "settled on mainnet, the order would sit at NOT_YET forever, and nothing would error.",
+    # Product honesty about a SECURITY decision, and the nearest miss for the-reason-this-file-gave
+    # ("The reason first given" rather than "the reason this file gave"), which is why it is pinned
+    # beside that pattern rather than trusted to stay clear of it.
+    PIN_README,
+    # A MIGRATION NOTICE, the one shape that looks exactly like a trace and must survive: it exists
+    # to stop a reader holding stale config from following instructions that now lose money. Its
+    # subject is what the reader's system is doing, not what this document used to say, and cutting
+    # it would take a real safety warning with it.
+    PIN_QUICKSTART,
+    # Ordinary enumeration, which is the near-miss for this-text-previously and the reason its
+    # "first" alternative demands a speech verb rather than standing bare. Nothing in the corpus
+    # trips it today, and a bare "first" would fire on any procedure that describes its own steps.
+    "This instruction first checks the mint, then the amount, then the recipient.",
 ]
 
 # Spans that MATCH a pattern above and are deliberately kept, each with the reason.
@@ -330,6 +367,22 @@ def allowed(path: str, window: str) -> int | None:
     return None
 
 
+def drifted_pins(sources: dict, read) -> list[tuple[str, str]]:
+    """Quoted must-not-fire pins that are no longer in the surface they claim to quote.
+
+    `read` returns a surface's text or None if it is unreadable, and is injectable so the selftest
+    can drive both verdicts without editing the repo's own documents. An unreadable surface counts
+    as drift rather than as a pass: a pin whose source cannot be opened is exactly as unproven as
+    one whose text has moved, and treating the two differently is how a check fails open.
+    """
+    out = []
+    for pin, rel in sources.items():
+        text = read(rel)
+        if text is None or normalise(pin) not in normalise(text):
+            out.append((pin, rel))
+    return out
+
+
 def inert_carve_outs(allow: list, fired: set[int]) -> list[int]:
     """Carve-outs that waived nothing this run.
 
@@ -357,6 +410,7 @@ def _selftest_wiring() -> tuple[int, int]:
         CONTROL_SAMPLES,
         sys.argv,
         SOURCE_PROVIDER,
+        PIN_SOURCES,
     )
     tmp = Path(tempfile.mkdtemp())
     (tmp / "planted.md").write_text(
@@ -405,6 +459,10 @@ def _selftest_wiring() -> tuple[int, int]:
             # No tracked source in a planted corpus. Declared, not inherited from a
             # git failure, so the discovery guard stays armed for real runs.
             globals()["SOURCE_PROVIDER"] = lambda: []
+            # Likewise for the quoted pins: a planted corpus has no README or QUICKSTART, and
+            # letting main() discover that would make every case below fail on drift instead of
+            # on the thing it is testing. Declared empty rather than allowed to fail open.
+            globals()["PIN_SOURCES"] = {}
             sys.argv = ["check-correction-traces"]
             import contextlib
             import io
@@ -427,6 +485,7 @@ def _selftest_wiring() -> tuple[int, int]:
             globals()["CONTROL_SAMPLES"],
             sys.argv,
             globals()["SOURCE_PROVIDER"],
+            globals()["PIN_SOURCES"],
         ) = saved
         # Otherwise every local run leaves a directory behind. Harmless in CI, untidy on a
         # developer machine, and the kind of thing that accumulates unnoticed for months.
@@ -510,7 +569,44 @@ def selftest() -> int:
         print(
             f"  {'ok  ' if ok else 'FAIL'}  {label}" + ("" if ok else f"  (got {got})")
         )
-    total = len(cases) + wiring_total + disc_total
+    print("\nquoted-pin drift:")
+    # The last case is the one that matters: a pin typed from memory rather than copied, differing
+    # from its page by three words in the middle of a long sentence. Nothing else here can see it.
+    pin_cases = [
+        (
+            "a pin still present in its source is silent",
+            {"p": "a.md"},
+            {"a.md": "prefix p suffix"},
+            [],
+        ),
+        (
+            "a whitespace-only difference is not drift",
+            {"one two": "a.md"},
+            {"a.md": "x one\n  two y"},
+            [],
+        ),
+        (
+            "an unreadable source counts as drift",
+            {"p": "gone.md"},
+            {},
+            [("p", "gone.md")],
+        ),
+        (
+            "a spliced ending is reported even though most of the pin matches",
+            {"carrying the wrong recipient": "r.md"},
+            {"r.md": "carrying somebody else's recipient"},
+            [("carrying the wrong recipient", "r.md")],
+        ),
+    ]
+    for label, sources, corpus, expected in pin_cases:
+        got = drifted_pins(sources, corpus.get)
+        ok = got == expected
+        failed += not ok
+        print(
+            f"  {'ok  ' if ok else 'FAIL'}  {label}" + ("" if ok else f"  (got {got})")
+        )
+
+    total = len(cases) + len(pin_cases) + wiring_total + disc_total
     if failed:
         print(f"\n{failed}/{total} selftest case(s) failed.", file=sys.stderr)
         return 2
@@ -588,6 +684,22 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 return 2
+
+    # A pin that no longer appears in the surface it claims to quote is testing a sentence the repo
+    # does not ship, and it says nothing about the text a judge actually reads. Reported rather
+    # than tolerated, for the same reason an inert carve-out is.
+    def _read(rel: str) -> str | None:
+        p = REPO / rel
+        return p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
+
+    for pin, rel in drifted_pins(PIN_SOURCES, _read):
+        print(
+            f"FAIL  a must-not-fire pin claims to quote {rel} and is not in it. Either the "
+            f"surface was reworded, or the pin was typed rather than copied. Re-copy it from "
+            f"the file; a pin nobody can trace is proving nothing.\n      {pin[:150]}",
+            file=sys.stderr,
+        )
+        return 2
 
     # An exclusion that waives nothing is the failure this file names in its own docstring:
     # invisible to --all, so it cannot be audited by the mechanism that is supposed to audit it.
