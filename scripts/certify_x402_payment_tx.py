@@ -1287,6 +1287,18 @@ def _self_test() -> int:  # noqa: PLR0915 - a flat list of cases reads better th
     refuses(
         "an out-of-range account index is refused", bytes([1]) + bytes(64) + bytes(bad)
     )
+    # The program index sits two bytes earlier: [prog_idx][n_accounts][first account index].
+    check(
+        "  the program-index offset was located too",
+        msg[first_acct_idx - 2] < n_keys,
+        f"byte at {first_acct_idx - 2} is {msg[first_acct_idx - 2]}, against {n_keys} keys",
+    )
+    bad_prog = bytearray(msg)
+    bad_prog[first_acct_idx - 2] = n_keys
+    refuses(
+        "an out-of-range PROGRAM index is refused",
+        bytes([1]) + bytes(64) + bytes(bad_prog),
+    )
 
     # ---- config is required, and cannot be borrowed from the challenge
     def refuses_config(name: str, call) -> None:

@@ -187,6 +187,7 @@ MUTATIONS = [
         "diagnostic",
     ),
     ("the account-index bound", "a >= n_keys", "False", "crash"),
+    ("the program-index bound", "prog_idx >= n_keys", "False", "crash"),
     # Python slices truncate silently, so every short read yields a value that fails an
     # anchored equality downstream. This turns that luck into an explicit refusal.
     ("the truncation check", "i + n > len(b)", "False", "diagnostic"),
