@@ -578,6 +578,16 @@ jobs:
       - name: the source-comment controls actually gate
         run: python3 scripts/check-source-comment-leaks.py --selftest
 
+      # A crate nothing BUILDS can break silently for weeks while a repo-wide formatter sweeps it
+      # and reports success. That is not hypothetical here: `e2e-track-a` stopped compiling for 21
+      # days exactly that way. Enumerating the class found two more, the on-chain programs, which
+      # a reader is told to `anchor build` and which no workflow referenced.
+      - name: every tracked crate is built by some workflow
+        run: python3 scripts/check-crate-build-coverage.py
+
+      - name: the coverage controls actually gate
+        run: python3 scripts/check-crate-build-coverage.py --selftest
+
       # THE RATE ON THE MONEY PATH. Both of these are offline by construction: the first plants
       # responses rather than fetching, the second parses two files as text. A BCB or ECB outage
       # cannot redden either, which is the property that lets them be required rather than
@@ -747,7 +757,7 @@ jobs:
         run: cargo run --release --locked -- 20000
 
   e2e-harness-compiles:
-    name: the two e2e reproduce crates still compile
+    name: the reproduce crates nothing else builds still compile
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # WHY THIS EXISTS, and it is not about the tests.
@@ -777,13 +787,31 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "e2e-track-a -> target\ne2e-localnet -> target"
+          workspaces: "e2e-track-a -> target\ne2e-localnet -> target\nonchain -> target"
       - name: e2e-track-a resolves and compiles against its committed lockfile
         working-directory: e2e-track-a
         run: cargo check --locked --all-targets
       - name: e2e-localnet resolves and compiles against its committed lockfile
         working-directory: e2e-localnet
         run: cargo check --locked --all-targets
+
+      # THE SAME CLASS, found by enumerating tracked crates against workflow coverage rather than
+      # by anything breaking. `zeroclaw_oracle` and `consumer_example` are the deployed on-chain
+      # programs, QUICKSTART tells a stranger to `anchor build` them, and until now no workflow
+      # referenced them either. Of 17 tracked crates carrying a `[package]`, these were the last
+      # two nothing built.
+      #
+      # CHECK, NOT `anchor build`. The SBF toolchain is a heavy install and this project has
+      # recorded an edition2024 resolution wall around it. The failure that actually bit here was
+      # API DRIFT, a caller left behind when a signature changed, and a host-target `cargo check`
+      # catches exactly that at a fraction of the cost. It does NOT prove the SBF artifact builds,
+      # and that limit is the reason this is worth stating rather than implying.
+      #
+      # Verified locally before being added, per the convention that a matrix entry is a standing
+      # gate rather than a gamble on a red badge: exit 0 in 56s on the Windows host, warnings only.
+      - name: the two on-chain programs still compile
+        working-directory: onchain
+        run: cargo check --locked --workspace
 
       # Same class, more exposed. sanitizer-microworld compiles the SHIPPED sanitizer to wasm so a
       # reader can drive the real thing in a browser, it is named on all four judge-facing surfaces
