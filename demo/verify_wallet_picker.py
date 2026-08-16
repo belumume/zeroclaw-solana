@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import base64
 import http.server
-import re
 import socketserver
 import sys
 import threading

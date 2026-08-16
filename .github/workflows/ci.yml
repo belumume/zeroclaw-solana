@@ -101,6 +101,55 @@ jobs:
             exit 1
           fi
 
+  lint-python:
+    name: ruff, every tracked Python file
+    runs-on: ubuntu-latest
+    # The fmt job above holds every Rust crate to a bar. Nothing held the Python
+    # to one, and the Python is not incidental here: scripts/ and demo/ ARE the
+    # verification suite a stranger is told to run. check-all.py exercises what
+    # those gates DO; nothing checked the gates' own code. A bug in a verifier is
+    # a bug a stranger inherits silently, because a broken checker still prints a
+    # verdict.
+    #
+    # It was not theoretical either. On the commit that added this job, ruff found
+    # four real defects across the tracked set: an unused import in
+    # demo/verify_wallet_picker.py and three assigned lambdas, one of them inside
+    # certify_publish_tx.py, which is the fail-closed certifier on the money path.
+    #
+    # SCOPE IS DISCOVERED, NOT LISTED, for the same reason fmt discovers crates: a
+    # file added later joins no hand-written list by itself. Note the scope is the
+    # whole tracked set rather than scripts/ and demo/ alone -- a first pass over
+    # just those two directories found 2 of the 4, and the pair it missed were in
+    # x402-feed-gate/scripts/.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # Pinned, so a ruff release cannot turn this red on a commit that changed no
+      # Python. Bump deliberately, never by floating.
+      - name: Install ruff
+        run: pip install --quiet ruff==0.14.9
+
+      - name: Every tracked Python file lints clean
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git ls-files '*.py' | sort)
+          count=${#files[@]}
+          echo "discovered $count tracked Python file(s)"
+          # Same floor argument as fmt: a discovered scope can silently shrink to
+          # nothing, and zero files checked would pass every assertion below. The
+          # floor is set below the current count rather than at it, because .py
+          # files churn more than crates and an exact match would go red on an
+          # ordinary deletion.
+          if [ "$count" -lt 70 ]; then
+            echo "discovery found only $count files, expected at least 70; the walk is broken" >&2
+            exit 1
+          fi
+          ruff check "${files[@]}"
+
   proofs:
     name: kani proofs on shortvec
     runs-on: ubuntu-latest

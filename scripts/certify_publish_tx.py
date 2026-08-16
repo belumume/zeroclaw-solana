@@ -198,7 +198,9 @@ def _self_test() -> int:
     SYS_IDX, ORACLE_IDX, TOKEN_IDX = 3, 4, 5
     advance = (SYS_IDX, [1], _ADVANCE_NONCE)  # touches nonce (idx1)
     publish = (ORACLE_IDX, [2, 1, 0], b"\x00" * 8 + b"payload")  # touches feed (idx2)
-    raw = lambda msg: bytes([1]) + b"\x00" * 64 + msg  # 1 empty sig + message
+
+    def raw(msg):
+        return bytes([1]) + b"\x00" * 64 + msg  # 1 empty sig + message
 
     results = []
 
