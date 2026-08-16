@@ -20,7 +20,7 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    typed on-chain feed another program consumes. Two publish paths share the same device
    signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
    publisher runs the durable feed on a schedule. As of 2026-08-15T19:41Z that feed carries **at least 1,514
-   publishes and zero failures across 21.6 days**, unbroken since 2026-07-25, at a median gap of
+   publishes and zero failures**, unbroken since 2026-07-25, at a median gap of
    20.5 minutes. Its largest gap is 61.5 minutes, and a second publisher running the same path from
    a laptop has a largest gap of 36 hours because the laptop sleeps. Both outliers are named
    because the command that reproduces the good numbers is the same command that finds them:
