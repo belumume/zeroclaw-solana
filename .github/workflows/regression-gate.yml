@@ -118,6 +118,13 @@ jobs:
                   "asserting nothing. Its control, test_check_root_divergence.py, builds its "
                   "own synthetic pair in a temp dir and DOES run in ci.yml, so the checker's "
                   "behaviour is verified here even though the checker cannot run here.",
+              "check-untracked-root-divergence.py":
+                  "same reason one layer down: it compares the UNTRACKED internal documents "
+                  "the two working roots share, and a runner clones one root and none of "
+                  "those gitignored documents, so it would report not-applicable on every "
+                  "run. Its control, test_check_untracked_root_divergence.py, builds its own "
+                  "synthetic pair in a temp dir and DOES run in ci.yml, with both mutation "
+                  "controls, so the checker's behaviour is verified here.",
           }
 
           tracked = subprocess.run(
