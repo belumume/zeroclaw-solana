@@ -475,9 +475,8 @@ fact-check is a separate pass and this gate is not it.
 The path gate constrains how any of this can be written down. `check-repo-paths.py` reads every
 repo path a doc names and asserts it resolves in a clone, so a document cannot name an absent file
 even in order to say it is absent: naming a path to say it is missing is indistinguishable, to a
-checker, from naming it to say it is there. The way
-through is to reword the sentence rather than carve out an exception, since the exception would
-blind the gate to the real case it exists for.
+checker, from naming it to say it is there. The way through is to reword the sentence rather than
+carve out an exception, since the exception would blind the gate to the real case it exists for.
 
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
 in `crates/solana-core`, which executes all four suites there for 120 tests rather than the
