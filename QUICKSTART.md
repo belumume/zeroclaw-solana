@@ -422,6 +422,34 @@ The generator copy into `workspace/tools/` matters: **channel turns run jailed t
 workspace**, so a skill referencing its own directory breaks in channels even though it
 works from the CLI.
 
+### Schedule the deterministic receipts (optional, 1 min)
+
+The SOP above is not installed because its confirmation step is prose. The replacement is
+`deploy/announce_settlements.sh`, which derives every field of the outgoing message from the chain
+via `confirm_settlements.py` and hands the bytes to `zeroclaw channel send`. No model is in that
+path at any point.
+
+It was runnable by hand and scheduled by nothing, which is the same as not running:
+
+```
+cp deploy/zc-announce.service deploy/zc-announce.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now zc-announce.timer
+systemctl --user list-timers zc-announce.timer     # NEXT/LEFT populated = armed
+```
+
+A minute is affordable because most runs end at the first step with nothing to announce, and it is
+what makes "the owner hears within about a minute of settlement" true rather than aspirational.
+
+Two things worth knowing before you enable it. The service is `Type=oneshot`, so a SUCCEEDED run
+reports `ActiveState=inactive` and reads as dead to a naive check. `deploy/box_selfcheck.py` reads
+`Result` as well, for exactly this. And the script sends FIRST and commits to the ledger AFTER, so a
+failed send re-announces on the next tick rather than swallowing a confirmation; a visible duplicate
+is recoverable and a silent miss is not, when the customer has already paid.
+
+If the binary or the confirmer is absent it exits 2 and says which, rather than announcing nothing
+quietly.
+
 ## 6. Run it (2 min)
 ```
 zeroclaw daemon        # gateway + channels + cron scheduler
