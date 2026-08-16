@@ -401,6 +401,15 @@ jobs:
       # tracked text, printable strings inside committed binaries, and COMMIT METADATA --
       # the last of which no working-tree check can reach, and which a content scrub leaves
       # untouched because rewriting blobs does not rewrite identities.
+      # The shop's four constants are pinned in TWO files: the table the model reads and the
+      # constants the script enforces. They are deliberately duplicated, because the script runs
+      # inside the channel's workspace jail and cannot import anything, and the deploy map copies
+      # the two separately so they can arrive from different commits. Nothing made them agree.
+      - name: the shop's two constant tables agree
+        run: python3 scripts/check-shop-constant-agreement.py
+      - name: that agreement gate can actually go red
+        run: python3 scripts/test_check_shop_constant_agreement.py
+
       - name: no personal identifier on any surface a clone receives
         run: python3 scripts/check-identifier-leaks.py
 
