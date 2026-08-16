@@ -513,6 +513,17 @@ jobs:
       - name: renaming an argument on either side is caught
         run: python3 scripts/check-spend-args-agreement.py --selftest
 
+      # THE BOX GATE AND ITS GENERATOR, whose self-tests were wired into no workflow and so
+      # protected nothing on a runner: they only ran when someone remembered. Both are stdlib-only
+      # and offline. box_selfcheck's suite is where the state scan's polarity is decided, and the
+      # case that must never go green is the 2026-08-06 incident, a retired mint planted in a
+      # synthetic brain.db, flagged while 27 one-off reference keys beside it are not.
+      - name: the box drift checker can fail in every direction
+        run: python3 deploy/box_selfcheck.py --self-test
+
+      - name: the manifest generator refuses every bad input it claims to
+        run: python3 deploy/make_invariants.py --self-test
+
       # check-all is the reporter every other gate is read through, so a defect in its counting
       # is invisible by construction: a wrong summary looks exactly like a right one. It once
       # read "all 10 gate(s) pass" where eight passed and two never executed, one of them the

@@ -113,6 +113,9 @@ MINT_NETWORK = {
 # Files whose content is scannable as text by box_selfcheck's mint and prose checks.
 TEXT_SUFFIXES = {".md", ".py", ".toml", ".sh", ".txt", ".json"}
 
+# Valid base58, so a hand-written extra cannot be a typo the scan then silently never matches.
+B58_TOKEN = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+
 # What determines a plugin binary. Anything here moving invalidates a blessed hash.
 PLUGIN_SOURCE_SHARED = ("wit", "crates/solana-core")
 
@@ -367,6 +370,43 @@ def derive_pins(root: Path) -> tuple[dict, list[str]]:
     return out, problems
 
 
+def derive_retired_mints(pins: dict, targets: dict) -> tuple[list[str], list[str]]:
+    """Every mint this shop must NOT be using, for box_selfcheck's state-scan prohibition.
+
+    DERIVED FROM MINT_NETWORK rather than declared, so a mint cannot be known to the
+    network table and unknown to the prohibition. Adding a row above puts it in both at once,
+    and the configured mint is removed by construction rather than by anyone remembering to.
+
+    `retired_mints_extra` exists for an address that was never in the network table at all: a
+    merchant wallet that has been rotated, a mint from a superseded deployment. It is a
+    DELIBERATE DECLARATION and it is never auto-populated, for the same reason
+    `allowed_addresses` is not -- a generator that harvested whatever it found on the box would
+    bless the current state including the drift, which is the one thing this manifest exists to
+    detect. The denylist inverts the polarity of the scan; it must not inherit the failure mode
+    of the allowlist it replaces.
+    """
+    problems: list[str] = []
+    mint = pins.get("mint")
+    retired = {m for m in MINT_NETWORK if m != mint}
+    for extra in targets.get("retired_mints_extra") or []:
+        tok = (extra or {}).get("address") if isinstance(extra, dict) else extra
+        tok = (tok or "").strip()
+        if not B58_TOKEN.match(tok):
+            problems.append(
+                f"retired_mints_extra carries {tok[:12]!r}, which is not a base58 address; a "
+                "typo here is a prohibition that matches nothing and reports clean forever"
+            )
+            continue
+        if tok == mint:
+            problems.append(
+                "retired_mints_extra names the CONFIGURED mint, which would make the shop's "
+                "own mint a finding on every scan"
+            )
+            continue
+        retired.add(tok)
+    return sorted(retired), problems
+
+
 # ---------------------------------------------------------------------------------------------
 # binaries
 # ---------------------------------------------------------------------------------------------
@@ -545,16 +585,46 @@ def build_manifest(
             "compare nothing and it fails closed on that, so the manifest would be red forever"
         )
 
+    # POLARITY IS PER TARGET, because the two tiers are not the same problem. A deployed file we
+    # write and hash gets the ALLOWLIST (anything unfamiliar is drift, and measurement says there
+    # is nothing unfamiliar in a correct tree). Agent state gets the DENYLIST, because a fresh
+    # reference key per order makes an allowlist unbounded by construction and the check can only
+    # go redder as the shop trades. box_selfcheck's docstring carries the full argument.
     declared: set[str] = set()
+    state_scan: list[str] = []
     for extra in targets.get("mint_scan_extra") or []:
-        if extra.get("enabled"):
+        if not extra.get("enabled"):
+            continue
+        policy = (extra.get("policy") or "allowlist").strip().lower()
+        if policy == "denylist":
+            state_scan.append(extra["path"])
+            notes.append(
+                f"state scan covers {extra['path']} as a RETIRED-MINT PROHIBITION "
+                "(declared box-only target, so its content could not be dry-run)"
+            )
+        elif policy == "allowlist":
             mint_scan.append(extra["path"])
             declared.add(extra["path"])
             notes.append(
                 f"mint scan also covers {extra['path']} (declared box-only target, "
                 "so its content could not be dry-run against the repo)"
             )
+        else:
+            problems.append(
+                f"mint_scan_extra entry {extra['path']} declares policy {policy!r}; only "
+                "'allowlist' and 'denylist' exist, and guessing which was meant would ship a "
+                "scan with the wrong polarity"
+            )
     mint_scan = sorted(set(mint_scan))
+    state_scan = sorted(set(state_scan))
+
+    retired_mints, retired_problems = derive_retired_mints(pins, targets)
+    problems.extend(retired_problems)
+    if state_scan and not retired_mints:
+        problems.append(
+            "a state scan target is configured with an EMPTY retired-mint list, so the "
+            "prohibition would read every database as clean and report green"
+        )
 
     not_checked: list[dict] = []
 
@@ -653,7 +723,9 @@ def build_manifest(
         "network": pins.get("network"),
         "allowed_addresses": targets.get("allowed_addresses") or [],
         "known_other": targets.get("known_other") or [],
+        "retired_mints": retired_mints,
         "mint_scan": mint_scan,
+        "state_scan": state_scan,
         "prose_scan": prose_scan,
         "pinned_scripts": pinned_scripts,
         "units": [u["unit"] for u in (targets.get("units") or []) if u.get("unit")],
@@ -909,6 +981,76 @@ def self_test() -> int:
             report(
                 "scope: the test file is NOT mint-scanned",
                 test_box not in man["mint_scan"],
+            )
+            report(
+                "derive: the retired list is DERIVED, so the devnet mint needs no declaration",
+                man["retired_mints"] == [T_DEVNET],
+            )
+            report(
+                "derive: the CONFIGURED mint is never in its own prohibition list",
+                T_MINT not in man["retired_mints"],
+            )
+
+            # --- polarity routing, which is the whole point of the change ----------------------
+            deny_targets = json.loads(json.dumps(T_TARGETS))
+            deny_targets["mint_scan_extra"] = [
+                {"path": "data/memory/brain.db", "enabled": True, "policy": "denylist"}
+            ]
+            m_deny, p_deny, _b, _n = build_manifest(
+                repo, deny_targets, blessed, allow_stale=True
+            )
+            report(
+                "routing: a denylist extra lands in state_scan and NOT in mint_scan",
+                m_deny is not None
+                and m_deny["state_scan"] == ["data/memory/brain.db"]
+                and "data/memory/brain.db" not in m_deny["mint_scan"],
+            )
+
+            allow_targets = json.loads(json.dumps(T_TARGETS))
+            allow_targets["mint_scan_extra"] = [
+                {"path": "data/memory/brain.db", "enabled": True}
+            ]
+            m_allow, _p, _b, _n = build_manifest(
+                repo, allow_targets, blessed, allow_stale=True
+            )
+            report(
+                "routing: an extra with NO policy keeps the old allowlist behaviour",
+                m_allow is not None
+                and "data/memory/brain.db" in m_allow["mint_scan"]
+                and m_allow["state_scan"] == [],
+            )
+
+            bad_targets = json.loads(json.dumps(T_TARGETS))
+            bad_targets["mint_scan_extra"] = [
+                {"path": "data/memory/brain.db", "enabled": True, "policy": "denylst"}
+            ]
+            m_bad, p_bad, _b, _n = build_manifest(
+                repo, bad_targets, blessed, allow_stale=True
+            )
+            report(
+                "routing: a MISSPELLED policy refuses rather than guessing the polarity",
+                m_bad is None and any("only 'allowlist'" in p for p in p_bad),
+            )
+
+            # A typo'd extra is a prohibition that matches nothing and reports clean forever, so
+            # it has to refuse at emit time; the shape is unverifiable once it reaches the box.
+            typo_targets = json.loads(json.dumps(T_TARGETS))
+            typo_targets["retired_mints_extra"] = ["not-a-base58-address"]
+            m_typo, p_typo, _b, _n = build_manifest(
+                repo, typo_targets, blessed, allow_stale=True
+            )
+            report(
+                "retired: a non-base58 extra REFUSES the emit",
+                m_typo is None and any("matches nothing" in p for p in p_typo),
+            )
+            self_targets = json.loads(json.dumps(T_TARGETS))
+            self_targets["retired_mints_extra"] = [T_MINT]
+            m_self, p_self, _b, _n = build_manifest(
+                repo, self_targets, blessed, allow_stale=True
+            )
+            report(
+                "retired: retiring the shop's OWN mint REFUSES the emit",
+                m_self is None and any("CONFIGURED mint" in p for p in p_self),
             )
 
             # --- the two incidents, driven through the REAL gate -----------------------------
@@ -1307,7 +1449,11 @@ def main() -> int:
         f"  files pinned      {len(manifest['files'])}  "
         f"({len(manifest['files']) - n_bin} from git, {n_bin} blessed binaries)"
     )
-    print(f"  mint scan         {len(manifest['mint_scan'])} target(s)")
+    print(f"  mint scan         {len(manifest['mint_scan'])} target(s) (allowlist)")
+    print(
+        f"  state scan        {len(manifest['state_scan'])} target(s) against "
+        f"{len(manifest['retired_mints'])} retired mint(s) (denylist)"
+    )
     print(
         f"  prose scan        {len(manifest['prose_scan'])} file(s) against network="
         f"{manifest['network']}"

@@ -158,12 +158,70 @@ def check_manifest(inv: dict, r: Result) -> None:
     )
 
 
-def check_mint_prohibition(inv: dict, r: Result) -> None:
-    """STATE: no address other than the configured mint may appear in skill or memory.
+def _read_target(rel: str, p: Path, findings: list[str]) -> str | None:
+    """Bytes of one scan target as text, or None with the reason recorded as a finding.
 
-    This is the check that would have caught the 2026-08-06 incident in seconds. The agent held a
-    stale mint in three brain.db rows while the skill on disk was already correct, so a
-    file-to-file comparison could never have seen it.
+    Binary-safe by design: decoding with replacement makes brain.db scannable the same way
+    strings(1) would scan it, which also reaches freelist pages and deleted rows that a SQL
+    query over the live tables cannot see. That reach is the reason this stays a byte scan
+    rather than becoming a set of sqlite queries.
+    """
+    if not p.is_file():
+        findings.append(f"{rel}: MISSING")
+        return None
+    try:
+        return p.read_bytes().decode("utf-8", "replace")
+    except Exception as exc:
+        findings.append(f"{rel}: unreadable ({exc})")
+        return None
+
+
+def check_mint_prohibition(inv: dict, r: Result) -> None:
+    """No wrong mint may reach a customer, asserted with a DIFFERENT POLARITY PER TIER.
+
+    THE TWO TIERS ARE NOT THE SAME PROBLEM, and running one mechanism across both is what made
+    this the only permanently-red check on the box.
+
+      DEPLOYED FILES (`mint_scan`)   skills, SOPs and scripts. We write them, we hash them, and
+                                     measurement across every tracked file under skills/ and
+                                     sops/ found ZERO foreign base58 tokens outside test
+                                     fixtures. So "any address that is not the configured one"
+                                     is affordable here and it is the strong form: it catches a
+                                     mint nobody has ever seen, including a typo and a
+                                     substituted merchant. Unchanged.
+
+      AGENT STATE (`state_scan`)     brain.db. Conversational memory legitimately accumulates
+                                     arbitrary addresses, because a Solana Pay reference key is
+                                     a FRESH RANDOM ADDRESS PER ORDER and the agent records it.
+                                     An allowlist here is unbounded BY CONSTRUCTION: the set of
+                                     legitimate tokens grows with every sale, so the check can
+                                     only ever go redder. Measured 2026-08-16 on the live box:
+                                     27 distinct unexpected tokens, each appearing exactly ONCE
+                                     in real content (the 54 occurrences are the memories_fts
+                                     index mirroring memories, and this scanner already dedupes
+                                     per file with set(), so the mirror was never the noise).
+                                     Every one was a one-off reference key.
+
+    So state is asserted as a PROHIBITION ON KNOWN-BAD VALUES, which is what this check has been
+    named all along. The list is `retired_mints`: finite, auditable, derived by the generator
+    from the same mint-to-network table that refuses to guess a network, so a mint cannot be
+    retired in one place and live in the other.
+
+    WHAT THIS GIVES UP, stated rather than hidden: an UNKNOWN wrong mint sitting only in agent
+    memory is no longer caught. That is a real reduction and it is the price of the check being
+    able to pass at all. It is bounded by what stayed strong: the deployed files keep the
+    allowlist, `code-pins` still requires both constants in the script that builds every link,
+    and `network-prose` still reads the sentence under the value. A mint the agent invents has
+    to survive pay_link.py's pin before it reaches a customer.
+
+    THE CONTROL THAT DECIDED THE DESIGN: the 2026-08-06 incident must still be caught. That
+    incident's mint is the devnet USDC mint, it is retired, and a brain.db row carrying it is
+    flagged by the denylist exactly as it was by the allowlist. Both directions are driven in
+    --self-test against a synthetic sqlite database with the live table shape.
+
+    FAILS CLOSED on an empty denylist while state targets exist: a prohibition with nothing to
+    prohibit reads every database as clean, which is the silent green this whole file exists to
+    refuse.
     """
     mint = inv.get("mint")
     merchant = inv.get("merchant")
@@ -177,36 +235,47 @@ def check_mint_prohibition(inv: dict, r: Result) -> None:
 
     allowed = {mint, merchant} | set(inv.get("allowed_addresses") or [])
     allowed.discard(None)
+    known_other = set(inv.get("known_other") or [])
 
-    targets: list[tuple[str, Path]] = []
-    for rel in inv.get("mint_scan") or []:
-        targets.append((rel, ZC / rel))
-    if not targets:
+    # Retired values are compared case-sensitively and exactly; base58 is case-significant.
+    retired = {t for t in (inv.get("retired_mints") or []) if t}
+    retired.discard(mint)
+
+    file_targets = list(inv.get("mint_scan") or [])
+    state_targets = list(inv.get("state_scan") or [])
+    if not file_targets and not state_targets:
         r.add("mint-prohibition", False, "no scan targets configured")
         return
+    if state_targets and not retired:
+        r.add(
+            "mint-prohibition",
+            False,
+            f"{len(state_targets)} state target(s) configured with an EMPTY retired_mints "
+            "list, so the prohibition would read every database as clean",
+        )
+        return
 
-    findings = []
+    findings: list[str] = []
     scanned = 0
-    for rel, p in targets:
-        if not p.is_file():
-            findings.append(f"{rel}: MISSING")
+
+    for rel in file_targets:
+        text = _read_target(rel, ZC / rel, findings)
+        if text is None:
             continue
         scanned += 1
-        try:
-            blob = p.read_bytes()
-        except Exception as exc:
-            findings.append(f"{rel}: unreadable ({exc})")
-            continue
-        # Binary-safe: decode with replacement so brain.db is scannable the same way strings(1)
-        # would scan it.
-        text = blob.decode("utf-8", "replace")
         for tok in set(B58.findall(text)):
-            if tok not in allowed:
-                # Only report tokens that look like a mint or a wallet rather than every base58
-                # blob; a reference key is a fresh random address per order and is legitimate.
-                if tok in (inv.get("known_other") or []):
-                    continue
-                findings.append(f"{rel}: unexpected address {tok[:10]}..")
+            if tok in allowed or tok in known_other:
+                continue
+            findings.append(f"{rel}: unexpected address {tok[:10]}..")
+
+    for rel in state_targets:
+        text = _read_target(rel, ZC / rel, findings)
+        if text is None:
+            continue
+        scanned += 1
+        present = set(B58.findall(text))
+        for tok in sorted(retired & present):
+            findings.append(f"{rel}: RETIRED mint {tok[:10]}.. present in agent state")
 
     # THE CAP MUST NAME WHAT IT DROPPED. This listed the first 8 findings and never the total, so
     # a reader could not tell 8 from 8,000 and the check was permanently unmeasurable: the question
@@ -216,7 +285,11 @@ def check_mint_prohibition(inv: dict, r: Result) -> None:
     # is the part a decision is made on.
     uniq = sorted(set(findings))
     if not uniq:
-        detail = f"{scanned} target(s) scanned; only configured addresses present"
+        detail = (
+            f"{scanned} target(s) scanned "
+            f"({len(file_targets)} file allowlist, {len(state_targets)} state denylist over "
+            f"{len(retired)} retired mint(s)); nothing prohibited found"
+        )
     else:
         shown = uniq[:MINT_FINDINGS_SHOWN]
         more = len(uniq) - len(shown)
@@ -470,6 +543,61 @@ def _plant(root: Path, *, clean: bool) -> None:
     )
 
 
+B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def _reference_addresses(n: int) -> list[str]:
+    """n distinct 44-char base58 tokens shaped like Solana Pay reference keys.
+
+    Deterministic rather than random so a failure is reproducible. The alphabet EXCLUDES 0, O, I
+    and l, and a previous fixture here used a decimal counter, produced tokens carrying a zero,
+    and the scanner correctly ignored them -- which made three cases fail for a reason that had
+    nothing to do with the code under test.
+    """
+    out = []
+    for i in range(n):
+        a = B58_ALPHABET[i % len(B58_ALPHABET)]
+        b = B58_ALPHABET[(i * 7 + 3) % len(B58_ALPHABET)]
+        out.append(("Ref" + a + b).ljust(44, "k"))
+    return out
+
+
+def _plant_brain_db(path: Path, refs: list[str], *, retired: str | None = None) -> None:
+    """A synthetic brain.db with the table shape measured on the box on 2026-08-16.
+
+    memories_fts is a MIRROR of memories, which is why the live probe counted every token twice.
+    It is reproduced here rather than simplified away, so the fixture exercises the duplication
+    the real database has and the dedupe this scanner relies on.
+    """
+    import sqlite3
+
+    path.unlink(missing_ok=True)
+    con = sqlite3.connect(path)
+    try:
+        con.execute("CREATE TABLE schema_version (version INTEGER)")
+        con.execute("INSERT INTO schema_version VALUES (1)")
+        con.execute("CREATE TABLE agents (id TEXT PRIMARY KEY, name TEXT)")
+        con.execute("INSERT INTO agents VALUES ('demo', 'demo')")
+        con.execute("CREATE TABLE memory_meta (k TEXT, v TEXT)")
+        con.execute("CREATE TABLE embedding_cache (k TEXT, v BLOB)")
+        con.execute("CREATE TABLE memories (id INTEGER PRIMARY KEY, content TEXT)")
+        try:
+            con.execute("CREATE VIRTUAL TABLE memories_fts USING fts5(content)")
+        except sqlite3.OperationalError:
+            # fts5 absent from this build. The scan reads bytes, so a plain mirror table
+            # reproduces the duplication faithfully enough for what is being tested.
+            con.execute("CREATE TABLE memories_fts (content TEXT)")
+        rows = [f"order {i}: reference {ref} recorded" for i, ref in enumerate(refs)]
+        if retired:
+            rows.append(f"pay with mint {retired} as recalled from memory")
+        for row in rows:
+            con.execute("INSERT INTO memories (content) VALUES (?)", (row,))
+            con.execute("INSERT INTO memories_fts (content) VALUES (?)", (row,))
+        con.commit()
+    finally:
+        con.close()
+
+
 def _invariants_for(root: Path, *, honest_manifest: bool) -> dict:
     skill = root / "skills" / "SKILL.md"
     return {
@@ -479,7 +607,9 @@ def _invariants_for(root: Path, *, honest_manifest: bool) -> dict:
         "files": {
             "skills/SKILL.md": sha256_file(skill) if honest_manifest else "0" * 64
         },
-        "mint_scan": ["skills/SKILL.md", "memory/brain.db"],
+        "mint_scan": ["skills/SKILL.md"],
+        "state_scan": ["memory/brain.db"],
+        "retired_mints": [BAD_MINT],
         "prose_scan": ["skills/SKILL.md"],
         "pinned_scripts": ["tools/pay_link.py"],
         "units": [],
@@ -570,6 +700,106 @@ def self_test() -> int:
         report(
             "mint cap: the sample really is capped (over-correction control)",
             detail.count("unexpected address") == MINT_FINDINGS_SHOWN,
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # THE STATE SCAN'S POLARITY, driven both directions against a synthetic brain.db carrying the
+    # table shape measured on the live box. These two cases DECIDED the design rather than
+    # documenting it: a narrowing that could not keep the incident caught would have been the
+    # wrong narrowing, and one that stayed noisy on 27 reference keys would have kept the box red.
+    tmp = Path(tempfile.mkdtemp(prefix="zc-state-"))
+    try:
+        prev_zc = ZC
+        (tmp / "memory").mkdir(parents=True)
+        db = tmp / "memory" / "brain.db"
+
+        refs = _reference_addresses(27)
+        _plant_brain_db(db, refs)
+        inv = {
+            "mint": GOOD_MINT,
+            "merchant": GOOD_MERCHANT,
+            "mint_scan": [],
+            "state_scan": ["memory/brain.db"],
+            "retired_mints": [BAD_MINT],
+            "allowed_addresses": [],
+            "known_other": [],
+        }
+        r = Result()
+        try:
+            ZC = tmp
+            check_mint_prohibition(inv, r)
+        finally:
+            ZC = prev_zc
+        clean_detail = r.checks[0]["detail"]
+        report(
+            f"state scan: {len(refs)} one-off reference keys produce ZERO findings",
+            r.checks[0]["ok"] is True and "finding(s)" not in clean_detail,
+        )
+        # Proves the scanner READ the database rather than skipping it. A zero from a target that
+        # was never opened is byte-identical to a zero from a clean one.
+        report(
+            "state scan: the clean verdict is a READ, not a skip",
+            "1 target(s) scanned" in clean_detail and "MISSING" not in clean_detail,
+        )
+
+        # THE NON-NEGOTIABLE CONTROL: 2026-08-06 verbatim in shape. The devnet mint in a brain.db
+        # row while the skill on disk is already correct. If this ever goes green the narrowing is
+        # wrong and must be reverted, not adjusted.
+        _plant_brain_db(db, refs, retired=BAD_MINT)
+        r = Result()
+        try:
+            ZC = tmp
+            check_mint_prohibition(inv, r)
+        finally:
+            ZC = prev_zc
+        detail = r.checks[0]["detail"]
+        report(
+            "state scan: a RETIRED mint in a brain.db row is FLAGGED (the 2026-08-06 incident)",
+            r.checks[0]["ok"] is False and "RETIRED mint" in detail,
+        )
+        report(
+            "state scan: it flags the retired mint ALONE, not the reference keys beside it",
+            detail.count("RETIRED mint") == 1 and "1 finding(s)" in detail,
+        )
+
+        # MUTATION CONTROL: the intersection above is what catches the incident, and nothing
+        # else in the file is. Without this, the incident case could be passing because some
+        # neighbouring check happens to complain, and the suite would never say so. The
+        # substitution is asserted to have APPLIED, because a stale anchor produces a mutant
+        # byte-identical to the original that then passes while testing nothing.
+        src = Path(__file__).read_text(encoding="utf-8")
+        anchor = "        for tok in sorted(retired & present):"
+        report("mutation: the anchor the control keys on still exists", anchor in src)
+        ns: dict = {"__name__": "bsc_mutant", "__file__": __file__}
+        exec(
+            compile(
+                src.replace(anchor, "        for tok in sorted(set()):", 1),
+                "bsc_mutant",
+                "exec",
+            ),
+            ns,
+        )
+        ns["ZC"] = tmp
+        mr = ns["Result"]()
+        ns["check_mint_prohibition"](inv, mr)
+        report(
+            "mutation: with the denylist gutted the incident STOPS firing",
+            mr.checks[0]["ok"] is True,
+        )
+
+        # An empty denylist over a live state target must FAIL rather than report clean. Without
+        # this the narrowing has an off switch that looks exactly like a pass.
+        r = Result()
+        try:
+            ZC = tmp
+            check_mint_prohibition({**inv, "retired_mints": []}, r)
+        finally:
+            ZC = prev_zc
+        report(
+            "state scan: an EMPTY retired list fails closed rather than reading clean",
+            r.checks[0]["ok"] is False
+            and "EMPTY retired_mints" in r.checks[0]["detail"],
         )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
