@@ -5,7 +5,11 @@ WHY A SECOND GATE RATHER THAN A WIDENING OF check-root-divergence.py. That gate 
 `git ls-files`, so it can only ever see TRACKED paths. The internal documents the two roots
 share -- the hookify rules, the memory scope, the always-loaded entry points, the listing
 captures -- are gitignored by design, so `git ls-files` never names them and no instrument in
-this repo has ever compared them. 13 such files exist in both roots today.
+this repo has ever compared them. 14 such files exist in both roots as this is written, 10 of them
+identical and 4 declared below. THAT NUMBER MOVES, by hours rather than by months: one of the
+fourteen was created while this file was being written. So read the count off the gate's own first
+output line rather than from here. The population is enumerated at run time and never listed,
+which is why a new shared document joins with no edit to this file.
 
 THE POLARITY IS THE OPPOSITE OF THE TRACKED GATE'S, and that is the whole reason this is a
 separate file rather than a third pass in that one. There, a difference is usually an unmerged
@@ -31,7 +35,7 @@ enforced. Revisit if `.tools/` ever stops being scratch.
 
 ONLY PATHS PRESENT AND UNTRACKED IN BOTH ROOTS ARE COMPARED. A document that exists in one root
 only is not drift, it is scope: the trunk carries ~219 internal files in this zone and the other
-root ~59, and reporting the 250-odd non-overlapping ones would bury the 13 that can actually
+root ~59, and reporting the 250-odd non-overlapping ones would bury the handful that can actually
 disagree. A path untracked in one root and TRACKED in the other is reported separately, because
 that is how a shared document silently stops being shared.
 
@@ -69,8 +73,8 @@ ZONE_DIRS = ("docs", ".claude")
 SKIP_PREFIXES = (".claude/worktrees/",)
 
 # Below this the walk found too little to have come from a real pair of roots, so a clean result
-# would mean nothing. Nine of the thirteen shared files are stable agent config that changes
-# rarely, so a count this low means the walk broke rather than that the documents went away.
+# would mean nothing. Ten of the fourteen shared documents are stable agent config and a hardlink
+# that change rarely, so a count this low means the walk broke rather than that they went away.
 MIN_SHARED = 6
 
 # DECLARED DIVERGENCES. Each entry is a path that is EXPECTED to differ, with the reason. A path
