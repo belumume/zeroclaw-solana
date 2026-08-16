@@ -132,6 +132,12 @@ def audit(root: pathlib.Path, data: dict) -> list[str]:
         # A `#` only opens a comment at the start of a word, which is the shell's own rule. Without
         # that, an explorer URL's fragment (`.../tx/ABC#cluster=mainnet`) reads as a comment and
         # anything after it gets scanned, so the gate would fire on a perfectly good command.
+        #
+        # DELIBERATELY NARROWER THAN SHELL GRAMMAR, so do not "complete" it. A real shell also
+        # starts a word after `;`, `&&`, `|` and `(`, and admitting those would make a query
+        # string's `?b=1&#frag=...` open a comment, which is the false positive this rule was
+        # narrowed to remove. Missing `true&&#...` costs a finding nobody has written; firing on a
+        # good command costs the gate its credibility, and a gate nobody trusts gets routed around.
         verify = str(c.get("verify") or "")
         opens = re.search(r"(?:^|\s)#(.*)$", verify)
         if opens:
