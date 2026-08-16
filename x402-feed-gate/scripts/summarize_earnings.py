@@ -7,6 +7,7 @@ earned today and all-time. Stdlib only.
 
 Usage: python3 tools/summarize_earnings.py [ledger_path] [utc_day]
 """
+
 import json
 import sys
 import time
@@ -29,8 +30,16 @@ except FileNotFoundError:
     raise SystemExit(0)
 
 today_rows = [r for r in rows if r.get("day") == today]
-tot = lambda rs: sum(int(r.get("amount", 0)) for r in rs)  # base units (6 dp)
-usd = lambda a: f"{a/1_000_000:.2f}"
+
+
+def tot(rs):
+    return sum(int(r.get("amount", 0)) for r in rs)  # base units (6 dp)
+
+
+def usd(a):
+    return f"{a / 1_000_000:.2f}"
+
+
 print(
     f"x402 feed sales: today {len(today_rows)} reads / {usd(tot(today_rows))} USDC; "
     f"all-time {len(rows)} reads / {usd(tot(rows))} USDC."
