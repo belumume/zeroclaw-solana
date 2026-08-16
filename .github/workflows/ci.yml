@@ -64,6 +64,13 @@ jobs:
       - name: Every x402 certification check is load-bearing
         run: python3 scripts/mutation-certify-x402.py
 
+      # The certifier's tracked CALL SITE. A certifier nobody calls is a library rather
+      # than a defense, and this repo has already had to fix that once, when the only
+      # caller of the publish-side certifier lived in a gitignored directory. Offline:
+      # it drives the captured mainnet transfer, needs no key and moves nothing.
+      - name: The x402 certifier has a caller, and the caller works
+        run: python3 scripts/pay_x402_certified.py --self-test
+
   fmt:
     name: rustfmt, every tracked crate
     runs-on: ubuntu-latest
