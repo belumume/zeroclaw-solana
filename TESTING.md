@@ -481,7 +481,7 @@ carve out an exception, since the exception would blind the gate to the real cas
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
 in `crates/solana-core`, which executes all four suites there for 120 tests, clippy with
 warnings as errors on both the host and `wasm32-wasip2`, the release build of the shipped
-wasm target, the fail-closed certification self-test, then all eight plugin components in a
+wasm target, the fail-closed certification self-test, then all nine plugin components in a
 matrix.
 Everything is offline and deterministic, and `--locked` throughout, so a green run also
 proves the committed lockfiles are the ones that work. That is the claim a reproducibility
@@ -490,7 +490,7 @@ promise actually rests on, and it now rests on a clean runner rather than on thi
 `ci.yml` also gates the supply chain with `cargo deny`, and the allow-list in `deny.toml`
 is derived rather than guessed: it is the exact set of distinct licenses in the graph, all
 eleven of them permissive, with no GPL, LGPL, AGPL, MPL or SSPL anywhere. Advisories, licenses
-and sources come back clean across solana-core, all eight components and the x402 gate, and the
+and sources come back clean across solana-core, all nine components and the x402 gate, and the
 CI matrix now runs all ten graphs rather than a sample. That distinction was worth fixing rather
 than rewording: each plugin is its own workspace with its own dependency graph, and the six that
 were previously ungated are not redundant with the three that were. `token-risk-check` and
