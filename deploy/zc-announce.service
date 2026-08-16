@@ -19,7 +19,7 @@
 
 [Unit]
 Description=Announce settled payments, every field derived from the chain
-Documentation=file:%h/zeroclaw/deploy/announce_settlements.sh
+Documentation=file:%h/.zeroclaw/bin/announce_settlements.sh
 After=network-online.target
 
 [Service]
@@ -40,7 +40,18 @@ Environment=ZC_CHANNEL=whatsapp.shop
 # sends to. Setting it here would hardcode a number into a tracked file and reintroduce exactly the
 # drift the script was written to avoid. Leave it unset.
 
-ExecStart=/usr/bin/env bash %h/zeroclaw/deploy/announce_settlements.sh
+# THE SCRIPT IS RUN FROM AN INSTALLED COPY, NOT FROM THE REPO, and the reason is worth stating
+# because the obvious alternative is wrong. A unit file cannot locate the repo the way a script can
+# locate itself, so the path has to be fixed. It cannot be %h/zeroclaw either: that is the UPSTREAM
+# host clone (the reproduction doc clones zeroclaw-labs/zeroclaw into it, and this script's own
+# ZC_BIN default reads the host binary out of it), so pointing there would fail 203/EXEC every tick
+# against a directory that has no deploy/ at all. This repo has no fixed home on the box.
+#
+# %h/.zeroclaw/bin is fixed, it matches how every other component in the reproduction doc installs,
+# and it is OUTSIDE the agent's workspace jail at %h/.zeroclaw/agents/demo/workspace, which the
+# deterministic path should not sit inside. The script reads nothing relative to its own directory,
+# so the copy behaves identically to the tracked original and stays byte-comparable to it.
+ExecStart=/usr/bin/env bash %h/.zeroclaw/bin/announce_settlements.sh
 
 # A run that hangs must not stack with the next tick. The timer's AccuracySec plus this ceiling keep
 # at most one in flight.

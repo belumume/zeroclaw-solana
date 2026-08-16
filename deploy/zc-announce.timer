@@ -16,7 +16,7 @@
 
 [Unit]
 Description=Poll for settled payments once a minute
-Documentation=file:%h/zeroclaw/deploy/zc-announce.service
+Documentation=file:%h/.config/systemd/user/zc-announce.service
 
 [Timer]
 OnBootSec=2min

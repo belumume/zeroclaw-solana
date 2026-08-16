@@ -432,11 +432,19 @@ path at any point.
 It was runnable by hand and scheduled by nothing, which is the same as not running:
 
 ```
+mkdir -p ~/.zeroclaw/bin ~/.config/systemd/user
+cp deploy/announce_settlements.sh ~/.zeroclaw/bin/     # fixed path: a unit cannot locate this repo
 cp deploy/zc-announce.service deploy/zc-announce.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now zc-announce.timer
 systemctl --user list-timers zc-announce.timer     # NEXT/LEFT populated = armed
+systemctl --user start zc-announce.service         # one run now
+journalctl --user -u zc-announce.service -n 20     # "nothing to announce" is the healthy idle line
 ```
+
+Note `~/zeroclaw` is the **host** clone from step 2, not this repo, so the unit cannot reach the
+script there. The copy above is what gives it a fixed path, and the script reads nothing relative to
+its own directory, so it behaves identically from either location.
 
 A minute is affordable because most runs end at the first step with nothing to announce, and it is
 what makes "the owner hears within about a minute of settlement" true rather than aspirational.
