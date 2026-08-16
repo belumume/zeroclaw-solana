@@ -127,6 +127,7 @@ claims separately, and names what it does not cover.
 | If you want | Read |
 |---|---|
 | The whole submission on one page | [`docs/ONE-PAGER.md`](docs/ONE-PAGER.md) |
+| The same case at length, with the reasoning and the controls | [`docs/ARGUMENT.md`](docs/ARGUMENT.md) |
 | What this is and why it is built this way | [`docs/WRITEUP.md`](docs/WRITEUP.md) |
 | To run it yourself | [`QUICKSTART.md`](QUICKSTART.md) |
 | Proof it is real, on chain | [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md) |

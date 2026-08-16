@@ -71,6 +71,10 @@ JUDGE_FACING = [
     "index.html",
     "docs/WRITEUP.md",
     "docs/ONE-PAGER.md",
+    # The long form the one-pager links to. It carries the bulk of the judge-facing prose, so
+    # leaving it off would move most of this gate's real subject out of scope while every run
+    # kept printing green.
+    "docs/ARGUMENT.md",
     "docs/HOST-SECURITY-AUDIT.md",
     "docs/DECISIONS.md",
     "docs/DEVNET-PROOF.md",

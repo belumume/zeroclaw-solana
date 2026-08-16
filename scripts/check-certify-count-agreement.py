@@ -65,6 +65,7 @@ SURFACES = [
     "README.md",
     "index.html",
     "docs/ONE-PAGER.md",
+    "docs/ARGUMENT.md",
     "demo/take.py",
     "scripts/certify_publish_tx.py",
     ".github/workflows/ci.yml",
