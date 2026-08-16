@@ -50,6 +50,27 @@ jobs:
       - name: Fail-closed action certification self-test
         run: python3 scripts/certify_publish_tx.py
 
+      # The same claim on the BUY side. Its good case is a captured mainnet transfer
+      # rather than a fixture, so the positional account checks are exercised against
+      # bytes the chain accepted; every refusal case is that transfer with one field
+      # moved. Offline: it reads docs/proof-bundle/mainnet-transactions.json.
+      - name: Fail-closed x402 payment certification self-test
+        run: python3 scripts/certify_x402_payment_tx.py
+
+      # ...and the control on that gate. Each check is neutered in a copy and the copy's
+      # suite is required to fail, because a self-test that passes proves the checks agree
+      # with their inputs, never that any of them is doing work. It found two uncovered
+      # checks on its first run.
+      - name: Every x402 certification check is load-bearing
+        run: python3 scripts/mutation-certify-x402.py
+
+      # The certifier's tracked CALL SITE. A certifier nobody calls is a library rather
+      # than a defense, and this repo has already had to fix that once, when the only
+      # caller of the publish-side certifier lived in a gitignored directory. Offline:
+      # it drives the captured mainnet transfer, needs no key and moves nothing.
+      - name: The x402 certifier has a caller, and the caller works
+        run: python3 scripts/pay_x402_certified.py --self-test
+
   fmt:
     name: rustfmt, every tracked crate
     runs-on: ubuntu-latest

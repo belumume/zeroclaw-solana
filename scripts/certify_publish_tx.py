@@ -73,7 +73,19 @@ def _read_shortvec(b: bytes, i: int):
 
 
 def parse_legacy_message(msg: bytes) -> dict:
-    """Parse a legacy (non-v0) transaction message into keys + instructions."""
+    """Parse a legacy (non-v0) transaction message into keys + instructions.
+
+    A VERSIONED message is refused rather than parsed. `oracle-publish` calls
+    `serialize_legacy`, so v0 is not a shape this path's producer makes, but a parser that reads
+    a v0 message as legacy starts three bytes early and every offset after that is wrong, which
+    would silently describe a transaction other than the one being signed. Refusing what cannot
+    be read exactly is the only honest option for a gate.
+    """
+    if msg and msg[0] & 0x80:
+        raise CertificationError(
+            f"this is a v{msg[0] & 0x7F} message; this path emits legacy, and reading a "
+            f"versioned one as legacy misaligns every offset below"
+        )
     i = 3  # 3 header bytes: num_required_sigs, num_ro_signed, num_ro_unsigned
     n_keys, i = _read_shortvec(msg, i)
     keys = [msg[i + k * 32 : i + (k + 1) * 32] for k in range(n_keys)]
@@ -247,6 +259,11 @@ def _self_test() -> int:
     check(
         "publish to a spoofed feed PDA", _build_msg(keys2, [advance2, publish2]), False
     )
+    # 6. A VERSIONED message. Read as legacy it would misalign every offset, so the parser must
+    #    refuse it rather than describe a transaction other than the one being signed. The
+    #    control is case 1 above: the same body without the version byte still certifies.
+    good = _build_msg(keys, [advance, publish])
+    check("a versioned (v0) message", b"\x80" + good, False)
 
     passed = sum(results)
     print(f"\n{passed}/{len(results)} cases correct")
