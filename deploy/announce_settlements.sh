@@ -150,8 +150,20 @@ if [ -z "$PENDING" ]; then
   exit 0
 fi
 
-# The remedies, printed once rather than per message, when neither id form is usable.
+# The host's own error and the remedies, emitted ONCE for the whole run rather than once per
+# message. Every pending receipt fails identically here, because the cause is the id and not the
+# payment, so on the incident's four stuck settlements this block would otherwise repeat four
+# times and bury the run's actual outcome. Which payments are affected is NOT lost to this: the
+# loop below still prints its own "will retry next run" line once per message.
+#
+# The flag survives the loop because a `while ... done <<< "$PENDING"` herestring runs in the
+# current shell rather than a subshell. A pipe there would silently give each iteration its own
+# copy and restore the repetition, which is why the loop must stay a herestring.
+UNSUPPORTED_TOLD=0
 unsupported_id() {
+  [ "$UNSUPPORTED_TOLD" -eq 0 ] || return 0
+  UNSUPPORTED_TOLD=1
+  printf '%s\n' "$1" >&2
   echo "this host's \`channel send\` does not accept '$CHANNEL_ID', and alias" >&2
   echo "'$CHANNEL_ALIAS' is not reachable by the bare type '$CHANNEL_TYPE' (the builder" >&2
   echo "pins a bare type to the 'default' alias). Nothing was sent and the ledger is" >&2
@@ -178,8 +190,7 @@ send_one() {
     *) printf '%s\n' "$out" >&2; return 1 ;;
   esac
   if [ -z "$CHANNEL_ID_RETRY" ]; then
-    printf '%s\n' "$out" >&2
-    unsupported_id
+    unsupported_id "$out"
     return 1
   fi
   echo "channel-id '$CHANNEL_ID' unknown to this host; using '$CHANNEL_ID_RETRY'" >&2

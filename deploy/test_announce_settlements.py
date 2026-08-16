@@ -24,7 +24,8 @@ FOUR LAYERS, because a control on one proves nothing about the others.
      whether the ledger was committed.
   3. REFUSAL. The incident's own stderr, verbatim, must fail loud and commit nothing -- and
      must NOT broaden to a bare type that reaches a different account.
-  4. MUTATION CONTROLS. The retry gate and the section-precision escape are each disabled in a
+  4. MUTATION CONTROLS. The retry gate, the once-only flag and the section anchor are each
+     disabled in a
      copy of the script and the matching case is REQUIRED to flip. Each asserts its target
      string is present in the source FIRST, so a control gone stale fails loudly instead of
      certifying an unmodified script.
@@ -74,6 +75,18 @@ SEND_LINE_B = (
     "at 2026-08-07T09:12:04Z (signature "
     "4VUbLWcE2dPPYAXQVtH2WhvgP33KrbUiX2ruA9PeyfKMU4k5iPgFSL3xkg8wLtjk8GumPYdyNR92haxgEasDstUh)"
 )
+
+SEND_LINE_C = (
+    "SEND: payment received: 12 USDC from EpzuUPXwMR2oWqL3MCUTjvvpfdrZXforkMt85ZCSowo3 "
+    "at 2026-08-07T15:44:20Z (signature "
+    "5Zk9RPAffYmo9zzgXZuGrHJ8bV9Y2rnbE3ZdsPiMqzjEDWVQN2dWieiPu1VpGUMX2d4SNBt4Quqs9ewHdk3eAvbm)"
+)
+
+# A line unique to the remedy block, used to COUNT it. Kept as a fragment of the real sentence
+# rather than a paraphrase, so rewording the remedy breaks the count rather than silently
+# measuring nothing.
+REMEDY_MARKER = "does not accept"
+RETRY_MARKER = "will retry next run"
 
 CHECKS = 0
 FAILS = 0
@@ -474,6 +487,51 @@ def test_refusal() -> None:
     finally:
         box.cleanup()
 
+    # THE INCIDENT AT ITS REAL WIDTH. Four settlements were stuck, not one, and every refusal
+    # case above uses a single message, so multi-message refusal went unexercised and a remedy
+    # block emitted once PER MESSAGE read as correct. The run-level diagnosis must appear once
+    # while the per-payment record must appear once per payment: the first says why the run
+    # failed, the second says which money is still owed, and collapsing either loses something.
+    box = Box(CONFIG_SHOP, FAKE_OLD_HOST, [SEND_LINE_A, SEND_LINE_B, SEND_LINE_C])
+    try:
+        r = box.run()
+        remedies = r.stderr.count(REMEDY_MARKER)
+        host_errors = r.stderr.count("Unknown channel 'whatsapp.shop'")
+        retries = r.stderr.count(RETRY_MARKER)
+        check("three pending, still exits 1", r.returncode == 1, r.stdout)
+        check("three pending, still commits nothing", not box.committed())
+        check(
+            "one invocation per payment, none broadened",
+            len(box.sends()) == 3
+            and all("--channel-id whatsapp.shop" in s for s in box.sends()),
+            box.sends(),
+        )
+        check(
+            f"the remedy block appears EXACTLY ONCE across 3 messages (got {remedies})",
+            remedies == 1,
+            r.stderr,
+        )
+        check(
+            f"the host's error is quoted once, not per message (got {host_errors})",
+            host_errors == 1,
+            r.stderr,
+        )
+        check(
+            f"the per-payment retry line appears ONCE PER MESSAGE (got {retries} of 3)",
+            retries == 3,
+            r.stderr,
+        )
+        check(
+            "and each payment is named in its own retry line",
+            all(
+                f"{RETRY_MARKER}: {line[len('SEND: ') :]}" in r.stderr
+                for line in (SEND_LINE_A, SEND_LINE_B, SEND_LINE_C)
+            ),
+            r.stderr,
+        )
+    finally:
+        box.cleanup()
+
     # OVER-CORRECTION CONTROL. The same old host with alias 'default': the bare type IS the same
     # destination there, so the retry must fire and the run must succeed.
     box = Box(CONFIG_DEFAULT_ALIAS, FAKE_OLD_HOST, [SEND_LINE_A])
@@ -564,6 +622,37 @@ def test_mutations() -> None:
             "removing the alias gate DOES broaden to the bare type (gate is real)",
             len(sends) == 2 and "--channel-id whatsapp " in sends[1] + " ",
             sends,
+        )
+    finally:
+        box.cleanup()
+        shutil.rmtree(mutant.parent, ignore_errors=True)
+
+    # Disable the once-only flag so the remedy is emitted per message again. Three pending
+    # messages must then produce three remedy blocks. This is the control for the drift the
+    # review caught: the comment claimed once while the code emitted per message, and every
+    # refusal case used a single message, so nothing could tell the two apart.
+    mutant = mutated_script(
+        """  [ "$UNSUPPORTED_TOLD" -eq 0 ] || return 0""",
+        """  : """,
+    )
+    box = Box(
+        CONFIG_SHOP,
+        FAKE_OLD_HOST,
+        [SEND_LINE_A, SEND_LINE_B, SEND_LINE_C],
+        script=mutant,
+    )
+    try:
+        r = box.run()
+        remedies = r.stderr.count(REMEDY_MARKER)
+        check(
+            f"removing the once-only flag DOES repeat the remedy (got {remedies} of 3)",
+            remedies == 3,
+            r.stderr,
+        )
+        check(
+            "while the per-payment line was already once per message",
+            r.stderr.count(RETRY_MARKER) == 3,
+            r.stderr,
         )
     finally:
         box.cleanup()
