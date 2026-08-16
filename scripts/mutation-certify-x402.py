@@ -141,6 +141,7 @@ MUTATIONS = [
         "False",
         "verdict",
     ),
+    ("the single-advance check", "len(advances) > 1", "False", "verdict"),
     ("the priority-fee ceiling", "fee > max_priority_lamports", "False", "verdict"),
     (
         "the ATA CreateIdempotent check",

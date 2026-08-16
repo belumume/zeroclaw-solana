@@ -605,8 +605,15 @@ def certify_x402_payment_tx(
             f"signature is spent"
         )
 
-    if nonce is not None and not any(i["program"] == SYSTEM_PROGRAM for i in ixs):
+    advances = [i for i in ixs if i["program"] == SYSTEM_PROGRAM]
+    if nonce is not None and not advances:
         raise CertificationError("expected a durable-nonce advance and found none")
+    if len(advances) > 1:
+        raise CertificationError(
+            f"{len(advances)} System instructions; one nonce needs one advance, and a second "
+            f"is either dead weight the chain will reject or a shape this gate should not have "
+            f"to reason about"
+        )
 
     memos = [i for i in ixs if i["program"] == memo_prog]
     if expected_memo is None:
@@ -1107,6 +1114,17 @@ def _self_test() -> int:  # noqa: PLR0915 - a flat list of cases reads better th
     refuses(
         "a configured nonce with no advance present is refused",
         real["within_cap"],
+        nonce_b58=REAL_NONCE,
+    )
+    refuses(
+        "a SECOND nonce advance is refused, even though both are well formed",
+        _rebuild(
+            _rebuild(
+                real["within_cap"],
+                append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, [b58decode(REAL_NONCE)]),
+            ),
+            append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, [b58decode(REAL_NONCE)]),
+        ),
         nonce_b58=REAL_NONCE,
     )
     # The same shape one program over: ComputeBudget was allowlisted for a priority fee.
