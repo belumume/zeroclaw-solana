@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Report where the two working roots disagree on a file they both track.
+
+WHY A GATE AND NOT A POINTER, because the obvious fix is the wrong one and was measured to be.
+The two roots track ~262 files in common, so a session working in either is looking at almost the
+same tree and IGNORANCE IS NOT THE FAILURE. What bites is SILENT DIVERGENCE: a fix lands in one
+copy and the other keeps serving the old content with nothing to indicate it. A pointer warns
+about a problem nobody has; this reports the one everybody has.
+
+NOT A HARD FAILURE BY DEFAULT, and that is deliberate. Two live branches SHOULD diverge while work
+is in flight, so a gate that reddens on any difference would redden permanently and get ignored,
+which is worse than no gate. It fails ONLY on paths declared MUST_MATCH: the proof bundles, the
+gates, and the CI workflows, where a difference between roots means one of them is enforcing or
+proving something the other is not.
+
+SEMANTIC COMPARISON WHERE THE FORMAT ALLOWS IT. `docs/proof-bundle/mainnet-transactions.json`
+differs by 42 bytes across the roots and is IDENTICAL DATA: three transactions each, parsed-equal.
+A byte diff reports that as a divergent proof bundle, which is the most alarming thing this could
+say and would be false. JSON is compared parsed; everything else by bytes.
+
+THE OTHER ROOT IS OPTIONAL. A clone has one root, so its absence is a SKIP with a stated reason and
+exit 0, never a failure and never a silent pass. Point it elsewhere with ZC_OTHER_ROOT.
+
+DELIBERATELY NOT WIRED INTO ci.yml, and the reason is that same optionality. A GitHub runner clones
+exactly one root, so this would SKIP on every run: a step that can only ever skip is a green check
+asserting nothing, which is the shape this repo has already had to remove twice. It is discovered by
+`check-all.py` instead, which runs on a machine that has both roots. If the pair is ever mirrored
+onto a runner, wiring it in becomes correct and this paragraph is the thing to revisit.
+
+Its control, `scripts/test_check_root_divergence.py`, is NOT subject to that: it builds its own
+synthetic pair of roots in a temp directory and is hermetic, so it belongs in CI even though the
+gate itself does not.
+
+Exit 0 agree or not-applicable, 1 a MUST_MATCH path diverged, 2 could not check.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import subprocess
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+OTHER = pathlib.Path(
+    os.environ.get("ZC_OTHER_ROOT", str(ROOT.parent / "zeroclaw-submission"))
+)
+
+# A difference here means one root enforces, proves or ships something the other does not.
+MUST_MATCH = (
+    "docs/proof-bundle/",
+    "scripts/check-",
+    "scripts/verify_proof_offline.py",
+    ".github/workflows/",
+)
+
+# Below this the intersection is too small to have come from a real pair of roots, so a clean
+# result would mean nothing. Same reasoning as check-all's discovery floor.
+MIN_SHARED = 150
+
+
+def git_files(root: pathlib.Path) -> set[str] | None:
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return {p for p in out.split("\n") if p.strip()}
+
+
+def same(a: pathlib.Path, b: pathlib.Path) -> bool:
+    ab, bb = a.read_bytes(), b.read_bytes()
+    if ab == bb:
+        return True
+    # Parsed equality for JSON, so a serialisation-only difference is not reported as data drift.
+    if a.suffix == ".json":
+        try:
+            return json.loads(ab.decode("utf-8")) == json.loads(bb.decode("utf-8"))
+        except Exception:
+            return False
+    return False
+
+
+def main() -> int:
+    if not (OTHER / ".git").exists():
+        print(
+            f"SKIP  the second root is not present at {OTHER}; a clone has one root, so this is "
+            f"not applicable rather than clean. Set ZC_OTHER_ROOT to point elsewhere."
+        )
+        return 0
+
+    mine, theirs = git_files(ROOT), git_files(OTHER)
+    if mine is None or theirs is None:
+        print("FAIL  git could not list one of the roots; nothing was compared")
+        return 2
+
+    shared = sorted(mine & theirs)
+    if len(shared) < MIN_SHARED:
+        print(
+            f"FAIL  only {len(shared)} shared path(s), expected at least {MIN_SHARED}. "
+            f"The intersection is too small to have come from a real pair of roots, so a clean "
+            f"result here would mean nothing."
+        )
+        return 2
+
+    diverged, unreadable = [], []
+    for rel in shared:
+        a, b = ROOT / rel, OTHER / rel
+        if not (a.is_file() and b.is_file()):
+            unreadable.append(rel)
+            continue
+        try:
+            if not same(a, b):
+                diverged.append(rel)
+        except Exception as exc:
+            unreadable.append(f"{rel} ({type(exc).__name__})")
+
+    blocking = [r for r in diverged if r.startswith(MUST_MATCH)]
+    informational = [r for r in diverged if r not in blocking]
+
+    print(
+        f"  {len(shared)} shared path(s) compared, {len(diverged)} diverge "
+        f"({len(blocking)} on a must-match path)"
+    )
+    if unreadable:
+        print(f"  {len(unreadable)} could not be read: {', '.join(unreadable[:4])}")
+
+    if informational:
+        print(
+            f"  INFO  {len(informational)} in-flight difference(s), which two live branches are"
+        )
+        print("        expected to have. Not gating:")
+        for r in informational[:12]:
+            print(f"          {r}")
+        if len(informational) > 12:
+            print(f"          ... and {len(informational) - 12} more")
+
+    if blocking:
+        print("FAIL  a must-match path differs between the roots:")
+        for r in blocking:
+            print(f"        {r}")
+        print(
+            "      These are the paths where a difference means one root enforces, proves or"
+        )
+        print(
+            "      ships something the other does not. Sync them, or move the path out of"
+        )
+        print("      MUST_MATCH with a reason.")
+        return 1
+
+    print("PASS  no must-match path differs between the two roots")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
