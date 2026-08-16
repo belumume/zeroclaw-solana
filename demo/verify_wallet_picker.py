@@ -207,9 +207,13 @@ def main() -> int:
             # are structurally blind to this: the list grows ~50px per wallet, so the defect only
             # appears past about four. RE-MEASURED 2026-08-16 against the live page in his own
             # profile: 67px per row, not 50, so eight rows occupy about 536px rather than 400.
-            # Only SEVEN of the eight render, because MetaMask is correctly filtered as
-            # non-Solana; at a 743px fold the last row's bottom edge landed at 650, so the
-            # defect does NOT reproduce there. That is one viewport, not a general clearance.
+            # On the LIVE page only seven of his eight render, because enumerateWallets
+            # filters on feature presence and the real MetaMask exposes no Solana features.
+            # THIS TEST DELIBERATELY RENDERS ALL EIGHT: FAKE_WALLETS stamps the Solana
+            # features onto every name, so the fake MetaMask passes the filter. That is the
+            # worst case and the right thing to assert geometry against; it is not a claim
+            # about what his browser shows. At a 743px fold the live seven-row picker's last
+            # row ended at 650, so the defect did not reproduce there, at one viewport.
             # The original Brave measurement below stands on its own conditions:
             # the card grew 887 -> 1286 and the QR's bottom edge landed at 972 against a 900-tall
             # viewport. His window happened to be 982 tall and cleared it by ten pixels, which is
