@@ -17,13 +17,62 @@
 #
 # The recipient is read from the channel's OWN allowlist rather than hardcoded, so this file
 # carries no phone number and cannot drift away from the channel it sends to.
+#
+# ------------------------------------------------------------------------------------------
+# TWO VALUES, ONE VARIABLE. `$ZC_CHANNEL` used to feed both the config lookup and `--channel-id`,
+# and those two want DIFFERENT strings:
+#
+#   the config lookup wants the INSTANCE  `whatsapp.shop`, because `[channels.whatsapp.shop]`
+#                                         is the literal section header the recipient lives in
+#   `--channel-id`      wants a channel   `whatsapp`, because the flag is documented as "Channel
+#                       the binary knows  config name (e.g. telegram, discord, slack)" and the
+#                                         binary matches it against a fixed list of families
+#
+# So one of the two was always wrong. Measured on the box 2026-08-16, every tick since 2026-08-06:
+#
+#   Error: Unknown channel 'whatsapp.shop'. Supported: telegram, discord, slack, ...
+#   SEND FAILED, will retry next run: payment received: ...
+#   announced 0 of 4; ledger NOT committed so the rest re-announce
+#
+# Four genuine mainnet settlements re-queued and none was ever announced. The ledger discipline
+# held perfectly, which is why nothing was lost, and it is also why this stayed invisible.
+#
+# THE FIX IS TO SEPARATE THEM, NOT TO RENAME ONE. `$ZC_CHANNEL` keeps its meaning and its value
+# (the instance) because that is what the deployed unit sets and what the config lookup needs;
+# the channel-id is DERIVED from it below and is a distinct variable from here on.
+#
+# WHICH FORM THE BINARY WANTS DEPENDS ON ITS VINTAGE, so this tries the precise one first:
+#
+#   newer hosts   `send_channel_message` falls through to the announcement dispatcher for any
+#                 dotted id its channel builder does not claim, and that dispatcher resolves
+#                 `<type>.<alias>` properly. `whatsapp.shop` is exact and reaches the shop.
+#   older hosts   no such fallback. Only a bare family name resolves, and the builder pins it
+#                 to the `default` alias -- so a bare `whatsapp` is the SAME destination only
+#                 when the instance IS the default alias.
+#
+# The bare-type retry is therefore gated on `alias = default`, and on the specific
+# `Unknown channel '<id>'` error, which is raised while BUILDING the channel and so guarantees
+# nothing was delivered. Retrying any other failure could double-send a receipt.
+#
+# When neither form is usable the run FAILS LOUD with both remedies named. It does not fall
+# back to some other family, some other alias, or an unverified id: a receipt delivered to the
+# wrong account is worse than a receipt delayed, and this path touches money.
 
 set -euo pipefail
+
+DRY_RUN=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    *) echo "usage: $0 [--dry-run]" >&2; exit 1 ;;
+  esac
+done
 
 Z="${ZC_BIN:-$HOME/zeroclaw/target/release/zeroclaw}"
 CFG="${ZC_CONFIG:-$HOME/.zeroclaw/config.toml}"
 TOOLS="${ZC_TOOLS:-$HOME/.zeroclaw/agents/demo/workspace/tools}"
 LEDGER="${ZC_LEDGER:-$HOME/.zeroclaw/agents/demo/workspace/confirmed-payments-v2.jsonl}"
+# The channel INSTANCE: `<type>.<alias>`, and the name of its config section.
 CHANNEL="${ZC_CHANNEL:-whatsapp.shop}"
 CONFIRM="$TOOLS/confirm_settlements.py"
 
@@ -31,13 +80,67 @@ CONFIRM="$TOOLS/confirm_settlements.py"
 [ -f "$CONFIRM" ]  || { echo "no confirmer at $CONFIRM" >&2; exit 2; }
 [ -f "$CFG" ]      || { echo "no config at $CFG" >&2; exit 2; }
 
+# ---------------------------------------------------------------------------
+# Resolution. Kept in one function with no side effects so it can be driven
+# against a fixture config off the box -- see deploy/test_announce_settlements.py.
+# ---------------------------------------------------------------------------
+
+case "$CHANNEL" in
+  *.*) ;;
+  *) echo "ZC_CHANNEL must be a <type>.<alias> instance (e.g. whatsapp.shop), got '$CHANNEL'" >&2
+     exit 2 ;;
+esac
+CHANNEL_TYPE="${CHANNEL%%.*}"
+CHANNEL_ALIAS="${CHANNEL#*.}"
+
+# The id handed to --channel-id. Explicit beats derived: an operator who knows their host takes
+# a form this script did not predict says so, and gets no silent retry behind their back.
+if [ -n "${ZC_CHANNEL_ID:-}" ]; then
+  CHANNEL_ID="$ZC_CHANNEL_ID"
+  CHANNEL_ID_RETRY=""
+else
+  CHANNEL_ID="$CHANNEL"
+  if [ "$CHANNEL_ALIAS" = "default" ]; then
+    CHANNEL_ID_RETRY="$CHANNEL_TYPE"
+  else
+    CHANNEL_ID_RETRY=""
+  fi
+fi
+
 # Resolve the recipient from the channel section that will actually carry the message. An empty
 # result is exit 2 (could not run), never exit 0 -- a receipt sent nowhere must not read as success.
-RECIPIENT="${ZC_RECIPIENT:-$(
-  sed -n "/^\[channels.${CHANNEL}\]/,/^\[/p" "$CFG" \
-    | grep -oE '[0-9]+@(g\.us|s\.whatsapp\.net)' | head -1
-)}"
-[ -n "$RECIPIENT" ] || { echo "no recipient resolved for channel ${CHANNEL} in $CFG" >&2; exit 2; }
+#
+# The pattern is a WhatsApp JID because that is the family this ships against; any other family
+# must set ZC_RECIPIENT, and the error below says so rather than guessing at another id shape.
+# Matches are collected whole and the first taken by expansion rather than piped through `head`,
+# which under `pipefail` can turn a healthy read into a SIGPIPE failure.
+SECTION_RE="$(printf '%s' "$CHANNEL" | sed 's/[].[^$*\/]/\\&/g')"
+if [ -n "${ZC_RECIPIENT:-}" ]; then
+  RECIPIENT="$ZC_RECIPIENT"
+else
+  MATCHES="$(sed -n "/^\[channels\.${SECTION_RE}\]/,/^\[/p" "$CFG" \
+    | grep -oE '[0-9]+@(g\.us|s\.whatsapp\.net)' || true)"
+  RECIPIENT="${MATCHES%%$'\n'*}"
+fi
+[ -n "$RECIPIENT" ] || {
+  echo "no recipient resolved from [channels.${CHANNEL}] in $CFG" >&2
+  echo "  the section must carry a WhatsApp JID, or set ZC_RECIPIENT explicitly" >&2
+  exit 2
+}
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "instance      ZC_CHANNEL=$CHANNEL"
+  echo "  type        $CHANNEL_TYPE"
+  echo "  alias       $CHANNEL_ALIAS"
+  echo "config lookup [channels.${CHANNEL}] in $CFG"
+  echo "  recipient   $RECIPIENT"
+  echo "channel-id    $CHANNEL_ID"
+  if [ -n "$CHANNEL_ID_RETRY" ]; then
+    echo "  retry-as    $CHANNEL_ID_RETRY   (only on Unknown channel '$CHANNEL_ID')"
+  else
+    echo "  retry-as    none; alias '$CHANNEL_ALIAS' is not reachable by a bare type"
+  fi
+fi
 
 # 1. Ask the chain what is unannounced. Writes nothing.
 PENDING="$(python3 "$CONFIRM" --ledger "$LEDGER" --dry-run | grep '^SEND: ' || true)"
@@ -47,6 +150,59 @@ if [ -z "$PENDING" ]; then
   exit 0
 fi
 
+# The host's own error and the remedies, emitted ONCE for the whole run rather than once per
+# message. Every pending receipt fails identically here, because the cause is the id and not the
+# payment, so on the incident's four stuck settlements this block would otherwise repeat four
+# times and bury the run's actual outcome. Which payments are affected is NOT lost to this: the
+# loop below still prints its own "will retry next run" line once per message.
+#
+# The flag survives the loop because a `while ... done <<< "$PENDING"` herestring runs in the
+# current shell rather than a subshell. A pipe there would silently give each iteration its own
+# copy and restore the repetition, which is why the loop must stay a herestring.
+UNSUPPORTED_TOLD=0
+unsupported_id() {
+  [ "$UNSUPPORTED_TOLD" -eq 0 ] || return 0
+  UNSUPPORTED_TOLD=1
+  printf '%s\n' "$1" >&2
+  echo "this host's \`channel send\` does not accept '$CHANNEL_ID', and alias" >&2
+  echo "'$CHANNEL_ALIAS' is not reachable by the bare type '$CHANNEL_TYPE' (the builder" >&2
+  echo "pins a bare type to the 'default' alias). Nothing was sent and the ledger is" >&2
+  echo "unchanged, so every pending receipt re-announces on the next run. Either:" >&2
+  echo "  - update the host binary to one whose channel send resolves <type>.<alias>, or" >&2
+  echo "  - set ZC_CHANNEL_ID to an id this host does resolve to the same account" >&2
+}
+
+# Send one message. Prints the command under --dry-run and sends nothing.
+send_one() {
+  local msg="$1" out
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf 'would run: %s channel send --channel-id %s --recipient %s %q\n' \
+      "$Z" "$CHANNEL_ID" "$RECIPIENT" "$msg"
+    return 0
+  fi
+  if out="$("$Z" channel send --channel-id "$CHANNEL_ID" --recipient "$RECIPIENT" "$msg" 2>&1)"; then
+    return 0
+  fi
+  # Only an id the binary does not KNOW is safe to retry: that error is raised while building
+  # the channel, before any delivery. Every other failure may have partially delivered.
+  case "$out" in
+    *"Unknown channel '$CHANNEL_ID'"*) ;;
+    *) printf '%s\n' "$out" >&2; return 1 ;;
+  esac
+  if [ -z "$CHANNEL_ID_RETRY" ]; then
+    unsupported_id "$out"
+    return 1
+  fi
+  echo "channel-id '$CHANNEL_ID' unknown to this host; using '$CHANNEL_ID_RETRY'" >&2
+  CHANNEL_ID="$CHANNEL_ID_RETRY"
+  CHANNEL_ID_RETRY=""
+  if out="$("$Z" channel send --channel-id "$CHANNEL_ID" --recipient "$RECIPIENT" "$msg" 2>&1)"; then
+    return 0
+  fi
+  printf '%s\n' "$out" >&2
+  return 1
+}
+
 # 2. Send each line verbatim. Count failures rather than aborting, so one bad send does not
 #    strand the others -- they are independent payments.
 FAILED=0
@@ -55,13 +211,18 @@ while IFS= read -r line; do
   [ -n "$line" ] || continue
   COUNT=$((COUNT + 1))
   MSG="${line#SEND: }"
-  if "$Z" channel send --channel-id "$CHANNEL" --recipient "$RECIPIENT" "$MSG"; then
-    echo "sent: $MSG"
+  if send_one "$MSG"; then
+    [ "$DRY_RUN" -eq 1 ] || echo "sent: $MSG"
   else
     echo "SEND FAILED, will retry next run: $MSG" >&2
     FAILED=$((FAILED + 1))
   fi
 done <<< "$PENDING"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "dry run: sent nothing, wrote nothing ($COUNT message(s) withheld)"
+  exit 0
+fi
 
 # 3. Commit ONLY if every send landed. A partial commit is the one outcome that loses a receipt.
 if [ "$FAILED" -eq 0 ]; then

@@ -28,7 +28,17 @@ Type=oneshot
 # Every path the script reads is overridable, and the defaults match the deployed layout. Set them
 # here rather than editing the script, so the script stays identical to the tracked copy and the
 # drift gate's byte comparison keeps working.
+#
+# ZC_CHANNEL is the channel INSTANCE: `<type>.<alias>`, and the literal name of the config
+# section the recipient is read from. It is NOT what `--channel-id` receives; the script derives
+# that separately, because the two want different strings and feeding one variable to both is
+# what left every tick since 2026-08-06 failing on `Unknown channel 'whatsapp.shop'`.
 Environment=ZC_CHANNEL=whatsapp.shop
+#
+# ZC_CHANNEL_ID overrides the derived `--channel-id` for a host that takes a form the script did
+# not predict. Setting it disables the script's own retry, so it is an explicit operator choice
+# rather than a fallback. Leave it unset unless the run says otherwise.
+# Environment=ZC_CHANNEL_ID=whatsapp
 # Environment=ZC_BIN=%h/zeroclaw/target/release/zeroclaw
 # Environment=ZC_CONFIG=%h/.zeroclaw/config.toml
 # Environment=ZC_TOOLS=%h/.zeroclaw/agents/demo/workspace/tools

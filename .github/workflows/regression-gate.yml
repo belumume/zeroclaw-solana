@@ -201,6 +201,14 @@ jobs:
       - name: settlement confirmation logic
         run: python3 demo/test_confirm_settlements.py
 
+      # The announcer is the half of the settlement path that talks to the host binary, and it
+      # is where the two-values-one-variable defect lived: `$ZC_CHANNEL` fed both the config
+      # lookup and `--channel-id`, which want different strings. The box is not reachable from
+      # CI, so this drives the real script against a fixture config and a fake binary that
+      # records its own argv.
+      - name: the settlement announcer hands the binary an id it accepts
+        run: python3 deploy/test_announce_settlements.py
+
       - name: x402 earnings accounting
         run: python3 demo/test_x402_earnings.py
 

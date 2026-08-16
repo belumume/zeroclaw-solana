@@ -1,0 +1,697 @@
+#!/usr/bin/env python3
+"""Controls for deploy/announce_settlements.sh -- proves what id it hands the binary.
+
+WHY THIS EXISTS. `$ZC_CHANNEL` fed two different consumers that want two different strings:
+the config lookup wants the INSTANCE (`whatsapp.shop`, the literal `[channels.whatsapp.shop]`
+section header), and `--channel-id` wants an id the binary resolves. One of the two was always
+wrong. Measured on the box 2026-08-16, on every tick since 2026-08-06:
+
+    Error: Unknown channel 'whatsapp.shop'. Supported: telegram, discord, slack, ...
+    announced 0 of 4; ledger NOT committed so the rest re-announce
+
+Four genuine mainnet settlements had re-queued and none was ever announced. Nothing was lost,
+because the send-first/commit-after discipline held, and that is also why it stayed invisible.
+
+The box is not reachable from here, so every claim below is driven against a FIXTURE config and
+a FAKE binary that records its own argv. What that buys is the thing a green suite usually does
+not: the exact command the next box contact should expect, established before the contact.
+
+FOUR LAYERS, because a control on one proves nothing about the others.
+
+  1. RESOLUTION, through --dry-run: which instance, which type, which alias, which recipient,
+     which channel-id, and whether a retry id exists at all.
+  2. SEND, end to end with a fake binary, asserting on the ACTUAL argv it received and on
+     whether the ledger was committed.
+  3. REFUSAL. The incident's own stderr, verbatim, must fail loud and commit nothing -- and
+     must NOT broaden to a bare type that reaches a different account.
+  4. MUTATION CONTROLS. The retry gate, the once-only flag and the section anchor are each
+     disabled in a
+     copy of the script and the matching case is REQUIRED to flip. Each asserts its target
+     string is present in the source FIRST, so a control gone stale fails loudly instead of
+     certifying an unmodified script.
+
+No network, no python3 dependency in the child: the "python3" the script invokes is a shim in
+the test's own PATH that runs the fake confirmer.
+
+    python3 deploy/test_announce_settlements.py
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SCRIPT = HERE / "announce_settlements.sh"
+
+# The reserved synthetic JID for fixtures in this repo. It has to be this exact value: the
+# identifier gate allows it by exact match and flags any realistic-looking phone JID, rightly.
+# The decoy is a GROUP jid, which the same recipient pattern matches and which the identifier
+# gate clears by domain: a room id is not a phone number. A second synthetic phone JID would be
+# flagged, correctly, because only the all-zero one is reserved.
+FIXTURE_JID = "00000000000@s.whatsapp.net"
+DECOY_JID = "000000000000000000@g.us"
+
+# The box's own error, verbatim from the journal on 2026-08-16. Kept byte-faithful: a paraphrase
+# here cannot tell you that a change still handles the real thing.
+BOX_UNKNOWN_CHANNEL = (
+    "Error: Unknown channel 'whatsapp.shop'. Supported: telegram, discord, slack, "
+    "mattermost, signal, matrix, whatsapp, qq, lark, feishu, dingtalk, wecom, wecom_ws, "
+    "nextcloud_talk, wati, linq, email, gmail_push, git, irc, twitter, mochat, imessage, "
+    "line, voice-call"
+)
+
+SEND_LINE_A = (
+    "SEND: payment received: 0.39 USDC from EpzuUPXwMR2oWqL3MCUTjvvpfdrZXforkMt85ZCSowo3 "
+    "at 2026-08-06T23:01:43Z (signature "
+    "4WG7HYF6As2AeDnJzQjuwEjEYXQK9WQKzqipqafZAirJf164Y8MEmJUsVGCkhk5bRTG5KpnixHFVAcfBkAKkuMsD)"
+)
+SEND_LINE_B = (
+    "SEND: payment received: 1.5 USDC from EpzuUPXwMR2oWqL3MCUTjvvpfdrZXforkMt85ZCSowo3 "
+    "at 2026-08-07T09:12:04Z (signature "
+    "4VUbLWcE2dPPYAXQVtH2WhvgP33KrbUiX2ruA9PeyfKMU4k5iPgFSL3xkg8wLtjk8GumPYdyNR92haxgEasDstUh)"
+)
+
+SEND_LINE_C = (
+    "SEND: payment received: 12 USDC from EpzuUPXwMR2oWqL3MCUTjvvpfdrZXforkMt85ZCSowo3 "
+    "at 2026-08-07T15:44:20Z (signature "
+    "5Zk9RPAffYmo9zzgXZuGrHJ8bV9Y2rnbE3ZdsPiMqzjEDWVQN2dWieiPu1VpGUMX2d4SNBt4Quqs9ewHdk3eAvbm)"
+)
+
+# A line unique to the remedy block, used to COUNT it. Kept as a fragment of the real sentence
+# rather than a paraphrase, so rewording the remedy breaks the count rather than silently
+# measuring nothing.
+REMEDY_MARKER = "does not accept"
+RETRY_MARKER = "will retry next run"
+
+CHECKS = 0
+FAILS = 0
+
+
+def check(label: str, ok: bool, detail: object = "") -> None:
+    global CHECKS, FAILS
+    CHECKS += 1
+    if ok:
+        print(f"  PASS  {label}")
+    else:
+        FAILS += 1
+        print(f"  FAIL  {label}")
+        if detail:
+            print(f"        {detail}")
+
+
+# A config whose SHOP section is preceded by a decoy alias carrying a different JID. The
+# section lookup has to land on the right one; a loose pattern takes the decoy and the receipt
+# goes to a stranger.
+CONFIG_SHOP = f"""\
+[channels.whatsapp.other]
+allowed_groups = ["{DECOY_JID}"]
+
+[channels.whatsapp.shop]
+mode = "personal"
+session_path = "/tmp/wa"
+allowed_peers = ["{FIXTURE_JID}"]
+
+[channels.telegram.shop]
+enabled = true
+"""
+
+CONFIG_DEFAULT_ALIAS = f"""\
+[channels.whatsapp.default]
+mode = "personal"
+allowed_peers = ["{FIXTURE_JID}"]
+"""
+
+CONFIG_NO_PEER = """\
+[channels.whatsapp.shop]
+mode = "personal"
+"""
+
+# ---------------------------------------------------------------------------
+# Harness
+# ---------------------------------------------------------------------------
+
+FAKE_ACCEPT = """\
+#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$ZCLOG"
+echo "Message sent."
+exit 0
+"""
+
+# An OLD host: the channel builder is the only resolver, so any dotted id is unknown and the
+# failure happens while BUILDING, before any delivery.
+FAKE_OLD_HOST = """\
+#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$ZCLOG"
+id=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --channel-id) id="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case "$id" in
+  *.*) echo "Error: Unknown channel '$id'. Supported: telegram, discord, slack, mattermost, \
+signal, matrix, whatsapp, qq, lark, feishu, dingtalk, wecom, wecom_ws, nextcloud_talk, wati, \
+linq, email, gmail_push, git, irc, twitter, mochat, imessage, line, voice-call" >&2
+       exit 1 ;;
+esac
+echo "Message sent."
+exit 0
+"""
+
+# A DELIVERY failure. Shaped nothing like an unknown id, because it is not one: the channel was
+# built and the send attempt may have partially landed. Retrying this is how a receipt doubles.
+FAKE_DELIVERY_FAIL = """\
+#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$ZCLOG"
+echo "Error: Failed to send message via whatsapp.shop: connection reset by peer" >&2
+exit 1
+"""
+
+# The first send lands, the second does not. Proves the ledger stays uncommitted on a partial.
+FAKE_SECOND_FAILS = """\
+#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$ZCLOG"
+n=$(wc -l < "$ZCLOG")
+if [ "$n" -ge 2 ]; then
+  echo "Error: Failed to send message via whatsapp.shop: connection reset by peer" >&2
+  exit 1
+fi
+exit 0
+"""
+
+FAKE_CONFIRMER = """\
+#!/usr/bin/env bash
+dry=0
+for a in "$@"; do [ "$a" = "--dry-run" ] && dry=1; done
+if [ "$dry" -eq 1 ]; then
+  printf '%s\\n' "$SEND_LINES"
+  exit 0
+fi
+echo COMMITTED >> "$COMMITLOG"
+exit 0
+"""
+
+# The shim standing in for python3: the script invokes `python3 <confirmer> ...`, and the
+# confirmer here is a bash script, so this runs it with bash.
+PY_SHIM = """\
+#!/usr/bin/env bash
+script="$1"; shift
+exec bash "$script" "$@"
+"""
+
+
+def bash() -> str | None:
+    found = shutil.which("bash")
+    if found:
+        return found
+    for candidate in (
+        r"C:\Program Files\Git\bin\bash.exe",
+        "/bin/bash",
+        "/usr/bin/bash",
+    ):
+        if Path(candidate).exists():
+            return candidate
+    return None
+
+
+BASH = bash()
+
+
+class Box:
+    """A throwaway fixture box: fake binary, fake confirmer, fixture config."""
+
+    def __init__(
+        self, config: str, fake: str, send_lines: list[str], script: Path = SCRIPT
+    ):
+        self.dir = Path(tempfile.mkdtemp(prefix="announce-test-"))
+        self.script = script
+        self.bin = self.dir / "bin"
+        self.bin.mkdir()
+        self.zclog = self.dir / "zc-argv.log"
+        self.commitlog = self.dir / "committed.log"
+        self.config = self.dir / "config.toml"
+        self.config.write_text(config, encoding="utf-8")
+        self.zbin = self.dir / "zeroclaw"
+        self._write_exec(self.zbin, fake)
+        self.confirmer = self.dir / "tools" / "confirm_settlements.py"
+        self.confirmer.parent.mkdir()
+        self._write_exec(self.confirmer, FAKE_CONFIRMER)
+        self._write_exec(self.bin / "python3", PY_SHIM)
+        self.send_lines = "\n".join(send_lines)
+
+    @staticmethod
+    def _write_exec(path: Path, body: str) -> None:
+        path.write_text(body, encoding="utf-8", newline="\n")
+        path.chmod(0o755)
+
+    def run(self, *args: str, **overrides: str) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
+        env["PATH"] = str(self.bin) + os.pathsep + env.get("PATH", "")
+        env.update(
+            {
+                "ZC_BIN": str(self.zbin),
+                "ZC_CONFIG": str(self.config),
+                "ZC_TOOLS": str(self.confirmer.parent),
+                "ZC_LEDGER": str(self.dir / "ledger.jsonl"),
+                "ZC_CHANNEL": "whatsapp.shop",
+                "ZCLOG": str(self.zclog),
+                "COMMITLOG": str(self.commitlog),
+                "SEND_LINES": self.send_lines,
+            }
+        )
+        env.pop("ZC_RECIPIENT", None)
+        env.pop("ZC_CHANNEL_ID", None)
+        for key, value in overrides.items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
+        return subprocess.run(
+            [BASH, str(self.script), *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+        )
+
+    def sends(self) -> list[str]:
+        if not self.zclog.exists():
+            return []
+        return [
+            ln
+            for ln in self.zclog.read_text(encoding="utf-8").splitlines()
+            if ln.strip()
+        ]
+
+    def committed(self) -> bool:
+        return self.commitlog.exists()
+
+    def cleanup(self) -> None:
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def mutated_script(anchor: str, replacement: str) -> Path:
+    """A copy of the script with one line replaced, asserting the anchor was really there."""
+    src = SCRIPT.read_text(encoding="utf-8")
+    if anchor not in src:
+        raise AssertionError(
+            f"mutation anchor is stale, not found in source: {anchor!r}"
+        )
+    path = Path(tempfile.mkdtemp(prefix="announce-mutant-")) / "announce_settlements.sh"
+    path.write_text(src.replace(anchor, replacement, 1), encoding="utf-8", newline="\n")
+    path.chmod(0o755)
+    return path
+
+
+# ---------------------------------------------------------------------------
+# 1. RESOLUTION
+# ---------------------------------------------------------------------------
+
+
+def test_resolution() -> None:
+    print(
+        "\n1. RESOLUTION -- the two values are separated and each gets the right string"
+    )
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        r = box.run("--dry-run")
+        out = r.stdout
+        check("dry run exits 0", r.returncode == 0, r.stderr)
+        check("instance is the config section", "ZC_CHANNEL=whatsapp.shop" in out, out)
+        check("type is derived as whatsapp", "type        whatsapp" in out, out)
+        check("alias is derived as shop", "alias       shop" in out, out)
+        check(
+            "recipient comes from the SHOP section",
+            f"recipient   {FIXTURE_JID}" in out,
+            out,
+        )
+        check(
+            "the decoy alias's JID is NOT taken",
+            DECOY_JID not in out,
+            out,
+        )
+        check(
+            "channel-id is the instance, tried first",
+            "channel-id    whatsapp.shop" in out,
+            out,
+        )
+        check(
+            "alias 'shop' has NO bare-type retry",
+            "retry-as    none" in out,
+            out,
+        )
+        check("dry run sent nothing", box.sends() == [], box.sends())
+        check("dry run committed nothing", not box.committed())
+        check(
+            "dry run prints the exact command the box will run",
+            "would run:" in out
+            and "channel send --channel-id whatsapp.shop --recipient" in out,
+            out,
+        )
+    finally:
+        box.cleanup()
+
+    box = Box(CONFIG_DEFAULT_ALIAS, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        r = box.run("--dry-run", ZC_CHANNEL="whatsapp.default")
+        check(
+            "alias 'default' DOES get a bare-type retry",
+            "retry-as    whatsapp" in r.stdout,
+            r.stdout,
+        )
+    finally:
+        box.cleanup()
+
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        r = box.run("--dry-run", ZC_CHANNEL="whatsapp")
+        check("a ZC_CHANNEL with no alias exits 2", r.returncode == 2, r.stderr)
+        check(
+            "and says what shape it wanted",
+            "<type>.<alias>" in r.stderr,
+            r.stderr,
+        )
+    finally:
+        box.cleanup()
+
+    box = Box(CONFIG_NO_PEER, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        r = box.run("--dry-run")
+        check("an unresolvable recipient exits 2, never 0", r.returncode == 2, r.stderr)
+        check(
+            "and names the section it looked in",
+            "[channels.whatsapp.shop]" in r.stderr,
+            r.stderr,
+        )
+    finally:
+        box.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# 2. SEND
+# ---------------------------------------------------------------------------
+
+
+def test_send() -> None:
+    print("\n2. SEND -- the argv the binary actually receives")
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A, SEND_LINE_B])
+    try:
+        r = box.run()
+        check("exits 0 when every send lands", r.returncode == 0, r.stderr)
+        check("one invocation per pending payment", len(box.sends()) == 2, box.sends())
+        check(
+            "channel send carries --channel-id whatsapp.shop",
+            all("--channel-id whatsapp.shop" in s for s in box.sends()),
+            box.sends(),
+        )
+        check(
+            "and --recipient from the shop allowlist",
+            all(f"--recipient {FIXTURE_JID}" in s for s in box.sends()),
+            box.sends(),
+        )
+        check(
+            "the message is the confirmer's line with SEND: stripped",
+            "payment received: 0.39 USDC" in box.sends()[0]
+            and "SEND: payment" not in box.sends()[0],
+            box.sends()[0],
+        )
+        check("the ledger is committed", box.committed())
+    finally:
+        box.cleanup()
+
+    box = Box(CONFIG_SHOP, FAKE_SECOND_FAILS, [SEND_LINE_A, SEND_LINE_B])
+    try:
+        r = box.run()
+        check("a partial run exits 1", r.returncode == 1, r.stdout)
+        check("a partial run does NOT commit the ledger", not box.committed())
+        check(
+            "and says the rest re-announce",
+            "ledger NOT committed" in r.stderr,
+            r.stderr,
+        )
+    finally:
+        box.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# 3. REFUSAL -- the incident, and the boundary of the retry
+# ---------------------------------------------------------------------------
+
+
+def test_refusal() -> None:
+    print("\n3. REFUSAL -- the box's own failure, and what must NOT be broadened")
+
+    # THE INCIDENT. An old host, alias 'shop'. The dotted id is refused, the bare type would
+    # reach `[channels.whatsapp.default]` which is a DIFFERENT account, so nothing is sent.
+    box = Box(CONFIG_SHOP, FAKE_OLD_HOST, [SEND_LINE_A])
+    try:
+        r = box.run()
+        check("an old host fails loud rather than 0", r.returncode == 1, r.stdout)
+        check("nothing is committed", not box.committed())
+        check(
+            "exactly ONE invocation: no bare-type broadening for alias 'shop'",
+            len(box.sends()) == 1,
+            box.sends(),
+        )
+        check(
+            "the one invocation used the instance id",
+            "--channel-id whatsapp.shop" in box.sends()[0],
+            box.sends(),
+        )
+        check(
+            "the host's own error is surfaced, not swallowed",
+            "Unknown channel 'whatsapp.shop'" in r.stderr,
+            r.stderr,
+        )
+        check(
+            "the diagnosis names the upgrade remedy",
+            "resolves <type>.<alias>" in r.stderr,
+            r.stderr,
+        )
+        check(
+            "the diagnosis names the ZC_CHANNEL_ID remedy",
+            "ZC_CHANNEL_ID" in r.stderr,
+            r.stderr,
+        )
+        check(
+            "and says the receipts re-announce",
+            "re-announce" in r.stderr,
+            r.stderr,
+        )
+    finally:
+        box.cleanup()
+
+    # THE INCIDENT AT ITS REAL WIDTH. Four settlements were stuck, not one, and every refusal
+    # case above uses a single message, so multi-message refusal went unexercised and a remedy
+    # block emitted once PER MESSAGE read as correct. The run-level diagnosis must appear once
+    # while the per-payment record must appear once per payment: the first says why the run
+    # failed, the second says which money is still owed, and collapsing either loses something.
+    box = Box(CONFIG_SHOP, FAKE_OLD_HOST, [SEND_LINE_A, SEND_LINE_B, SEND_LINE_C])
+    try:
+        r = box.run()
+        remedies = r.stderr.count(REMEDY_MARKER)
+        host_errors = r.stderr.count("Unknown channel 'whatsapp.shop'")
+        retries = r.stderr.count(RETRY_MARKER)
+        check("three pending, still exits 1", r.returncode == 1, r.stdout)
+        check("three pending, still commits nothing", not box.committed())
+        check(
+            "one invocation per payment, none broadened",
+            len(box.sends()) == 3
+            and all("--channel-id whatsapp.shop" in s for s in box.sends()),
+            box.sends(),
+        )
+        check(
+            f"the remedy block appears EXACTLY ONCE across 3 messages (got {remedies})",
+            remedies == 1,
+            r.stderr,
+        )
+        check(
+            f"the host's error is quoted once, not per message (got {host_errors})",
+            host_errors == 1,
+            r.stderr,
+        )
+        check(
+            f"the per-payment retry line appears ONCE PER MESSAGE (got {retries} of 3)",
+            retries == 3,
+            r.stderr,
+        )
+        check(
+            "and each payment is named in its own retry line",
+            all(
+                f"{RETRY_MARKER}: {line[len('SEND: ') :]}" in r.stderr
+                for line in (SEND_LINE_A, SEND_LINE_B, SEND_LINE_C)
+            ),
+            r.stderr,
+        )
+    finally:
+        box.cleanup()
+
+    # OVER-CORRECTION CONTROL. The same old host with alias 'default': the bare type IS the same
+    # destination there, so the retry must fire and the run must succeed.
+    box = Box(CONFIG_DEFAULT_ALIAS, FAKE_OLD_HOST, [SEND_LINE_A])
+    try:
+        r = box.run(ZC_CHANNEL="whatsapp.default")
+        check("alias 'default' on an old host succeeds", r.returncode == 0, r.stderr)
+        check("it took two invocations", len(box.sends()) == 2, box.sends())
+        check(
+            "the retry used the bare type",
+            "--channel-id whatsapp " in box.sends()[1] + " ",
+            box.sends(),
+        )
+        check("the ledger is committed", box.committed())
+    finally:
+        box.cleanup()
+
+    # A DELIVERY failure is NOT retried. This is the control that keeps the retry from becoming
+    # a general retry, which would double-send a receipt the customer already got.
+    box = Box(CONFIG_DEFAULT_ALIAS, FAKE_DELIVERY_FAIL, [SEND_LINE_A])
+    try:
+        r = box.run(ZC_CHANNEL="whatsapp.default")
+        check("a delivery failure exits 1", r.returncode == 1, r.stdout)
+        check(
+            "a delivery failure is sent ONCE, never retried",
+            len(box.sends()) == 1,
+            box.sends(),
+        )
+        check("and commits nothing", not box.committed())
+    finally:
+        box.cleanup()
+
+    # An explicit id is honoured and gets no retry behind the operator's back.
+    box = Box(CONFIG_SHOP, FAKE_OLD_HOST, [SEND_LINE_A])
+    try:
+        r = box.run(ZC_CHANNEL_ID="whatsapp")
+        check("ZC_CHANNEL_ID overrides the derived id", r.returncode == 0, r.stderr)
+        check(
+            "and is the id actually sent",
+            len(box.sends()) == 1 and "--channel-id whatsapp " in box.sends()[0] + " ",
+            box.sends(),
+        )
+        check(
+            "while the recipient still comes from the shop section",
+            f"--recipient {FIXTURE_JID}" in box.sends()[0],
+            box.sends(),
+        )
+    finally:
+        box.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# 4. MUTATION CONTROLS
+# ---------------------------------------------------------------------------
+
+
+def test_mutations() -> None:
+    print("\n4. MUTATION CONTROLS -- each guard is load-bearing")
+
+    # Disable the Unknown-channel gate so ANY failure retries. The delivery-failure case must
+    # then double-send, which is exactly the harm the gate prevents.
+    mutant = mutated_script(
+        """    *"Unknown channel '$CHANNEL_ID'"*) ;;""",
+        """    *) ;;""",
+    )
+    box = Box(CONFIG_DEFAULT_ALIAS, FAKE_DELIVERY_FAIL, [SEND_LINE_A], script=mutant)
+    try:
+        box.run(ZC_CHANNEL="whatsapp.default")
+        check(
+            "removing the Unknown-channel gate DOES double-send (gate is real)",
+            len(box.sends()) == 2,
+            box.sends(),
+        )
+    finally:
+        box.cleanup()
+        shutil.rmtree(mutant.parent, ignore_errors=True)
+
+    # Disable the alias=default condition so any alias retries as a bare type. The incident case
+    # must then broaden to `whatsapp`, which is the wrong-account send this refuses to make.
+    mutant = mutated_script(
+        """  if [ "$CHANNEL_ALIAS" = "default" ]; then""",
+        """  if true; then""",
+    )
+    box = Box(CONFIG_SHOP, FAKE_OLD_HOST, [SEND_LINE_A], script=mutant)
+    try:
+        box.run()
+        sends = box.sends()
+        check(
+            "removing the alias gate DOES broaden to the bare type (gate is real)",
+            len(sends) == 2 and "--channel-id whatsapp " in sends[1] + " ",
+            sends,
+        )
+    finally:
+        box.cleanup()
+        shutil.rmtree(mutant.parent, ignore_errors=True)
+
+    # Disable the once-only flag so the remedy is emitted per message again. Three pending
+    # messages must then produce three remedy blocks. This is the control for the drift the
+    # review caught: the comment claimed once while the code emitted per message, and every
+    # refusal case used a single message, so nothing could tell the two apart.
+    mutant = mutated_script(
+        """  [ "$UNSUPPORTED_TOLD" -eq 0 ] || return 0""",
+        """  : """,
+    )
+    box = Box(
+        CONFIG_SHOP,
+        FAKE_OLD_HOST,
+        [SEND_LINE_A, SEND_LINE_B, SEND_LINE_C],
+        script=mutant,
+    )
+    try:
+        r = box.run()
+        remedies = r.stderr.count(REMEDY_MARKER)
+        check(
+            f"removing the once-only flag DOES repeat the remedy (got {remedies} of 3)",
+            remedies == 3,
+            r.stderr,
+        )
+        check(
+            "while the per-payment line was already once per message",
+            r.stderr.count(RETRY_MARKER) == 3,
+            r.stderr,
+        )
+    finally:
+        box.cleanup()
+        shutil.rmtree(mutant.parent, ignore_errors=True)
+
+    # Loosen the section pattern back to unescaped dots AND drop the anchor, so a neighbouring
+    # alias can be matched. The decoy JID must then win, which is why the section is anchored.
+    mutant = mutated_script(
+        """/^\\[channels\\.${SECTION_RE}\\]/,/^\\[/p""",
+        """/channels/,/^\\[zzz/p""",
+    )
+    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A], script=mutant)
+    try:
+        r = box.run("--dry-run")
+        check(
+            "loosening the section pattern DOES take the decoy alias (anchor is real)",
+            DECOY_JID in r.stdout,
+            r.stdout,
+        )
+    finally:
+        box.cleanup()
+        shutil.rmtree(mutant.parent, ignore_errors=True)
+
+
+def main() -> int:
+    if BASH is None:
+        print("FAIL  no bash on PATH; this suite drives a shell script and cannot run")
+        return 1
+    if not SCRIPT.exists():
+        print(f"FAIL  {SCRIPT} is missing")
+        return 1
+    print(f"bash: {BASH}")
+    test_resolution()
+    test_send()
+    test_refusal()
+    test_mutations()
+    print(f"\n{CHECKS - FAILS}/{CHECKS} checks passed")
+    return 1 if FAILS else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
