@@ -99,6 +99,70 @@ def same(a: pathlib.Path, b: pathlib.Path) -> bool:
     return False
 
 
+def _norm(b: bytes) -> bytes:
+    return b.replace(b"\r\n", b"\n")
+
+
+def other_is_behind(rel: str) -> bool:
+    """True when the other root's content is one of THIS root's OWN earlier versions.
+
+    WHY THIS EXISTS, and it is not a loosening. Two working roots on two live branches differ on
+    a must-match path for two reasons that look identical byte-for-byte and have opposite
+    remedies. Real DRIFT means someone changed one root and not the other and the difference will
+    persist; that is what this gate is for. BEHIND means this root is simply ahead on an unmerged
+    branch, which is the normal state of every branch that touches `.github/workflows/` or
+    `scripts/check-*`, and there the implied remedy is actively harmful: syncing would copy
+    unmerged, unreviewed CI into the other root.
+
+    Without this, the gate was RED BY CONSTRUCTION for the whole life of such a branch, which is
+    the failure mode where a check gets learned around and then ignored when it is finally right.
+
+    The discriminator is exact rather than heuristic: if the other root's bytes equal some commit
+    of ours for that same path, that content came from here and they are behind. If it appears
+    nowhere in our history, the two genuinely diverged and the gate still fails.
+
+    Line endings are normalised for the same reason `same()` normalises them: under
+    `core.autocrlf` our stored blob is LF and their checkout is CRLF, so a raw hash comparison
+    would report every CRLF file as diverged and defeat the whole check.
+
+    `git ls-tree` plus `git cat-file blob` is used rather than the `<rev>:<path>` colon form,
+    which MSYS mangles when the rev contains a slash and the path begins with a dot, exactly the
+    shape of `.github/workflows/ci.yml`.
+    """
+    try:
+        target = _norm((OTHER / rel).read_bytes())
+    except OSError:
+        return False
+    try:
+        revs = subprocess.run(
+            ["git", "-C", str(ROOT), "rev-list", "--all", "--max-count=200", "--", rel],
+            capture_output=True,
+            check=True,
+        ).stdout.split()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+    seen: set[bytes] = set()
+    for rev in revs:
+        entry = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-tree", rev.decode(), "--", rel],
+            capture_output=True,
+        ).stdout.split()
+        if len(entry) < 3:
+            continue
+        blob = entry[2]
+        if blob in seen:
+            continue
+        seen.add(blob)
+        got = subprocess.run(
+            ["git", "-C", str(ROOT), "cat-file", "blob", blob.decode()],
+            capture_output=True,
+        )
+        if got.returncode == 0 and _norm(got.stdout) == target:
+            return True
+    return False
+
+
 def main() -> int:
     if not (OTHER / ".git").exists():
         print(
@@ -133,8 +197,10 @@ def main() -> int:
         except Exception as exc:
             unreadable.append(f"{rel} ({type(exc).__name__})")
 
-    blocking = [r for r in diverged if r.startswith(MUST_MATCH)]
-    informational = [r for r in diverged if r not in blocking]
+    must_match = [r for r in diverged if r.startswith(MUST_MATCH)]
+    behind = [r for r in must_match if other_is_behind(r)]
+    blocking = [r for r in must_match if r not in behind]
+    informational = [r for r in diverged if r not in must_match]
 
     print(
         f"  {len(shared)} shared path(s) compared, {len(diverged)} diverge "
@@ -142,6 +208,19 @@ def main() -> int:
     )
     if unreadable:
         print(f"  {len(unreadable)} could not be read: {', '.join(unreadable[:4])}")
+
+    if behind:
+        print(
+            f"  INFO  {len(behind)} must-match path(s) where THIS root is ahead and the other"
+        )
+        print(
+            "        root's content is one of our own earlier versions. That is an unmerged"
+        )
+        print(
+            "        branch, not drift, and it syncs when the branch merges. Not gating:"
+        )
+        for r in behind:
+            print(f"          {r}")
 
     if informational:
         print(

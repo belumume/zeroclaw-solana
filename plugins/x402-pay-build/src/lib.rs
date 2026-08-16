@@ -27,11 +27,13 @@
 #![deny(unsafe_code)]
 
 pub mod args;
+#[cfg(target_family = "wasm")]
+mod component;
 pub mod compose;
 pub mod pay;
 pub mod resolve;
 
 pub use args::{parse as parse_args, ChallengeSource, ParsedArgs};
-pub use compose::{atomic_to_ui, compose, SpendArgs};
+pub use compose::{atomic_to_ui, compose, render_summary, SpendArgs};
 pub use pay::{authorise, AuthorisedPayment, Challenge, PayConfig, PriceExtra, PriceOption};
 pub use resolve::mint_decimals;

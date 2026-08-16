@@ -71,32 +71,6 @@ jobs:
       - name: The x402 certifier has a caller, and the caller works
         run: python3 scripts/pay_x402_certified.py --self-test
 
-  x402-pay-build:
-    name: x402-pay-build (the buy plugin's pure core)
-    runs-on: ubuntu-latest
-    # Built here rather than in the plugin matrix below because it is not a wasm component YET:
-    # its authorisation core is written and host-tested, and its transaction builder and component
-    # shim are not. A crate that ships nothing still has to COMPILE, and this repo already learned
-    # what happens otherwise, when a reproduce harness sat broken for 21 days while a formatter
-    # swept it every run and reported success. Formatting is not compiling.
-    #
-    # It moves to the plugin matrix, and to the supply-chain matrix that gates what ships, when the
-    # component lands.
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: plugins/x402-pay-build
-
-      - name: Host tests
-        working-directory: plugins/x402-pay-build
-        run: cargo test --locked
-
-      - name: Clippy, warnings are errors
-        working-directory: plugins/x402-pay-build
-        run: cargo clippy --all-targets --locked -- -D warnings
-
   fmt:
     name: rustfmt, every tracked crate
     runs-on: ubuntu-latest
@@ -678,6 +652,7 @@ jobs:
           - plugins/solana-pay-request
           - plugins/spl-transfer-build
           - plugins/token-risk-check
+          - plugins/x402-pay-build
           - x402-feed-gate
     steps:
       - uses: actions/checkout@v4
@@ -703,6 +678,7 @@ jobs:
           - solana-pay-request
           - spl-transfer-build
           - token-risk-check
+          - x402-pay-build
     steps:
       - uses: actions/checkout@v4
 
