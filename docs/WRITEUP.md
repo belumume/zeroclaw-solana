@@ -721,20 +721,15 @@ Driven three ways on 2026-08-16: an order whose link asks a cent too little is r
 link and states `R$ 100 at 5.2236 (BCB PTAX, corroborated by ECB within 0.91%, 2026-08-14)`; and
 July's 5.0825 supplied as a cross-check is refused at 2.70% apart, over the 2.50% band.
 
-The order VALUE is now bound to the words it came from. `--brl` is refused unless it equals a figure
-marked in reais in `--quote`, the verbatim customer message, or the sum of the distinct figures
-there. The currency marker is what does the work: a bare-number reader would take 4, 42 and 2 out of
-`Mesa 4 - Pedido #42, 2 pizzas, R$ 60` and license almost any small integer. Ambiguous separators
-refuse rather than guess, and `--brl` without `--quote` refuses, because a binding you can skip by
-omitting a flag is not a binding.
+Two details of that binding are worth stating because they are where a weaker version would leak.
+An ambiguous separator refuses rather than guesses, since `R$ 1.200` is a 1000x difference that sits
+inside the band either way. And `--brl` without `--quote` refuses outright, because a binding you
+can skip by omitting a flag is not a binding.
 
-What this does not close, stated rather than implied: the agent supplies the quote, so a fabricated
-one passes. The gain is that a silent numeric substitution becomes a fabricated customer utterance,
-echoed to the operator and falsifiable against a channel transcript the model does not write. That
-is evidence, not proof. Closing it fully still needs a price source the model cannot author: a
-priced SKU table, an order id resolved against a store, or a merchant confirmation certifying the
-serialized bytes. The shop on the node has not picked this up yet, so the enforcement is in the repo
-and the deploy is what remains.
+Closing it the rest of the way needs a price source the model cannot author: a priced SKU table, an
+order id resolved against a store, or a merchant confirmation certifying the serialized bytes. The
+shop on the node has not picked this change up yet, so the enforcement is in the repo and the deploy
+is what remains.
 
 ## What we turned down, and why
 
