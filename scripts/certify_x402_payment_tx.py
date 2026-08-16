@@ -600,6 +600,27 @@ def certify_x402_payment_tx(
     # for every authority in the instruction.
     if not spend["signer"][A_DELEGATEE]:
         raise CertificationError("the delegatee slot is not marked as a signer")
+
+    # THE NONCE'S AUTHORITY, not just its address. AdvanceNonceAccount takes
+    # [nonce(w), recent_blockhashes, authority(signer)], and pinning only the nonce leaves the
+    # AUTHORITY free. A transaction pairing this delegatee's spend with an advance authorised by
+    # someone else certifies, then needs a second signature the host will not produce, so it fails
+    # safe at the validator rather than misdirecting funds. It is still a transaction this gate
+    # should never have called the operator's own.
+    for k, ix in enumerate(ixs):
+        if ix["program"] != SYSTEM_PROGRAM:
+            continue
+        if len(ix["accounts"]) < 3:
+            raise CertificationError(
+                f"ix{k} advances a nonce with {len(ix['accounts'])} accounts; "
+                f"AdvanceNonceAccount takes three"
+            )
+        if ix["accounts"][2] != at(A_DELEGATEE):
+            raise CertificationError(
+                f"ix{k} advances a nonce authorised by "
+                f"{b58encode(ix['accounts'][2])}, not the delegatee "
+                f"{b58encode(at(A_DELEGATEE))}, so this needs a signature the host cannot give"
+            )
     for slot in (A_DELEGATION, A_DELEGATOR_ATA, A_RECEIVER_ATA):
         if not spend["writable"][slot]:
             raise CertificationError(f"{ACCT_NAMES[slot]} is not marked writable")
@@ -680,6 +701,12 @@ REAL_DELEGATION = "HVVeimGq8VD4CuBgrvqWsgQV1GRVhfVNYQxJxTocUNY9"
 REAL_RECEIVER_ATA = "98LLx6QvLcspjhCgRZa16TkCPBHSgDmvkqwyRtnb7d2o"
 REAL_DELEGATOR_ATA = "EpzuUPXwMR2oWqL3MCUTjvvpfdrZXforkMt85ZCSowo3"
 REAL_NONCE = "6Zwppsr7ZFVinp4rFYcqjXKQ1jsvXpzFPFVVLpxLZUKm"
+# The delegatee of the captured transfers, which is the account marked as a signer at slot 6 and
+# therefore the only key the host can produce a signature for.
+DELEGATEE = "9dy9XpFcEzqYSJMYKN8KskDadtuuCDfHFEW51AGxicVJ"
+# SysvarRecentB1ockHashes11111111111111111111, the middle account of AdvanceNonceAccount.
+SYSVAR_RECENT_BLOCKHASHES = b58decode("SysvarRecentB1ockHashes11111111111111111111")
+ADVANCE_ACCTS = [b58decode(REAL_NONCE), SYSVAR_RECENT_BLOCKHASHES, b58decode(DELEGATEE)]
 
 
 def _load_real() -> dict[str, bytes]:
@@ -1099,11 +1126,31 @@ def _self_test() -> int:  # noqa: PLR0915 - a flat list of cases reads better th
         "a System instruction with no nonce configured is refused even if it IS an advance",
         _rebuild(
             real["within_cap"],
-            append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, [b58decode(REAL_NONCE)]),
+            append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, ADVANCE_ACCTS),
         ),
     )
     certifies(
         "a real nonce advance certifies when that nonce is configured",
+        _rebuild(
+            real["within_cap"],
+            append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, ADVANCE_ACCTS),
+        ),
+        nonce_b58=REAL_NONCE,
+    )
+    refuses(
+        "a nonce advance authorised by someone other than the delegatee is refused",
+        _rebuild(
+            real["within_cap"],
+            append(
+                SYSTEM_PROGRAM,
+                SYS_ADVANCE_NONCE,
+                [b58decode(REAL_NONCE), SYSVAR_RECENT_BLOCKHASHES, b58decode(MERCHANT)],
+            ),
+        ),
+        nonce_b58=REAL_NONCE,
+    )
+    refuses(
+        "a nonce advance with too few accounts to name an authority is refused",
         _rebuild(
             real["within_cap"],
             append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, [b58decode(REAL_NONCE)]),
@@ -1114,7 +1161,15 @@ def _self_test() -> int:  # noqa: PLR0915 - a flat list of cases reads better th
         "a nonce advance on a DIFFERENT account is refused",
         _rebuild(
             real["within_cap"],
-            append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, [b58decode(REAL_RECEIVER_ATA)]),
+            append(
+                SYSTEM_PROGRAM,
+                SYS_ADVANCE_NONCE,
+                [
+                    b58decode(REAL_RECEIVER_ATA),
+                    SYSVAR_RECENT_BLOCKHASHES,
+                    b58decode(DELEGATEE),
+                ],
+            ),
         ),
         nonce_b58=REAL_NONCE,
     )
@@ -1128,9 +1183,9 @@ def _self_test() -> int:  # noqa: PLR0915 - a flat list of cases reads better th
         _rebuild(
             _rebuild(
                 real["within_cap"],
-                append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, [b58decode(REAL_NONCE)]),
+                append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, ADVANCE_ACCTS),
             ),
-            append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, [b58decode(REAL_NONCE)]),
+            append(SYSTEM_PROGRAM, SYS_ADVANCE_NONCE, ADVANCE_ACCTS),
         ),
         nonce_b58=REAL_NONCE,
     )
@@ -1172,14 +1227,9 @@ def _self_test() -> int:  # noqa: PLR0915 - a flat list of cases reads better th
     # Same shape as the SOL transfer, but pointed AT the configured nonce account, so only the
     # data check can catch it. Without this case that check and the identity check are one.
     refuses(
-        "a System instruction on the RIGHT nonce account with the wrong data is refused",
+        "a System instruction on the RIGHT nonce with the RIGHT authority and wrong data is refused",
         _rebuild(
-            real["within_cap"],
-            append(
-                SYSTEM_PROGRAM,
-                sol_transfer,
-                [b58decode(REAL_NONCE), b58decode(MERCHANT)],
-            ),
+            real["within_cap"], append(SYSTEM_PROGRAM, sol_transfer, ADVANCE_ACCTS)
         ),
         nonce_b58=REAL_NONCE,
     )

@@ -73,6 +73,28 @@ def load_config(args: argparse.Namespace) -> dict:
     return cfg
 
 
+def splice_signature(raw: bytes, sig: bytes) -> bytes:
+    """Put `sig` in signature slot 0, refusing any transaction that needs more than one.
+
+    Separated from the signing itself so the byte surgery is testable with no key and no crypto
+    library. It is also where the one assumption the signing path makes gets enforced: the host
+    holds one key, so a transaction whose header demands two signatures would go out with a
+    zero-filled slot and be rejected on chain for a reason nobody would trace back to here.
+    """
+    if len(sig) != 64:
+        raise CertificationError(f"an ed25519 signature is 64 bytes, got {len(sig)}")
+    if not raw:
+        raise CertificationError("empty transaction")
+    if raw[0] != 1:
+        raise CertificationError(
+            f"this transaction declares {raw[0]} required signature(s); the host holds one key, "
+            f"so signing it here would leave a slot empty and the chain would reject it"
+        )
+    out = bytearray(raw)
+    out[1:65] = sig
+    return bytes(out)
+
+
 def certify(raw: bytes, cfg: dict) -> dict:
     mint = cfg.pop("expected_mint_b58", None)
     receiver = cfg.pop("expected_receiver_b58", None)
@@ -143,6 +165,45 @@ def _self_test() -> int:
             print(f"PASS  a missing {name} is refused")
             passed += 1
 
+    # THE SIGNING SPLICE, which certification alone never exercises. A dummy signature is enough:
+    # what is under test is where the bytes land and what is refused, not ed25519 itself.
+    #
+    # The captured transfer declares TWO required signatures, because the delegator paid the fee
+    # there and the delegatee signed the spend. The plugin's shape is different: the agent is both
+    # fee payer and sole signer, so nsigs is 1. That two-signature transaction is therefore the
+    # honest refusal fixture below, and this is the one-signature carrier of the same message.
+    dummy = bytes(range(64))
+    one_sig = bytes([1]) + bytes(64) + raw[1 + raw[0] * 64 :]
+    signed = splice_signature(one_sig, dummy)
+    raw, two_sig = one_sig, bytes([2]) + bytes(128) + raw[1 + raw[0] * 64 :]
+    for name, ok in (
+        ("the signature lands in slot 0", signed[1:65] == dummy),
+        ("nothing else in the transaction moves", signed[65:] == raw[65:]),
+        ("the length is unchanged", len(signed) == len(raw)),
+        (
+            "the signed message is the certified message",
+            signed[1 + signed[0] * 64 :] == raw[1 + raw[0] * 64 :],
+        ),
+    ):
+        print(f"{'PASS' if ok else 'FAIL'}  {name}")
+        passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+
+    for name, tx, sig in (
+        (
+            "a transaction needing two signatures is refused",
+            two_sig,
+            dummy,
+        ),
+        ("a signature of the wrong length is refused", raw, b"short"),
+    ):
+        try:
+            splice_signature(tx, sig)
+            print(f"FAIL  {name} (spliced)")
+            failed += 1
+        except CertificationError as e:
+            print(f"PASS  {name} ({str(e)[:56]})")
+            passed += 1
+
     print(f"\nRESULT: {passed} passed, {failed} failed, {passed + failed} total")
     return 0 if failed == 0 else 1
 
@@ -207,14 +268,16 @@ def main() -> int:
 
     secret = json.loads(Path(args.sign).read_text(encoding="utf-8"))
     key = Ed25519PrivateKey.from_private_bytes(bytes(secret[:32]))
-    nsigs = raw[0]
-    message = raw[1 + nsigs * 64 :]
-    signed = bytearray(raw)
-    signed[1 : 1 + 64] = key.sign(message)
+    message = raw[1 + raw[0] * 64 :]
+    try:
+        signed = splice_signature(raw, key.sign(message))
+    except CertificationError as e:
+        print(f"REFUSED before signing: {e}", file=sys.stderr)
+        return 2
 
     if not args.broadcast:
         print("\nSigned, NOT submitted. Add --broadcast to send it.")
-        print(base64.b64encode(bytes(signed)).decode())
+        print(base64.b64encode(signed).decode())
         return 0
 
     import urllib.request
@@ -225,7 +288,7 @@ def main() -> int:
             "id": 1,
             "method": "sendTransaction",
             "params": [
-                base64.b64encode(bytes(signed)).decode(),
+                base64.b64encode(signed).decode(),
                 {"encoding": "base64"},
             ],
         }
