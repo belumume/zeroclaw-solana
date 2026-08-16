@@ -46,6 +46,20 @@
       "include": "**",
       "flatten": false,
       "why": "The agent workspace copy. SOPs also live in two places, and the evening-reconciliation read path stayed open for two hours after the skill write path was closed because only one copy was corrected."
+    },
+    {
+      "src": "deploy",
+      "dst": "bin",
+      "include": "announce_settlements.sh",
+      "flatten": true,
+      "why": "The deterministic settlement announcer, and the literal ExecStart target of zc-announce.service (`%h/.zeroclaw/bin/announce_settlements.sh`). It exists to REPLACE the prose SOP whose reporting step let a model compose settlement fields: on 2026-08-06 that produced four fabricated ledger rows, two with a literal ellipsis where an 88-char signature belongs and two sharing one signature across different orders and amounts, none of which matched any of the merchant ATA's twelve lifetime signatures. The unit was written and this file never carried the script, so the deployer could not place it and the checker could not miss it, and a unit whose ExecStart does not exist fails 203/EXEC every tick while the prose path stays the only thing that would run. That is the whole defect class this map exists to close, landing on the one path that touches money."
+    },
+    {
+      "src": "demo",
+      "dst": "agents/demo/workspace/tools",
+      "include": "confirm_settlements.py",
+      "flatten": true,
+      "why": "The confirmer the announcer shells out to, and the thing that actually derives every announced field from the chain rather than from model prose. announce_settlements.sh resolves it at $ZC_TOOLS/confirm_settlements.py and exits 2 without it, so its absence degrades the deterministic path to a no-op that still exits non-zero. Scoped to the one filename because demo/ also tracks test_confirm_settlements.py, which has no business in a jailed agent workspace."
     }
   ],
 
@@ -69,6 +83,10 @@
     {
       "unit": "x402-tunnel.service",
       "why": "The Cloudflare tunnel that makes the gate reachable. The gate being alive behind a dead tunnel looks identical to the gate being down."
+    },
+    {
+      "unit": "zc-announce.timer",
+      "why": "Schedules the deterministic settlement announcer. Listed here because a replacement nobody schedules does not replace anything: the prose SOP it supersedes is still installable, and the only thing separating the two is which one a timer drives. Expect this to read MISSING on its first run if the unit was never installed, which is the point -- an absent timer is currently indistinguishable from a running one, and that is exactly the state in which a fabricated confirmation would reach a customer."
     }
   ],
 
