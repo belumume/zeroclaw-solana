@@ -219,6 +219,74 @@ def main():
         expect_in="rogue_unicode",
     )
 
+    # ---------------------------------------------------------------- announced frames
+    # One must-fire per phrase, because a three-alternative pattern can be broken for two of its
+    # branches while the third keeps the suite green. Each planted line is checked for the gate
+    # naming the FILE as well as the check, since the finding is useless without the location.
+    for n, phrase in (
+        ("18", "said plainly"),
+        ("19", "the interesting part"),
+        ("20", "what matters here"),
+    ):
+        case(
+            f"{n} planted {phrase!r} fires and names the file",
+            {
+                "README.md": "# Title\n\nOrdinary prose.\n",
+                "docs/PLANTED.md": f"# Planted\n\nThe cap holds, {phrase}, and the rest follows.\n",
+            },
+            FIRE,
+            expect_in="docs/PLANTED.md: announced_frames",
+        )
+
+    # Hard wrapping is the realistic shape of these documents, and a same-line pattern would report
+    # a wrapped instance as absent. Absence and a blind spot print the same green.
+    case(
+        "21 a phrase straddling a line wrap still fires",
+        {
+            "README.md": "# Title\n\nOrdinary prose.\n",
+            "docs/PLANTED.md": "# Planted\n\nThe cap holds and the second check runs beside it, the\n"
+            "interesting part being where it runs.\n",
+        },
+        FIRE,
+        expect_in="announced_frames",
+    )
+
+    # MUST NOT FIRE, and these two are the reason the pattern is three literals rather than a class.
+    # Both are scored honesty about the SYSTEM: an unflattering live gap on the money path, and a
+    # disclosure that reversed decisions are shown. A gate that eats either costs more than every
+    # frame it removes, so they are pinned verbatim from the tracked documents.
+    keeps = {
+        "docs/PLANTED.md": (
+            "# Planted\n\n"
+            "What that leaves open: the order *value* is still the caller's. An implausible\n"
+            "one is refused in code, but a plausible wrong amount still does.\n\n"
+            "Several of these went the other way at first and were reversed by evidence, which is\n"
+            "recorded rather than tidied away.\n"
+        ),
+        "README.md": "# Title\n\nOrdinary prose.\n",
+    }
+    case(
+        "22 scored honesty about the system does not fire",
+        keeps,
+        CLEAN,
+    )
+
+    # The over-correction control for case 22, sharing its vocabulary and differing only in the
+    # frame. Without it, case 22 passing is equally consistent with the check having been disabled.
+    fired = dict(keeps)
+    fired["docs/PLANTED.md"] = keeps["docs/PLANTED.md"].replace(
+        "What that leaves open:", "What that leaves open, said plainly:"
+    )
+    assert fired["docs/PLANTED.md"] != keeps["docs/PLANTED.md"], (
+        "case 23 substitution did not apply; the control would be testing case 22 again"
+    )
+    case(
+        "23 the same passage with the frame restored fires (over-correction control)",
+        fired,
+        FIRE,
+        expect_in="announced_frames",
+    )
+
     # ---------------------------------------------------------------- vendored, bounded not skipped
     # The vendored files are copied verbatim into every fixture above and never appear in a
     # finding, which is the at-baseline half. This is the other half: one em-dash ABOVE the
