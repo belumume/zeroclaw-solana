@@ -487,13 +487,12 @@ struct RestoreStats {
 /// summarise it: the verdict object is served as written, with two server-added
 /// fields, so a change to what the checker asserts needs no change here.
 fn handle_selfcheck() -> (u16, String, Option<String>) {
-    // HOME rather than a literal path, for the same reason `/health` reads it
-    // that way: the deployed copy must not carry an operator username, and this
-    // response is public.
-    let Ok(home) = std::env::var("HOME") else {
-        return selfcheck_unavailable("HOME is unset, so the verdict path is unknown");
+    let zeroclaw_home = std::env::var("ZEROCLAW_HOME").ok();
+    let home = std::env::var("HOME").ok();
+    let path = match resolve_verdict_path(zeroclaw_home.as_deref(), home.as_deref()) {
+        Ok(p) => p,
+        Err(reason) => return selfcheck_unavailable(&reason),
     };
-    let path = format!("{home}/.zeroclaw/state/box-selfcheck.json");
 
     // mtime first, then the bytes. Reading the file and then failing to stat it
     // would leave the age unknown on a verdict that is present, and an age that
@@ -507,6 +506,51 @@ fn handle_selfcheck() -> (u16, String, Option<String>) {
         .map_err(|e| format!("verdict unreadable: {e}"));
 
     render_selfcheck(loaded, SystemTime::now())
+}
+
+/// Where the verdict lives, resolved the way `deploy/box_selfcheck.py` resolves
+/// it: `ZEROCLAW_HOME` if set, else `$HOME/.zeroclaw`, then
+/// `state/box-selfcheck.json` under that.
+///
+/// THE TWO MUST BE CHANGED TOGETHER. `box_selfcheck.py` takes its root from
+/// `os.environ.get("ZEROCLAW_HOME", Path.home() / ".zeroclaw")`; if this
+/// disagrees, a box running with the override writes a verdict where this route
+/// does not look, and a present verdict is then served as 503. That is worse
+/// than a plain miss, because 503 here means "no verdict was produced", so a
+/// reader applies the remedy for a checker that is not running while the
+/// checker is running fine.
+///
+/// Env is read by the caller and passed in, so both branches are testable
+/// without mutating process-global state from a threaded test harness.
+///
+/// HOME rather than a literal path, for the same reason `/health` reads it that
+/// way: the deployed copy must not carry an operator username, and this
+/// response is public.
+fn resolve_verdict_path(zeroclaw_home: Option<&str>, home: Option<&str>) -> Result<String, String> {
+    // Set-but-EMPTY is the case that `.ok()` alone does not cover: `std::env::var`
+    // returns `Ok("")` for `ZEROCLAW_HOME=` in a unit file, which is a shape a
+    // shell produces by accident rather than on purpose.
+    //
+    // This is the ONE point where mirroring Python exactly would be wrong, so it
+    // is deliberate rather than an oversight: `os.environ.get` also returns `""`
+    // there, and `Path("") / "state"` is the RELATIVE path `state/...`, while the
+    // naive Rust equivalent is `/state/...` at the filesystem root. Both are
+    // useless, neither is what an operator meant, and only one of them can be
+    // reached by a reader who then wonders why the root of the disk is being
+    // stat'd. Falling back to `$HOME/.zeroclaw` is the reading that can be right.
+    let root = match zeroclaw_home.filter(|v| !v.is_empty()) {
+        Some(explicit) => explicit.to_string(),
+        None => match home.filter(|v| !v.is_empty()) {
+            Some(h) => format!("{h}/.zeroclaw"),
+            None => {
+                return Err(
+                    "neither ZEROCLAW_HOME nor HOME is set, so the verdict path is unknown"
+                        .to_string(),
+                )
+            }
+        },
+    };
+    Ok(format!("{root}/state/box-selfcheck.json"))
 }
 
 /// The pure half of `/selfcheck`: verdict bytes and their mtime in, status and
@@ -995,6 +1039,88 @@ mod selfcheck_tests {
         })
         .to_string()
         .into_bytes()
+    }
+
+    /// `ZEROCLAW_HOME` is read, because `deploy/box_selfcheck.py` honours it and
+    /// a route that did not would serve 503 for a verdict sitting on disk.
+    ///
+    /// Its control is the test below. Either one alone passes on a resolver that
+    /// ignores the other input entirely: hardcode the override and this passes
+    /// while the default is broken; hardcode `$HOME` and the reverse. Read them
+    /// as one case split in two, which is also why they assert the two roots
+    /// produce DIFFERENT paths — a resolver returning a constant fails that and
+    /// nothing else here.
+    #[test]
+    fn zeroclaw_home_is_honoured_when_it_is_set() {
+        let overridden = resolve_verdict_path(Some("/srv/zc"), Some("/home/node")).unwrap();
+        assert_eq!(overridden, "/srv/zc/state/box-selfcheck.json");
+
+        let default = resolve_verdict_path(None, Some("/home/node")).unwrap();
+        assert_ne!(
+            overridden, default,
+            "the override and the default resolved to one path, so one input is being ignored"
+        );
+    }
+
+    /// The default still works when the override is absent, which is the state
+    /// of every box that has not set it — including the one in production.
+    #[test]
+    fn the_default_root_is_used_when_zeroclaw_home_is_unset() {
+        assert_eq!(
+            resolve_verdict_path(None, Some("/home/node")).unwrap(),
+            "/home/node/.zeroclaw/state/box-selfcheck.json"
+        );
+    }
+
+    /// A set-but-empty variable falls back rather than resolving to the root of
+    /// the filesystem. `std::env::var` returns `Ok("")` for `ZEROCLAW_HOME=` in
+    /// a unit file, so `.ok()` alone would take that branch and stat
+    /// `/state/box-selfcheck.json`.
+    ///
+    /// Driven on both variables, since `HOME=` is the same shape and reaching
+    /// `/.zeroclaw/state/...` is the same defect one level down.
+    #[test]
+    fn an_empty_env_value_falls_back_rather_than_resolving_to_the_filesystem_root() {
+        assert_eq!(
+            resolve_verdict_path(Some(""), Some("/home/node")).unwrap(),
+            "/home/node/.zeroclaw/state/box-selfcheck.json",
+            "an empty override was treated as a real path"
+        );
+        // An empty HOME with a real override is still the override.
+        assert_eq!(
+            resolve_verdict_path(Some("/srv/zc"), Some("")).unwrap(),
+            "/srv/zc/state/box-selfcheck.json"
+        );
+        // Nothing usable is an error with a reason, never a path at the root.
+        for (zc, home) in [
+            (None, None),
+            (Some(""), None),
+            (None, Some("")),
+            (Some(""), Some("")),
+        ] {
+            let resolved = resolve_verdict_path(zc, home);
+            assert!(
+                resolved.is_err(),
+                "resolved to {resolved:?} with nothing usable to resolve from"
+            );
+        }
+    }
+
+    /// The resolved path reaches the response: an unresolvable path is the same
+    /// 503 as an unreadable file, with its own reason rather than a generic one.
+    #[test]
+    fn an_unresolvable_path_is_503_with_its_own_reason() {
+        let reason = resolve_verdict_path(None, None).unwrap_err();
+        let (status, body, _) = render_selfcheck(Err(reason), at(FIXED_NOW_EPOCH));
+        assert_eq!(status, 503);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["error"], "no verdict");
+        assert!(
+            v["detail"]
+                .as_str()
+                .is_some_and(|d| d.contains("ZEROCLAW_HOME")),
+            "the reason must name what was missing: {body}"
+        );
     }
 
     /// BRANCH 1: a verdict that is present and parses is served whole, with the
