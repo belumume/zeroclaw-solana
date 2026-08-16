@@ -29,7 +29,7 @@ files across 31 crates.
 
 ## Why this belongs in a plugin submission
 
-Two reasons, and the second is the one that matters.
+Two reasons.
 
 The plugins here are deny-by-default and push the real spending bound onto an audited on-chain
 program, precisely so that a host-side or model-side compromise cannot move funds. That argument is

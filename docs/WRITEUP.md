@@ -43,7 +43,7 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
 The node: anyone putting a sensor's word on-chain: DePIN operators, environmental telemetry,
 device-attested readings, without trusting the host machine's LLM with a spend key. The
 terminal: a small merchant who wants "charge table 4, 25 USDC" to just work, with the
-blast radius of a hacked agent capped by on-chain math, not vibes.
+blast radius of a hacked agent capped by on-chain math.
 
 ## Which ZeroClaw features it uses (stock first, per the ladder)
 - Stock binary: channels (Telegram, WhatsApp Web), skills, SOPs with cron triggers +
@@ -208,7 +208,7 @@ They are independent bugs with one shape: the config layer accepts a key without
 a consumer exists for it on the selected backend. The setting validates, appears in `config
 get`, and governs nothing.
 
-Two things follow, and the second is the one that matters.
+Two things follow.
 
 The obvious one is that our own configuration had to be hardened against the first of these
 before the shop was safe, and that fix ships in the reproduction, where you can run it.
@@ -576,14 +576,14 @@ The tiers in words:
   two fall back to ten minutes each, and the between-bytes bound resets on every frame, so a drip
   slower than the call and faster than the fallback runs on. Upstream measured a two-second drip
   holding one call open for eleven minutes.
-  The interface is not what is missing, which makes this fixable
-  rather than merely regrettable. `wasi:http`'s `request-options` already defines
+  The interface is not what is missing, which makes this fixable.
+  `wasi:http`'s `request-options` already defines
   `set-first-byte-timeout` and `set-between-bytes-timeout` next to the connect one, and the
   second of those is specified as the timeout for receiving each further chunk of the response
   body, which is exactly the bound this attack needs. Only the Rust client omits them, so
   exposing them is additive and mirrors a method it already carries. That is the ecosystem fix,
   and it would let every plugin bound its own reads rather than each one waiting on the host.
-  Two honest qualifications on that, since a reviewer will reach both. The client's last release
+  Two qualifications on that, since a reviewer will reach both. The client's last release
   and last commit are both from December 2024, so an upstream fix is not something to plan
   around. And because the bindings are right there, this is a CHOICE rather than an
   impossibility: calling `wasi:http` directly instead of through the client would let us set the
@@ -650,9 +650,57 @@ Scoped non-goals (deliberate):
   the bound survives an agent that has been deceived. Integrating it would add a surface without
   moving the guarantee, and the brief scores depth over breadth.
 
-**Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC at a stated
-rate source (ECB reference), so a merchant charges "R$120" and the customer pays the USDC
-equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches a public USD/BRL rate (frankfurter.dev, ECB-based), computes the USDC amount, and states the conversion (for example R$120 at 5.0797 = 23.62 USDC). **The live pay page settles in mainnet USDC** (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`); the recorded transaction bundle in DEVNET-PROOF is devnet, because it predates the move and its signatures cannot be migrated. The settlement rule is unchanged either way: an order marks paid only on an exact amount, mint and destination match, never on the reference alone.
+**Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC, so a
+merchant charges "R$120" and the customer pays the USDC equivalent, the BRL-invoicing flow
+Superteam Brasil asked for. **The live pay page settles in mainnet USDC** (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`); the recorded transaction bundle in DEVNET-PROOF is devnet, because it predates the move and its signatures cannot be migrated. The settlement rule is unchanged either way: an order marks paid only on an exact amount, mint and destination match, never on the reference alone.
+
+The conversion itself was the weakest step on that path, and the first version of it reads as
+sound. The skill told the model to fetch a public ECB rate and compute `BRL / rate` itself, and
+`pay_link.py` then verified that arithmetic against the rate the same caller had supplied. That
+catches a slipped division and passes a consistent lie: a model that states a wrong rate and
+divides by it correctly clears every check. It was not theoretical either. The runtime trace for
+2026-07-27T13:11:14Z records the host refusing the agent's `calculator` call with "Missing
+required parameter", duration 0 and empty output, and a figure being quoted to the customer
+regardless, so every price that shop had ever stated was model arithmetic with nothing between it
+and the customer's wallet.
+
+The rate is no longer an input. `scripts/rate_crosscheck.py` reads BRL/USD from Brazil's central
+bank (BCB PTAX) and treats the ECB's published rate, fetched via Frankfurter, as a corroborator
+with no authority to set the price and only the power to refuse by disagreeing beyond a stated
+band. That reuses the corroboration shape payment-watch already uses for a second RPC rather than
+inventing one. Both endpoints are keyless, so a stranger reproducing this needs no credential. It
+fails closed on an unreachable source, on dates that do not line up, and on a figure outside a
+plausible BRL/USD band, and there is no last-known rate to fall back on: on a weekend, when BCB
+publishes nothing, the call returns HTTP 200 with zero rows and the quote stops rather than
+ageing. The measurement that set the design was taken before choosing anything, on 2026-08-14:
+PTAX at 5.2236 against the ECB's 5.1762, 0.91% apart, which one source would have carried into
+every order silently.
+
+`pay_link.py` performs that fetch itself and re-derives the amount from it, so `--brl` alone is
+the whole contract. `--rate` survives only as a cross-check, and that is what stops a caller
+keeping the old behaviour by continuing to supply both: the figure used is always the fetched one,
+so a supplied rate can add a refusal and can never relax one. Those constants are duplicated into
+the pay path deliberately, because the deployed workspace receives exactly one file and cannot
+import the rest, and `scripts/check-pay-link-rate-agreement.py` binds the copy to the original by
+reading the values out of `rate_crosscheck.py`'s source instead of restating them. Perturbing one
+constant in the jailed copy turns that gate red.
+
+```bash
+python scripts/rate_crosscheck.py                                  # the corroborated rate, or a refusal
+python skills/solana-pay/scripts/pay_link.py "<solana: url>" pt --brl 100
+python scripts/check-pay-link-rate-agreement.py                    # the two copies still agree
+```
+
+Driven three ways on 2026-08-16: an order whose link asks a cent too little is refused, naming
+`expected: 19.14` against `got: 19.13` and producing no link; the same order at 19.14 returns the
+link and states `R$ 100 at 5.2236 (BCB PTAX, corroborated by ECB within 0.91%, 2026-08-14)`; and
+July's 5.0825 supplied as a cross-check is refused at 2.70% apart, over the 2.50% band.
+
+What this does not close, stated rather than implied: the order VALUE is still caller-supplied, so
+"table 4, R$ 0.05" passes every check above. This removes one free parameter of two, and closing
+the other needs a priced SKU table, an order id resolved against a store, or a merchant
+confirmation. The shop on the node has not picked this change up yet either, so the enforcement is
+in the repo and the deploy is what remains.
 
 ## What we turned down, and why
 
