@@ -187,12 +187,12 @@ BEATS = [
     Beat(
         "injection-certify",
         "python scripts/certify_publish_tx.py",
-        # From the real run: one positive control then four injection shapes, each REFUSED with its
-        # reason, closing "5/5 cases correct". "fail-closed" is in the header line.
+        # From the real run: one positive control then five injection shapes, each REFUSED with its
+        # reason, closing "6/6 cases correct". "fail-closed" is in the header line.
         ["fail-closed", "REFUSED", "cases correct"],
         0.12,
-        "The fail-closed suite: one good publish certifies, four injection shapes refuse, each "
-        "with its reason, in a single eight-line block. Offline and byte-identical across runs. "
+        "The fail-closed suite: one good publish certifies, five injection shapes refuse, each "
+        "with its reason, in a single nine-line block. Offline and byte-identical across runs. "
         "The attack text itself is not filmed here; it lives in the committed transcript, which is "
         "a document a judge reads rather than a terminal impersonating a conversation.",
     ),
