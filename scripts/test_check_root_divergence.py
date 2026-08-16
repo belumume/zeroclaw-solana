@@ -137,7 +137,9 @@ def crlf_only(a, b):
     # Normalised FIRST. `write_text` in build_pair already applied the platform ending on
     # Windows, so a bare NL->CRNL replace produces CR CR LF and plants a real difference
     # rather than an ending-only one. The fixture hit the exact trap the gate now handles.
-    (b / "scripts" / "check-example.py").write_bytes(src.replace(CRNL, NL).replace(NL, CRNL))
+    (b / "scripts" / "check-example.py").write_bytes(
+        src.replace(CRNL, NL).replace(NL, CRNL)
+    )
 
 
 def crlf_plus_real_change(a, b):
@@ -194,11 +196,16 @@ CASES = [
         "check-example.py",
     ),
     # Not-applicable and could-not-check, kept distinct from both agree and diverged.
+    # Was AGREE with the word "SKIP" until 2026-08-17, which contradicted three things around it:
+    # this case's own NAME, the section comment directly above, and the sibling case below that
+    # already treats could-not-check as CANNOT. The gate returned 0 to match, so `check-all.py`
+    # counted an uncompared clone as a passing comparison. Four signals said could-not-check and
+    # one enum value said pass; the enum was the outlier.
     (
-        "an absent second root SKIPS rather than passing silently",
+        "an absent second root CANNOT-CHECK rather than passing silently",
         other_root_absent,
-        AGREE,
-        "SKIP",
+        CANNOT,
+        "CANNOT CHECK",
     ),
     (
         "too small an intersection is CANNOT-CHECK, not a pass",
