@@ -1,0 +1,28 @@
+[package]
+name = "x402-pay-build"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ZeroClaw tool plugin: turn an x402 402-Payment-Required challenge into an UNSIGNED transaction that pays it under a Solana Foundation Subscriptions & Allowances delegation. The challenge is content the SELLER writes, so the payee, mint, network and funding delegation come from jailed operator config and are cross-checked against it; a mismatch fails closed. Holds no keys (custody tier T1): returns base64 plus a human-readable summary for the host to certify and sign."
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+solana-core = { path = "../../crates/solana-core" }
+wit-bindgen = "0.46"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+waki = { version = "0.5.1", features = ["json"] }
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
