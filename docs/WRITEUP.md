@@ -685,10 +685,26 @@ ageing. The measurement that set the design was taken before choosing anything, 
 PTAX at 5.2236 against the ECB's 5.1762, 0.91% apart, which one source would have carried into
 every order silently.
 
-`pay_link.py` performs that fetch itself and re-derives the amount from it, so `--brl` alone is
-the whole contract. `--rate` survives only as a cross-check, and that is what stops a caller
-keeping the old behaviour by continuing to supply both: the figure used is always the fetched one,
-so a supplied rate can add a refusal and can never relax one. Those constants are duplicated into
+`pay_link.py` performs that fetch itself and re-derives the amount from it, so the rate is never
+an input. `--rate` survives only as a cross-check, and that is what stops a caller keeping the old
+behaviour by continuing to supply both: the figure used is always the fetched one, so a supplied
+rate can add a refusal and can never relax one.
+
+The order VALUE gets the same treatment one level up. Bounding it to a plausible band removes an
+absurd figure and cannot tell R$ 25 from R$ 60 for the same order, so `--brl` must additionally be
+DERIVABLE from `--quote`, the verbatim message the figure was given in: equal to one figure marked
+`R$` or `reais` in that text, or to the sum of the DISTINCT figures in it. The marker
+requirement is the check.
+Extracting bare numbers would be worse than nothing, because "Mesa 4 - Pedido #42, 2 pizzas,
+R$ 60" contains 4, 42 and 2, and a bare extractor would license almost any small integer; the
+marker reduces that message to one admissible figure. Against a band holding 4,999,901 values at
+two decimals, a typical order is left with one or two. The agent supplies the quote, so a
+fabricated one passes, and the honest claim is narrower than proof: a silent numeric substitution
+becomes a fabricated customer utterance, echoed to the operator trace and falsifiable against a
+channel transcript the model does not write, and injected text can no longer set a price without
+being laundered into the quote as the customer's own words.
+
+Those constants are duplicated into
 the pay path deliberately, because the deployed workspace receives exactly one file and cannot
 import the rest, and `scripts/check-pay-link-rate-agreement.py` binds the copy to the original by
 reading the values out of `rate_crosscheck.py`'s source instead of restating them. Perturbing one
@@ -696,7 +712,7 @@ constant in the jailed copy turns that gate red.
 
 ```bash
 python scripts/rate_crosscheck.py                                  # the corroborated rate, or a refusal
-python skills/solana-pay/scripts/pay_link.py "<solana: url>" pt --brl 100
+python skills/solana-pay/scripts/pay_link.py "<solana: url>" pt --brl 100 --quote "o pedido deu R$ 100"
 python scripts/check-pay-link-rate-agreement.py                    # the two copies still agree
 ```
 

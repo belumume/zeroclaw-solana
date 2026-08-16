@@ -222,14 +222,27 @@ exec(compile(open(SCRIPT, encoding="utf-8").read(), SCRIPT, "exec"), {"__name__"
 """
 
 
-def run(url, extra=None, planted_rate=None):
-    """planted_rate=None runs the script untouched, so no-flag cases stay a real end-to-end run."""
+def run(url, extra=None, planted_rate=None, script=None, default_quote=True):
+    """planted_rate=None runs the script untouched, so no-flag cases stay a real end-to-end run.
+
+    `--brl` now requires `--quote`, so a case that passes one and not the other would refuse for
+    the wrong reason and quietly stop testing what it was written to test. A default quote naming
+    the same figure is supplied here, which keeps every rate, band and amount case measuring
+    exactly what it measured. Cases that are ABOUT the quote pass their own and are untouched.
+    """
+    extra = list(extra or [])
+    if default_quote and "--brl" in extra and "--quote" not in extra:
+        extra += ["--quote", f"R$ {extra[extra.index('--brl') + 1]}"]
+    SCRIPT_ = script or SCRIPT
     if planted_rate is None:
-        cmd = [sys.executable, str(SCRIPT), url] + list(extra or [])
+        cmd = [sys.executable, str(SCRIPT_), url] + list(extra or [])
     else:
         _r = planted_rate if planted_rate == "FAIL" else float(planted_rate)
+        # SCRIPT_ and not SCRIPT: the stub execs whatever path it is handed, so pinning the
+        # global here would run the REAL script under a mutant's name and the mutation control
+        # would report the unmutated behaviour as if it were the mutant's.
         body = _STUB.replace("__RATE__", repr(_r)).replace(
-            "__SCRIPT__", repr(str(SCRIPT))
+            "__SCRIPT__", repr(str(SCRIPT_))
         )
         fh = tempfile.NamedTemporaryFile(
             "w", suffix="_ratestub.py", delete=False, encoding="utf-8"
@@ -446,6 +459,221 @@ def main():
         if not ok:
             failures.append(
                 f"compat extra={extra!r}: rc={rc} out={out.strip()[:200]!r}"
+            )
+
+    # ----------------------------------------------------------------- THE ORDER VALUE'S SOURCE
+    # The band above removes absurd values. These cover where the value CAME FROM: `--brl` must be
+    # derivable from the verbatim text quoted with `--quote`. R$ 25 for a R$ 60 order is the shape
+    # the band explicitly cannot see, and it is the first case here.
+    #
+    # POSITIVE CONTROLS COME FIRST and are not decoration. Every refusal case below is satisfied
+    # by a binding that refuses everything, so without a legitimate order that still produces a
+    # link these prove only that the script got quieter.
+    QUOTE_URL = (
+        f"solana:{MERCHANT}?amount=11.80&spl-token={USDC_MAINNET}"  # R$ 60 at 5.0827
+    )
+    for desc, brl, quote, amount, must_accept in [
+        # --- positive controls
+        (
+            "CONTROL a plain quoted order is ACCEPTED",
+            "60",
+            "quero 2 pizzas, R$ 60",
+            "11.80",
+            True,
+        ),
+        (
+            "CONTROL pt-BR decimal comma is read",
+            "60",
+            "sao R$ 60,00 no total",
+            "11.80",
+            True,
+        ),
+        (
+            "CONTROL 'reais' suffix marks a figure",
+            "60",
+            "60 reais por favor",
+            "11.80",
+            True,
+        ),
+        (
+            "CONTROL a figure among bare order numbers is found",
+            "60",
+            "Mesa 4 - Pedido #42, 2 pizzas, R$ 60",
+            "11.80",
+            True,
+        ),
+        (
+            "CONTROL the SUM of quoted figures is admissible",
+            "72",
+            "R$ 60 a pizza e R$ 12 a entrega",
+            "14.17",
+            True,
+        ),
+        (
+            "CONTROL a quoted component of that sum is also admissible",
+            "12",
+            "R$ 60 a pizza e R$ 12 a entrega",
+            "2.36",
+            True,
+        ),
+        (
+            "CONTROL pt-BR thousands and decimals together",
+            "1234.56",
+            "o total deu R$ 1.234,56",
+            "242.89",
+            True,
+        ),
+        # --- THE ATTACK SHAPE the band cannot see
+        (
+            "the R$ 25 for a R$ 60 order is refused",
+            "25",
+            "quero 2 pizzas, R$ 60",
+            "4.92",
+            False,
+        ),
+        (
+            "an overcharge the customer never named is refused",
+            "600",
+            "quero 2 pizzas, R$ 60",
+            "118.05",
+            False,
+        ),
+        # --- the flag cannot be dropped to skip the check
+        (
+            "--brl with no --quote is refused, not waved through",
+            "60",
+            None,
+            "11.80",
+            False,
+        ),
+        # --- a bare number is not a price
+        (
+            "a bare number with no currency marker is not a figure",
+            "42",
+            "Mesa 4 - Pedido #42, 2 pizzas",
+            "8.26",
+            False,
+        ),
+        (
+            "a quote naming no amount at all is refused",
+            "60",
+            "oi, tudo bem?",
+            "11.80",
+            False,
+        ),
+        # --- ambiguity refuses rather than guessing, in both separator directions
+        (
+            "'R$ 1.200' is ambiguous and refuses rather than picking 1200",
+            "1200",
+            "sao R$ 1.200 no total",
+            "236.11",
+            False,
+        ),
+        (
+            "'R$ 1,200' is ambiguous in the other direction and also refuses",
+            "1200",
+            "sao R$ 1,200 no total",
+            "236.11",
+            False,
+        ),
+        # --- an arbitrary subset sum is NOT admissible, which is what keeps a long
+        #     list of figures from reaching almost any value
+        (
+            "a subset sum that is neither one figure nor the total is refused",
+            "72",
+            "R$ 60 a pizza, R$ 12 a entrega, R$ 8 a bebida",
+            "14.16",
+            False,
+        ),
+        # --- A REPEATED FIGURE IS NOT A MULTIPLIER. Summing the raw list rather than the
+        #     distinct ones doubled the order value on the most ordinary chat pattern there
+        #     is, a customer confirming the price they were just quoted. Both directions are
+        #     pinned: the doubling refuses, and the figure itself still works in the same
+        #     message, so the fix cannot be satisfied by refusing the whole quote.
+        (
+            "a confirmed price is not doubled by being repeated",
+            "120",
+            "quero uma pizza de R$ 60. Confirma, sao 60 reais mesmo?",
+            "23.61",
+            False,
+        ),
+        (
+            "CONTROL the repeated figure itself is still admissible",
+            "60",
+            "quero uma pizza de R$ 60. Confirma, sao 60 reais mesmo?",
+            "11.80",
+            True,
+        ),
+        (
+            "two items at one price cannot reach their total without it being stated",
+            "120",
+            "R$ 60 a pizza e R$ 60 a outra",
+            "23.61",
+            False,
+        ),
+        (
+            "CONTROL a stated total is admissible",
+            "120",
+            "as duas pizzas dao R$ 120",
+            "23.61",
+            True,
+        ),
+    ]:
+        url = f"solana:{MERCHANT}?amount={amount}&spl-token={USDC_MAINNET}"
+        # quote=None means the flag is genuinely ABSENT, which run()'s default would paper over,
+        # so that case turns the default off and reaches the missing-flag refusal it is testing.
+        extra = ["--brl", brl] + (["--quote", quote] if quote is not None else [])
+        rc, out = run(
+            url, extra, planted_rate="5.0827", default_quote=quote is not None
+        )
+        if must_accept:
+            ok = rc == 0 and PAGE_OK(out, url)
+        else:
+            ok = rc != 0 and "REFUSED" in out
+        print(f"{'PASS' if ok else 'FAIL'}  quote: {desc}")
+        if not ok:
+            failures.append(f"quote/{desc}: rc={rc} out={out.strip()[:220]!r}")
+
+    # --quote alone verifies nothing and must refuse rather than be ignored.
+    rc, out = run(QUOTE_URL, ["--quote", "R$ 60"], planted_rate="5.0827")
+    ok = rc != 0 and "REFUSED" in out
+    print(f"{'PASS' if ok else 'FAIL'}  quote: --quote alone is refused, not ignored")
+    if not ok:
+        failures.append(f"--quote alone: rc={rc} out={out.strip()[:200]!r}")
+
+    # MUTATION CONTROL. Every case above is also satisfied by a script that refuses for some other
+    # reason, so disable the admissibility comparison in a copy and require the R$ 25 attack to
+    # SUCCEED. The substitution is asserted before the copy is run: an anchor that has drifted
+    # would leave the mutant byte-identical to the real script, and the control would then pass
+    # while testing nothing.
+    ANCHOR = "    if brl not in admissible:"
+    src = SCRIPT.read_text(encoding="utf-8")
+    if ANCHOR not in src:
+        failures.append(
+            "mutation control: anchor not found in pay_link.py, so the mutant is the real "
+            "script and this control proves nothing. Update ANCHOR."
+        )
+        print("FAIL  quote: mutation control anchor is stale")
+    else:
+        mutant_dir = tempfile.mkdtemp()
+        mutant = Path(mutant_dir) / "pay_link.py"
+        mutant.write_text(src.replace(ANCHOR, "    if False:", 1), encoding="utf-8")
+        attack = f"solana:{MERCHANT}?amount=4.92&spl-token={USDC_MAINNET}"
+        rc, out = run(
+            attack,
+            ["--brl", "25", "--quote", "quero 2 pizzas, R$ 60"],
+            planted_rate="5.0827",
+            script=mutant,
+        )
+        ok = rc == 0 and PAGE_OK(out, attack)
+        print(
+            f"{'PASS' if ok else 'FAIL'}  quote: mutation control, disabling the binding "
+            f"lets the R$ 25 attack through"
+        )
+        if not ok:
+            failures.append(
+                f"mutation control did not re-open the hole, so the refusal above is coming "
+                f"from somewhere else: rc={rc} out={out.strip()[:220]!r}"
             )
 
     # usage errors must also fail closed, not fall through to a link
