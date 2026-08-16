@@ -3,15 +3,27 @@
 
 WHY THE DIRECTION IS INVERTED, because this is the design decision worth defending.
 
-The obvious shape is a CI job that reaches into the box and inspects it. That shape is dead here
-and the reason is measured rather than assumed: port 22 is blocked network-wide from the operator's
-location, direct HTTPS to the instance IP is blocked, the OCI Bastion endpoint is blocked on both
-22 and 443, and Compute Instance Run Command reports `desired-state: ENABLED` while being absent
-from the live plugin list, so the agent never instantiated it. Every inbound route is shut.
+The obvious shape is a CI job that reaches into the box and inspects it. That shape is impractical
+here, and the reasons are measured rather than assumed: port 22 is blocked network-wide from the
+operator's location (control: `github.com:22` times out while `:443` opens in about a second), and
+Compute Instance Run Command reports `desired-state: ENABLED` while being absent from the live
+plugin list, so the agent never instantiated it.
+
+NOT every inbound route is shut, and that distinction matters because the opposite claim sends a
+reader away from the one that works. OCI Bastion plus Cloud Shell REACHES the node: Bastion runs,
+it accepts the ed25519 key the node authorises (the RSA-only constraint belongs to Cloud Shell's
+FIPS OpenSSH, not to Bastion), and sessions have been created and used through it. What that route
+is not is CHEAP or unattended: it needs a browser, a session that expires, and a human-ish hop.
 
 So the box checks ITSELF and pushes the verdict outward through the Cloudflare tunnel it already
-runs for the x402 gate. Nothing needs to reach in. A checker anywhere fetches one JSON document
-over plain HTTPS, and `check_box_drift.py` is that checker.
+runs for the x402 gate. Nothing needs to reach in, and a checker anywhere fetches one JSON
+document over plain HTTPS.
+
+THAT FETCHER DOES NOT EXIST YET. `deploy/make_invariants.py` writes the manifest this file
+consumes, and this file computes a verdict, but nothing schedules the run and nothing retrieves
+the result: `box_selfcheck` appears in zero of the six workflows and in no unit here. Until both
+halves exist the inversion is a design that works when invoked by hand rather than a gate, and
+describing it otherwise is the failure it was written to prevent.
 
 That inversion is strictly better than the inbound design, not merely a workaround for a blocked
 port: a verdict computed on the box can see the deployed bytes, the live memory and the running
