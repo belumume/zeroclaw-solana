@@ -21,10 +21,28 @@ a DHT11 is a drop-in for the reading source and the on-chain half is identical e
 reading comes from a keyless public weather API on that host rather than from a physical probe.
 
 **A shop that takes money without holding keys.** A merchant agent on Telegram and WhatsApp
-quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in mainnet
-USDC. It marks an order paid only when four things agree: the reference, the exact amount, the
-exact mint, and the watched destination. A payment in a token the payer minted themselves does
-not qualify.
+quotes an order in BRL at a rate it fetches rather than states, issues a Solana Pay link, and
+settles in mainnet USDC. It marks an order paid only when four things agree: the reference, the
+exact amount, the exact mint, and the watched destination. A payment in a token the payer minted
+themselves does not qualify.
+
+The rate was the one money-touching number a language model could assert with nothing checking
+it, which is why it is now fetched in code. `scripts/rate_crosscheck.py` reads BRL/USD from
+Brazil's central bank (BCB PTAX) and refuses unless the ECB's published figure, via Frankfurter,
+agrees within a stated band. Neither source needs a credential, and neither is a fallback for the
+other: there is no last-known rate, so a source that cannot be reached stops the quote rather than
+ageing one. On 2026-08-14 the two sat 0.91% apart, which is the error a single source would have
+carried into every order without saying so. `pay_link.py` performs that fetch itself and
+re-derives the amount, so the order value in BRL is the whole contract; a rate passed on the
+command line is a cross-check that can add a refusal and cannot relax one.
+`scripts/check-pay-link-rate-agreement.py` holds the pay path's duplicated constants to the
+original by reading them out of its source, because the deployed workspace receives a single file
+and cannot import the rest.
+
+What that leaves open, said plainly: the order *value* is still the caller's, so "table 4,
+R$ 0.05" passes every check above. This removes one free parameter of two. The shop on the node
+has not picked the change up yet, so the enforcement is in the repo and the deploy is what
+remains.
 
 Built for a small operator who wants an agent touching money without handing it a signing key.
 
