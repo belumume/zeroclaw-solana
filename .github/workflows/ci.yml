@@ -438,6 +438,15 @@ jobs:
       - name: the root-divergence gate can go red, and does not on a formatting-only difference
         run: python3 scripts/test_check_root_divergence.py
 
+      # Same reasoning one layer down. That gate reads `git ls-files`, so it is structurally blind
+      # to the internal documents the two roots share, which are gitignored by design and which
+      # nothing in this repo compared until now. Its polarity is inverted -- an untracked file is
+      # on no branch, so a divergence never merges away and the default is FAIL -- and the two
+      # cases below are what make its allowlist mean anything: an undeclared document differing
+      # must go red, a declared one must be silent. Its own two mutation controls run with it.
+      - name: the untracked-document divergence gate fires on undeclared drift and not on declared
+        run: python3 scripts/test_check_untracked_root_divergence.py
+
       - name: no personal identifier on any surface a clone receives
         run: python3 scripts/check-identifier-leaks.py
 

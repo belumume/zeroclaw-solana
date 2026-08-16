@@ -28,7 +28,8 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MIN_GATES = 25  # below this the discovery walk is broken; see the docstring.
+MIN_GATES = 26  # below this the discovery walk is broken; see the docstring.
+# Raised from 25 when check-untracked-root-divergence joined.
 # Raised from 7 when check-correction-traces joined. A floor slack by five gates cannot detect
 # a discovery break, which is the only thing it exists to catch. The number is what discovery
 # RETURNS, which excludes check-all.py itself, so it is one below the tracked file count.
