@@ -131,6 +131,42 @@ TRACE = [
         r"\bthe\s+(?:old|previous|former|stale)\s+(?:number|figure|count|value|wording|claim)\b",
     ),
     ("used-to-say", r"\bused to (?:say|read|claim|state)\b"),
+    # THE SELF-REFERENCE FORM. Every pattern above keys on a document's HISTORY being narrated
+    # ("previously read", "corrected on", "an audit found"). This family keys on the document
+    # pointing at ITSELF as a unit of text -- this sentence, that bullet, the earlier wording,
+    # the reason this file gave -- which is the same defect with the history left implicit, and
+    # it was invisible to all thirteen. Measured: five live spans across two judge-facing
+    # surfaces while the gate reported clean.
+    #
+    # THE NOUN LISTS ARE DELIBERATELY NARROW, and "section" and "page" are absent from all four.
+    # A migration notice legitimately addresses a reader holding a stale copy ("Until 2026-08-05
+    # this section told you to point payment_watch at devnet"), which is an instruction to the
+    # reader about the SYSTEM's current state, not a narration of the edit. Admitting those two
+    # nouns would eat it.
+    (
+        "this-text-previously",
+        r"\b(?:this|that)\s+(?:sentence|bullet|instruction|note|clause|heading|entry|caption|"
+        r"footnote)\s+(?:previously|originally|once|formerly|used to|first)\b",
+    ),
+    (
+        "the-earlier-wording",
+        # "text" is deliberately absent: a migration notice says "the exact failure the old text
+        # warned about", and one reword of that sentence's verb would put a safety warning inside
+        # this pattern. "wording" and "phrasing" can only describe a draft.
+        r"\bthe\s+(?:earlier|previous|original|old|former)\s+(?:wording|phrasing|draft|"
+        r"instruction|sentence|bullet)\s+(?:said|read|claimed|stated|named|told|gave)\b",
+    ),
+    (
+        "the-reason-this-file-gave",
+        r"\bthe\s+(?:reason|wording|explanation|justification|figure|number|count)\s+"
+        r"(?:this|that)\s+(?:file|document|README|page|row|line|sentence|note|section)\s+"
+        r"(?:gave|used|carried|stated|named|said|listed)\b",
+    ),
+    (
+        "how-this-text-was-written",
+        r"\b(?:this|that)\s+(?:sentence|paragraph|line|row|passage|bullet|instruction|note)\s+"
+        r"was\s+(?:written|worded|phrased|drafted|rewritten)\b",
+    ),
 ]
 
 # One probe per pattern, so each is proven to fire on its own rather than riding on a sibling.
@@ -151,6 +187,11 @@ CONTROL_SAMPLES = {
     "session-ref": "After a compaction the number was restated.",
     "the-old-number": "The old figure understated the interruption.",
     "used-to-say": "It used to say the device was live.",
+    # The self-reference family. Each probe is the shape of a real span this gate missed.
+    "this-text-previously": "This sentence used to point at an ignored directory.",
+    "the-earlier-wording": "The earlier wording said only that prices are never computed.",
+    "the-reason-this-file-gave": "The reason this file gave for it was stale.",
+    "how-this-text-was-written": "A note on how that sentence was written, for the record.",
 }
 
 # The over-correction control. CONTROL_SAMPLES proves each pattern can FIRE; without these, a
@@ -167,6 +208,19 @@ MUST_NOT_FIRE = [
     "That ARM box is a rented VM, not a device on a windowsill.",
     "The original justification for that demotion was wrong: the real failure is a well-formed "
     "URL carrying somebody else's recipient.",
+    # Verbatim from README. Product honesty about a SECURITY decision, and the nearest miss for
+    # the-reason-this-file-gave, which is why it is pinned beside that pattern rather than trusted
+    # to stay clear of it.
+    "The reason first given for that call was wrong, and the correction is in docs/DECISIONS.md: "
+    "the failure that matters is a well-formed URL carrying somebody else's recipient.",
+    # Verbatim from QUICKSTART. A MIGRATION NOTICE, which is the one shape that looks exactly like
+    # a trace and must survive: it exists to stop a reader who is holding stale config from
+    # following instructions that now lose money. Its subject is what the reader's system is doing,
+    # not what this document used to say, and cutting it would take a real safety warning with it.
+    "Read this if you followed an earlier copy of this page. Until 2026-08-05 this section told "
+    "you to point payment_watch at devnet and to pass a devnet mint on every call. Both "
+    "instructions are now wrong, and following them is the exact failure the old text warned "
+    "about, with the chain the other way round.",
 ]
 
 # Spans that MATCH a pattern above and are deliberately kept, each with the reason.
@@ -294,8 +348,15 @@ def _selftest_wiring() -> tuple[int, int]:
     import shutil
     import tempfile
 
-    saved = (REPO, JUDGE_FACING, ALLOW, TRACE, CONTROL_SAMPLES, sys.argv,
-             SOURCE_PROVIDER)
+    saved = (
+        REPO,
+        JUDGE_FACING,
+        ALLOW,
+        TRACE,
+        CONTROL_SAMPLES,
+        sys.argv,
+        SOURCE_PROVIDER,
+    )
     tmp = Path(tempfile.mkdtemp())
     (tmp / "planted.md").write_text(
         "The box is rented. An audit found the citation was dead, which is why THE ANCHOR SPAN "

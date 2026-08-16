@@ -350,15 +350,11 @@ separate step, plus `check-doc-slop.py`. All four are pure git plus filesystem, 
 same answer on any machine, which is what makes them meaningful on a runner. The other two stay
 manual on purpose.
 
-`check-doc-links.py` stays manual, and the reason this file gave for it was stale rather than
-merely imprecise. It said the gate goes red on unfilled repo-URL placeholders. There are none:
-those were filled once it was established that a repository URL derives from owner and name, so
-visibility never gated them, and grepping the three prose documents for them returns nothing. The
-real residual is narrower and clears on one event. An anonymous request for a private repository
-returns 404, and the checker cannot distinguish that from a URL that was never valid, so the gate
-reports one problem until the repository is public and none afterward. Wiring a known-red check in
-would still teach a reader to ignore a red badge, so it still goes in at publish, for that reason
-rather than the stale one.
+`check-doc-links.py` stays manual because of one narrow residual that clears on a single event. An
+anonymous request for a private repository returns 404, and the checker cannot distinguish that
+from a URL that was never valid, so the gate reports one problem until the repository is public and
+none afterward. Wiring a known-red check into CI would teach a reader to ignore a red badge, so it
+goes in at publish instead.
 
 A second red on that gate was retired rather than deferred, because no event could ever clear it.
 QUICKSTART illustrates an SSH tunnel with `127.0.0.1:8899`, and fetching a loopback address
@@ -476,13 +472,12 @@ exactly like a live one. That is not hypothetical here: a draft justified the wa
 reason this project had already overturned, and it was clean on all fourteen patterns. The
 fact-check is a separate pass and this gate is not it.
 
-A note on how that sentence was written, because the gate caught the first draft. It originally
-named the absent config file, in backticks, to say the file does not exist. `check-repo-paths.py`
-reads every repo path a doc names and asserts it resolves in a clone, so it correctly refused a
-document pointing at a file no reader could open. Naming a path to say it is missing is
-indistinguishable, to a checker, from naming it to say it is there. The fix was to reword rather
-than to carve out an exception, since the exception would have blinded the gate to the real case
-it exists for.
+The path gate constrains how any of this can be written down. `check-repo-paths.py` reads every
+repo path a doc names and asserts it resolves in a clone, so a document cannot name an absent file
+even in order to say it is absent: naming a path to say it is missing is indistinguishable, to a
+checker, from naming it to say it is there. The way
+through is to reword the sentence rather than carve out an exception, since the exception would
+blind the gate to the real case it exists for.
 
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
 in `crates/solana-core`, which executes all four suites there for 120 tests rather than the
@@ -625,13 +620,11 @@ it restores the source on every exit path and refuses to interpret a mutation un
 baseline was green first, and run from outside a checkout it fails loudly with exit 2 rather
 than passing silently.
 
-This sentence used to point at `.tools/`, which is git-ignored. That was accurate when written
-and became false when the runner was ported, which is the same defect one level up: a claim
-about evidence that a reader cannot reach. `scripts/check-shadowed-scripts.py` now fails if an
-ignored copy shadows a tracked script, since remembering this rule did not prevent committing
-it twice in one day. Its two scopes were written from that one incident, `.tools/` on the ignored
-side and `scripts/` on the tracked side, so it covered the pair it was built for and nothing
-wider. Both scopes are derived from git now, which is what puts the rest of the tree under it.
+A runner that lives only in a git-ignored directory is the same defect one level up: a claim about
+evidence that a reader cannot reach. `scripts/check-shadowed-scripts.py` fails if an ignored copy
+shadows a tracked script, since remembering the rule did not prevent committing one twice in one
+day. Its scopes are derived from git rather than from the single `.tools/` and `scripts/` pair that
+produced it, which is what puts the rest of the tree under it.
 
 ## One layer you can operate rather than read
 
