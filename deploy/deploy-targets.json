@@ -74,9 +74,9 @@
 
   "mint_scan_extra": [
     {
-      "path": "agents/demo/workspace/memory/brain.db",
+      "path": "data/memory/brain.db",
       "enabled": true,
-      "why": "The 2026-08-06 incident surface: the skill on disk was already correct while three brain.db rows still held the devnet mint, so a file-to-file comparison could never have seen it. Included deliberately even though box_selfcheck's mint scan has a known open defect (it matches any base58 token against a static allowlist, and a fresh reference key per order is that shape). If this proves noisy in steady state the fix is to populate known_other or to disable this entry WITH the reason, never to drop the scan silently."
+      "why": "The 2026-08-06 incident surface: the skill on disk was already correct while three brain.db rows still held the devnet mint, so a file-to-file comparison could never have seen it. THE PATH WAS WRONG UNTIL 2026-08-16 and this entry scanned nothing: it read agents/demo/workspace/memory/, a directory that does not exist on the box, while the live database is at data/memory/brain.db (245,760 B, with -wal and -shm siblings, and a brain.db.bak-premint dated the morning of that same incident). The check failed MISSING rather than passing, which is the honest direction, and it is also why nobody chased it: a red that never changes reads as a known issue. Included deliberately even though box_selfcheck's mint scan has a known open defect (it matches any base58 token against a static allowlist, and a fresh reference key per order is that shape). If this proves noisy in steady state the fix is to populate known_other or to disable this entry WITH the reason, never to drop the scan silently."
     }
   ],
 
