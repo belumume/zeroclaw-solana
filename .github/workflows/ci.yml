@@ -410,6 +410,13 @@ jobs:
       - name: that agreement gate can actually go red
         run: python3 scripts/test_check_shop_constant_agreement.py
 
+      # The root-divergence gate itself is NOT here on purpose: a runner clones one root, so it
+      # would SKIP on every run, and a step that can only ever skip is a green check asserting
+      # nothing. Its CONTROL is hermetic, building its own pair of roots in a temp directory, so
+      # the checker's behaviour is still verified here even though the checker cannot run here.
+      - name: the root-divergence gate can go red, and does not on a formatting-only difference
+        run: python3 scripts/test_check_root_divergence.py
+
       - name: no personal identifier on any surface a clone receives
         run: python3 scripts/check-identifier-leaks.py
 
