@@ -260,6 +260,127 @@ mod tests {
         serde_json::from_str(body).expect("fixture parses")
     }
 
+    /// THE REAL BYTES, captured from the live gate on 2026-08-16.
+    ///
+    /// `GET https://x402.perfpilot.dev/reading` -> HTTP 402, 988 bytes, copied verbatim. Every
+    /// fixture above is one this repo WROTE, so all of them together prove only that the parser
+    /// agrees with its author. This one is what the seller actually serves, and it is stored here
+    /// rather than fetched because a test that reaches the network fails when the box is down and
+    /// silently stops testing anything when the endpoint changes shape. Capturing the bytes is the
+    /// same discipline this project applies to on-chain proofs: a link is a claim that a stranger
+    /// will still be serving something, and the bytes are the evidence.
+    ///
+    /// Note the network is CAIP-2 DEVNET (`EtWTRABZ...` is devnet's genesis prefix; mainnet's is
+    /// `5eykt4Us...`), and the asset is devnet USDC, which is why the buy loop costs nothing.
+    const LIVE_402: &str = r#"{
+      "x402Version": 2,
+      "error": "payment required to read this feed",
+      "resource": {
+        "url": "https://x402.perfpilot.dev/reading",
+        "description": "One device-signed reading from a ZeroClaw DePIN feed on Solana",
+        "mimeType": "application/json",
+        "serviceName": "ZeroClaw DePIN feed",
+        "tags": ["depin", "solana", "oracle", "telemetry"]
+      },
+      "accepts": [
+        {"scheme": "exact", "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+         "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+         "payTo": "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ",
+         "amount": "1000000", "maxTimeoutSeconds": 60,
+         "extra": {"memo": "x402-18cc4476b22166d4-4e"}, "description": "one feed reading"},
+        {"scheme": "exact", "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+         "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+         "payTo": "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ",
+         "amount": "5000000", "maxTimeoutSeconds": 60,
+         "extra": {"memo": "x402-18cc4476b22166d4-4e"},
+         "description": "day pass: unlimited reads this UTC day"}
+      ],
+      "extra": {"memo": "x402-18cc4476b22166d4-4e"}
+    }"#;
+
+    const LIVE_MINT: &str = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+    const LIVE_NETWORK: &str = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+
+    fn live_cfg(max_amount: u64) -> PayConfig {
+        PayConfig {
+            receiver: RECEIVER.to_string(),
+            mint: LIVE_MINT.to_string(),
+            network: LIVE_NETWORK.to_string(),
+            delegation: DELEGATION.to_string(),
+            max_amount,
+        }
+    }
+
+    #[test]
+    fn the_live_gate_challenge_parses_and_the_cheap_tier_is_taken() {
+        // A ceiling BETWEEN the two offered prices, which is the whole demonstration: the day pass
+        // is priced above what the operator authorised, so the reading is bought and the day pass
+        // is not, decided off-chain before anything is built or signed.
+        let p = authorise(&challenge(LIVE_402), &live_cfg(2_000_000), None)
+            .expect("the cheap tier is within the ceiling");
+        assert_eq!(p.amount, 1_000_000);
+        assert_eq!(p.tier_index, 0);
+        assert_eq!(p.memo, "x402-18cc4476b22166d4-4e");
+        assert_eq!(p.description, "one feed reading");
+        // Read from config, never adopted from the seller's bytes.
+        assert_eq!(p.receiver, RECEIVER);
+        assert_eq!(p.mint, LIVE_MINT);
+    }
+
+    #[test]
+    fn the_live_day_pass_is_refused_by_the_ceiling_and_says_which_tier_and_why() {
+        // Asking for the expensive tier EXPLICITLY must still refuse. A ceiling that only applies
+        // when the plugin chooses for itself is not a ceiling.
+        let e = authorise(&challenge(LIVE_402), &live_cfg(2_000_000), Some(1))
+            .expect_err("the day pass is over the ceiling");
+        assert!(e.contains("tier 1"), "{e}");
+        assert!(e.contains("5000000") && e.contains("2000000"), "{e}");
+    }
+
+    #[test]
+    fn a_ceiling_under_both_live_tiers_buys_nothing() {
+        let e = authorise(&challenge(LIVE_402), &live_cfg(500_000), None).unwrap_err();
+        assert!(e.contains("tier 0") && e.contains("tier 1"), "{e}");
+    }
+
+    #[test]
+    fn the_live_challenge_composes_into_arguments_the_other_plugin_accepts() {
+        // The whole path on real bytes: the seller's live 402, authorised against config, converted
+        // at the mint's ACTUAL decimals, and handed on as `allowance_spend_build` arguments.
+        //
+        // 6 decimals is read from devnet, not assumed: `getAccountInfo` on
+        // 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU returns owner
+        // TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA and decimals 6. In production
+        // `resolve::mint_decimals` performs that same read, with the owner checked before decoding.
+        let p = authorise(&challenge(LIVE_402), &live_cfg(2_000_000), None).unwrap();
+        let args = crate::compose::compose(&p, 6).unwrap();
+
+        // 1000000 atomic at 6 decimals is ONE whole unit. Emitting "1000000" here would be a
+        // millionfold overpayment that every later check accepts, because it is a legal amount.
+        assert_eq!(args.amount, "1");
+        assert_eq!(args.receiver, RECEIVER);
+        assert_eq!(args.delegation, DELEGATION);
+        assert_eq!(args.memo, "x402-18cc4476b22166d4-4e");
+
+        let json = args.to_json();
+        for key in ["delegation", "amount", "receiver", "memo"] {
+            assert!(
+                json.contains(&format!("\"{key}\":")),
+                "missing {key}: {json}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_live_challenge_is_refused_on_mainnet_config_despite_matching_payee() {
+        // The live gate is on devnet. An operator configured for mainnet must not pay it, because
+        // the same base58 payee on a different chain is a different account.
+        let mut c = live_cfg(2_000_000);
+        c.network = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp".to_string();
+        let e = authorise(&challenge(LIVE_402), &c, None).unwrap_err();
+        assert!(e.contains("different address"), "{e}");
+    }
+
     fn two_tier(pay_to: &str, asset: &str, network: &str, cheap: &str, dear: &str) -> Challenge {
         challenge(&format!(
             r#"{{"x402Version":2,"accepts":[
