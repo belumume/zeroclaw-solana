@@ -750,3 +750,16 @@ jobs:
       - name: e2e-localnet resolves and compiles against its committed lockfile
         working-directory: e2e-localnet
         run: cargo check --locked --all-targets
+
+      # Same class, more exposed. sanitizer-microworld compiles the SHIPPED sanitizer to wasm so a
+      # reader can drive the real thing in a browser, it is named on all four judge-facing surfaces
+      # (README, the landing page, the one-pager and the write-up), and its wasm is NOT committed,
+      # so a stranger has to build it. It was built by no workflow either.
+      #
+      # A different target from the plugin matrix above: those are wasm32-wasip2 components, this is
+      # a plain cdylib for wasm32-unknown-unknown, so the target has to be added explicitly.
+      - name: add the browser wasm target
+        run: rustup target add wasm32-unknown-unknown
+      - name: sanitizer-microworld compiles for the browser
+        working-directory: sanitizer-microworld
+        run: cargo check --locked --target wasm32-unknown-unknown
