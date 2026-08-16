@@ -25,7 +25,7 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    a laptop has a largest gap of 36 hours because the laptop sleeps. Both outliers are named
    because the command that reproduces the good numbers is the same command that finds them:
    `python demo/chain_history.py`. Re-derive rather than trusting this paragraph; the count only
-   grows. You can message the node on Telegram to ask what it saw and why a reading was refused.
+   grows.
    It also SELLS that feed rather than only publishing it: another agent asks for a reading, gets an HTTP 402 with a price menu, signs its own
    stablecoin transfer, and is served. No human is in that loop at any point and no facilitator
    sits in the middle, because the buyer is the fee payer. The gate holds no key beyond its own
