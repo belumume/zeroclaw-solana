@@ -268,6 +268,26 @@ def main() -> int:
         rc, out = sync(*flags)
         expect("a stale DEPLOYED_SHA is detected", "STALE" in out, out)
 
+    # ORDERING, pinned statically because the failing window is not reachable from a fixture:
+    # it needs an external process to touch the box between the per-file write-back check and
+    # the full-tree re-verification. Writing DEPLOYED_SHA on the narrow `bad` check alone let a
+    # run exit 1 while the box had already recorded the commit as deployed, so the next run read
+    # the sha as current with a file still differing. A position assertion is weaker than a
+    # behavioural one and is the strongest available here; it is stated as such rather than
+    # dressed up. Both anchors are asserted present first, so this cannot pass vacuously after a
+    # refactor renames either one.
+    src = SYNC.read_text(encoding="utf-8")
+    guard = "if after or uafter or bad:"
+    write = "(ZC / DEPLOYED_SHA_NAME).write_text"
+    expect("ordering: the full-tree guard is still present", guard in src)
+    expect("ordering: the DEPLOYED_SHA write is still present", write in src)
+    if guard in src and write in src:
+        expect(
+            "DEPLOYED_SHA is written only AFTER the full-tree re-verification",
+            src.index(write) > src.index(guard),
+            f"guard at {src.index(guard)}, write at {src.index(write)}",
+        )
+
     for f in failures:
         print(f"  ---   {f}")
     print(f"\n{cases - len(failures)} passed, {len(failures)} failed")

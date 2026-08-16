@@ -508,16 +508,21 @@ def main() -> int:
         if "MISMATCH" in line:
             bad += 1
 
-    # Written LAST, so the box never claims a commit whose files failed to land.
-    if not bad:
-        (ZC / DEPLOYED_SHA_NAME).write_text(recorded_sha + "\n", encoding="utf-8")
-        print(f"  OK  {ZC / DEPLOYED_SHA_NAME} -> {recorded_sha}")
-
+    # THE FULL-TREE RE-VERIFICATION RUNS FIRST, and DEPLOYED_SHA is written only after it
+    # passes. `bad` is the per-file write-back check, which is narrower: it sees what THIS run
+    # wrote and cannot see a file some other process touched mid-apply. Writing the sha on `bad`
+    # alone left a window where the run correctly reported FAIL and exited 1 while the box had
+    # already recorded the commit as deployed, so the NEXT run would read the sha as current with
+    # a file still differing. Ordering it after `after`/`uafter` closes that, and makes the
+    # comment above it true rather than aspirational.
     after = [r for r in classify(file_pairs, ROOT, ZC) if r[2] != SAME]
     uafter = [r for r in classify(unit_pairs(ROOT), ROOT, SYSTEMD_DIR) if r[2] != SAME]
     if after or uafter or bad:
         print(f"\nFAIL  {len(after) + len(uafter)} file(s) still differ after the copy")
         return 1
+
+    (ZC / DEPLOYED_SHA_NAME).write_text(recorded_sha + "\n", encoding="utf-8")
+    print(f"  OK  {ZC / DEPLOYED_SHA_NAME} -> {recorded_sha}")
     print(
         f"\nall {len(file_pairs)} mapped and {len(urows)} unit file(s) now match {sha[:12]}"
     )
