@@ -133,6 +133,64 @@ class Result:
         return bool(self.checks) and all(c["ok"] for c in self.checks)
 
 
+def check_vintage_agreement(inv: dict, r: Result) -> None:
+    """TWO RECORDS OF THE DEPLOY VINTAGE EXIST. Assert they still agree.
+
+    `SHOP-INVARIANTS.json` carries `repo_commit`, written by `make_invariants.py` from
+    `git rev-parse HEAD` in the SAME run that computed every hash in `files`. It is therefore
+    the authoritative vintage by construction: it names the commit the manifest actually
+    verifies against. `DEPLOYED_SHA` is a separate file that nothing in this repo writes, so it
+    is maintained by hand at deploy time.
+
+    A hand-maintained label beside a generated one drifts, and this one did. On 2026-08-16 the
+    box served `deployed_sha` from 2026-08-06 while the files it was running had been deployed
+    on 2026-08-15: the manifest was green, correctly, because the hashes had been regenerated,
+    and the published label was nine days stale. Every reader of that endpoint, human or gate,
+    was handed the wrong baseline, and the correct one was sitting unread in the same directory.
+
+    Reported rather than silently preferred, because the two disagreeing is itself the finding:
+    it means a deploy updated one record and not the other, and whatever did that will do it
+    again. `repo_commit` is what `deployed_sha` now carries, so a consumer gets the value the
+    hashes belong to.
+    """
+    generated = inv.get("repo_commit")
+    label = None
+    try:
+        label = DEPLOYED_SHA.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        label = None
+
+    if not isinstance(generated, str) or len(generated) < 7:
+        r.add(
+            "deploy-vintage",
+            False,
+            f"the invariants file carries no usable repo_commit ({generated!r}), so the "
+            f"commit its hashes belong to cannot be named",
+        )
+        return
+    if label is None:
+        # Not a failure. The generated record is the authoritative one and it is present; the
+        # hand file is the redundant copy, and its absence removes the thing that can drift.
+        r.add(
+            "deploy-vintage",
+            True,
+            f"repo_commit {generated[:12]}; no hand-written DEPLOYED_SHA to disagree with it",
+        )
+        return
+    agree = label.startswith(generated[:12]) or generated.startswith(label[:12])
+    r.add(
+        "deploy-vintage",
+        agree,
+        f"repo_commit {generated[:12]} and DEPLOYED_SHA {label[:12]} agree"
+        if agree
+        else (
+            f"repo_commit {generated[:12]} but DEPLOYED_SHA says {label[:12]}. The hashes "
+            f"below belong to the FIRST; the second is a hand-written label that a deploy "
+            f"updated the files without updating. Trust repo_commit and correct the file."
+        ),
+    )
+
+
 def check_manifest(inv: dict, r: Result) -> None:
     """CODE AND SKILLS: every tracked file byte-identical to the commit it was deployed from."""
     files = inv.get("files") or {}
@@ -461,6 +519,7 @@ def run_checks() -> Result:
         )
         return r
     r.add("invariants", True, f"loaded {INVARIANTS.name}")
+    check_vintage_agreement(inv, r)
     check_manifest(inv, r)
     check_mint_prohibition(inv, r)
     check_network_prose(inv, r)
@@ -495,15 +554,32 @@ def redact(text: str) -> str:
 
 
 def build_verdict(r: Result) -> dict:
-    sha = "unknown"
+    # `deployed_sha` NOW CARRIES THE GENERATED VINTAGE, not the hand-written label. It used to
+    # publish DEPLOYED_SHA alone, and on 2026-08-16 that served a commit nine days older than
+    # the files the same payload was certifying. The name is kept because it is already read by
+    # `scripts/verify-proof.py` and by anyone who has opened the endpoint; what changes is that
+    # it now names the commit the hashes in this verdict actually belong to. The hand file is
+    # still published beside it so a disagreement stays visible rather than being papered over,
+    # and `check_vintage_agreement` turns that disagreement red.
+    label = "unknown"
     try:
-        sha = DEPLOYED_SHA.read_text(encoding="utf-8").strip()
-    except Exception:
+        label = DEPLOYED_SHA.read_text(encoding="utf-8").strip() or "unknown"
+    except OSError:
         pass
+    inv = load_invariants() or {}
+    generated = inv.get("repo_commit")
+    have_generated = isinstance(generated, str) and len(generated) >= 7
+    sha = generated if have_generated else label
     return {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "generated_at_epoch": int(time.time()),
         "deployed_sha": sha,
+        "deployed_sha_source": (
+            "repo_commit"
+            if have_generated
+            else "DEPLOYED_SHA (no repo_commit available)"
+        ),
+        "deployed_sha_label": label,
         "ok": r.ok,
         # Redacted HERE rather than at the serving layer, so what lands on disk is already safe.
         # The gate that serves this is a dumb file reader; putting the defense in the writer means
@@ -906,6 +982,89 @@ def self_test() -> int:
             "absent invariants file says so in its detail",
             "NOT a pass" in r.checks[0]["detail"],
         )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # THE DEPLOY VINTAGE, driven both directions plus the incident. The failure this guards was
+    # invisible precisely because both records looked healthy on their own: the manifest was
+    # green against regenerated hashes while the published label was nine days stale, so the
+    # only observable was the two disagreeing and nothing compared them.
+    global DEPLOYED_SHA
+    tmp = Path(tempfile.mkdtemp(prefix="boxcheck-"))
+    try:
+        ZC = tmp
+        DEPLOYED_SHA = tmp / "DEPLOYED_SHA"
+        agreeing = "a" * 40
+        stale = "b" * 40
+
+        DEPLOYED_SHA.write_text(agreeing, encoding="utf-8")
+        r = Result()
+        check_vintage_agreement({"repo_commit": agreeing}, r)
+        report("vintage: matching records pass", r.checks[0]["ok"] is True)
+
+        # THE INCIDENT, 2026-08-16: files deployed at one commit, label left at an older one.
+        DEPLOYED_SHA.write_text(stale, encoding="utf-8")
+        r = Result()
+        check_vintage_agreement({"repo_commit": agreeing}, r)
+        report(
+            "vintage: disagreeing records FAIL (the incident)",
+            r.checks[0]["ok"] is False,
+        )
+        report(
+            "vintage: the failure names repo_commit as the one to trust",
+            "Trust repo_commit" in r.checks[0]["detail"],
+        )
+
+        # An ABSENT hand file is not a failure: the generated record is authoritative and the
+        # thing that can drift is simply not there. Over-correction control for the case above.
+        DEPLOYED_SHA.unlink()
+        r = Result()
+        check_vintage_agreement({"repo_commit": agreeing}, r)
+        report(
+            "vintage: absent label passes (over-correction control)",
+            r.checks[0]["ok"] is True,
+        )
+
+        # A missing GENERATED record is a failure, because then nothing names the commit the
+        # hashes belong to and the manifest below it is verifying against an unnamed baseline.
+        r = Result()
+        check_vintage_agreement({}, r)
+        report("vintage: absent repo_commit FAILS", r.checks[0]["ok"] is False)
+
+        # THE PUBLISHED FIELD, which is what a remote reader and every gate actually consume.
+        # Before this change it carried the hand label, so it served the stale commit.
+        DEPLOYED_SHA.write_text(stale, encoding="utf-8")
+        INVARIANTS = tmp / "SHOP-INVARIANTS.json"
+        INVARIANTS.write_text(json.dumps({"repo_commit": agreeing}), encoding="utf-8")
+        v = build_verdict(Result())
+        report(
+            "vintage: deployed_sha publishes repo_commit, not the label",
+            v["deployed_sha"] == agreeing,
+        )
+        report(
+            "vintage: the stale label is still published beside it",
+            v["deployed_sha_label"] == stale,
+        )
+        report(
+            "vintage: the source of the value is named",
+            v["deployed_sha_source"] == "repo_commit",
+        )
+
+        # MUTATION CONTROL. With the comparison neutered the incident must stop firing, which is
+        # what proves the red above came from the comparison rather than from anywhere else.
+        real = check_vintage_agreement.__code__
+        try:
+            check_vintage_agreement.__code__ = (
+                lambda inv, r: r.add("deploy-vintage", True, "muted")
+            ).__code__
+            r = Result()
+            check_vintage_agreement({"repo_commit": agreeing}, r)
+            report(
+                "vintage: mutation, the incident STOPS firing",
+                r.checks[0]["ok"] is True,
+            )
+        finally:
+            check_vintage_agreement.__code__ = real
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

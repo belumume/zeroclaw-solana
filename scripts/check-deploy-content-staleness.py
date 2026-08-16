@@ -152,7 +152,35 @@ def fetch_deployed_sha(url: str) -> tuple[str | None, str]:
     sha = payload.get("deployed_sha")
     if not isinstance(sha, str) or len(sha) < 7:
         return None, f"the self-check payload carries no usable deployed_sha ({sha!r})"
-    return sha, ""
+
+    # IS THAT NUMBER CORROBORATED. `deployed_sha` used to be served from a hand-maintained
+    # `DEPLOYED_SHA` file that no code writes, so it named whatever a human last typed rather
+    # than the commit the box's own hashes were generated from. Measured 2026-08-16: it was
+    # nine days stale while the manifest beside it was green. A box serving
+    # `deployed_sha_source` has the fixed checker and the value is the generated one; a box
+    # without that field predates the fix and its baseline is the operator's memory.
+    return sha, baseline_note(payload.get("deployed_sha_source"))
+
+
+def baseline_note(source: object) -> str:
+    """How much the reported commit is worth, as a sentence printed above the verdict.
+
+    Pure and separate from the fetch so it can be driven by the controls: the note decides how a
+    reader weighs the drift list, which makes it part of the verdict rather than decoration.
+    """
+    if source == "repo_commit":
+        return (
+            "baseline CORROBORATED: the box reports this as the commit its own hashes were "
+            "generated from"
+        )
+    if isinstance(source, str):
+        return f"BASELINE UNCORROBORATED: the box reports its source as {source!r}"
+    return (
+        "BASELINE UNCORROBORATED: this box predates `deployed_sha_source`, so the commit below "
+        "is a hand-maintained label rather than the one its hashes belong to. A label left "
+        "BEHIND over-reports drift, which is the safe direction; a label advanced without a "
+        "deploy would under-report it, which is not."
+    )
 
 
 def main() -> int:
@@ -172,12 +200,13 @@ def main() -> int:
         return CANNOT_CHECK
 
     if args.sha:
-        deployed, why = args.sha, ""
+        deployed, note = args.sha, "baseline supplied on the command line"
     else:
-        deployed, why = fetch_deployed_sha(args.url)
+        deployed, note = fetch_deployed_sha(args.url)
     if deployed is None:
-        print(f"CANNOT VERIFY  {why}")
+        print(f"CANNOT VERIFY  {note}")
         return CANNOT_CHECK
+    print(f"baseline: {note}")
 
     rc, kind = git("cat-file", "-t", deployed)
     if rc != 0 or kind.strip() != "commit":

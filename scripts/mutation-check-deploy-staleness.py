@@ -30,10 +30,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 GATE = ROOT / "scripts" / "check-deploy-content-staleness.py"
 CANNOT_CHECK = 2
 
-# The box's real deployed sha as of 2026-08-16, pinned so these controls stay offline and stay
-# reproducible after the box is finally brought current. Once it is, the live gate goes green
-# and this commit is still the input on which the detector must demonstrably fire.
-STALE_SHA = "4e65a5ca2b9eda1f5a9208f21ae25f4c39222d2a"
+# The commit the box's files were ACTUALLY deployed from, established by content rather than by
+# the box's own report: the live `pay_link.py` hashes to this commit's blob. The endpoint was
+# separately reporting a commit from 2026-08-06, nine days older, which is the mislabel
+# `check_vintage_agreement` now turns red. Pinned so these controls stay offline and stay
+# reproducible after the box is brought current: once it is, the live gate goes green and this
+# commit is still an input on which the detector must demonstrably fire.
+STALE_SHA = "291a317916dc018b88fe8ccad7d315701a1154a1"
 
 
 def git(*args: str) -> str:
@@ -161,6 +164,34 @@ def main() -> int:
                 f"rc={rc_m}, reached={'yes' if reached else 'NO'}, "
                 f"drift={'yes' if 'DRIFTED' in out_m else 'no'}",
             )
+
+    # E. THE BASELINE NOTE. It decides how a reader weighs the drift list, so it is part of the
+    # verdict. A box serving the fixed checker names `repo_commit` as the source and the number
+    # is corroborated; a box predating it serves a hand-maintained label, and calling that
+    # corroborated is the failure that produced a wrong drift count on 2026-08-16.
+    sys.path.insert(0, str(GATE.parent))
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_dcs", GATE)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    ok &= report(
+        "E1 repo_commit source -> CORROBORATED",
+        "CORROBORATED" in mod.baseline_note("repo_commit"),
+        "",
+    )
+    ok &= report(
+        "E2 absent source -> UNCORROBORATED",
+        "UNCORROBORATED" in mod.baseline_note(None),
+        "the shape the live box serves today",
+    )
+    ok &= report(
+        "E3 some other source -> UNCORROBORATED",
+        "UNCORROBORATED"
+        in mod.baseline_note("DEPLOYED_SHA (no repo_commit available)"),
+        "",
+    )
 
     print()
     if ok:
