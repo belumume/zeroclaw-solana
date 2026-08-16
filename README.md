@@ -63,8 +63,10 @@ on the live shop. Driven against the deployed file, a wrong figure is refused by
 correct one settles.
 
 What the rate work does NOT close, stated because it is the remaining hole rather than a caveat:
-the order VALUE is still supplied by the caller. "Table 4, R$ 0.05" passes every check. One free
-parameter of two is gone.
+the order VALUE is still supplied by the caller. An implausible one is now refused in code, so
+"Table 4, R$ 0.05" no longer produces a link, but a PLAUSIBLE wrong amount still does: R$ 25
+for a R$ 60 order sits inside any band a shop without a catalog can justify. One free parameter
+of two is gone and the second is narrowed rather than closed.
 
 **The feed has published to devnet since 2026-07-25 and not one of its transactions has failed.**
 Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.
@@ -125,6 +127,7 @@ claims separately, and names what it does not cover.
 | If you want | Read |
 |---|---|
 | The whole submission on one page | [`docs/ONE-PAGER.md`](docs/ONE-PAGER.md) |
+| The same case at length, with the reasoning and the controls | [`docs/ARGUMENT.md`](docs/ARGUMENT.md) |
 | What this is and why it is built this way | [`docs/WRITEUP.md`](docs/WRITEUP.md) |
 | To run it yourself | [`QUICKSTART.md`](QUICKSTART.md) |
 | Proof it is real, on chain | [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md) |
@@ -132,6 +135,7 @@ claims separately, and names what it does not cover.
 | How it is tested, and what each layer cannot catch | [`TESTING.md`](TESTING.md) |
 | What an adversarial audit found here, including what is still open | [`docs/AUDIT.md`](docs/AUDIT.md) |
 | Eight things we believed that were wrong, and the measurement that killed each | [`docs/WHAT-WE-GOT-WRONG.md`](docs/WHAT-WE-GOT-WRONG.md) |
+| Every claim the demo video makes, with the command that re-derives it | [`docs/video-claims.json`](docs/video-claims.json) |
 | Ten verified defects found in the HOST this runs on, all reported upstream | [`docs/HOST-SECURITY-AUDIT.md`](docs/HOST-SECURITY-AUDIT.md) |
 | The agent refusing an attack, verbatim | [`docs/transcripts/`](docs/transcripts/) |
 | To poke the sanitizer yourself, no build needed | [the live microworld](https://belumume.github.io/zeroclaw-solana/sanitizer-microworld/) |
@@ -193,7 +197,7 @@ Human approval is a weak boundary on its own, because the sentence the human rea
 model wrote. So the paths with a fixed intent never ask: `scripts/broadcast_certified.py`
 re-derives the intent from the exact serialized bytes and refuses an appended transfer, a
 swapped program or a spoofed feed. Run that check as a self-test with
-`python3 scripts/certify_publish_tx.py`, which puts four injection shapes through it, and
+`python3 scripts/certify_publish_tx.py`, which puts five injection shapes through it, and
 CI runs it on every push. Stated precisely, because this project's own argument is that a
 control which is claimed and enforced by no runtime path is worse than an absent one: what
 this repo proves is the MECHANISM, not the wiring. The scheduler driving the live node is

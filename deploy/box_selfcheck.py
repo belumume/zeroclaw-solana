@@ -82,6 +82,12 @@ VERDICT_DEFAULT = ZC / "state" / "box-selfcheck.json"
 # under-matching is not.
 B58 = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
 
+# How many mint-scan findings the detail line SAMPLES. The line is served publicly and read in a
+# terminal, so it cannot carry an unbounded list. The cap is a sample size, never the count: the
+# total is always reported alongside, because a bounded list without its total is unmeasurable and
+# reads as complete.
+MINT_FINDINGS_SHOWN = 8
+
 # A line that FORBIDS a network necessarily names it, so the network-prose check has to tell a
 # prohibition apart from an assertion to the customer. Deliberately a small, boring marker set:
 # this is a semantic distinction and regex does those badly, so the honest posture is a narrow
@@ -202,16 +208,24 @@ def check_mint_prohibition(inv: dict, r: Result) -> None:
                     continue
                 findings.append(f"{rel}: unexpected address {tok[:10]}..")
 
-    r.add(
-        "mint-prohibition",
-        not findings,
-        f"{scanned} target(s) scanned; "
-        + (
-            "only configured addresses present"
-            if not findings
-            else "; ".join(sorted(set(findings))[:8])
-        ),
-    )
+    # THE CAP MUST NAME WHAT IT DROPPED. This listed the first 8 findings and never the total, so
+    # a reader could not tell 8 from 8,000 and the check was permanently unmeasurable: the question
+    # "is this scan noisy in steady state" had no answer available from its own output, and the
+    # verdict file carries the same string, so reading it on the box gave the same 8. A silent
+    # truncation reads as completeness. The count goes first, before the sample, because the count
+    # is the part a decision is made on.
+    uniq = sorted(set(findings))
+    if not uniq:
+        detail = f"{scanned} target(s) scanned; only configured addresses present"
+    else:
+        shown = uniq[:MINT_FINDINGS_SHOWN]
+        more = len(uniq) - len(shown)
+        detail = (
+            f"{scanned} target(s) scanned; {len(uniq)} finding(s): "
+            + "; ".join(shown)
+            + (f"; ... and {more} more not shown" if more else "")
+        )
+    r.add("mint-prohibition", not findings, detail)
 
 
 def check_network_prose(inv: dict, r: Result) -> None:
@@ -511,6 +525,54 @@ def self_test() -> int:
                 )
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    # THE MINT SCAN'S CAP MUST NAME WHAT IT DROPPED. It listed the first 8 findings and never the
+    # total, so the check was permanently unmeasurable: 8 and 8,000 produced the same line, and the
+    # verdict file carried the same string, so reading it on the box did not help either. Driven
+    # with MORE findings than the cap, which is the only way this can fail.
+    tmp = Path(tempfile.mkdtemp(prefix="zc-mintcap-"))
+    try:
+        planted = 12  # deliberately above MINT_FINDINGS_SHOWN
+        (tmp / "skills").mkdir(parents=True)
+        # Distinct 44-char base58 addresses, none of them the configured mint or merchant.
+        # The alphabet EXCLUDES 0, O, I and l, which is why a naive f"{i:02d}" counter produced
+        # tokens the scanner correctly ignored and made all three cases fail on the first run.
+        d = "123456789"
+        addrs = [("Z" + d[i // 9] + d[i % 9]).ljust(44, "k") for i in range(planted)]
+        (tmp / "skills" / "SKILL.md").write_text(" ".join(addrs), encoding="utf-8")
+        inv = {
+            "mint": GOOD_MINT,
+            "merchant": GOOD_MERCHANT,
+            "mint_scan": ["skills/SKILL.md"],
+            "allowed_addresses": [],
+            "known_other": [],
+        }
+        r = Result()
+        # `global ZC` is declared at the top of this function, so the plain assignment is the
+        # file's own idiom. The RESTORE is deliberate and deviates from the blocks above, which
+        # leave ZC pointing at a deleted temp dir: this block is not last, so leaking the path
+        # would silently change what every later block scans. Do not "simplify" it away.
+        prev_zc = ZC
+        try:
+            ZC = tmp
+            check_mint_prohibition(inv, r)
+        finally:
+            ZC = prev_zc
+        detail = r.checks[0]["detail"]
+        report(
+            f"mint cap: the TRUE total is reported, not the sample size ({planted})",
+            f"{planted} finding(s)" in detail,
+        )
+        report(
+            "mint cap: the dropped remainder is named rather than silently cut",
+            f"and {planted - MINT_FINDINGS_SHOWN} more not shown" in detail,
+        )
+        report(
+            "mint cap: the sample really is capped (over-correction control)",
+            detail.count("unexpected address") == MINT_FINDINGS_SHOWN,
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
     # SERVICES. Driven through the pure verdict rather than systemd, because the whole reason the
     # inversion survived is that the self-test set units=[] and this check was never exercised.

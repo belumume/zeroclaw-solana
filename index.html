@@ -13,8 +13,8 @@
 <meta property="og:description" content="A DePIN node that sells its own signed readings, and a shop that takes money without holding keys. Every claim checkable with one command.">
 <meta property="og:url" content="https://belumume.github.io/zeroclaw-solana/">
 <meta property="og:image" content="https://belumume.github.io/zeroclaw-solana/docs/assets/social-preview.png">
-<meta property="og:image:width" content="1280">
-<meta property="og:image:height" content="640">
+<meta property="og:image:width" content="2560">
+<meta property="og:image:height" content="1280">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="ZeroClaw on Solana: an agent bounded by the chain">
 <meta name="twitter:description" content="A DePIN node that sells its own signed readings, and a shop that takes money without holding keys. Every claim checkable with one command.">
@@ -238,10 +238,12 @@
 <pre><code>python3 scripts/rate_crosscheck.py                  # the corroborated rate, or a refusal
 python3 scripts/check-pay-link-rate-agreement.py   # the pay path's copy still matches</code></pre>
 <p class="note">
-  What this does not close: the order <em>value</em> is still supplied by the caller, so
-  "table 4, R$ 0.05" passes every check here. This removes one free parameter of two. The shop on
-  the node has not picked the change up yet, so the enforcement is in the repo and the deploy is
-  what remains.
+  What this does not close: the order <em>value</em> is still supplied by the caller. An
+  implausible one is refused in code, so "table 4, R$ 0.05" no longer produces a link, but a
+  plausible wrong amount still does. That band is wide on purpose, because this shop has no
+  catalog and a narrow one would refuse legitimate orders. One free parameter of two is gone and
+  the second is narrowed. The shop on the node has not picked either change up yet, so the
+  enforcement is in the repo and the deploy is what remains.
 </p>
 
 <h2><span class="n">03</span>The customer's own page refuses, in their language</h2>
@@ -301,7 +303,7 @@ python demo/verify_settlement_poll.py     # the page polls for settlement, not o
 <pre><code>git clone https://github.com/belumume/zeroclaw-solana &amp;&amp; cd zeroclaw-solana
 python3 scripts/verify-proof.py           # 10 static + 4 live claims, stdlib only
 python3 scripts/verify_proof_offline.py   # the custody proofs, no network at all
-python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</code></pre>
+python3 scripts/certify_publish_tx.py     # five injection shapes, all refused</code></pre>
 <p>
   No install step, no virtualenv, no credentials. The offline verifier refuses to report at all if
   its own positive control stops passing, so a green result cannot come from a broken checker.
@@ -365,7 +367,9 @@ python3 scripts/certify_publish_tx.py     # four injection shapes, all refused</
   <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/WRITEUP.md">Write-up</a></b>
       <span>what it is, who it is for, custody and threat model</span></li>
   <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/ONE-PAGER.md">One-pager</a></b>
-      <span>the whole argument, with every check inline</span></li>
+      <span>the submission in three minutes, every claim with its command</span></li>
+  <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/ARGUMENT.md">The case in full</a></b>
+      <span>the same claims at length, with the reasoning and the controls</span></li>
   <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/QUICKSTART.md">Quickstart</a></b>
       <span>run it yourself</span></li>
   <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/MAINNET-PROOF.md">Mainnet custody proof</a></b>

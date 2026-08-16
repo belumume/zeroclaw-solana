@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 oracle-publish = { path = "../plugins/oracle-publish" }
 solana-core = { path = "../crates/solana-core" }
-solana-client = "2.1"
+solana-rpc-client = "2.1"
 solana-sdk = "2.1"
 borsh = "1"
 bincode = "1"

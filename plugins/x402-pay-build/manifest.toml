@@ -1,0 +1,53 @@
+name = "x402-pay-build"
+version = "0.1.0"
+description = "Decide whether an x402 402-Payment-Required challenge describes a payment the operator authorised, and if so return the arguments for allowance_spend_build to turn into an unsigned transaction. The payee, mint, network and funding delegation come from jailed operator config and are CROSS-CHECKED against the challenge, because a challenge is written by the party being paid and the on-chain delegation bounds amount rather than payee. A mismatch fails closed. Holds no wallet, signs nothing, and builds no transaction."
+author = "belumume"
+wasm_path = "x402_pay_build.wasm"
+capabilities = ["tool"]
+# http_client: two destinations, both narrow. An https GET of the seller's 402 challenge (plain
+# http is refused, because a challenge names where money goes and a rewritable channel makes the
+# seller's answer whatever the network says it is), and one Solana JSON-RPC getAccountInfo on the
+# configured mint to read its `decimals`. TLS is host-side.
+# config_read: the jailed operator config carrying the receiver WALLET, the mint, the CAIP-2
+# network, the funding delegation and the atomic-unit ceiling. NO private key is ever read, and a
+# top-level tool argument that shadows any of those five is REFUSED rather than ignored: the agent
+# is the party an injected challenge influences, so a payee it could set would make this plugin
+# cross-check a challenge against values the same challenge chose.
+#
+# Custody tier T1, and narrower than the tier requires: this plugin does not build a transaction
+# at all. Its output is an argument object for `allowance-spend-build`, which reads the delegation,
+# fails closed unless the agent is the delegatee, and emits the unsigned transaction. The spend is
+# bounded a SECOND time by the audited on-chain Subscriptions & Allowances program, which returns
+# custom error 0x12c over cap, so a fully prompt-injected agent cannot exceed the allowance. The
+# host then re-derives intent from the final serialized bytes
+# (`scripts/pay_x402_certified.py`) before any signature.
+permissions = ["http_client", "config_read"]
+
+[custody]
+# MACHINE-CHECKED by scripts/check-custody-tier.py, which reads these back out of the shipped
+# .wasm's IMPORT TABLE. They are properties of the compiled artifact rather than of this comment:
+# a capability absent from that table has no host function to be called through, whatever the
+# source says. Re-derive from this directory with
+#   cargo build --target wasm32-wasip2 --release
+#   python3 ../../scripts/check-custody-tier.py
+tier = "T1"
+network_reachable = true
+filesystem = false
+host_capabilities = [
+    "clock",
+    "environment",
+    "host-logging",
+    "host-types",
+    "io-streams",
+    "network-http",
+    "process-exit",
+    "random-insecure",
+    "stdio",
+]
+# DECLARED, NOT CHECKED, and labelled rather than dropped. Neither is decidable from an import
+# table: signing is pure computation that imports nothing, and operator config arrives as a
+# `__config` field inside the tool arguments, crossing no import boundary. `config_injected` is
+# cross-checked against `permissions` above, which is a manifest-internal consistency check and
+# not a claim about the binary.
+signs = false
+config_injected = true

@@ -46,7 +46,7 @@ jobs:
         run: cargo build --target wasm32-wasip2 --release --locked
 
       # The custody claim, checked rather than asserted: a good publish tx is
-      # certified and four injection shapes are refused.
+      # certified and five injection shapes are refused.
       - name: Fail-closed action certification self-test
         run: python3 scripts/certify_publish_tx.py
 
@@ -502,6 +502,17 @@ jobs:
       - name: the correction-trace carve-out controls actually gate
         run: python3 scripts/check-correction-traces.py --selftest
 
+      # x402-pay-build hands its result to allowance-spend-build, which is the correct layering
+      # and leaves exactly one seam: the FIELD NAMES. Nothing catches a rename at compile time,
+      # because one emits JSON and the other parses it, so it type-checks, tests green, and fails
+      # at runtime on a live payment. This reads the consumer's own parameters_schema and requires
+      # the producer to emit what it declares, restating neither list.
+      - name: the two plugins agree about the arguments passed between them
+        run: python3 scripts/check-spend-args-agreement.py
+
+      - name: renaming an argument on either side is caught
+        run: python3 scripts/check-spend-args-agreement.py --selftest
+
       # check-all is the reporter every other gate is read through, so a defect in its counting
       # is invisible by construction: a wrong summary looks exactly like a right one. It once
       # read "all 10 gate(s) pass" where eight passed and two never executed, one of them the
@@ -567,6 +578,16 @@ jobs:
       - name: the source-comment controls actually gate
         run: python3 scripts/check-source-comment-leaks.py --selftest
 
+      # A crate nothing BUILDS can break silently for weeks while a repo-wide formatter sweeps it
+      # and reports success. That is not hypothetical here: `e2e-track-a` stopped compiling for 21
+      # days exactly that way. Enumerating the class found two more, the on-chain programs, which
+      # a reader is told to `anchor build` and which no workflow referenced.
+      - name: every tracked crate is built by some workflow
+        run: python3 scripts/check-crate-build-coverage.py
+
+      - name: the coverage controls actually gate
+        run: python3 scripts/check-crate-build-coverage.py --selftest
+
       # THE RATE ON THE MONEY PATH. Both of these are offline by construction: the first plants
       # responses rather than fetching, the second parses two files as text. A BCB or ECB outage
       # cannot redden either, which is the property that lets them be required rather than
@@ -582,6 +603,29 @@ jobs:
       # original on the box is impossible. This asserts the copy still prices identically.
       - name: the two rate copies agree
         run: python3 scripts/check-pay-link-rate-agreement.py
+
+      # The demo video is frozen and submitted, so its claims cannot be corrected and the claims
+      # map is the only remaining way to make them checkable. That makes the MAP judge-facing: a
+      # claim pointing at a renamed script reads as a verification route and is a dead end, which
+      # is worse than no map. Offline: it reads JSON and stats paths.
+      - name: the video claims map points at things that exist
+        run: python3 scripts/check-video-claims.py
+
+      - name: that map's own controls
+        run: python3 scripts/check-video-claims.py --selftest
+
+      # Five judge-facing surfaces quote the certifier's score in prose. When a sixth case was
+      # added they all kept saying 5/5, and nothing noticed: the certifier's self-test passes at
+      # any N, the step above only reads its exit code, and take.py asserts on "cases correct"
+      # without the number. QUICKSTART was the worst, promising a stranger the literal string
+      # their first command would print. This RUNS the certifier and compares, so the script is
+      # the source of truth rather than a number someone once believed. Offline, like the two
+      # above, because the certifier only builds and inspects bytes in memory.
+      - name: the docs quote the certifier's real score
+        run: python3 scripts/check-certify-count-agreement.py
+
+      - name: that gate's own controls
+        run: python3 scripts/check-certify-count-agreement.py --selftest
 
       # The pay path's own suite, which plants the rate so it neither reaches the network nor
       # rots as the published rate moves.
@@ -641,6 +685,7 @@ jobs:
           - plugins/solana-pay-request
           - plugins/spl-transfer-build
           - plugins/token-risk-check
+          - plugins/x402-pay-build
           - x402-feed-gate
     steps:
       - uses: actions/checkout@v4
@@ -666,6 +711,7 @@ jobs:
           - solana-pay-request
           - spl-transfer-build
           - token-risk-check
+          - x402-pay-build
     steps:
       - uses: actions/checkout@v4
 
@@ -734,7 +780,7 @@ jobs:
         run: cargo run --release --locked -- 20000
 
   e2e-harness-compiles:
-    name: the two e2e reproduce crates still compile
+    name: the reproduce crates nothing else builds still compile
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # WHY THIS EXISTS, and it is not about the tests.
@@ -764,13 +810,31 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "e2e-track-a -> target\ne2e-localnet -> target"
+          workspaces: "e2e-track-a -> target\ne2e-localnet -> target\nonchain -> target"
       - name: e2e-track-a resolves and compiles against its committed lockfile
         working-directory: e2e-track-a
         run: cargo check --locked --all-targets
       - name: e2e-localnet resolves and compiles against its committed lockfile
         working-directory: e2e-localnet
         run: cargo check --locked --all-targets
+
+      # THE SAME CLASS, found by enumerating tracked crates against workflow coverage rather than
+      # by anything breaking. `zeroclaw_oracle` and `consumer_example` are the deployed on-chain
+      # programs, QUICKSTART tells a stranger to `anchor build` them, and until now no workflow
+      # referenced them either. Of 17 tracked crates carrying a `[package]`, these were the last
+      # two nothing built.
+      #
+      # CHECK, NOT `anchor build`. The SBF toolchain is a heavy install and this project has
+      # recorded an edition2024 resolution wall around it. The failure that actually bit here was
+      # API DRIFT, a caller left behind when a signature changed, and a host-target `cargo check`
+      # catches exactly that at a fraction of the cost. It does NOT prove the SBF artifact builds,
+      # and that limit is the reason this is worth stating rather than implying.
+      #
+      # Verified locally before being added, per the convention that a matrix entry is a standing
+      # gate rather than a gamble on a red badge: exit 0 in 56s on the Windows host, warnings only.
+      - name: the two on-chain programs still compile
+        working-directory: onchain
+        run: cargo check --locked --workspace
 
       # Same class, more exposed. sanitizer-microworld compiles the SHIPPED sanitizer to wasm so a
       # reader can drive the real thing in a browser, it is named on all four judge-facing surfaces
@@ -781,6 +845,33 @@ jobs:
       # a plain cdylib for wasm32-unknown-unknown, so the target has to be added explicitly.
       - name: add the browser wasm target
         run: rustup target add wasm32-unknown-unknown
+      # BUILD rather than check, because the wasm is the input to the page generator and the drift
+      # step below cannot run without it. sanitizer.wasm is deliberately not committed.
       - name: sanitizer-microworld compiles for the browser
         working-directory: sanitizer-microworld
-        run: cargo check --locked --target wasm32-unknown-unknown
+        run: cargo build --release --locked --target wasm32-unknown-unknown
+
+      # index.html is GENERATED and committed, so it drifts from its generator in both directions:
+      # an edit to build_page.py that nobody rebuilds ships nothing, and an edit to the page is
+      # erased by the next build. webshop-pay has this same step for the same reason, after that
+      # page and its generator drifted once.
+      - name: the microworld page matches its generator
+        working-directory: sanitizer-microworld
+        run: |
+          # The artifact name and the target dir are build.sh's, copied rather than re-guessed:
+          # the crate is sanitizer-microworld so cargo emits sanitizer_microworld.wasm, and
+          # CARGO_TARGET_DIR may be redirected by the cache action. Running from this directory
+          # is what makes the relative default correct, exactly as build.sh does.
+          TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+          WASM="$TARGET_DIR/wasm32-unknown-unknown/release/sanitizer_microworld.wasm"
+          test -f "$WASM" || { echo "no artifact at $WASM"; ls -R "$TARGET_DIR" | head -40; exit 1; }
+          cp "$WASM" ./sanitizer.wasm
+          python3 build_page.py --check
+
+      # The page invites a judge to beat the sanitizer and says BEATEN if they do. A banner that
+      # can only ever say CONTRACT HOLDS is an uncalibrated instrument, and worse than no banner
+      # because it invites a challenge it cannot honour. This extracts the page's own clause
+      # checker and plants one violation per clause, with a positive control so a check that
+      # always fails cannot satisfy it. Offline: it reads the generated file and runs node.
+      - name: the microworld's win condition can actually say BEATEN
+        run: node sanitizer-microworld/check_verdict.js

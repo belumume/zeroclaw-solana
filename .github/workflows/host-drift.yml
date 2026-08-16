@@ -46,14 +46,30 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # The check refuses a COMPATIBLE verdict while any plugin is unbuilt, so all
-      # eight must exist before it can say anything meaningful.
-      - name: Build all eight components
+      # The check refuses a COMPATIBLE verdict while any plugin is unbuilt, so every one
+      # must exist before it can say anything meaningful.
+      #
+      # SCOPE IS DISCOVERED, NOT LISTED, matching the fmt job in ci.yml. This was a
+      # hand-written list of eight, which is the shape that silently loses a plugin added
+      # later: it would build and pass while the new component's WIT parity went unchecked,
+      # and interface drift is a whole-fleet failure rather than a per-plugin one. The floor
+      # is what makes a broken walk fail loudly instead of building nothing and reporting
+      # success, which is the same defect one layer down.
+      - name: Build every component
         run: |
-          for p in allowance-spend-build depin-attest lending-health oracle-publish \
-                   payment-watch solana-pay-request spl-transfer-build token-risk-check; do
-            (cd "plugins/$p" && cargo build --target wasm32-wasip2 --release --locked)
+          set -euo pipefail
+          n=0
+          for m in plugins/*/manifest.toml; do
+            d=$(dirname "$m")
+            (cd "$d" && cargo build --target wasm32-wasip2 --release --locked)
+            n=$((n + 1))
           done
+          echo "built $n component(s)"
+          if [ "$n" -lt 8 ]; then
+            echo "discovery found $n plugins, fewer than the 8 that existed when this floor" \
+                 "was written; the walk is broken, refusing to report parity" >&2
+            exit 1
+          fi
 
       # Skips only the three host-binary feature checks, which would need a full host
       # build. WIT parity and the per-component variant check are the ones that catch

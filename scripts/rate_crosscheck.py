@@ -36,9 +36,11 @@ reach (argv, env, config, memory) is not a control, and this runs at the last po
 customer is asked for money.
 
 WHAT THIS DOES NOT CLOSE, stated because a partial fix presented as a whole one is worse than
-none. The order VALUE stays model-supplied: "Table 4, R$ 0.05" passes every check here. This
-removes one free parameter of two. Closing the other needs a priced SKU table, an order id
-resolved against a store, or a merchant confirmation.
+none. The order VALUE stays model-supplied. pay_link.py now refuses an implausible one, so
+"Table 4, R$ 0.05" no longer produces a link, but a PLAUSIBLE wrong amount still does. This
+removes one free parameter of two and narrows the second. Closing it needs a price source the
+model cannot author: a priced SKU table, an order id resolved against a store, or a merchant
+confirmation certifying the serialized bytes rather than a sentence.
 
 EXIT CODES, matching verify-proof.py, feed_heartbeat.py and rate_from_feed.py:
   0  a corroborated rate was read and printed

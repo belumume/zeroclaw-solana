@@ -9,6 +9,7 @@ most readers will never run.
 import base64
 import io
 import os
+import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -101,6 +102,16 @@ HTML = """<!doctype html>
   }
   button:hover { border-color: var(--accent); color: var(--accent); }
   .note { color: var(--dim); font-size: 13px; min-height: 34px; margin: 4px 2px 14px; }
+  .verdict {
+    border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 16px 0 0;
+    background: var(--panel); font-size: 13px; line-height: 1.55;
+  }
+  .verdict .v { font-weight: 600; letter-spacing: .04em; }
+  .verdict.hold .v { color: var(--accent); }
+  .verdict.beaten { border-color: #e2564d; }
+  .verdict.beaten .v { color: #e2564d; }
+  .verdict ul { margin: 8px 0 0; padding-left: 18px; color: var(--dim); }
+  .verdict li.bad { color: #e2564d; }
   textarea {
     width: 100%; min-height: 92px; background: var(--panel); color: var(--ink);
     border: 1px solid var(--line); border-radius: 8px; padding: 12px;
@@ -141,6 +152,18 @@ HTML = """<!doctype html>
   <div class="presets" id="presets"></div>
   <div class="note" id="note">Pick an attack above, or type your own.</div>
 
+  <div class="prov">
+    <b>Try to beat it.</b> The win condition is not a slogan, it is the contract the property
+    tests assert, and this page re-checks all six clauses against the real output on every
+    keystroke. You have beaten it if the panel below ever says BEATEN: that means an input
+    reached output that is over the 96-character cap, or still carries a control, format, bidi
+    or zero-width character, or has a leading space, a trailing space or a doubled space, or is
+    not idempotent. The same clauses run as
+    <code>assert_output_contract</code> in <code>crates/solana-core/tests/properties.rs</code>
+    over 1,024 generated cases per property, so beating it here means those tests are wrong.
+    Where we have already been wrong is published in <code>docs/WHAT-WE-GOT-WRONG.md</code>.
+  </div>
+
   <textarea id="in" spellcheck="false"></textarea>
 
   <div class="grid">
@@ -155,6 +178,8 @@ HTML = """<!doctype html>
   </div>
 
   <div class="stats" id="stats"></div>
+
+  <div class="verdict hold" id="verdict"></div>
 
   <div class="limits">
     <h2>What this deliberately does not do</h2>
@@ -199,11 +224,19 @@ async function boot() {
   setValue(PRESETS[0].value, PRESETS[0].note);
 }
 
+// ONE definition of the cap. It is passed to the wasm call in `run` AND checked by the bounded
+// clause further down, and nothing kept the two in step when they were separate literals:
+// changing the call would have left the clause silently asserting the wrong bound. Declared
+// ABOVE `run` rather than below it, because `boot` is async and calls through to `run`, so
+// relying on the const being initialised by then would be reasoning about the temporal dead zone
+// instead of removing the question.
+const CAP = 96;
+
 function run(text) {
   const enc = new TextEncoder().encode(text);
   const ptr = wasm.alloc(enc.length);
   new Uint8Array(wasm.memory.buffer, ptr, enc.length).set(enc);
-  const res = wasm.sanitize(ptr, enc.length, 96);
+  const res = wasm.sanitize(ptr, enc.length, CAP);
   const len = new DataView(wasm.memory.buffer).getUint32(res, true);
   const body = new Uint8Array(wasm.memory.buffer, res + 4, len);
   return JSON.parse(new TextDecoder().decode(body));
@@ -238,6 +271,38 @@ function stat(label, value, tone) {
   return d;
 }
 
+// THE WIN CONDITION, checked rather than asserted. Every clause below is one line of
+// `assert_output_contract` in crates/solana-core/tests/properties.rs, plus the idempotence
+// property next to it. It is deliberately checked against r.text, the sanitized field, and NOT
+// against r.labelled: the label is a prefix this page adds around the field, so checking the
+// labelled string would test the wrong thing and could report a false BEATEN.
+function forbidden(ch) {
+  const c = ch.codePointAt(0);
+  return c < 0x20 || (c >= 0x7f && c <= 0x9f)          // control (Cc)
+    || c === 0x2028 || c === 0x2029                     // line / paragraph separator
+    || c === 0x200b || c === 0x200c || c === 0x200d || c === 0xfeff
+    || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069)
+    || c === 0x200e || c === 0x200f;                    // bidi / zero-width
+}
+function contract(out) {
+  const chars = [...out];
+  const bad = chars.filter(forbidden).map(
+    (c) => "U+" + c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0"));
+  // Idempotence: a second pass must change nothing and strip nothing.
+  const again = run(out);
+  return [
+    ["bounded to " + CAP + " characters", chars.length <= CAP,
+     chars.length + " chars"],
+    ["no control, format, bidi or zero-width survives", bad.length === 0,
+     bad.length ? bad.join(" ") : "none present"],
+    ["no leading space", !out.startsWith(" "), ""],
+    ["no trailing space", !out.endsWith(" "), ""],
+    ["no doubled space", !out.includes("  "), ""],
+    ["idempotent: a second pass changes nothing",
+     again.text === out && again.stripped === 0, ""],
+  ];
+}
+
 function update() {
   const text = document.getElementById("in").value;
   const r = run(text);
@@ -254,6 +319,28 @@ function update() {
     stat("injection framing", r.injection_suspected ? "labelled" : "none",
          r.injection_suspected ? "warn" : ""),
   );
+
+  const clauses = contract(r.text);
+  const beaten = clauses.some(([, ok]) => !ok);
+  const v = document.getElementById("verdict");
+  v.className = "verdict " + (beaten ? "beaten" : "hold");
+  v.textContent = "";
+  const head = document.createElement("div");
+  const tag = document.createElement("span");
+  tag.className = "v";
+  tag.textContent = beaten ? "BEATEN" : "CONTRACT HOLDS";
+  head.append(tag, document.createTextNode(
+    beaten
+      ? ". This input broke a clause the property tests assert. That is a real finding."
+      : ". All six clauses, re-checked on the output above."));
+  const ul = document.createElement("ul");
+  for (const [label, ok, detail] of clauses) {
+    const li = document.createElement("li");
+    if (!ok) li.className = "bad";
+    li.textContent = (ok ? "✓ " : "✗ ") + label + (detail ? " (" + detail + ")" : "");
+    ul.appendChild(li);
+  }
+  v.append(head, ul);
 }
 
 function setValue(v, note) {
@@ -282,6 +369,54 @@ boot();
 """
 
 html = HTML.replace("__WASM_B64__", wasm_b64).replace("__PRESETS__", preset_js)
+
+# `--check` REGENERATES AND DIFFS instead of writing. The committed index.html is the artifact a
+# reader double-clicks and it is GENERATED from this file, so the two drift silently in both
+# directions: an edit here that nobody rebuilds ships nothing, and an edit to the page directly is
+# erased by the next build. `webshop-pay/build.py --check` exists in this repo for exactly that
+# reason, after that page and its generator drifted once.
+#
+# THE WASM PAYLOAD IS EXCLUDED FROM THE COMPARISON, and that is a correctness requirement rather
+# than a convenience. A wasm built by a different rustc is a different blob, so comparing whole
+# pages would go red on any machine whose toolchain differs from whoever last committed, which is
+# a false drift report and would train people to ignore the gate. What genuinely drifts is the
+# TEMPLATE: the markup, the JS, the clause checker, the presets. Those are compared exactly.
+#
+# It compares TEXT, not bytes. Both sides use newline="\n", and reading the committed file in text
+# mode normalises line endings, so a checkout that translated them cannot manufacture a mismatch.
+if "--check" in sys.argv:
+    if not os.path.exists(OUT):
+        print(f"FAIL  {OUT} does not exist, so there is nothing to compare")
+        raise SystemExit(1)
+
+    def without_payload(page):
+        """The page with the base64 wasm replaced by its length, so toolchains cannot differ."""
+        m = re.search(r'const WASM_B64 = "([A-Za-z0-9+/=]*)";', page)
+        if not m:
+            return None
+        return page[: m.start(1)] + f"<{len(m.group(1))} b64 chars>" + page[m.end(1) :]
+
+    committed = io.open(OUT, encoding="utf-8").read()
+    a, b = without_payload(committed), without_payload(html)
+    if a is None or b is None:
+        print(
+            "FAIL  could not locate the WASM_B64 payload, so the comparison would be meaningless"
+        )
+        raise SystemExit(1)
+    if a == b:
+        print(
+            f"PASS  index.html matches build_page.py "
+            f"({len(b):,} template bytes; the wasm payload is excluded by design)"
+        )
+        raise SystemExit(0)
+    print(
+        f"FAIL  index.html has DRIFTED from build_page.py\n"
+        f"        committed {len(a):,} template bytes, regenerated {len(b):,}\n"
+        f"      Run `python3 sanitizer-microworld/build_page.py` and commit the result.\n"
+        f"      The page is generated; editing it directly is erased by the next build."
+    )
+    raise SystemExit(1)
+
 io.open(OUT, "w", encoding="utf-8", newline="\n").write(html)
 print(f"wrote {OUT}")
 print(f"  wasm  {len(wasm_b64) * 3 // 4:,} bytes -> {len(wasm_b64):,} base64")

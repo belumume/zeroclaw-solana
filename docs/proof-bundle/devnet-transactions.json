@@ -1,5 +1,5 @@
 {
-  "captured_utc": "2026-08-05T18:13:45Z",
+  "captured_utc": "2026-08-16T11:18:20Z",
   "cluster": "devnet",
   "source_rpc": "https://api.devnet.solana.com",
   "note": "Raw base64 transactions captured before public devnet RPC prunes them (~4 day retention). Each entry is verifiable offline: the signature is ed25519 over the serialized message.",
@@ -271,6 +271,40 @@
       "raw_base64": "AZ/nCXHZLxLikkZw+Ij2gPZ07TN+/y6x6d2epkrYt6j76FByrz+iOM2pOQONvpCFM3lgsVy3w7DgbQISCG4V0wkBAAIDo/X9RAed5hW9ySQkUBqYIWCciS6hZBLdQmrJUZD4NFUEapW2AmjRjkrLlndhWxJiW2rIfFtNw51CKkhFpbz5HZUPr3PCgjGd6QYnqzkjObzSJwq5zo+kgh4hH3st7ue/r/o8ORZLrXjLgOzfNtgksJiHPocuW56XZTnVL8we46IBAgEBGDZBC/rL7JtloA8AAAAAAAAIBwAAAAAAAA==",
       "raw_sha256": "8d9dbfa6968c4648ffcd4881e8bbda1439addb016b5d7d7cf940c7ded59572e5",
       "raw_len": 226
+    },
+    "5KuPETJfzhHeeJ59wrFU8pReQKJYSKVvv8tj2pdhTax6j4yUVUPk7HtifN32Ccs7L7JMw3havvM6fPomWFBQgMLf": {
+      "status": "CAPTURED",
+      "slot": 484429503,
+      "blockTime": 1786879009,
+      "err": null,
+      "raw_base64": "AdhejnucW+eGXi84Ywd5fvle4y7XUaz6MkkVRZHtDOCjA+GH6WeCPIu/MS32EDWR+EvkQqr2U0aYGskqiE2sZAwBAAQGo/X9RAed5hW9ySQkUBqYIWCciS6hZBLdQmrJUZD4NFWuK4EN4Lrq7DSa7e583WlI+RShX78lM/KxeEkEPHgnYQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAANwLktmyf79Yt+7rHFrD1yWmrh01szsy4+EgasxoDcNu7x3evumjwEj7AxNG37olukwHJKcVaBrqVGCFYJYwVqesrnSQFsx1PB9FU4fQoMIQe8QELFJWJS/gc3O3G4baFSEAgc0NGPIn7XZZxgdeBIz2H8iS5afxolkyBlksK8e8BBAYABQEDAgAhATMglEvpAAAAgIQeAAAAAAAxKalqAAAAALrO3xwAAAAA",
+      "raw_sha256": "352ca1a395bd61d3b942eb6a29ebd528018ee5972ca7d1d2704d5cd15b5080d6",
+      "raw_len": 336
+    },
+    "5aYSoco4mYrKSQP3MmWgte1iTUAwaxcZvJik1xLJN2WBJL9QK7zRi3bg8zd6CbxJkcDBRNvum7VT34cWjC5TsrZt": {
+      "status": "CAPTURED",
+      "slot": 484429507,
+      "blockTime": 1786879009,
+      "err": null,
+      "raw_base64": "AuT+VESeg0B5qjM7DwcloFnSk7GjeWzql67ay5K7WqjZvw+qiZL4zZ0lCO9X/3p1QXnR4yq/wvb15Y4xQHyeNgcgMocBW3329fxORYE7arxf3uBadY/+mg++Hyto1bs6nujeP9mqWeJ6Tm5RvEOL9hjfltLSDiDmAauNshDaH3gKAgEFCqP1/UQHneYVvckkJFAamCFgnIkuoWQS3UJqyVGQ+DRVNwLktmyf79Yt+7rHFrD1yWmrh01szsy4+EgasxoDcNtPKsraURCuXapLSeYdlQ2OIn+lY4R4HcJxptR7BtGD5mboyr2cizhALOiuBMF0FeawM+vIc0/PFdbo3Du8UHAoriuBDeC66uw0mu3ufN1pSPkUoV+/JTPysXhJBDx4J2EiBF5J49o2tW3he9FotFqiIbMQ3oW9qKuhXoGwD7qFgjtELLORIVfxOpM9ATQoLQMrX/7NAaLb8bd5BgjfAC6nu8d3r7po8BI+wMTRt+6JbpMBySnFWga6lRghWCWMFanrK50kBbMdTwfRVOH0KDCEHvEBCxSViUv4HNztxuG2hQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCpSEAgc0NGPIn7XZZxgdeBIz2H8iS5afxolkyBlksK8e8BBwkECAIDBgkBBQdJBEBCDwAAAAAAo/X9RAed5hW9ySQkUBqYIWCciS6hZBLdQmrJUZD4NFU7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupw==",
+      "raw_sha256": "a21b66d28e377fb7cee4a34ca83e263e4ec9763a7dab40264f62b2a2883b32f4",
+      "raw_len": 571
+    },
+    "5P9wTdBHPqQASpUycrrkmcxhuRG6Pum76fRQVG3bLmeB2s1DEvkxuF7FYSodsbedtFJcmr9WyNj2774WSJa5sZcq": {
+      "status": "CAPTURED",
+      "slot": 484429510,
+      "blockTime": 1786879010,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 300
+          }
+        ]
+      },
+      "raw_base64": "AtssQOoAeBTLTtVPrlZ52Ai1FMz2lWoo3ombZmY7Z7Xg8YTFjB9lpzuKMiN1C4vjhhszMBX2YoZprxKV2quWWg6RSV4CujGnoKUa/7Rzu0XEbwPFZFnlipp+vxt70QD4YD6dx34weNN7nq4KcqoM+h8HkBUSTsVWcLhYWbBJ6rYOAgEFCqP1/UQHneYVvckkJFAamCFgnIkuoWQS3UJqyVGQ+DRVNwLktmyf79Yt+7rHFrD1yWmrh01szsy4+EgasxoDcNtPKsraURCuXapLSeYdlQ2OIn+lY4R4HcJxptR7BtGD5mboyr2cizhALOiuBMF0FeawM+vIc0/PFdbo3Du8UHAoriuBDeC66uw0mu3ufN1pSPkUoV+/JTPysXhJBDx4J2EiBF5J49o2tW3he9FotFqiIbMQ3oW9qKuhXoGwD7qFgjtELLORIVfxOpM9ATQoLQMrX/7NAaLb8bd5BgjfAC6nu8d3r7po8BI+wMTRt+6JbpMBySnFWga6lRghWCWMFanrK50kBbMdTwfRVOH0KDCEHvEBCxSViUv4HNztxuG2hQbd9uHXZaGT2cvhRs7reawctIXtX1s3kTqM9YV+/wCp7UPGGASWeUU33nF40mAPXr+qlVi+4rUBiGnu31MdpzkBBwkECAIDBgkBBQdJBEBLTAAAAAAAo/X9RAed5hW9ySQkUBqYIWCciS6hZBLdQmrJUZD4NFU7RCyzkSFX8TqTPQE0KC0DK1/+zQGi2/G3eQYI3wAupw==",
+      "raw_sha256": "261bf0b2c08259dabe7ce7b7c9d5fd8645fd7949cacdbbfbcf17b1c81487f351",
+      "raw_len": 571
     }
   }
 }
