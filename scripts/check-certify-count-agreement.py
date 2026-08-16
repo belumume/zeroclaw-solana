@@ -24,9 +24,17 @@ order to search for them, and its own docstring quotes the stale `5/5` to explai
 Every other tracked file is in scope, which the self-test pins.
 
 HONEST CEILING. It only reads the surfaces named in SURFACES. A doc that quotes the score and is
-not on that list is invisible, so the list is derived from a repo-wide grep rather than memory, and
-widening it is one line. It also cannot tell a live claim from a historical one, which is why
+not on that list is invisible. It also cannot tell a live claim from a historical one, which is why
 `docs/HANDOFF-ARCHIVE.md` is deliberately absent: that file records what was true at the time.
+
+HOW SURFACES MUST BE BUILT. From a grep with NO PATHSPEC. An extension filter such as
+`git grep ... -- '*.md' '*.py' '*.yml'` cannot see `index.html` whatever it holds, and
+`index.html` is one of the submission form's five links, so scoping the search drops a
+judge-facing surface without saying so. A filter that narrows an instrument makes its zero mean
+"I did not look" while it reads as "nothing is there". `check-doc-slop.py` guards the same `.html`
+omission. Re-derive with:
+
+    git grep -nE '[0-9]+/[0-9]+ cases correct|(four|five|[0-9]+) inject(ion|ed) shapes?'
 
 Exit codes follow the house convention: 0 agree, 1 a real disagreement, 2 could not check.
 
@@ -44,13 +52,17 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CERTIFIER = ROOT / "scripts" / "certify_publish_tx.py"
 
-# Derived from `git grep -nE '[0-9]+/[0-9]+ cases correct|injection shapes'` rather than recalled.
-# A surface that quotes the score belongs here; one that merely runs the command does not.
+# From an UNSCOPED git grep (see the docstring on why the pathspec mattered). A surface that
+# quotes the score belongs here; one that merely runs the command does not. The certifier itself
+# is on the list because its own docstring and self-test comment described four shapes while it
+# printed six, so the source of truth was misdescribing itself.
 SURFACES = [
     "QUICKSTART.md",
     "README.md",
+    "index.html",
     "docs/ONE-PAGER.md",
     "demo/take.py",
+    "scripts/certify_publish_tx.py",
     ".github/workflows/ci.yml",
 ]
 
@@ -67,11 +79,12 @@ WORDS = {
     "nine": 9,
     "ten": 10,
 }
-SHAPES = re.compile(
-    r"\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
-    r"(?:inject(?:ion|ed)\s+shapes?)",
-    re.IGNORECASE,
-)
+_N = r"(one|two|three|four|five|six|seven|eight|nine|ten|\d+)"
+SHAPES = re.compile(rf"\b{_N}\s+(?:inject(?:ion|ed)\s+shapes?)", re.IGNORECASE)
+# QUICKSTART states the count TWICE in one sentence: "five injected shapes ... The five refusals
+# are ...". Guarding only the first lets a future bump update one and miss the other, which is the
+# same half-corrected shape this gate exists to prevent.
+REFUSALS = re.compile(rf"\bThe\s+{_N}\s+refusals\b", re.IGNORECASE)
 
 CANNOT_CHECK = 2
 
@@ -120,12 +133,13 @@ def scan(root: pathlib.Path, surfaces: list[str], total: int) -> list[str]:
                     bad.append(
                         f"{rel}:{n}: quotes '{m.group(0)}' but the certifier prints {total}/{total}"
                     )
-            for m in SHAPES.finditer(line):
-                got = spoken(m.group(1))
-                if got is not None and got != shapes:
-                    bad.append(
-                        f"{rel}:{n}: says '{m.group(0)}' but the certifier refuses {shapes}"
-                    )
+            for pat in (SHAPES, REFUSALS):
+                for m in pat.finditer(line):
+                    got = spoken(m.group(1))
+                    if got is not None and got != shapes:
+                        bad.append(
+                            f"{rel}:{n}: says '{m.group(0)}' but the certifier refuses {shapes}"
+                        )
     return bad
 
 
@@ -186,6 +200,26 @@ def selftest() -> int:
             "4 injected shapes are refused\n", encoding="utf-8"
         )
         check("a stale DIGIT count fires", len(scan(tmp, ["stale_digit.md"], 7)), 1)
+
+        # Review finding: QUICKSTART states the count TWICE in one sentence and only the first was
+        # guarded. A half-corrected sentence must fire on the half that is still wrong.
+        (tmp / "half.md").write_text(
+            "six injection shapes, and prints `7/7 cases correct`. The four refusals are ...\n",
+            encoding="utf-8",
+        )
+        got = scan(tmp, ["half.md"], 7)
+        check("a half-corrected sentence fires on the stale half", len(got), 1)
+        check(
+            "and it names the refusals clause", bool(got) and "refusals" in got[0], True
+        )
+
+        # An .html surface must be scanned like any other: an extension pathspec cannot see
+        # index.html at all, and index.html is a judge-facing surface, so SURFACES has to come
+        # from an unscoped grep for this case to be reachable.
+        (tmp / "page.html").write_text(
+            "<pre># four injection shapes, all refused</pre>\n", encoding="utf-8"
+        )
+        check("an .html surface is scanned", len(scan(tmp, ["page.html"], 7)), 1)
 
         # OVER-CORRECTION CONTROL: the corrected wording must be SILENT, or the gate would flag the
         # very text its own message tells an author to write.
