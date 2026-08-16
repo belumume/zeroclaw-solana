@@ -248,7 +248,9 @@ while IFS= read -r line; do
 done <<< "$PENDING"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "dry run: sent nothing, wrote nothing ($COUNT message(s) withheld)"
+  # Not "wrote nothing": step 1 ran a real scan, and a scan updates the confirmer's cache.
+  # Nothing was SENT and no ledger record was written, which is what a dry run promises.
+  echo "dry run: sent nothing, wrote no ledger record ($COUNT message(s) withheld)"
   exit 0
 fi
 

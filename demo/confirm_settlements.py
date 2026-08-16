@@ -586,8 +586,10 @@ def main(argv: list[str] | None = None) -> int:
         print(send_line(record))
 
     if args.dry_run:
+        # "wrote no ledger record", not "wrote nothing": a scanning run updates the scan
+        # cache above, and this line is the one a reader checks that against.
         print(
-            f"dry run: wrote nothing ({len(settlements)} record(s) withheld)",
+            f"dry run: wrote no ledger record ({len(settlements)} record(s) withheld)",
             file=sys.stderr,
         )
         return 0
