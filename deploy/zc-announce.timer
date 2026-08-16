@@ -1,0 +1,29 @@
+# Per-minute poll for settled payments.
+#
+# WHY A MINUTE IS AFFORDABLE, which is the SOP's own argument and survives it: most runs end at the
+# first step with nothing to announce, because there is usually no open reference. The expensive
+# path only runs when a payment actually landed. A per-minute tick therefore costs one cheap read
+# almost every time and does real work rarely.
+#
+# WHY NOT SLOWER. The claim this exists to support is that the owner learns of a payment within
+# about a minute of it settling on chain. A five-minute tick would make that sentence false, and the
+# sentence is the deliverable.
+#
+# Persistent=false ON PURPOSE. After downtime there is no value in firing a catch-up run
+# immediately: the next ordinary tick is at most a minute away, and a catch-up burst on boot would
+# announce a backlog in one clump rather than as it settles. The ledger already prevents duplicates,
+# so this is about presentation rather than correctness.
+
+[Unit]
+Description=Poll for settled payments once a minute
+Documentation=file:%h/.config/systemd/user/zc-announce.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=false
+Unit=zc-announce.service
+
+[Install]
+WantedBy=timers.target

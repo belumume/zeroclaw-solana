@@ -1,0 +1,64 @@
+# Deterministic settlement receipts, driven with no model in the path.
+#
+# WHY A UNIT EXISTS AT ALL. `deploy/announce_settlements.sh` and `demo/confirm_settlements.py` both
+# already exist and both already work when invoked by hand. Nothing scheduled them, so the
+# deterministic path was available and never running, while the prose SOP it replaces was the thing
+# that would actually fire if anyone installed it. A replacement nobody schedules does not replace
+# anything.
+#
+# Type=oneshot, because this is a poll that finishes rather than a daemon. Note a SUCCEEDED oneshot
+# reports ActiveState=inactive, which reads as dead to a naive check; `deploy/box_selfcheck.py`
+# already handles that distinction and it is the reason it reads Result as well as ActiveState.
+#
+# NOT ENABLED BY THIS FILE. Installing it is a separate deliberate act on the box:
+#     cp deploy/zc-announce.{service,timer} ~/.config/systemd/user/
+#     systemctl --user daemon-reload && systemctl --user enable --now zc-announce.timer
+#
+# The script itself refuses rather than guessing: it exits 2 if the zeroclaw binary or the confirmer
+# is absent, so a half-installed setup fails loudly instead of silently announcing nothing.
+
+[Unit]
+Description=Announce settled payments, every field derived from the chain
+Documentation=file:%h/.zeroclaw/bin/announce_settlements.sh
+After=network-online.target
+
+[Service]
+Type=oneshot
+
+# Every path the script reads is overridable, and the defaults match the deployed layout. Set them
+# here rather than editing the script, so the script stays identical to the tracked copy and the
+# drift gate's byte comparison keeps working.
+Environment=ZC_CHANNEL=whatsapp.shop
+# Environment=ZC_BIN=%h/zeroclaw/target/release/zeroclaw
+# Environment=ZC_CONFIG=%h/.zeroclaw/config.toml
+# Environment=ZC_TOOLS=%h/.zeroclaw/agents/demo/workspace/tools
+# Environment=ZC_LEDGER=%h/.zeroclaw/agents/demo/workspace/confirmed-payments-v2.jsonl
+#
+# ZC_RECIPIENT IS DELIBERATELY ABSENT, and this note exists because the obvious completion of the
+# list above is to add it. The script reads the recipient from the channel's OWN allowlist rather
+# than from a variable, so it carries no phone number and cannot drift away from the channel it
+# sends to. Setting it here would hardcode a number into a tracked file and reintroduce exactly the
+# drift the script was written to avoid. Leave it unset.
+
+# THE SCRIPT IS RUN FROM AN INSTALLED COPY, NOT FROM THE REPO, and the reason is worth stating
+# because the obvious alternative is wrong. A unit file cannot locate the repo the way a script can
+# locate itself, so the path has to be fixed. It cannot be %h/zeroclaw either: that is the UPSTREAM
+# host clone (the reproduction doc clones zeroclaw-labs/zeroclaw into it, and this script's own
+# ZC_BIN default reads the host binary out of it), so pointing there would fail 203/EXEC every tick
+# against a directory that has no deploy/ at all. This repo has no fixed home on the box.
+#
+# %h/.zeroclaw/bin is fixed, it matches how every other component in the reproduction doc installs,
+# and it is OUTSIDE the agent's workspace jail at %h/.zeroclaw/agents/demo/workspace, which the
+# deterministic path should not sit inside. The script reads nothing relative to its own directory,
+# so the copy behaves identically to the tracked original and stays byte-comparable to it.
+ExecStart=/usr/bin/env bash %h/.zeroclaw/bin/announce_settlements.sh
+
+# A run that hangs must not stack with the next tick. The timer's AccuracySec plus this ceiling keep
+# at most one in flight.
+TimeoutStartSec=90
+
+# The script's own ordering is send-first, commit-after, so a failed run re-announces rather than
+# swallowing a confirmation. That makes a plain failure safe and a retry storm the only real risk,
+# which is what the timer's interval bounds.
+StandardOutput=journal
+StandardError=journal
