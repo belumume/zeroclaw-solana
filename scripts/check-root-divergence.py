@@ -19,7 +19,14 @@ A byte diff reports that as a divergent proof bundle, which is the most alarming
 say and would be false. JSON is compared parsed; everything else by bytes.
 
 THE OTHER ROOT IS OPTIONAL. A clone has one root, so its absence is a SKIP with a stated reason and
-exit 0, never a failure and never a silent pass. Point it elsewhere with ZC_OTHER_ROOT.
+**exit 2**, never a failure and never a silent pass. Point it elsewhere with ZC_OTHER_ROOT.
+
+That exit code was 0 until 2026-08-17, and the sentence above was already the right standard while
+the code missed it: the PROSE said "not applicable rather than clean" and the EXIT CODE said pass.
+`check-all.py` reserves 2 for could-not-check and reads everything else as a verdict, so on every
+clone this gate was counted as a passing comparison having compared nothing. Found by running it
+beside its untracked-file sibling in a fresh clone: identical condition, `rc=0` here and `rc=2`
+there. Same class as the defect #77 removed from check-all's own summary line.
 
 DELIBERATELY NOT WIRED INTO ci.yml, and the reason is that same optionality. A GitHub runner clones
 exactly one root, so this would SKIP on every run: a step that can only ever skip is a green check
@@ -166,10 +173,13 @@ def other_is_behind(rel: str) -> bool:
 def main() -> int:
     if not (OTHER / ".git").exists():
         print(
-            f"SKIP  the second root is not present at {OTHER}; a clone has one root, so this is "
-            f"not applicable rather than clean. Set ZC_OTHER_ROOT to point elsewhere."
+            f"CANNOT CHECK  the second root is not present at {OTHER}; a clone has one root, so "
+            f"this is not applicable rather than clean. Set ZC_OTHER_ROOT to point elsewhere."
         )
-        return 0
+        # 2, not 0. `check-all.py` reserves 2 for could-not-check and reads every other code as a
+        # verdict, so returning 0 here counted this as a passing comparison of nothing on every
+        # clone. The printed word was always honest; the exit code was not.
+        return 2
 
     mine, theirs = git_files(ROOT), git_files(OTHER)
     if mine is None or theirs is None:
