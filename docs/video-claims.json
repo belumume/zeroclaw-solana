@@ -15,8 +15,8 @@
       "spoken": "I asked the agent to make a payment. I want to make a payment of two reais.",
       "kind": "capability",
       "asserts": "An order is placed conversationally, in BRL, through a real chat channel.",
-      "verify": "python3 skills/solana-pay/scripts/pay_link.py '<solana: URL>' pt --brl 2",
-      "note": "The order VALUE is caller-supplied and is bounded, not sourced. See task #93 and the band in pay_link.py."
+      "verify": "python3 skills/solana-pay/scripts/pay_link.py '<solana: URL>' pt --brl 2 --quote 'I want to make a payment of R$ 2'",
+      "note": "The order VALUE is bounded by a plausibility band and bound to the words it came from: --brl must equal an R$-marked figure in --quote, or the sum of them. A fabricated quote still passes, so the value is sourced rather than proven."
     },
     {
       "id": "brl-conversion",

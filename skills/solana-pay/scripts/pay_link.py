@@ -29,6 +29,7 @@ translated; the recipient, amount and asset never pass through the language laye
 import base64
 import datetime as _dt
 import json
+import re
 import sys
 import urllib.request
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -119,11 +120,113 @@ MIN_PLAUSIBLE, MAX_PLAUSIBLE = 3.0, 10.0
 # of value no merchant transaction has: a sub-currency-unit total, and a fat-finger that is orders
 # of magnitude out.
 #
-# WHAT IT DOES NOT DO, so nobody reads it as closing the hole: a PLAUSIBLE wrong amount still
-# passes. R$ 25 for a R$ 60 order is inside the band and always will be. Closing that needs a
-# price source the model cannot author, and the honest options are in SKILL.md.
+# WHAT THE BAND ALONE DOES NOT DO: R$ 25 for a R$ 60 order sits inside it. The band removes a
+# class of absurd value; the SOURCE of the value is what the block below addresses.
 MIN_ORDER_BRL, MAX_ORDER_BRL = Decimal("1.00"), Decimal("50000.00")
 FETCH_TIMEOUT_S = 20
+
+# ------------------------------------------------------------- THE ORDER VALUE'S SOURCE
+# Every other constant on this path was moved from ASSERTED to DERIVED. The recipient, the mint
+# and the label are pinned against a value the agent cannot reach. The exchange rate is fetched
+# from BCB and corroborated by the ECB, because verifying the caller's arithmetic against the
+# caller's own rate caught arithmetic error and not intent error: a consistent lie passed
+# everything. The order value is the last field still asserted, and it is the one a customer pays.
+#
+# SKILL.md already states the invariant in words: "the order value comes from the operator or the
+# customer, never from you." A responsibility assigned in prose to a model is not a constraint on
+# it. That sentence is the whole argument this shop is built on, so it is enforced here instead.
+#
+# `--quote` carries the verbatim text the figure came from, and `--brl` must be DERIVABLE from it:
+# equal to one currency-marked figure in that text, or to the exact sum of all of them. There is
+# no third branch, and in particular no arbitrary subset sum, because subset sums of a long list
+# reach almost any value and would hand back the free parameter this removes.
+#
+# A CURRENCY MARKER IS REQUIRED and that requirement is the check. Extracting bare numbers would
+# be worse than nothing here: "Mesa 4 - Pedido #42, 2 pizzas, R$ 60" contains 4, 42 and 2, so a
+# bare extractor would license almost any small integer as customer-authored. Requiring `R$` or
+# `reais` reduces that message to a single admissible figure.
+#
+# WHAT IT DOES NOT PROVE, stated rather than implied: the model supplies the quote, so it can
+# fabricate one. What changes is the cost and the visibility of the lie. A silent numeric
+# substitution becomes a fabricated CUSTOMER UTTERANCE, echoed into the operator trace on stderr
+# and falsifiable against the channel transcript, which the model does not write. Text injected by
+# a third party -- a group message, a memory row, a tool output -- can no longer set the price
+# without the model laundering it into the quote as the customer's own words. The ceiling is a
+# check that reads the channel transcript itself rather than being handed it; this script runs in
+# the workspace jail and cannot reach that log, so it is out of reach here rather than unwanted.
+MAX_QUOTE_CHARS = 2000
+
+# `R$ 60`, `R$60,00`, `R$ 1.234,56`, `60 reais`. The character class is deliberately loose and the
+# strictness lives in _parse_money, so a malformed figure REFUSES rather than being skipped by a
+# tighter pattern and silently leaving a smaller admissible set.
+_MONEY_RE = re.compile(
+    r"R\$\s*([\d.,]+)|([\d.,]+)\s*(?:reais|real)\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_money(tok: str) -> Decimal:
+    """A Brazilian money token to a Decimal, refusing anything whose separators are ambiguous.
+
+    `1.234` is 1234 to a Brazilian writer and 1.234 to this parser's default reading, a
+    thousand-fold difference well inside the plausibility band, so a separator followed by exactly
+    three digits raises rather than picking a side.
+    """
+    t = tok.strip().rstrip(".,")
+    if not t or not any(ch.isdigit() for ch in t):
+        raise ValueError("carries no digits")
+    dots, commas = t.count("."), t.count(",")
+    if dots and commas:
+        dec_sep = "." if t.rfind(".") > t.rfind(",") else ","
+        tho_sep = "," if dec_sep == "." else "."
+        int_part, _, dec_part = t.rpartition(dec_sep)
+        if not dec_part.isdigit() or not 1 <= len(dec_part) <= 2:
+            raise ValueError("its decimal part is not one or two digits")
+        groups = int_part.split(tho_sep)
+        if (
+            len(groups) < 2
+            or not all(g.isdigit() for g in groups)
+            or not 1 <= len(groups[0]) <= 3
+            or any(len(g) != 3 for g in groups[1:])
+        ):
+            raise ValueError("its thousands groups are not three digits each")
+        return Decimal(f"{''.join(groups)}.{dec_part}")
+    sep = "." if dots else ("," if commas else "")
+    if not sep:
+        if not t.isdigit():
+            raise ValueError("it is not a number")
+        return Decimal(t)
+    if t.count(sep) > 1:
+        raise ValueError(
+            f"it repeats {sep!r} with no decimal separator to disambiguate"
+        )
+    head, _, tail = t.partition(sep)
+    if not head.isdigit() or not tail.isdigit():
+        raise ValueError("it is not a number")
+    if len(tail) == 3:
+        raise ValueError(
+            f"{sep!r} followed by exactly three digits is a thousands separator to a "
+            f"Brazilian writer and a decimal point to this parser, a thousand-fold difference"
+        )
+    if len(tail) > 3:
+        raise ValueError("its decimal part is longer than two digits")
+    return Decimal(f"{head}.{tail}")
+
+
+def figures_in(quote: str) -> list[Decimal]:
+    """Every currency-marked figure in the quote, in order. Refuses on a malformed one."""
+    out = []
+    for whole, suffixed in _MONEY_RE.findall(quote):
+        tok = whole or suffixed
+        try:
+            out.append(_parse_money(tok))
+        except ValueError as exc:
+            sys.exit(
+                f"REFUSED: the quoted text carries the figure {tok!r}, which cannot be read "
+                f"unambiguously because {exc}. No link was produced. Ask for the amount again "
+                f"in a plain form such as 'R$ 1234,56'."
+            )
+    return out
 
 
 def _fetch_json(url: str):
@@ -209,25 +312,30 @@ def fetch_rate() -> tuple[Decimal, str, str]:
     return ptax[0], ptax[1], f"BCB PTAX, corroborated by ECB within {div * 100:.2f}%"
 
 
-USAGE = "usage: pay_link.py '<solana: URL>' [pt|en] [--brl <value>] [--rate <rate>]"
+USAGE = (
+    "usage: pay_link.py '<solana: URL>' [pt|en] "
+    "[--brl <value> --quote '<verbatim text the value came from>'] [--rate <rate>]"
+)
 
 # Pull the optional flags out first so the positional contract stays exactly what it
 # was. Callers that pass only the URL, or the URL and a language, behave identically
 # to before this check existed; the live shop cannot break by being older than this
 # script.
 argv = sys.argv[1:]
-brl_arg = rate_arg = None
+brl_arg = rate_arg = quote_arg = None
 positional = []
 i = 0
 while i < len(argv):
     token = argv[i]
-    if token in ("--brl", "--rate"):
+    if token in ("--brl", "--rate", "--quote"):
         if i + 1 >= len(argv):
             sys.exit(f"REFUSED: {token} given with no value.\n{USAGE}")
         if token == "--brl":
             brl_arg = argv[i + 1]
-        else:
+        elif token == "--rate":
             rate_arg = argv[i + 1]
+        else:
+            quote_arg = argv[i + 1]
         i += 2
         continue
     positional.append(token)
@@ -398,6 +506,9 @@ if label_values:
 if rate_arg is not None and brl_arg is None:
     sys.exit("REFUSED: --rate given without --brl; there is no order value to price.")
 
+if quote_arg is not None and brl_arg is None:
+    sys.exit("REFUSED: --quote given without --brl; there is no order value to bind.")
+
 if brl_arg is not None:
     try:
         brl = Decimal(brl_arg)
@@ -412,6 +523,60 @@ if brl_arg is not None:
             f"purpose and only removes values no merchant order has; a plausible wrong amount "
             f"still passes, which is why the price source matters."
         )
+
+    # THE QUOTE IS MANDATORY WITH --brl, and treating a missing one as "skip the check" is the
+    # exact fail-open this guard exists to prevent: a caller that can omit the binding by omitting
+    # a flag is not bound. Refusing costs a link and produces no wrong price, which is the same
+    # trade fetch_rate() already makes on a network failure.
+    if quote_arg is None:
+        sys.exit(
+            "REFUSED: --brl given without --quote. The order value must be traceable to the "
+            "words it came from, so pass the customer's or operator's verbatim message. "
+            "No link was produced."
+        )
+    if len(quote_arg) > MAX_QUOTE_CHARS:
+        sys.exit(
+            f"REFUSED: --quote is {len(quote_arg)} characters, over the {MAX_QUOTE_CHARS} cap. "
+            f"Pass the message the figure came from, not a transcript. No link was produced."
+        )
+    # The quote is echoed to a terminal below, so C0 controls are refused rather than stripped:
+    # stripping would let the echoed text differ from the text that was matched against, and the
+    # operator reading the trace would be checking a different string from the one that priced
+    # the order. Newline and tab survive because real chat messages carry them.
+    bad = sorted({c for c in quote_arg if ord(c) < 32 and c not in "\n\t"})
+    if bad:
+        sys.exit(
+            f"REFUSED: --quote carries control characters {[hex(ord(c)) for c in bad]}. "
+            f"No link was produced."
+        )
+
+    quoted = figures_in(quote_arg)
+    if not quoted:
+        sys.exit(
+            "REFUSED: the quoted text names no amount in reais, so the order value is not "
+            "traceable to it. A figure must be marked with 'R$' or 'reais': a bare number is "
+            "not read as a price, because table and order numbers are bare numbers too. "
+            "No link was produced."
+        )
+    admissible = set(quoted) | {sum(quoted)}
+    if brl not in admissible:
+        sys.exit(
+            f"REFUSED: the order value is not derivable from the quoted text.\n"
+            f"  order value: R$ {brl}\n"
+            f"  quoted:      {', '.join(f'R$ {q}' for q in quoted)}\n"
+            f"  admissible:  {', '.join(f'R$ {a}' for a in sorted(admissible))} "
+            f"(any one figure, or the sum of all of them)\n"
+            f"No link was produced. The value a customer is asked to pay has to come from the "
+            f"operator or the customer, never from the agent; if the quote is right and the "
+            f"value is wrong, use the quoted figure."
+        )
+    matched = (
+        "the sum of the quoted figures" if brl not in set(quoted) else "a quoted figure"
+    )
+    print(
+        f"order: R$ {brl} is {matched} in {quote_arg[:200]!r}",
+        file=sys.stderr,
+    )
 
     rate, rate_date, provenance = fetch_rate()
 

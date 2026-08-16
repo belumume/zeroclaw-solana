@@ -285,3 +285,64 @@ so re-run them rather than quoting these if the shaping changes.
 **What would justify Tier 1.** A lens reading only values the chain itself constrains, with no
 operator-supplied text and no third-party JSON anywhere in the response. Neither of these is
 that, and a lens over token metadata never will be.
+
+## 11. The order value is bound to the customer's own words, because the two obvious sources were both blocked
+
+**The gap.** Every other field on the pay path was moved from asserted to derived. The recipient,
+the mint and the label are pinned against constants the agent cannot reach. The exchange rate is
+fetched from BCB PTAX and corroborated against the ECB, because checking the caller's arithmetic
+against the caller's own rate caught arithmetic error and never intent error. The order value was
+the last field still asserted, and it is the only one a customer actually pays. Bounding it to a
+plausible band removes an absurd figure and cannot tell R$ 25 from R$ 60 for the same order.
+
+**Rejected: a priced SKU table the shop quotes from.** This is the strongest answer and it is not
+ours to give. `git ls-files | grep -iE 'menu|sku|catalog|price'` returns nothing, so there is no
+catalog to read, and inventing one decides what this shop sells. That is a product decision, and a
+band derived from a menu we made up would refuse legitimate orders at a shop selling something
+else.
+
+**Rejected for now: a merchant confirmation that certifies the serialized bytes.** The right shape,
+and the one that would make the value provable rather than sourced: the operator approves the exact
+bytes rather than a sentence a model composed, which is the argument `certify_publish_tx.py`
+already makes on the publish path. It needs `request_approval` on the whatsapp-web channel. That is
+our own upstream contribution and it MERGED on 2026-08-13 as
+[zeroclaw-labs/zeroclaw#9385](https://github.com/zeroclaw-labs/zeroclaw/pull/9385), so the upstream
+blocker is gone. What blocks it now is deployment rather than code: the box runs an agent binary
+built before that merge. Re-derive the upstream half with
+`gh pr view 9385 --repo zeroclaw-labs/zeroclaw --json state,mergedAt` rather than trusting this
+paragraph.
+
+**Chosen: bind the value to the text it came from.** `pay_link.py` requires `--quote`, the verbatim
+message the figure was given in, and `--brl` must equal one figure marked `R$` or `reais` in that
+text or the sum of all of them. There is no third branch, and deliberately no arbitrary subset sum,
+because subset sums of a long list reach almost any value and would hand back the parameter this
+removes. SKILL.md already carried the invariant in words, "the order value comes from the operator
+or the customer, never from you"; a responsibility assigned in prose to a model is not a constraint
+on it, which is the argument this whole shop rests on, so it is a check now.
+
+**The currency marker is the check.** Extracting bare numbers would be worse than nothing:
+`Mesa 4 - Pedido #42, 2 pizzas, R$ 60` contains 4, 42 and 2, so a bare extractor would license
+almost any small integer as customer-authored. Requiring the marker reduces that message to one
+admissible figure. Against a band holding 4,999,901 values at two decimals
+(`python -c "print(int((50000_00 - 1_00)) + 1)"`), a typical order is left with one or two.
+
+**Ambiguity refuses rather than guessing.** `R$ 1.200` is 1200 to a Brazilian writer and 1.200 to a
+naive parser, a thousand-fold difference sitting well inside the plausibility band, so a separator
+followed by exactly three digits is refused and the agent asks for the figure again. That costs a
+round trip on a real message shape, and picking a side costs a customer 1000x.
+
+**What it does not prove, stated rather than implied.** The agent supplies the quote, so a
+fabricated one passes. What changes is the cost and the visibility of the lie: a silent numeric
+substitution becomes a fabricated customer utterance, echoed to the operator trace on stderr and
+falsifiable against a channel transcript the model does not write, and text injected by a third
+party cannot set a price without being laundered into the quote as the customer's own words. The
+ceiling is a check that READS the channel transcript instead of being handed it; the script runs in
+the workspace jail and cannot reach that log, so that is out of reach here rather than unwanted.
+
+**Consequence.** `--brl` without `--quote` is refused rather than waved through, because a caller
+that can skip the binding by omitting a flag is not bound; that is the same trade `fetch_rate()`
+already makes, producing no link rather than an unverified price. The suite carries seven positive
+controls, so the refusals cannot be satisfied by a binding that refuses everything, and a mutation
+control disables the comparison and requires the R$ 25 attack to succeed, asserting the
+substitution applied first so a drifted anchor cannot leave the control passing on an unmutated
+script. Re-run with `python3 skills/solana-pay/scripts/test_pay_link.py`.

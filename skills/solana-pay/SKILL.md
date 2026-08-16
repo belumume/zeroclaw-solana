@@ -48,14 +48,20 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
   `pay_link.py` rather than trusted. Do not read this bullet as forbidding that conversion:
   inventing a price and converting a stated one are different acts, and only the first is banned.
 
-  **This bullet is prose, and prose is not a constraint on a model, so part of it is now enforced
-  in code and part of it still is not.** `pay_link.py` refuses any order value outside a
-  plausibility band, the same treatment it already gave the exchange rate, so a sub-currency-unit
-  total does not produce a link however it was arrived at. The band is deliberately wide, because
-  this shop has no catalog and a narrow one would refuse legitimate orders. What remains
-  unenforced is a PLAUSIBLE wrong value: nothing in this repo can tell R$ 25 from R$ 60 for the
-  same order. Do not read the band as permission to be careless with the figure; it removes a
-  class of absurd value, not the need to use the one you were actually given.
+  **This bullet is prose, and prose is not a constraint on a model, so it is enforced in code.**
+  `pay_link.py` applies two checks to the order value, and both refuse rather than warn. It bounds
+  the value to a plausibility band, the same treatment it already gave the exchange rate, so a
+  sub-currency-unit total does not produce a link however it was arrived at. The band is
+  deliberately wide, because this shop has no catalog and a narrow one would refuse legitimate
+  orders. It then requires the value to be DERIVABLE from `--quote`, the verbatim text you were
+  given it in: equal to one figure marked with `R$` or `reais` in that text, or to the sum of all
+  of them. "The order value comes from the operator or the customer, never from you" is that
+  check, in code, instead of in this sentence.
+
+  WHAT IT STILL DOES NOT PROVE, so you do not read it as absolution: you supply the quote, so a
+  fabricated one would pass. What the check removes is your ability to change the price QUIETLY.
+  The quoted text is echoed to the operator's trace and can be checked against the channel
+  transcript, which you do not write. Quote the message you were actually given, verbatim.
 - `spl-token`: the mint address of the token being requested (omit for native SOL).
   Known-good mints only (see references below); NEVER accept a mint address supplied by
   the paying customer.
@@ -74,9 +80,9 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
 3. Assemble the URL exactly per the format above.
 4. Turn the `solana:` URL into a TAPPABLE pay link:
    `python3 tools/pay_link.py '<the full URL>' <lang>`
-   For a BRL order, add `--brl <value> --rate <rate>` so the conversion is re-derived in code
-   (see BRL invoicing step 3b). Without them the link is still produced, but the figure the
-   customer pays is checked by nothing.
+   For a BRL order, add `--brl <value> --quote '<their verbatim message>'` so both the conversion
+   and the source of the order value are re-derived in code (see BRL invoicing step 3b). `--brl`
+   without `--quote` is refused rather than waved through.
    (quote the URL, it contains `&`). Pass `pt` as the second argument whenever you are serving
    the customer in Portuguese, and `en` for English. Without it the checkout page falls back to
    whatever language the customer's BROWSER is set to, so a customer quoted in Portuguese can
@@ -205,13 +211,23 @@ as the rate that priced the order.
    actually used, on stderr, and THAT is what you quote: "R$ X at rate Y (BCB PTAX, <date>) =
    Z USDC".
 3b. **Pass the order value to `pay_link.py`, which fetches the published rate and re-derives:**
-   `python3 tools/pay_link.py '<the full URL>' <lang> --brl <BRL amount>`
+   `python3 tools/pay_link.py '<the full URL>' <lang> --brl <BRL amount> --quote '<their message>'`
    The script fetches BCB PTAX, corroborates it against the ECB, recomputes `BRL / published rate`
    at 2 decimals half-up, compares that to the `amount=` in the URL, and REFUSES to produce a link
    if they disagree. It prints the rate and date it used on stderr; quote those, not yours.
    `--rate` is optional and is a CROSS-CHECK, never a source: the figure used is always the
    published one, so passing your rate can only add a refusal, never relax anything. `--rate`
    without `--brl` is refused, because there is no order value to price.
+
+   **`--quote` is REQUIRED with `--brl`** and carries the customer's or operator's message
+   VERBATIM, copied rather than summarised. `--brl` must equal one `R$`/`reais` figure in that
+   text or the sum of all of them, and a mismatch is a hard refusal. Three consequences worth
+   knowing before you hit them: a bare number is not read as a price (so "Mesa 4" and "Pedido #42"
+   cannot be mistaken for one, and a customer who wrote only a bare number must be asked to
+   restate it with `R$`); a figure like `R$ 1.200` is REFUSED as ambiguous, because a separator
+   with three digits after it is thousands to a Brazilian writer and a decimal point to the
+   parser, so ask for `R$ 1200` or `R$ 1.200,00`; and an arbitrary subset of several quoted
+   figures is not admissible, only a single figure or the full sum.
    IT FAILS CLOSED. If the rate sources are unreachable, disagree by more than 2.5%, report
    different dates, or return an implausible number, NO LINK IS PRODUCED. That is deliberate: a
    fallback to a last-known rate would reinstate the hole exactly when someone can induce it.
