@@ -502,6 +502,17 @@ jobs:
       - name: the correction-trace carve-out controls actually gate
         run: python3 scripts/check-correction-traces.py --selftest
 
+      # x402-pay-build hands its result to allowance-spend-build, which is the correct layering
+      # and leaves exactly one seam: the FIELD NAMES. Nothing catches a rename at compile time,
+      # because one emits JSON and the other parses it, so it type-checks, tests green, and fails
+      # at runtime on a live payment. This reads the consumer's own parameters_schema and requires
+      # the producer to emit what it declares, restating neither list.
+      - name: the two plugins agree about the arguments passed between them
+        run: python3 scripts/check-spend-args-agreement.py
+
+      - name: renaming an argument on either side is caught
+        run: python3 scripts/check-spend-args-agreement.py --selftest
+
       # check-all is the reporter every other gate is read through, so a defect in its counting
       # is invisible by construction: a wrong summary looks exactly like a right one. It once
       # read "all 10 gate(s) pass" where eight passed and two never executed, one of them the
@@ -641,6 +652,7 @@ jobs:
           - plugins/solana-pay-request
           - plugins/spl-transfer-build
           - plugins/token-risk-check
+          - plugins/x402-pay-build
           - x402-feed-gate
     steps:
       - uses: actions/checkout@v4
@@ -666,6 +678,7 @@ jobs:
           - solana-pay-request
           - spl-transfer-build
           - token-risk-check
+          - x402-pay-build
     steps:
       - uses: actions/checkout@v4
 

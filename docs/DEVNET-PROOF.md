@@ -396,6 +396,56 @@ every non-zero replay is refused with the same 300. Check that here rather than 
 python3 scripts/replay_allowance_probe.py --bundle docs/proof-bundle/devnet-transactions.json
 ```
 
+## The same cap, at the prices our own x402 gate actually charges (the buy loop)
+
+The run above uses round numbers. This one uses the two prices a real buyer of this feed faces,
+so the cap is not a demonstration amount but a purchasing decision.
+
+`GET https://x402.perfpilot.dev/reading` returned HTTP 402 on 2026-08-16 offering exactly two
+tiers on devnet USDC-Dev (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`, 6 decimals, read from
+the mint rather than assumed): **1,000,000 base units for one reading** and **5,000,000 for a day
+pass**. Those bytes are stored verbatim as a test fixture in `plugins/x402-pay-build/src/pay.rs`,
+because a test that fetches at run time stops testing anything the day the endpoint changes shape.
+
+A fixed delegation was then created with a cap of **2,000,000**, deliberately between the two
+prices, and the agent session key `4hjyyXptBXqkwtjyvXFnXGiDvhzms2drm6BgPcRp5twc` signed both
+spends:
+
+```
+PASS  5KuPETJfzhHeeJ59..  slot=484429503  sigs 1/1 verified  succeeded
+        ix0  SF Allowances: createFixedDelegation cap=2000000 raw units (nonce 1001995378739)
+PASS  5aYSoco4mYrKSQP3..  slot=484429507  sigs 2/2 verified  succeeded
+        ix0  SF Allowances: transferFixed amount=1000000 raw units
+PASS  5P9wTdBHPqQASpUy..  slot=484429510  sigs 2/2 verified  FAILED ON CHAIN: {"InstructionError": [0, {"Custom": 300}]}
+        ix0  SF Allowances: transferFixed amount=5000000 raw units
+```
+
+The reading settled. The day pass was refused by the audited program, with the agent's own key on
+the transaction.
+
+**Both layers refuse the day pass, and they are not the same refusal.** `x402-pay-build` refuses
+it OFF-CHAIN, against the challenge, before anything is built: the ceiling is operator
+configuration, so the tier is never selected and no transaction exists. The program refuses it
+ON-CHAIN, against the delegation, even when a transaction is built and signed anyway. The first
+depends on the plugin behaving; the second does not depend on anything of ours behaving. That is
+why both exist, and the transactions above are the second layer holding while the first is
+bypassed by construction.
+
+Reproduce the off-chain half with `cd plugins/x402-pay-build && cargo test --locked`, where
+`the_live_day_pass_is_refused_by_the_ceiling_and_says_which_tier_and_why` runs against the captured
+bytes. Reproduce the on-chain half with:
+
+```
+cd e2e-allowance && npm install && \
+E2E_FUNDER=<operator.json> E2E_CLUSTER=devnet \
+E2E_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU \
+E2E_CAP=2000000 E2E_WITHIN=1000000 E2E_OVER=5000000 node demo.js
+```
+
+Both figures above are decoded from the captured bytes by
+`python3 scripts/verify_proof_offline.py`, not copied from a run log, so the amounts are read from
+the transactions rather than from a caption beside them.
+
 ## How to re-verify
 Three ways, no account of ours needed. The first needs no network and is the one that still works
 after the links expire, so it is listed first deliberately:
