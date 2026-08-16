@@ -205,20 +205,32 @@ def main() -> int:
 
             # 4c. EIGHT wallets must not push the QR out of view, and the two-wallet cases above
             # are structurally blind to this: the list grows ~50px per wallet, so the defect only
-            # appears past about four. Measured in the operator's own Brave, which registers eight:
+            # appears past about four. RE-MEASURED 2026-08-16 against the live page in his own
+            # profile: 67px per row, not 50, so eight rows occupy about 536px rather than 400.
+            # On the LIVE page only seven of his eight render, because enumerateWallets
+            # filters on feature presence and the real MetaMask exposes no Solana features.
+            # THIS TEST DELIBERATELY RENDERS ALL EIGHT: FAKE_WALLETS stamps the Solana
+            # features onto every name, so the fake MetaMask passes the filter. That is the
+            # worst case and the right thing to assert geometry against; it is not a claim
+            # about what his browser shows. At a 743px fold the live seven-row picker's last
+            # row ended at 650, so the defect did not reproduce there, at one viewport.
+            # The original Brave measurement below stands on its own conditions:
             # the card grew 887 -> 1286 and the QR's bottom edge landed at 972 against a 900-tall
             # viewport. His window happened to be 982 tall and cleared it by ten pixels, which is
             # the only reason he did not hit it. The phone path must stay reachable after the
             # picker opens, however many wallets are installed.
+            # MEASURED 2026-08-16 in the operator's own profile, replacing an invented set.
+            # "Brave Wallet" was never installed; the eighth is Petra. Read live off the pay page
+            # by dispatching wallet-standard:app-ready and collecting what registered.
             EIGHT = [
                 "Backpack",
-                "Brave Wallet",
                 "Phantom",
                 "MetaMask",
-                "Magic Eden",
                 "Solflare",
                 "Jupiter",
+                "Magic Eden",
                 "Glow",
+                "Petra",
             ]
             for vw, vh in ((1280, 900), (390, 844)):
                 ctx = b.new_context(viewport={"width": vw, "height": vh})
