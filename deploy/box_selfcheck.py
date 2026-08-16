@@ -548,12 +548,16 @@ def self_test() -> int:
             "known_other": [],
         }
         r = Result()
-        old_zc = globals()["ZC"]
-        globals()["ZC"] = tmp
+        # `global ZC` is declared at the top of this function, so the plain assignment is the
+        # file's own idiom. The RESTORE is deliberate and deviates from the blocks above, which
+        # leave ZC pointing at a deleted temp dir: this block is not last, so leaking the path
+        # would silently change what every later block scans. Do not "simplify" it away.
+        prev_zc = ZC
         try:
+            ZC = tmp
             check_mint_prohibition(inv, r)
         finally:
-            globals()["ZC"] = old_zc
+            ZC = prev_zc
         detail = r.checks[0]["detail"]
         report(
             f"mint cap: the TRUE total is reported, not the sample size ({planted})",
