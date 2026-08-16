@@ -12,6 +12,8 @@ WHAT IT CHECKS, all mechanical and none of it a judgement about whether a claim 
     restated, so a re-cut that shortens the video reddens this instead of silently mispointing
   - every timestamp range is ordered, start before end
   - every repo path named in a `verify` or `note` field exists
+  - no `verify` hides a load-bearing path in a trailing comment, since a command needing an
+    unstated cd is a dead end for exactly the stranger this map is for
   - every claim carries a kind of `capability` or `recording`, because that distinction is the
     file's whole honesty mechanism and a missing one reads as a stronger claim than intended
 
@@ -123,6 +125,22 @@ def audit(root: pathlib.Path, data: dict) -> list[str]:
                 if not (root / rel).exists():
                     problems.append(f"{cid}: {field} names {rel}, which does not exist")
 
+        # A LOAD-BEARING PATH MUST NOT HIDE IN A COMMENT. `cargo test --locked  # in
+        # plugins/payment-watch` names a real directory and is still not runnable as written,
+        # because each plugin is its own workspace and the cd is unstated. Every path a reader
+        # needs belongs in the command. A comment that names no path is fine and stays fine.
+        verify = str(c.get("verify") or "")
+        if "#" in verify:
+            comment = verify.split("#", 1)[1]
+            hidden = PATH_RE.findall(comment) + re.findall(
+                r"\b(?:plugins|crates|skills|demo|scripts)/[A-Za-z0-9_.-]+", comment
+            )
+            if hidden:
+                problems.append(
+                    f"{cid}: verify hides {hidden[0]} in a comment, so it is not runnable as "
+                    f"written; put the path in the command (cd <dir> && ...)"
+                )
+
     return problems
 
 
@@ -221,6 +239,41 @@ def selftest() -> int:
             [],
         )
 
+        # THE REVIEW FINDING, in its own shape: a real directory hidden in a trailing comment.
+        # Every path in it exists, so the path-existence rule above is silent, and the command
+        # is still not runnable as written.
+        check(
+            "a path hidden in a verify comment fires",
+            len(
+                one(
+                    lambda d: d["claims"][0].update(
+                        verify="cargo test --locked   # in plugins/payment-watch"
+                    )
+                )
+            ),
+            1,
+        )
+        # OVER-CORRECTION CONTROLS. The corrected form must be silent, or the rule argues against
+        # its own remedy; and a comment naming no path must be silent, or it forbids commenting.
+        check(
+            "the corrected cd form does not fire",
+            one(
+                lambda d: d["claims"][0].update(
+                    verify="cd plugins/payment-watch && cargo test --locked"
+                )
+            ),
+            [],
+        )
+        check(
+            "a comment naming no path does not fire",
+            one(
+                lambda d: d["claims"][0].update(
+                    verify="python3 scripts/real.py   # stdlib only, no network"
+                )
+            ),
+            [],
+        )
+
     # The real map must be clean, which is the case a regression breaks.
     if MAP.is_file():
         check(
@@ -257,10 +310,11 @@ def main() -> int:
     )
     if problems:
         print(
-            "\nFAIL  the claims map points at things that are not there:\n"
+            "\nFAIL  the claims map offers a verification route that does not work:\n"
             + "\n".join(f"    {p}" for p in problems)
-            + "\n  This map is judge-facing. A claim pointing at a renamed script reads as a\n"
-            "  verification route and is a dead end, which is worse than no map.",
+            + "\n  This map is judge-facing. A claim pointing at a renamed script, or naming a\n"
+            "  command that is not runnable as written, reads as a verification route and is a\n"
+            "  dead end, which is worse than no map.",
             file=sys.stderr,
         )
         return 1

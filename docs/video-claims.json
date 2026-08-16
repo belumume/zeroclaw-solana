@@ -1,6 +1,6 @@
 {
   "_what": "Every checkable claim the demo video makes, mapped to its timestamp and to the command or artifact that re-derives it. The video is frozen and submitted, so it cannot be corrected; this is the only remaining way to make what it says checkable.",
-  "_how_to_use": "Play the cut, or read the caption track at docs/assets/zeroclaw-demo.vtt. For any claim, run the command in `verify`. Claims marked capability are re-derivable today; claims marked recording are about that specific take and are checkable only where an artifact captured them.",
+  "_how_to_use": "Play the cut, or read the caption track at docs/assets/zeroclaw-demo.vtt. For any claim, run the command in `verify`. Every verify is copy-paste runnable FROM THE REPO ROOT with no other step, which is a requirement rather than a style: a command needing an unstated cd is a dead end for exactly the stranger this file is for. Each plugin is its own standalone workspace, so a cargo command carries its own cd. Claims marked capability are re-derivable today; claims marked recording are about that specific take and are checkable only where an artifact captured them.",
   "_honesty": "Two kinds of claim are deliberately distinguished. A CAPABILITY claim says the system does something, and a command re-derives it now. A RECORDING claim says a particular thing happened on camera. Presenting the second as if a command proved it would be the overclaim this file exists to prevent.",
   "video": {
     "file": "docs/assets/zeroclaw-demo-1080p.mp4",
@@ -51,7 +51,7 @@
       "spoken": "This is a terminal that's monitoring for transaction, and this is the same link opened in the browser on desktop.",
       "kind": "capability",
       "asserts": "Settlement is watched independently of the page.",
-      "verify": "cargo test --locked   # in plugins/payment-watch",
+      "verify": "cd plugins/payment-watch && cargo test --locked",
       "note": "payment-watch matches on a CONJUNCTION of reference, amount, mint and destination, not on the reference alone."
     },
     {
