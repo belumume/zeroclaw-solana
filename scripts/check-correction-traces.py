@@ -234,8 +234,18 @@ PIN_QUICKSTART = (
     "settled on mainnet, the order would sit at NOT_YET forever, and nothing would error."
 )
 
+PIN_WRITEUP = (
+    "**The original justification for that demotion was wrong.** It rested on the worst failure "
+    "of a malformed URL being a payment that never starts, so no funds are at risk. The real "
+    "failure is a *well-formed* URL carrying somebody else's recipient."
+)
+
 # Which surface each quoted pin is quoted FROM, so the claim is checkable rather than asserted.
-PIN_SOURCES = {PIN_README: "README.md", PIN_QUICKSTART: "QUICKSTART.md"}
+PIN_SOURCES = {
+    PIN_README: "README.md",
+    PIN_QUICKSTART: "QUICKSTART.md",
+    PIN_WRITEUP: "docs/WRITEUP.md",
+}
 
 MUST_NOT_FIRE = [
     "The ledger is durable: restarting the process does not re-open a spent allowance. "
@@ -244,8 +254,10 @@ MUST_NOT_FIRE = [
     "An earlier version restarted the day on every boot, which is a cap in name only.",
     "An earlier version of the Solana Pay spec used a different field name.",
     "That ARM box is a rented VM, not a device on a windowsill.",
-    "The original justification for that demotion was wrong: the real failure is a well-formed "
-    "URL carrying somebody else's recipient.",
+    # The canonical KEEP: it discloses a reasoning error about the SECURITY MODEL, which is what
+    # the custody axis asks for. It was a three-sentence span compressed into one, which is the
+    # same defect as a spliced pin and equally invisible, so it is quoted whole and checked.
+    PIN_WRITEUP,
     # Product honesty about a SECURITY decision, and the nearest miss for the-reason-this-file-gave
     # ("The reason first given" rather than "the reason this file gave"), which is why it is pinned
     # beside that pattern rather than trusted to stay clear of it.
