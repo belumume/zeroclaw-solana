@@ -54,9 +54,10 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
   sub-currency-unit total does not produce a link however it was arrived at. The band is
   deliberately wide, because this shop has no catalog and a narrow one would refuse legitimate
   orders. It then requires the value to be DERIVABLE from `--quote`, the verbatim text you were
-  given it in: equal to one figure marked with `R$` or `reais` in that text, or to the sum of all
-  of them. "The order value comes from the operator or the customer, never from you" is that
-  check, in code, instead of in this sentence.
+  given it in: equal to one figure marked with `R$` or `reais` in that text, or to the sum of the
+  DISTINCT figures in it, so a repeated price counts once and cannot double the order. "The order
+  value comes from the operator or the customer, never from you" is that check, in code, instead
+  of in this sentence.
 
   WHAT IT STILL DOES NOT PROVE, so you do not read it as absolution: you supply the quote, so a
   fabricated one would pass. What the check removes is your ability to change the price QUIETLY.
@@ -221,13 +222,15 @@ as the rate that priced the order.
 
    **`--quote` is REQUIRED with `--brl`** and carries the customer's or operator's message
    VERBATIM, copied rather than summarised. `--brl` must equal one `R$`/`reais` figure in that
-   text or the sum of all of them, and a mismatch is a hard refusal. Three consequences worth
-   knowing before you hit them: a bare number is not read as a price (so "Mesa 4" and "Pedido #42"
-   cannot be mistaken for one, and a customer who wrote only a bare number must be asked to
-   restate it with `R$`); a figure like `R$ 1.200` is REFUSED as ambiguous, because a separator
-   with three digits after it is thousands to a Brazilian writer and a decimal point to the
-   parser, so ask for `R$ 1200` or `R$ 1.200,00`; and an arbitrary subset of several quoted
-   figures is not admissible, only a single figure or the full sum.
+   text or the sum of the DISTINCT figures in it, and a mismatch is a hard refusal. Four
+   consequences worth knowing before you hit them. A bare number is not read as a price, so
+   "Mesa 4" and "Pedido #42" cannot be mistaken for one, and a customer who wrote only a bare
+   number must be asked to restate it with `R$`. A figure like `R$ 1.200` is REFUSED as ambiguous,
+   because a separator with three digits after it is thousands to a Brazilian writer and a decimal
+   point to the parser, so ask for `R$ 1200` or `R$ 1.200,00`. An arbitrary subset of several
+   quoted figures is not admissible, only a single figure or the full sum. And a REPEATED figure
+   counts once, so a customer confirming a price ("R$ 60. Confirma, sao 60 reais?") does not make
+   R$ 120 admissible; if an order really is several items at the same price, ask for the total.
    IT FAILS CLOSED. If the rate sources are unreachable, disagree by more than 2.5%, report
    different dates, or return an implausible number, NO LINK IS PRODUCED. That is deliberate: a
    fallback to a last-known rate would reinstate the hole exactly when someone can induce it.

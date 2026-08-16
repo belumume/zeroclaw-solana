@@ -16,7 +16,7 @@
       "kind": "capability",
       "asserts": "An order is placed conversationally, in BRL, through a real chat channel.",
       "verify": "python3 skills/solana-pay/scripts/pay_link.py '<solana: URL>' pt --brl 2 --quote 'I want to make a payment of R$ 2'",
-      "note": "The order VALUE is bounded by a plausibility band and bound to the words it came from: --brl must equal an R$-marked figure in --quote, or the sum of them. A fabricated quote still passes, so the value is sourced rather than proven."
+      "note": "The order VALUE is bounded by a plausibility band and bound to the words it came from: --brl must equal an R$-marked figure in --quote, or the sum of the distinct figures in it. A fabricated quote still passes, so the value is sourced rather than proven."
     },
     {
       "id": "brl-conversion",
@@ -85,6 +85,6 @@
   "_not_claimed": [
     "That the agent holds or signs with any key. It does not; the customer's wallet signs.",
     "That the agent announced the settlement. The page and the watcher detected it; the agent announcement path is separate and undeployed.",
-    "That the order value is verified. It is bounded to a plausible range and is otherwise caller-supplied."
+    "That the order value is PROVEN. It is bounded to a plausible range and must be derivable from the verbatim text quoted to pay_link.py, but the agent supplies that text, so a fabricated quote would pass."
   ]
 }

@@ -693,7 +693,8 @@ rate can add a refusal and can never relax one.
 The order VALUE gets the same treatment one level up. Bounding it to a plausible band removes an
 absurd figure and cannot tell R$ 25 from R$ 60 for the same order, so `--brl` must additionally be
 DERIVABLE from `--quote`, the verbatim message the figure was given in: equal to one figure marked
-`R$` or `reais` in that text, or to the sum of all of them. The marker requirement is the check.
+`R$` or `reais` in that text, or to the sum of the DISTINCT figures in it. The marker
+requirement is the check.
 Extracting bare numbers would be worse than nothing, because "Mesa 4 - Pedido #42, 2 pizzas,
 R$ 60" contains 4, 42 and 2, and a bare extractor would license almost any small integer; the
 marker reduces that message to one admissible figure. Against a band holding 4,999,901 values at

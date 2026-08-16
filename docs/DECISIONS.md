@@ -314,7 +314,8 @@ paragraph.
 
 **Chosen: bind the value to the text it came from.** `pay_link.py` requires `--quote`, the verbatim
 message the figure was given in, and `--brl` must equal one figure marked `R$` or `reais` in that
-text or the sum of all of them. There is no third branch, and deliberately no arbitrary subset sum,
+text or the sum of the DISTINCT figures in it. There is no third branch, and deliberately no
+arbitrary subset sum,
 because subset sums of a long list reach almost any value and would hand back the parameter this
 removes. SKILL.md already carried the invariant in words, "the order value comes from the operator
 or the customer, never from you"; a responsibility assigned in prose to a model is not a constraint

@@ -585,6 +585,39 @@ def main():
             "14.16",
             False,
         ),
+        # --- A REPEATED FIGURE IS NOT A MULTIPLIER. Summing the raw list rather than the
+        #     distinct ones doubled the order value on the most ordinary chat pattern there
+        #     is, a customer confirming the price they were just quoted. Both directions are
+        #     pinned: the doubling refuses, and the figure itself still works in the same
+        #     message, so the fix cannot be satisfied by refusing the whole quote.
+        (
+            "a confirmed price is not doubled by being repeated",
+            "120",
+            "quero uma pizza de R$ 60. Confirma, sao 60 reais mesmo?",
+            "23.61",
+            False,
+        ),
+        (
+            "CONTROL the repeated figure itself is still admissible",
+            "60",
+            "quero uma pizza de R$ 60. Confirma, sao 60 reais mesmo?",
+            "11.80",
+            True,
+        ),
+        (
+            "two items at one price cannot reach their total without it being stated",
+            "120",
+            "R$ 60 a pizza e R$ 60 a outra",
+            "23.61",
+            False,
+        ),
+        (
+            "CONTROL a stated total is admissible",
+            "120",
+            "as duas pizzas dao R$ 120",
+            "23.61",
+            True,
+        ),
     ]:
         url = f"solana:{MERCHANT}?amount={amount}&spl-token={USDC_MAINNET}"
         # quote=None means the flag is genuinely ABSENT, which run()'s default would paper over,

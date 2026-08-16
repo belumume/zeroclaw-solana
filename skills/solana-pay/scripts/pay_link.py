@@ -137,7 +137,8 @@ FETCH_TIMEOUT_S = 20
 # it. That sentence is the whole argument this shop is built on, so it is enforced here instead.
 #
 # `--quote` carries the verbatim text the figure came from, and `--brl` must be DERIVABLE from it:
-# equal to one currency-marked figure in that text, or to the exact sum of all of them. There is
+# equal to one currency-marked figure in that text, or to the exact sum of the DISTINCT figures
+# in it. Repeats count once, so a quote confirming a price cannot double it. There is
 # no third branch, and in particular no arbitrary subset sum, because subset sums of a long list
 # reach almost any value and would hand back the free parameter this removes.
 #
@@ -558,23 +559,47 @@ if brl_arg is not None:
             "not read as a price, because table and order numbers are bare numbers too. "
             "No link was produced."
         )
-    admissible = set(quoted) | {sum(quoted)}
+    # THE SUM IS OVER DISTINCT FIGURES, and summing the raw list instead is a doubling bypass on
+    # the most ordinary chat pattern there is. "quero uma pizza de R$ 60. Confirma, sao 60 reais
+    # mesmo?" extracts [60, 60], and a raw sum makes R$ 120 admissible for a R$ 60 order: a
+    # repeated figure acts as a multiplier, which is the arbitrary-subset-sum problem this branch
+    # was written to avoid, arriving through repetition rather than through selection.
+    #
+    # THE COST IS REAL AND IS THE SAFE DIRECTION. Two genuinely different items at the same price
+    # ("R$ 60 a pizza e R$ 60 a outra") now sum to 60 rather than 120, so a real R$ 120 order is
+    # REFUSED until someone states the total. That is a round trip, and it is the same trade the
+    # ambiguous-separator refusal above already makes: refusing costs a message, and guessing
+    # costs a customer double.
+    distinct = set(quoted)
+    admissible = distinct | {sum(distinct)}
     if brl not in admissible:
+        repeats = len(quoted) != len(distinct)
         sys.exit(
             f"REFUSED: the order value is not derivable from the quoted text.\n"
             f"  order value: R$ {brl}\n"
             f"  quoted:      {', '.join(f'R$ {q}' for q in quoted)}\n"
             f"  admissible:  {', '.join(f'R$ {a}' for a in sorted(admissible))} "
-            f"(any one figure, or the sum of all of them)\n"
-            f"No link was produced. The value a customer is asked to pay has to come from the "
-            f"operator or the customer, never from the agent; if the quote is right and the "
-            f"value is wrong, use the quoted figure."
+            f"(any one figure, or the sum of the DISTINCT figures)\n"
+            + (
+                "  the quote repeats a figure, and repeats are counted once, so a total that "
+                "adds the same price twice is not admissible. If the order really is several "
+                "items at one price, state the total.\n"
+                if repeats
+                else ""
+            )
+            + "No link was produced. The value a customer is asked to pay has to come from the "
+            "operator or the customer, never from the agent; if the quote is right and the "
+            "value is wrong, use the quoted figure."
         )
     matched = (
-        "the sum of the quoted figures" if brl not in set(quoted) else "a quoted figure"
+        "the sum of the quoted figures" if brl not in distinct else "a quoted figure"
     )
+    # The quote is echoed IN FULL rather than truncated. Its length is already capped at
+    # MAX_QUOTE_CHARS, and the trace's whole purpose is to let someone check the price against the
+    # channel transcript, which a cut-off echo cannot support for exactly the long messages where
+    # the figure is hardest to find.
     print(
-        f"order: R$ {brl} is {matched} in {quote_arg[:200]!r}",
+        f"order: R$ {brl} is {matched} in {quote_arg!r}",
         file=sys.stderr,
     )
 
