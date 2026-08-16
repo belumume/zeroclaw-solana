@@ -249,6 +249,11 @@ grep -rn 'kani::proof' crates/solana-core/src/ | wc -l              # 2 proofs
 python3 scripts/check-all.py                                        # every gate, one command
 ```
 
+One of those gates asks whether the deployed box is running the content on `main`, and it reads
+RED whenever the box is behind. That is a deploy-lag finding rather than a code defect, and the
+gate says so in its own failure text; every other gate passing beside it is the rest of the
+answer. It goes green on the next deploy without anything in the tree changing.
+
 Upstream, [ten host defects](HOST-SECURITY-AUDIT.md) were confirmed by one audit and reported,
 one of them escalated to a private advisory. That page states its own scope in its first lines,
 because the project total is larger and reported elsewhere as eighteen filed; the two count

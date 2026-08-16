@@ -23,6 +23,8 @@ on:
       - "scripts/verify-proof.py"
       - "scripts/verify_proof_ledger_control.py"
       - "scripts/verify_proof_selfcheck_control.py"
+      - "scripts/check-deploy-content-staleness.py"
+      - "deploy/deploy-targets.json"
       - "docs/DEVNET-PROOF.md"
       - ".github/workflows/proof-check.yml"
 
@@ -32,7 +34,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # FULL history, because check-deploy-content-staleness.py resolves the commit the BOX
+      # reports it was deployed from, and that commit is weeks behind the tip. On the default
+      # depth-1 clone it is absent, and the gate then reports CANNOT VERIFY forever: an honest
+      # verdict that answers nothing, and one that looks identical to a healthy quiet check.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Retry only transient RPC unreachability. A real FAIL (a claim that stopped
       # holding) must not be papered over, but a public endpoint refusing one request
@@ -89,3 +97,43 @@ jobs:
           set -o pipefail
           python3 scripts/verify_proof_ledger_control.py
           python3 scripts/verify_proof_selfcheck_control.py
+
+      # IS THE BOX RUNNING THE CODE THIS REPO DESCRIBES. Nothing above answers that. The box's
+      # own self-check compares it to the commit it was DEPLOYED FROM, so a box months behind
+      # reports a green manifest, honestly, because it does match that snapshot. Measured on
+      # 2026-08-16: a green manifest, and 8 of 14 mapped files not what main says they are.
+      #
+      # A SEPARATE STEP so its red is legible. A failure here means the box is behind, which is
+      # a different alarm from an on-chain claim that stopped holding and has a different fix,
+      # and folding the two into one step would make the badge say neither.
+      #
+      # `continue-on-error` is deliberately NOT set. A stale deploy on the money path is the
+      # alarm this workflow exists to raise, and a step allowed to fail quietly is a step
+      # nobody reads.
+      #
+      # RETRIED THE SAME WAY THE DEVNET STEP ABOVE IS, and for the reason in this file's own
+      # header: a third-party outage must never turn the badge red. The gate already separates
+      # the two cases by exit code, so the retry keys on that rather than on its prose: 2 is
+      # "the endpoint did not answer", which is retryable and says nothing about the deploy, and
+      # 1 is a real drift finding that must fail on the first attempt rather than being tried
+      # three times as though the box might change its mind.
+      - name: the box is running the content on main
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            python3 scripts/check-deploy-content-staleness.py
+            rc=$?
+            case "$rc" in
+              0) exit 0 ;;
+              2)
+                echo "Could not reach the box on attempt $attempt; retrying."
+                sleep 20
+                ;;
+              *)
+                echo "The box is not running the content on main. Not a transport problem."
+                exit 1
+                ;;
+            esac
+          done
+          echo "the box self-check endpoint was unreachable on three attempts"
+          exit 1
