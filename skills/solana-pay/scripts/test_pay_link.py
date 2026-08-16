@@ -323,6 +323,28 @@ def main():
             "FAIL",
             False,
         ),
+        # THE DOCUMENTED ATTACK SHAPE, verbatim from the note in pay_link.py that said it passed
+        # every check. The rate had a plausibility band and the figure a customer pays had none.
+        (
+            "the documented sub-currency-unit order value is refused",
+            ["--brl", "0.05"],
+            "5.0827",
+            False,
+        ),
+        (
+            "just below the floor is refused",
+            ["--brl", "0.99"],
+            "5.0827",
+            False,
+        ),
+        (
+            "an order orders of magnitude above the ceiling is refused",
+            ["--brl", "50001"],
+            "5.0827",
+            False,
+        ),
+        # The in-band CONTROL is the "--brl alone is the primary form and is accepted" case above,
+        # at R$ 80. Without it these three would be satisfied by a band that refuses everything.
     ]:
         rc, out = run(URL_80, extra, planted_rate=planted)
         ok = (

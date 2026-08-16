@@ -107,6 +107,22 @@ ECB_URL = "https://api.frankfurter.dev/v1/{date}?base=USD&symbols=BRL"
 MAX_WALKBACK_DAYS = 4
 MAX_DIVERGENCE = 0.025
 MIN_PLAUSIBLE, MAX_PLAUSIBLE = 3.0, 10.0
+
+# THE ORDER VALUE GETS A BAND TOO, for the same reason the rate has one, and the asymmetry is
+# what makes the case: this file already refuses an implausible EXCHANGE RATE in code, while the
+# figure a customer actually pays had no bound at all. "Table 4, R$ 0.05" is the documented attack
+# shape and it passed everything.
+#
+# The bounds are deliberately WIDE and product-neutral. This shop has no catalog, so no narrow
+# figure could be justified without inventing one, and a band that assumes a menu would refuse
+# legitimate orders at a shop that sells something else. What a wide band does remove is the class
+# of value no merchant transaction has: a sub-currency-unit total, and a fat-finger that is orders
+# of magnitude out.
+#
+# WHAT IT DOES NOT DO, so nobody reads it as closing the hole: a PLAUSIBLE wrong amount still
+# passes. R$ 25 for a R$ 60 order is inside the band and always will be. Closing that needs a
+# price source the model cannot author, and the honest options are in SKILL.md.
+MIN_ORDER_BRL, MAX_ORDER_BRL = Decimal("1.00"), Decimal("50000.00")
 FETCH_TIMEOUT_S = 20
 
 
@@ -373,9 +389,12 @@ if label_values:
 # being bypassable by a caller who simply keeps supplying both.
 #
 # WHAT THIS STILL DOES NOT CLOSE, stated rather than implied: the order VALUE remains
-# caller-supplied. "Table 4, R$ 0.05" passes every check here. This removes one free parameter
-# of two; the other needs a priced SKU table, an order id resolved against a store, or a
-# merchant confirmation.
+# caller-supplied. It is now bounded by MIN_ORDER_BRL/MAX_ORDER_BRL above, so the
+# sub-currency-unit case no longer produces a link, but a PLAUSIBLE wrong value still does and
+# always will while the band is wide enough for a shop with no catalog. This removes one free
+# parameter of two and narrows the second; closing it needs a price source the model cannot
+# author: a priced SKU table, an order id resolved against a store, or a merchant confirmation
+# that certifies the serialized bytes rather than a sentence.
 if rate_arg is not None and brl_arg is None:
     sys.exit("REFUSED: --rate given without --brl; there is no order value to price.")
 
@@ -386,6 +405,13 @@ if brl_arg is not None:
         sys.exit(f"REFUSED: --brl must be a decimal number; got {brl_arg!r}.")
     if brl <= 0:
         sys.exit(f"REFUSED: --brl must be positive; got {brl}.")
+    if not (MIN_ORDER_BRL <= brl <= MAX_ORDER_BRL):
+        sys.exit(
+            f"REFUSED: the order value R$ {brl} is outside the plausible band "
+            f"[{MIN_ORDER_BRL}, {MAX_ORDER_BRL}]. No link produced. This band is wide on "
+            f"purpose and only removes values no merchant order has; a plausible wrong amount "
+            f"still passes, which is why the price source matters."
+        )
 
     rate, rate_date, provenance = fetch_rate()
 

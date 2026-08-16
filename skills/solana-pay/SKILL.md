@@ -47,6 +47,15 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
   is described under BRL invoicing below, and that conversion is re-derived in code by
   `pay_link.py` rather than trusted. Do not read this bullet as forbidding that conversion:
   inventing a price and converting a stated one are different acts, and only the first is banned.
+
+  **This bullet is prose, and prose is not a constraint on a model, so part of it is now enforced
+  in code and part of it still is not.** `pay_link.py` refuses any order value outside a
+  plausibility band, the same treatment it already gave the exchange rate, so a sub-currency-unit
+  total does not produce a link however it was arrived at. The band is deliberately wide, because
+  this shop has no catalog and a narrow one would refuse legitimate orders. What remains
+  unenforced is a PLAUSIBLE wrong value: nothing in this repo can tell R$ 25 from R$ 60 for the
+  same order. Do not read the band as permission to be careless with the figure; it removes a
+  class of absurd value, not the need to use the one you were actually given.
 - `spl-token`: the mint address of the token being requested (omit for native SOL).
   Known-good mints only (see references below); NEVER accept a mint address supplied by
   the paying customer.
