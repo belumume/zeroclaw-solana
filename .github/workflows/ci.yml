@@ -711,3 +711,42 @@ jobs:
       - name: 20,000 iterations, the exact command the write-up prints
         working-directory: differential-fuzz
         run: cargo run --release --locked -- 20000
+
+  e2e-harness-compiles:
+    name: the two e2e reproduce crates still compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # WHY THIS EXISTS, and it is not about the tests.
+    #
+    # `e2e-track-a` and `e2e-localnet` are reproduce paths a stranger is pointed at, and until now
+    # they were built by NOTHING: zero references across every workflow here. A lockfile nothing
+    # builds is a lockfile nothing can verify, and both of them carry the repository's only two HIGH
+    # dependabot alerts (one advisory, `rustls-webpki`, transitive through the Solana toolchain).
+    #
+    # That bump is deliberately deferred: it is semver-incompatible, so `cargo update -p` cannot
+    # reach it, and it cascades through the Solana dependency graph. The reason it CANNOT be done
+    # safely today is precisely that no gate could verify it. This job is that gate, added first, so
+    # whoever performs the bump has something that can tell them it broke.
+    #
+    # CHECK RATHER THAN TEST. Running these needs a local validator; COMPILING them does not. The
+    # question a bump makes urgent is whether the graph still resolves and the code still builds,
+    # and `cargo check --locked` answers exactly that. `--locked` is the point: it fails if the
+    # lockfile would need to change, so a silent resolution drift cannot pass.
+    #
+    # NOT RUNNABLE ON THIS PROJECT'S WINDOWS HOST, which is why it has to live here. `solana-sdk`
+    # pulls `solana-precompiles` -> `solana-secp256r1-program` -> `openssl-sys`, and on MinGW that
+    # needs OpenSSL development headers the host does not carry: measured, 74s to that failure. The
+    # same constraint is already recorded for the differential fuzzer above. ubuntu-latest ships
+    # `libssl-dev`, so the runner is the only place the question can actually be answered.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "e2e-track-a -> target\ne2e-localnet -> target"
+      - name: e2e-track-a resolves and compiles against its committed lockfile
+        working-directory: e2e-track-a
+        run: cargo check --locked --all-targets
+      - name: e2e-localnet resolves and compiles against its committed lockfile
+        working-directory: e2e-localnet
+        run: cargo check --locked --all-targets
