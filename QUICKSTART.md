@@ -458,6 +458,46 @@ is recoverable and a silent miss is not, when the customer has already paid.
 If the binary or the confirmer is absent it exits 2 and says which, rather than announcing nothing
 quietly.
 
+### Publish the box's own drift verdict (optional, 1 min)
+
+`deploy/box_selfcheck.py` runs on the box and asserts that the deployed skills and tools are
+byte-identical to a named commit, that the network-bearing config fields still say mainnet, and that
+no funds-critical constant has drifted into state. That verdict is worth more than anything an
+outside prober can produce, because it can see deployed bytes and running services. That only holds
+if something schedules it and something retrieves it.
+
+```
+mkdir -p ~/.zeroclaw/bin ~/.config/systemd/user
+python3 deploy/make_invariants.py                      # writes the manifest the check compares against
+cp deploy/box_selfcheck.py ~/.zeroclaw/bin/
+cp deploy/zc-selfcheck.service deploy/zc-selfcheck.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now zc-selfcheck.timer
+systemctl --user start zc-selfcheck.service
+cat ~/.zeroclaw/state/box-selfcheck.json | head -20    # the verdict the gate publishes
+```
+
+The gate serves it at `/selfcheck`, over the tunnel it already runs, so nothing has to reach into
+the box. Three responses, and the status code carries the meaning rather than the body: **200** with
+the verdict, **503** when the route is live but no verdict is on disk (the timer is not running),
+**404** when the deployed gate predates the route. `scripts/verify-proof.py` reads all three and
+treats only the 404 as pending, because "not shipped yet" and "the check stopped running" need
+opposite responses.
+
+A verdict that says `ok` while being hours old is the failure this is built to make visible, so the
+served body carries `age_seconds` derived from the file's own mtime rather than from any field
+inside it, and the verifier fails on a stale one.
+
+The unit exits 1 when the box has drifted, which marks it failed in
+`systemctl --user list-units --failed`. That is deliberate: it is a second local signal that costs
+nothing, and the verdict file is written before that exit, so a drifted run still publishes what it
+found.
+
+Detail lines are redacted before they are written, since this is served publicly: the home path
+becomes `~` and a chat recipient becomes `<recipient>`. Mint and merchant addresses are left alone
+on purpose: they are public constants and they are exactly what the checks assert, so hiding them
+would leave a green checker saying nothing.
+
 ## 6. Run it (2 min)
 ```
 zeroclaw daemon        # gateway + channels + cron scheduler

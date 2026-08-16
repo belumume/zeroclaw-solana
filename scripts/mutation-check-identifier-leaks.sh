@@ -67,9 +67,11 @@ mutate "commit-identity detection removed" \
        "            bad.setdefault(addr, set()).add(sha[:9])" \
        "            pass"
 
-# 3. The e-mail detector in tracked content.
+# 3. The e-mail detector in tracked content. The anchor carries BOTH allowlists because the two
+#    scans were made consistent: the exact-address list was consulted in commit metadata and not
+#    here, so one string meant two different things depending on which surface carried it.
 mutate "tracked-content e-mail detection removed" \
-       "        if IMPERSONAL_EMAIL.search(addr):" \
+       "        if addr.lower() in IMPERSONAL_EXACT or IMPERSONAL_EMAIL.search(addr):" \
        "        if True:"
 
 # 4. The discovery floor. Removing it must break the FLOOR case specifically.
