@@ -307,7 +307,8 @@ did not write.
 
 **Properties.** 23 proptest properties, 1024 cases each, over the sanitizer, the length codec
 and message invariants. Sanitizer idempotence is in there because it is the property
-sanitizers most often fail.
+sanitizers most often fail. Count them without running them:
+`cd crates/solana-core && cargo test --test properties --test mined_invariants -- --list`.
 
 **A proof, where sampling was the wrong tool.** The length-prefix decoder carries a Kani
 harness that is exhaustive over every byte string up to three bytes, all 16,777,216 of them,
@@ -351,7 +352,10 @@ green first, and restores the source on every exit path. A passing suite is then
 would catch a regression, rather than an assumption that it would.
 
 Supply chain is gated at 10 of 10 on advisories, licences and sources, with the licence allow
-list derived from the dependency graph rather than guessed. Three CI workflows keep this
+list derived from the dependency graph rather than guessed. The ten are the `supply-chain`
+job's matrix in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), so the count is
+whatever that list holds rather than a figure written here:
+`python -c "import yaml;print(len(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']['supply-chain']['strategy']['matrix']['manifest']))"`. Three CI workflows keep this
 honest on a machine that is not ours, deliberately separate so a red badge says which thing
 broke.
 
