@@ -243,7 +243,21 @@ def main() -> int:
             # measured environment with its provenance, so re-measuring is a data edit the harness
             # picks up rather than a code change, and so a reader can tell a measured number from
             # one somebody chose. The list was invented twice before it was measured once.
-            EIGHT = list(OPERATOR_PROFILE["wallets"]["registered"])
+            # SHAPE, checked the same way the file read is. A profile that parses as JSON but has
+            # the wrong structure would otherwise surface as a raw KeyError, which reads as a bug
+            # in this harness rather than as a bad profile, and sends the reader to the wrong file.
+            try:
+                registered = OPERATOR_PROFILE["wallets"]["registered"]
+                if not isinstance(registered, list) or not all(
+                    isinstance(w, str) for w in registered
+                ):
+                    raise TypeError("wallets.registered must be a list of strings")
+            except (KeyError, TypeError) as exc:
+                raise SystemExit(
+                    f"{PROFILE_PATH.name} parsed but is not shaped as a profile: {exc}\n"
+                    "Expected wallets.registered to be a list of wallet-name strings."
+                ) from exc
+            EIGHT = list(registered)
 
             # THE PROFILE MUST BE BIG ENOUGH TO SEE THE DEFECT, and this guard is the whole reason
             # the profile is data rather than a constant. Deriving the count assertion from the
