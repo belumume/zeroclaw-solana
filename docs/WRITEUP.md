@@ -721,13 +721,15 @@ Driven three ways on 2026-08-16: an order whose link asks a cent too little is r
 link and states `R$ 100 at 5.2236 (BCB PTAX, corroborated by ECB within 0.91%, 2026-08-14)`; and
 July's 5.0825 supplied as a cross-check is refused at 2.70% apart, over the 2.50% band.
 
-What this does not close, stated rather than implied: the order VALUE is still caller-supplied. An
-implausible one is now refused in code, so "table 4, R$ 0.05" no longer produces a link, but a
-plausible wrong one still does. This removes one free parameter of two and narrows the second
-rather than closing it. Closing it needs a price source the model cannot author: a priced SKU
-table, an order id resolved against a store, or a merchant confirmation that certifies the
-serialized bytes rather than a sentence the model wrote. The shop on the node has not picked
-either change up yet, so the enforcement is in the repo and the deploy is what remains.
+Two details of that binding are worth stating because they are where a weaker version would leak.
+An ambiguous separator refuses rather than guesses, since `R$ 1.200` is a 1000x difference that sits
+inside the band either way. And `--brl` without `--quote` refuses outright, because a binding you
+can skip by omitting a flag is not a binding.
+
+Closing it the rest of the way needs a price source the model cannot author: a priced SKU table, an
+order id resolved against a store, or a merchant confirmation certifying the serialized bytes. The
+shop on the node has not picked this change up yet, so the enforcement is in the repo and the deploy
+is what remains.
 
 ## What we turned down, and why
 

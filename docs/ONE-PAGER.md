@@ -66,8 +66,11 @@ positive control stops passing, so a green result cannot come from a broken chec
 
 ## What we are not claiming
 
-The order *value* is still the caller's. An implausible one is refused in code, so "table 4,
-R$ 0.05" no longer produces a link, but a plausible wrong amount still does. The certifier's
+The order *value* must now be derivable from the customer's own words: `--brl` is refused unless it
+equals a figure marked in reais in the quoted message, or the sum of the distinct ones. That turns a
+silent numeric substitution into a fabricated customer utterance, which is echoed to the operator
+and falsifiable against a channel transcript the model does not write. It is not proof, because the
+agent supplies the quote. The certifier's
 mechanism is proven and CI-gated; its wiring to the live scheduler is operator-side configuration
 and is not provable from this repo. The DePIN feed runs on devnet by choice, since duplicating an
 already-offline-verifiable proof on mainnet costs 2.87 SOL in rent.
