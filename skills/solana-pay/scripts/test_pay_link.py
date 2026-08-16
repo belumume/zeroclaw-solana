@@ -356,6 +356,21 @@ def main():
         if not ok:
             failures.append(f"rate/{desc}: got rc={rc} out={out.strip()[:160]!r}")
 
+    # THE BAND'S BOUNDARIES ARE INCLUSIVE, and that is the half the refusal cases cannot show.
+    # These need their own URL because the amount must match the conversion at the planted rate,
+    # so they cannot reuse URL_80. Both are the exact bound: an off-by-one that turned `<=` into
+    # `<` would refuse a legitimate order at the floor and pass every other case in this file.
+    for desc, brl, amount in [
+        ("the floor itself is ACCEPTED, not refused", "1.00", "0.20"),
+        ("the ceiling itself is ACCEPTED, not refused", "50000.00", "9837.29"),
+    ]:
+        url = f"solana:{MERCHANT}?amount={amount}&spl-token={USDC_MAINNET}"
+        rc, out = run(url, ["--brl", brl], planted_rate="5.0827")
+        ok = rc == 0 and PAGE_OK(out, url)
+        print(f"{'PASS' if ok else 'FAIL'}  band: {desc}")
+        if not ok:
+            failures.append(f"band/{desc}: got rc={rc} out={out.strip()[:160]!r}")
+
     for desc, brl, rate, amount, must_accept in AMOUNT_CASES:
         url = f"solana:{MERCHANT}?amount={amount}&spl-token={USDC_MAINNET}"
         # Each case keeps the intent it was written with, under the new contract.
