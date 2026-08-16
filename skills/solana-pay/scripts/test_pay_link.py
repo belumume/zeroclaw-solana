@@ -26,6 +26,7 @@ on the path. An invariant enforced in code is the only thing that closes it.
 
 import base64
 import subprocess
+import tempfile
 import sys
 from pathlib import Path
 
@@ -101,6 +102,50 @@ CASES = [
         f"solana:{MERCHANT}x?amount=25",
         False,
     ),
+    # LABEL. Until this shipped it was the one pinned constant with nothing enforcing it, and
+    # SKILL.md said so in its own words. A stale one reached a customer's approval screen on
+    # 2026-08-06. The wallet renders `label` as WHO IS BEING PAID, so a wrong value misnames the
+    # shop on the last screen before money moves.
+    (
+        "the correct label passes",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}&label=ZeroClaw%20Shop",
+        True,
+    ),
+    (
+        "the correct label in the + encoding also passes",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}&label=ZeroClaw+Shop",
+        True,
+    ),
+    (
+        "the placeholder name that reached a real customer is REFUSED",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}&label=Demo%20Shop",
+        False,
+    ),
+    (
+        "a plausible near-miss on the shop's own name is REFUSED",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}&label=ZeroClaw%20Store",
+        False,
+    ),
+    (
+        "a duplicated label is REFUSED, like a duplicated mint or amount",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}"
+        f"&label=ZeroClaw%20Shop&label=Attacker",
+        False,
+    ),
+    # THE OVER-CORRECTION CONTROLS. The check is deliberately split so that ABSENT is not treated
+    # as WRONG: `label` is optional in the Solana Pay spec and a wallet then shows the recipient
+    # address, which is less informative and is not misleading. If either of these ever starts
+    # failing, the guard was widened into refusing legitimate links.
+    (
+        "an ABSENT label still passes, because absent is not wrong",
+        f"solana:{MERCHANT}?amount=25&spl-token={USDC_MAINNET}",
+        True,
+    ),
+    (
+        "a bare merchant link with no query at all still passes",
+        f"solana:{MERCHANT}",
+        True,
+    ),
 ]
 
 
@@ -135,13 +180,64 @@ AMOUNT_CASES = [
 ]
 
 
-def run(url, extra=None):
-    p = subprocess.run(
-        [sys.executable, str(SCRIPT), url] + list(extra or []),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+# The rate is FETCHED by the script now, so the amount cases must PLANT it rather than pass it.
+# Planting happens here, in a temp wrapper that patches urlopen and then exec's the real script
+# unmodified. Deliberately NOT an env var or a --test flag in pay_link.py: that file's own rule
+# is that anything an agent can reach is not a control, so a production test hook would be the
+# exact bypass the fetch exists to remove. Nothing in pay_link.py knows this wrapper exists.
+#
+# It also keeps the suite OFFLINE and deterministic. Fixtures that pinned a July rate and
+# compared it against a live fetch would both hit the network and rot as the rate moved.
+_STUB = """
+import json, re, sys, urllib.request
+RATE = __RATE__
+SCRIPT = __SCRIPT__
+
+class _Resp:
+    def __init__(self, text):
+        self._b = text.encode("utf-8")
+        self.status = 200
+    def read(self):
+        return self._b
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+def _planted(req, timeout=None):
+    if RATE == "FAIL":
+        raise OSError("planted: source unreachable")
+    url = getattr(req, "full_url", None) or str(req)
+    if "olinda" in url:
+        m = re.search(r"'(\\d{2})-(\\d{2})-(\\d{4})'", url)
+        mm, dd, yyyy = m.groups()
+        return _Resp(json.dumps({"value": [{"cotacaoVenda": RATE,
+                                            "dataHoraCotacao": yyyy + "-" + mm + "-" + dd + " 13:00:00"}]}))
+    m = re.search(r"/v1/(\\d{4}-\\d{2}-\\d{2})", url)
+    return _Resp(json.dumps({"rates": {"BRL": RATE}, "date": m.group(1)}))
+
+urllib.request.urlopen = _planted
+sys.argv = [SCRIPT] + sys.argv[1:]
+exec(compile(open(SCRIPT, encoding="utf-8").read(), SCRIPT, "exec"), {"__name__": "__main__"})
+"""
+
+
+def run(url, extra=None, planted_rate=None):
+    """planted_rate=None runs the script untouched, so no-flag cases stay a real end-to-end run."""
+    if planted_rate is None:
+        cmd = [sys.executable, str(SCRIPT), url] + list(extra or [])
+    else:
+        _r = planted_rate if planted_rate == "FAIL" else float(planted_rate)
+        body = _STUB.replace("__RATE__", repr(_r)).replace(
+            "__SCRIPT__", repr(str(SCRIPT))
+        )
+        fh = tempfile.NamedTemporaryFile(
+            "w", suffix="_ratestub.py", delete=False, encoding="utf-8"
+        )
+        fh.write(body)
+        fh.close()
+        cmd = [sys.executable, fh.name, url] + list(extra or [])
+    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
@@ -159,9 +255,101 @@ def main():
         if not ok:
             failures.append(f"{desc}: {detail}, got rc={rc} out={out.strip()[:200]!r}")
 
+    # THE RATE IS NOW FETCHED, so these prove the new refusals actually fire. Without the
+    # first case the cross-check could be refusing everything; without the rest it could be
+    # refusing nothing. A supplied rate can only ever ADD a refusal: the figure used is always
+    # the published one, so passing a rate cannot relax anything.
+    # DUPLICATE amount=, the smuggling shape the spl-token guard already refuses. This parser
+    # reads the first and the pay page reads the last, so without the guard the check verifies
+    # one figure while the customer is shown another. Both orders are planted, because a guard
+    # that only catches "correct first" would pass whichever way the attacker writes it.
+    for desc, amt_qs, must_accept in [
+        ("duplicate amount, correct one first", "amount=15.32&amount=1532", False),
+        ("duplicate amount, correct one last", "amount=1532&amount=15.32", False),
+        ("CONTROL single amount still accepted", "amount=15.32", True),
+    ]:
+        u = f"solana:{MERCHANT}?{amt_qs}&spl-token={USDC_MAINNET}"
+        rc, out = run(u, ["--brl", "80"], planted_rate="5.2236")
+        ok = (
+            (rc == 0 and PAGE_OK(out, u))
+            if must_accept
+            else (rc != 0 and "REFUSED" in out)
+        )
+        print(f"{'PASS' if ok else 'FAIL'}  amount-dup: {desc}")
+        if not ok:
+            failures.append(f"amount-dup/{desc}: got rc={rc} out={out.strip()[:160]!r}")
+
+    URL_80 = f"solana:{MERCHANT}?amount=15.74&spl-token={USDC_MAINNET}"
+    for desc, extra, planted, must_accept in [
+        (
+            "CONTROL a supplied rate that agrees is accepted",
+            ["--brl", "80", "--rate", "5.0827"],
+            "5.0827",
+            True,
+        ),
+        (
+            "a supplied rate 2.7% stale is refused (the July rate against today's)",
+            ["--brl", "80", "--rate", "5.0827"],
+            "5.2236",
+            False,
+        ),
+        (
+            "a wildly wrong supplied rate is refused",
+            ["--brl", "80", "--rate", "1.0"],
+            "5.0827",
+            False,
+        ),
+        (
+            "CONTROL --brl alone, no rate supplied, is the primary form and is accepted",
+            ["--brl", "80"],
+            "5.0827",
+            True,
+        ),
+        (
+            "--rate without --brl is refused: no order value to price",
+            ["--rate", "5.0827"],
+            "5.0827",
+            False,
+        ),
+        (
+            "a published rate outside the plausible band is refused",
+            ["--brl", "80"],
+            "30.50",
+            False,
+        ),
+        (
+            "an unreachable rate source refuses rather than pricing the order",
+            ["--brl", "80"],
+            "FAIL",
+            False,
+        ),
+    ]:
+        rc, out = run(URL_80, extra, planted_rate=planted)
+        ok = (
+            (rc == 0 and PAGE_OK(out, URL_80))
+            if must_accept
+            else (rc != 0 and "REFUSED" in out)
+        )
+        print(f"{'PASS' if ok else 'FAIL'}  rate: {desc}")
+        if not ok:
+            failures.append(f"rate/{desc}: got rc={rc} out={out.strip()[:160]!r}")
+
     for desc, brl, rate, amount, must_accept in AMOUNT_CASES:
         url = f"solana:{MERCHANT}?amount={amount}&spl-token={USDC_MAINNET}"
-        rc, out = run(url, ["--brl", brl, "--rate", rate])
+        # Each case keeps the intent it was written with, under the new contract.
+        # A VALID rate is now the PUBLISHED one: plant it and do not pass it, so the case
+        # still tests the division and nothing else. A zero, negative or non-numeric rate
+        # can no longer reach a division at all, so those cases move to testing the
+        # cross-check: they are passed as `--rate` against a sane planted rate and must
+        # refuse. Same fixtures, same failure they were written to catch.
+        try:
+            usable = float(rate) > 0
+        except ValueError:
+            usable = False
+        if usable:
+            rc, out = run(url, ["--brl", brl], planted_rate=rate)
+        else:
+            rc, out = run(url, ["--brl", brl, "--rate", rate], planted_rate="5.0827")
         if must_accept:
             ok = rc == 0 and PAGE_OK(out, url)
             detail = "expected a pay-page link"
@@ -242,11 +430,16 @@ def main():
 
 
 def PAGE_OK(out, url):
-    """An accepted run must emit a page link whose payload round-trips to the input."""
-    line = out.strip().splitlines()[-1] if out.strip() else ""
-    if "?u=" not in line:
+    """An accepted run must emit a page link whose payload round-trips to the input.
+
+    FINDS the link line rather than assuming it is the last one. The script also prints the
+    rate's provenance to stderr so an operator can see which published figure priced the
+    order, and this helper reads stdout and stderr combined, so position is not a contract.
+    """
+    line = next((ln for ln in out.splitlines() if "?u=" in ln), "")
+    if not line:
         return False
-    payload = line.split("?u=", 1)[1]
+    payload = line.strip().split("?u=", 1)[1]
     try:
         return base64.urlsafe_b64decode(payload).decode() == url
     except Exception:

@@ -51,12 +51,28 @@ the reference is an additional optional condition, not the check itself. A payme
 wrong amount, or of a token the payer minted themselves, does not settle an order. Brazilian
 orders are quoted in BRL at a stated rate and settled in USDC.
 
+That rate is the one money-touching input a language model could otherwise invent, so it is
+taken off the model: [`scripts/rate_crosscheck.py`](scripts/rate_crosscheck.py) reads the
+Brazilian central bank's published USD rate and refuses unless a second source agrees within a
+stated band, and it fails closed rather than guessing.
+[`check-pay-link-rate-agreement.py`](scripts/check-pay-link-rate-agreement.py) holds the pay
+path's copy of those constants to the original, because the deployed workspace gets exactly one
+file and cannot import the rest. **The node runs this**, so the model no longer supplies the rate
+on the live shop. Driven against the deployed file, a wrong figure is refused by name
+(`expected: 19.14` for R$ 100 at 5.2236, BCB PTAX corroborated by ECB within 0.91%) and the
+correct one settles.
+
+What the rate work does NOT close, stated because it is the remaining hole rather than a caveat:
+the order VALUE is still supplied by the caller. "Table 4, R$ 0.05" passes every check. One free
+parameter of two is gone.
+
 **The feed has published to devnet since 2026-07-25 and not one of its transactions has failed.**
 Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.
 The account holds the `RegisterDevice` call that created it plus one
 per reading, so the transaction count and the sequence number move together and both only climb.
-They read at least 986 and 985, measured 2026-08-08T06:05Z, and are higher by the time you run the
-commands below. One
+They read at least 1,516 and 1,514, measured 2026-08-15T19:41Z, and are higher by the time you run
+the commands below. The two differ by two rather than one because a consumer program has also read
+this feed once on chain, which is a transaction against the account that advances no sequence. One
 `getSignaturesForAddress` against `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` returns every
 transaction the device has ever sent, which is the complete history because the oldest of them is
 the account's own creation.
@@ -76,6 +92,14 @@ on chain, so `verify-proof.py` can go red on it. The shop is a Telegram and What
 with no inbound port, and its trace is traffic-driven, so from outside a quiet shop and a
 stopped one look identical. That half is asserted here and machine-checked by a `/health`
 endpoint on the x402 gate, which asks systemd on the node directly.
+
+A second and stronger check runs beside it, and the direction is the interesting part.
+[`deploy/box_selfcheck.py`](deploy/box_selfcheck.py) runs **on** the node, compares the deployed
+bytes against the manifest written at deploy time, and pushes a verdict outward through the same
+tunnel. Every inbound route is shut, so nothing reaches in and the box reports on itself, which
+also lets it see deployed bytes and running services that an external prober cannot. The checker
+that consumes that verdict is not tracked here, so what a stranger can read in this repo is the
+self-check and its reasoning rather than a live drift result.
 
 Live on-chain evidence, all clickable, is in
 [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md). The verifier above reports static and live
@@ -249,9 +273,11 @@ self-test and all eight components in a matrix, with `--locked` throughout so a 
 also proves the committed lockfiles are the ones that work. A second workflow re-verifies the
 published on-chain claims twice a day. A third re-checks interface parity against upstream
 HEAD, because the interface is unfrozen and drifting away from it once already came close to
-making every plugin fail to register; it runs on a daily schedule that has not come around
-since this repository reached its remote, so it is the one workflow here that has not yet
-executed. See [`TESTING.md`](TESTING.md) for what each of those can and cannot catch.
+making every plugin fail to register; it runs daily at 05:41 UTC and has been running since
+2026-07-25, so unlike the other two it reports on a moving target we do not control. Count its
+runs yourself rather than believing this sentence:
+`gh run list --workflow=host-drift.yml --limit 100 --json conclusion --jq 'length'`.
+See [`TESTING.md`](TESTING.md) for what each of those can and cannot catch.
 
 Building the ZeroClaw host needs three feature flags, and one of them removes a channel in
 silence if omitted. That is step 1 of [`QUICKSTART.md`](QUICKSTART.md), worth reading before

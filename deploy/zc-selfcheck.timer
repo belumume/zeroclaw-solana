@@ -1,0 +1,29 @@
+# Hourly, and the interval is chosen rather than inherited.
+#
+# WHY NOT PER-MINUTE, which is what the sibling announce timer runs at. That one is racing a
+# customer who has already paid; this one is watching for drift, and drift is a DEPLOY-TIME event.
+# Between deploys the answer cannot change, so a faster tick would buy nothing and would hash every
+# tracked skill sixty times an hour for it.
+#
+# WHY NOT SLOWER. The published verdict carries age_seconds derived from the file's mtime, so a
+# consumer can always tell a fresh verdict from a stale one. An hour keeps that number small enough
+# that "the box agreed with the repo recently" stays a meaningful sentence.
+#
+# Persistent=true HERE, unlike the announce timer, and the difference is the point. A missed
+# announcement is water under the bridge, because the next tick re-derives from the chain anyway. A
+# missed drift check leaves the last verdict on disk aging silently, so after downtime the honest
+# thing is to recompute at once rather than serve an hours-old answer until the next hour turns.
+
+[Unit]
+Description=Recompute the box drift verdict hourly
+Documentation=file:%h/.config/systemd/user/zc-selfcheck.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+AccuracySec=1min
+Persistent=true
+Unit=zc-selfcheck.service
+
+[Install]
+WantedBy=timers.target

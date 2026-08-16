@@ -101,6 +101,55 @@ jobs:
             exit 1
           fi
 
+  lint-python:
+    name: ruff, every tracked Python file
+    runs-on: ubuntu-latest
+    # The fmt job above holds every Rust crate to a bar. Nothing held the Python
+    # to one, and the Python is not incidental here: scripts/ and demo/ ARE the
+    # verification suite a stranger is told to run. check-all.py exercises what
+    # those gates DO; nothing checked the gates' own code. A bug in a verifier is
+    # a bug a stranger inherits silently, because a broken checker still prints a
+    # verdict.
+    #
+    # It was not theoretical either. On the commit that added this job, ruff found
+    # four real defects across the tracked set: an unused import in
+    # demo/verify_wallet_picker.py and three assigned lambdas, one of them inside
+    # certify_publish_tx.py, which is the fail-closed certifier on the money path.
+    #
+    # SCOPE IS DISCOVERED, NOT LISTED, for the same reason fmt discovers crates: a
+    # file added later joins no hand-written list by itself. Note the scope is the
+    # whole tracked set rather than scripts/ and demo/ alone -- a first pass over
+    # just those two directories found 2 of the 4, and the pair it missed were in
+    # x402-feed-gate/scripts/.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # Pinned, so a ruff release cannot turn this red on a commit that changed no
+      # Python. Bump deliberately, never by floating.
+      - name: Install ruff
+        run: pip install --quiet ruff==0.14.9
+
+      - name: Every tracked Python file lints clean
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git ls-files '*.py' | sort)
+          count=${#files[@]}
+          echo "discovered $count tracked Python file(s)"
+          # Same floor argument as fmt: a discovered scope can silently shrink to
+          # nothing, and zero files checked would pass every assertion below. The
+          # floor is set below the current count rather than at it, because .py
+          # files churn more than crates and an exact match would go red on an
+          # ordinary deletion.
+          if [ "$count" -lt 70 ]; then
+            echo "discovery found only $count files, expected at least 70; the walk is broken" >&2
+            exit 1
+          fi
+          ruff check "${files[@]}"
+
   proofs:
     name: kani proofs on shortvec
     runs-on: ubuntu-latest
@@ -229,6 +278,21 @@ jobs:
       - name: the link gate still skips illustrations and still checks real links
         run: python3 scripts/test_check_doc_links.py
 
+      # This suite was TRACKED and invoked by nothing. Of the thirteen tracked
+      # scripts/test_*.py it was the only one absent from this file, so it ran when
+      # someone remembered to type it and protected nothing during judging -- the
+      # same failure the two comments above call out, sitting one file away from
+      # them. It is pure classification over strings with no network, so a runner is
+      # exactly where it belongs.
+      #
+      # What it guards is a distinction that has produced a wrong verdict here
+      # before: a TRANSPORT failure is not a claim that stopped holding. An RPC
+      # timeout or an HTTP 429 means the check could not run, and reporting that as
+      # a failed claim turns a healthy system red and trains a reader to ignore the
+      # colour.
+      - name: transport failures are classified apart from failed claims
+        run: python3 scripts/test_verify_proof_transport.py
+
       # The on-chain evidence outlives the links to it. Public devnet RPC prunes
       # after about four days, so every explorer link in DEVNET-PROOF is dead well
       # before judging. This verifies the captured raw transactions instead:
@@ -337,6 +401,15 @@ jobs:
       # tracked text, printable strings inside committed binaries, and COMMIT METADATA --
       # the last of which no working-tree check can reach, and which a content scrub leaves
       # untouched because rewriting blobs does not rewrite identities.
+      # The shop's four constants are pinned in TWO files: the table the model reads and the
+      # constants the script enforces. They are deliberately duplicated, because the script runs
+      # inside the channel's workspace jail and cannot import anything, and the deploy map copies
+      # the two separately so they can arrive from different commits. Nothing made them agree.
+      - name: the shop's two constant tables agree
+        run: python3 scripts/check-shop-constant-agreement.py
+      - name: that agreement gate can actually go red
+        run: python3 scripts/test_check_shop_constant_agreement.py
+
       - name: no personal identifier on any surface a clone receives
         run: python3 scripts/check-identifier-leaks.py
 
@@ -381,7 +454,7 @@ jobs:
         run: python3 scripts/check-claim-coherence.py
 
       # The edit process is not part of the artifact. This gate refuses a judge-facing document
-      # that narrates what a claim used to say, when it was fixed, or who caught it. The test is
+      # that narrates a claim's earlier wording, when it was fixed, or who caught it. The test is
       # the sentence's SUBJECT: text-as-subject is a trace and goes, system-as-subject is product
       # honesty and stays, which is why the checker carries an ALLOW list rather than a blanket ban.
       #
@@ -443,6 +516,49 @@ jobs:
 
       - name: the internal-marker controls actually gate
         run: python3 scripts/check-internal-not-tracked.py --selftest
+
+      # A Brazilian customer short on USDC read a sentence half in each language, on the money
+      # path, at the moment the payment stopped. Three instances of that one shape were found
+      # separately by a human or a reviewer and never by anything that runs, which is what
+      # earns a gate rather than a note. It also checks that every key a lookup asks for
+      # exists, because a missing key renders English while reading as localised in the source.
+      - name: every customer-facing message routes through the locale lookup
+        run: python3 scripts/check-i18n-coverage.py
+
+      - name: the i18n controls actually gate
+        run: python3 scripts/check-i18n-coverage.py --selftest
+
+      # Every slop and leak gate lists four prose suffixes and none of them is .py, so tracked
+      # source was green by never being scanned. Five internal references were live on the
+      # default branch when this was added, readable by anyone who clones. The marker set was
+      # narrowed by measurement over 151 tracked files: two obvious candidates were dropped
+      # because they fire on working code and on legitimate privacy descriptions.
+      - name: no tracked source names a private artifact, channel, or process
+        run: python3 scripts/check-source-comment-leaks.py
+
+      - name: the source-comment controls actually gate
+        run: python3 scripts/check-source-comment-leaks.py --selftest
+
+      # THE RATE ON THE MONEY PATH. Both of these are offline by construction: the first plants
+      # responses rather than fetching, the second parses two files as text. A BCB or ECB outage
+      # cannot redden either, which is the property that lets them be required rather than
+      # advisory.
+      - name: the rate cross-check still refuses what it must
+        run: python3 scripts/check-rate-crosscheck.py
+
+      - name: the cross-check tool's own controls
+        run: python3 scripts/rate_crosscheck.py --selftest
+
+      # The rate constants exist in two copies because deploy/deploy-targets.json puts exactly
+      # one file from scripts/ into the agent workspace, and it is pay_link.py, so importing the
+      # original on the box is impossible. This asserts the copy still prices identically.
+      - name: the two rate copies agree
+        run: python3 scripts/check-pay-link-rate-agreement.py
+
+      # The pay path's own suite, which plants the rate so it neither reaches the network nor
+      # rots as the published rate moves.
+      - name: pay-link invariants, recipient, mint, amount and rate
+        run: python3 skills/solana-pay/scripts/test_pay_link.py
 
       # Its controls, which every sibling gate in scripts/ already had and this one did not.
       # Case 1 is the motivating incident verbatim: a certifier credited with a runtime role

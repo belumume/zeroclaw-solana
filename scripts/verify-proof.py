@@ -647,6 +647,87 @@ def main():
                     f"PASS  x402 daily cap survived the last restart ({note}{skip_note})"
                 )
 
+    # THE BOX'S OWN DRIFT VERDICT. deploy/box_selfcheck.py runs on the node and asserts that the
+    # deployed skills and tools are byte-identical to a named commit, that the network-bearing
+    # config fields still say mainnet, and that no funds-critical constant has drifted into state.
+    # That verdict is worth more than anything reachable from outside, because it can see deployed
+    # bytes and running services that an external prober cannot see at all -- but only if somebody
+    # retrieves it. This is that somebody.
+    #
+    # FOUR OUTCOMES, and the HTTP status carries the distinction rather than the body:
+    #   404  the deployed gate predates the /selfcheck route     -> PENDING, does not gate
+    #   503  route present, no verdict on disk                    -> FAIL, the timer is not running
+    #   200  a verdict                                            -> judged on `ok` and freshness
+    #   anything else / unreachable                               -> FAIL
+    # 404 and 503 must stay distinguishable. Collapsing them would make one red mean either "we
+    # have not shipped this yet" or "the check silently stopped running", and those need opposite
+    # responses.
+    selfcheck_gates = False
+    sc_url = os.environ.get(
+        "SHOP_SELFCHECK_URL", "https://x402.perfpilot.dev/selfcheck"
+    )
+    # An hour of slack on top of the hourly timer, so one missed tick is not an alarm while a
+    # stopped timer still is.
+    max_age = int(os.environ.get("MAX_SELFCHECK_AGE_S", "7800"))
+    try:
+        req = urllib.request.Request(
+            sc_url, headers={"User-Agent": "Mozilla/5.0 (verify-proof)"}
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            sc = json.loads(r.read(65536).decode("utf-8", "replace"))
+        selfcheck_gates = True
+        age = sc.get("age_seconds")
+        ok = sc.get("ok")
+        checks = sc.get("checks")
+        sha = sc.get("deployed_sha")
+        if not isinstance(age, int) or not isinstance(checks, list) or ok is None:
+            print(
+                f"FAIL  box self-check malformed: age={age!r} ok={ok!r} "
+                f"checks={type(checks).__name__}"
+            )
+            fails += 1
+        elif age > max_age:
+            # A stale verdict is the failure this endpoint exists to make visible: the box would
+            # otherwise keep serving an old green answer forever with nothing to indicate the
+            # check had stopped running.
+            print(
+                f"FAIL  box self-check is {age}s old (limit {max_age}s), so the hourly timer is "
+                "not running and the served verdict describes the past"
+            )
+            fails += 1
+        elif ok is not True:
+            bad = [c.get("name") for c in checks if c.get("ok") is not True]
+            print(f"FAIL  box has DRIFTED from {sha}: {', '.join(map(str, bad))}")
+            fails += 1
+        else:
+            print(
+                f"PASS  box matches {sha} on all {len(checks)} invariants "
+                f"(verdict {age}s old)"
+            )
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            print(
+                "PEND  box self-check not yet observable: the deployed gate predates the "
+                "/selfcheck route. Not gating. It becomes a live claim on the next deploy."
+            )
+        elif e.code == 503:
+            print(
+                "FAIL  box self-check endpoint is live but has no verdict to serve, so the "
+                "hourly timer is not installed or not running"
+            )
+            selfcheck_gates = True
+            fails += 1
+        else:
+            print(f"FAIL  box self-check returned HTTP {e.code}")
+            selfcheck_gates = True
+            fails += 1
+    except Exception as e:
+        # Distinct from the two above: this is transport, not a verdict. It still gates, because a
+        # node nobody can reach is a real problem, but the message must not read as drift.
+        print(f"FAIL  box self-check unreachable: {e}")
+        selfcheck_gates = True
+        fails += 1
+
     # Report the two kinds separately, because collapsing them into one number is exactly
     # how a dead system prints a clean bill of health. An audit put it plainly: of the
     # eleven claims this script used to total, ten were deployed-program state or immutable
@@ -662,7 +743,11 @@ def main():
     # what actually gated rather than hardcoded, so a PENDING x402 claim cannot be counted as
     # a verified one, and the number rises on its own the moment the deploy lands. A constant
     # here would either overstate today or need remembering later.
-    live_total = 4 if ledger_gates else 3
+    # Both optional claims are counted the same way and for the same reason: derive the total from
+    # what actually gated, so a PENDING claim can never be tallied as a verified one and the number
+    # rises by itself when the deploy lands. A constant here would either overstate today or need
+    # remembering later, and nobody remembers later.
+    live_total = 3 + (1 if ledger_gates else 0) + (1 if selfcheck_gates else 0)
     live_fails = fails - static_fails
     print(
         f"\n{static_total - static_fails}/{static_total} static claims verified "

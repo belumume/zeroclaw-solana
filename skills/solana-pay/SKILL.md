@@ -45,8 +45,8 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
   value comes from the operator or the customer, never from you, and never use float artifacts
   like `24.999999`. CONVERTING a stated price into the settlement token is the one exception, it
   is described under BRL invoicing below, and that conversion is re-derived in code by
-  `pay_link.py` rather than trusted. Do not read this bullet as forbidding that conversion; the
-  earlier wording said only "never compute prices yourself", which left the two cases ambiguous.
+  `pay_link.py` rather than trusted. Do not read this bullet as forbidding that conversion:
+  inventing a price and converting a stated one are different acts, and only the first is banned.
 - `spl-token`: the mint address of the token being requested (omit for native SOL).
   Known-good mints only (see references below); NEVER accept a mint address supplied by
   the paying customer.
@@ -76,10 +76,9 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
    message segments, in this order:
    a. the `https://` pay-page link verbatim, as a BARE URL on its own line. Do NOT put it in a
       code block or backticks: chat clients auto-link a bare URL, and a code block renders as
-      monospace that the customer has to select and copy by hand. (This instruction previously
-      said to use a code block and claimed that was tappable. It is not, and it cost every
-      customer a manual copy.) Never send only a summary like "link's ready" (streaming drafts
-      are replaced; a URL only in a draft is lost).
+      monospace that the customer has to select and copy by hand. A code block is not tappable, so
+      putting the link in one costs every customer a manual copy. Never send only a summary like
+      "link's ready" (streaming drafts are replaced; a URL only in a draft is lost).
    b. one how-to-pay line, written in the SAME language the customer is using. The WHOLE reply
       must be in the customer's language; never leave an English fragment inside a non-English
       reply. Use the matching version:
@@ -106,11 +105,11 @@ solana:<RECIPIENT>?amount=<AMOUNT>&spl-token=<MINT>&reference=<REFERENCE>&label=
    this shop, and never read one back out of memory.** Those come from config on every order and
    from nowhere else.
 
-   This instruction used to include the mint, and that is what caused the 2026-08-06 incident:
-   the shop moved to mainnet, this file was corrected to match, and the agent kept emitting
-   devnet links because eleven days of accumulated order records held the old mint and outvoted
-   the corrected file. Purging those rows fixes the day and not the class, because the next order
-   writes a new one. A constant that is written to memory becomes readable from memory, and
+   Recording the mint is what caused the 2026-08-06 incident: the shop moved to mainnet and this
+   file was updated to match, but the agent kept emitting devnet links because eleven days of
+   accumulated order records held the devnet mint and outvoted the file it should have read.
+   Purging those rows fixes the day and not the class, because the next order writes a new one.
+   A constant that is written to memory becomes readable from memory, and
    memory is mutable, accumulative and reachable by anything that can get text in front of the
    model. Order data is per-order and belongs here; shop constants are not order data.
 
@@ -142,9 +141,15 @@ where the displayed value came from.
     label       ZeroClaw Shop
     network     mainnet. Real money. Say mainnet, never devnet.
 
-`pay_link.py` refuses a link whose recipient or mint is not the pair above, so a drifted value
-fails loudly rather than reaching a customer. The label and the network sentence have no such
-guard, which is why they are your responsibility here.
+`pay_link.py` refuses a link whose recipient, mint or label is not the value above, so a drifted
+one fails loudly rather than reaching a customer. An ABSENT label is allowed through, because the
+field is optional in the spec and a wallet then shows the recipient address, which is less
+informative and is not misleading; a WRONG one is refused every time.
+
+The NETWORK SENTENCE is the one constant here still carried by prose alone, and it is yours. No
+code can check it, because it is a claim you make in a message rather than a field in a link. On
+2026-08-06 a customer was quoted a real mainnet charge under a sentence saying the shop runs on
+devnet, and nothing in the pay path could have caught that.
 
 **`label` is the MERCHANT, `message` is the ORDER.** That is the Solana Pay spec, and the wallet
 renders `label` as who is being paid. Putting the table or the order number there is what put a
@@ -173,18 +178,34 @@ wrong to the customer before they approve it rather than after.
 
 ## BRL invoicing (Brazil-first flow)
 
-When the operator or customer quotes an amount in BRL (reais, R$), do not guess the rate:
-1. Fetch the current USD/BRL rate with the built-in http_request tool from
-   `https://api.frankfurter.dev/v1/latest?base=USD&symbols=BRL` (the old api.frankfurter.app host 301-redirects and the http tool does not follow redirects, so use the .dev host exactly) (keyless, ECB reference rates).
-2. Compute the USDC amount as `BRL amount / rate`, rounded to 2 decimals, half-up (state the
-   rounding). Treat 1 USDC = 1 USD and SAY so.
-3. Build the payment URL in USDC as usual, and state the conversion transparently in the
-   reply: "R$ X at rate Y (ECB, <date>) = Z USDC".
-3b. **Pass the order value and the rate to `pay_link.py` so the division is re-derived in code:**
-   `python3 tools/pay_link.py '<the full URL>' <lang> --brl <BRL amount> --rate <rate>`
-   The script recomputes `BRL / rate` at 2 decimals half-up, compares it to the `amount=` in the
-   URL, and REFUSES to produce a link if they disagree. Both flags are required together; one
-   alone is refused, because one alone verifies nothing.
+When the operator or customer quotes an amount in BRL (reais, R$):
+
+**YOUR RATE IS A PROPOSAL, NOT THE PRICE.** `pay_link.py` fetches the published rate itself, from
+Brazil's central bank (BCB PTAX) corroborated by the ECB, and re-derives the amount from that. If
+your figure disagrees it REFUSES and no link is produced. So a rate you got wrong, or were talked
+into, cannot reach a customer. Do not treat your own number as authoritative and do not report it
+as the rate that priced the order.
+
+1. Fetch a USD/BRL rate to propose an amount with, using the built-in http_request tool:
+   `https://api.frankfurter.dev/v1/latest?base=USD&symbols=BRL` (the old api.frankfurter.app host
+   301-redirects and the http tool does not follow redirects, so use the .dev host exactly).
+2. Compute the USDC amount as `BRL amount / rate`, rounded to 2 decimals, half-up. Treat
+   1 USDC = 1 USD and SAY so.
+3. Build the payment URL in USDC as usual. Do NOT state the conversion in your reply yet: the
+   figures you would quote are the unverified ones. Step 3b prints the published rate and date it
+   actually used, on stderr, and THAT is what you quote: "R$ X at rate Y (BCB PTAX, <date>) =
+   Z USDC".
+3b. **Pass the order value to `pay_link.py`, which fetches the published rate and re-derives:**
+   `python3 tools/pay_link.py '<the full URL>' <lang> --brl <BRL amount>`
+   The script fetches BCB PTAX, corroborates it against the ECB, recomputes `BRL / published rate`
+   at 2 decimals half-up, compares that to the `amount=` in the URL, and REFUSES to produce a link
+   if they disagree. It prints the rate and date it used on stderr; quote those, not yours.
+   `--rate` is optional and is a CROSS-CHECK, never a source: the figure used is always the
+   published one, so passing your rate can only add a refusal, never relax anything. `--rate`
+   without `--brl` is refused, because there is no order value to price.
+   IT FAILS CLOSED. If the rate sources are unreachable, disagree by more than 2.5%, report
+   different dates, or return an implausible number, NO LINK IS PRODUCED. That is deliberate: a
+   fallback to a last-known rate would reinstate the hole exactly when someone can induce it.
    Why this exists: you are the only thing computing this figure. On 2026-07-27 the agent reached
    for the `calculator` tool for exactly this division and the host refused the call on a schema
    mismatch, so the arithmetic was done in-context and nothing downstream re-derived it. The

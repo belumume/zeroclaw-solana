@@ -24,12 +24,8 @@ about behaviour over time. A KAT is one point.
 
 **Unit tests.** 89 in `solana-core`, plus 19 in `oracle-publish`, 41 in
 `payment-watch`, 26 in `x402-feed-gate`. These cover branches, error variants, and
-the specific adversarial cases we thought of. The middle two read 17 and 29 until
-2026-07-27, having been written before those suites grew; the last has now been
-wrong twice for the same reason, reading 10 until 2026-08-04 and then 21 until the
-v2-conformance tests landed with the challenge cutover. `QUICKSTART.md` and
-`x402-feed-gate/README.md` both said 26 while this line still said 21, which is the
-tell worth keeping: a figure repeated on three surfaces goes stale on whichever one
+the specific adversarial cases we thought of. Every one of these counts drifts as its
+suite grows, and a figure repeated across three surfaces goes stale on whichever one
 nobody re-derived. Each is `grep -c '^\s*#\[test\]'` over that crate's sources, so
 the command rather than the memory is the record.
 
@@ -354,15 +350,11 @@ separate step, plus `check-doc-slop.py`. All four are pure git plus filesystem, 
 same answer on any machine, which is what makes them meaningful on a runner. The other two stay
 manual on purpose.
 
-`check-doc-links.py` stays manual, and the reason this file gave for it was stale rather than
-merely imprecise. It said the gate goes red on unfilled repo-URL placeholders. There are none:
-those were filled once it was established that a repository URL derives from owner and name, so
-visibility never gated them, and grepping the three prose documents for them returns nothing. The
-real residual is narrower and clears on one event. An anonymous request for a private repository
-returns 404, and the checker cannot distinguish that from a URL that was never valid, so the gate
-reports one problem until the repository is public and none afterward. Wiring a known-red check in
-would still teach a reader to ignore a red badge, so it still goes in at publish, for that reason
-rather than the stale one.
+`check-doc-links.py` stays manual because of one narrow residual that clears on a single event. An
+anonymous request for a private repository returns 404, and the checker cannot distinguish that
+from a URL that was never valid, so the gate reports one problem until the repository is public and
+none afterward. Wiring a known-red check into CI would teach a reader to ignore a red badge, so it
+goes in at publish instead.
 
 A second red on that gate was retired rather than deferred, because no event could ever clear it.
 QUICKSTART illustrates an SSH tunnel with `127.0.0.1:8899`, and fetching a loopback address
@@ -382,11 +374,17 @@ scheduled onto the judging window and read as a known residual rather than as a 
 `check-config-drift.py` compares against a config on the operator's machine, which a runner does
 not have, so running it there would assert nothing while looking like coverage.
 
-The six `check-*` lines are pre-publish gates rather than tests. That count read four until
-2026-07-27 and five until 2026-08-01, each time one short of the list directly above it, which is
-the same class of defect these gates exist to close: a number nobody recounts after the list it
-describes grows. It has now been wrong twice in the paragraph that documents it being wrong, so
-prose counts drift by default and the list is the authority.
+The `check-*` lines are pre-publish gates rather than tests. Their number is deliberately not
+restated here, because a count in prose is exactly the defect these gates exist to close: nobody
+recounts it after the list it describes grows.
+
+The block above is a walkthrough, not the roster. It interleaves gates with mutation scripts and
+control suites, and it names only some of the `check-*.py` files. The authority is
+`scripts/check-all.py`, which discovers them with `git ls-files scripts/check-*.py` and refuses to
+report a result if that walk returns fewer than its floor, so a broken discovery step fails loudly
+instead of reading as a clean repo. `ci.yml` invokes them individually, and its hermetic job
+asserts that every tracked gate is either invoked by a workflow or declared unable to run offline
+with the reason. Run `python3 scripts/check-all.py` for the current set and count.
 `check-doc-links.py` deliberately
 does not fetch explorer URLs, because the explorer is a single-page app that returns HTTP 200 for a
 signature that does not exist, so a status-code checker would report a confident pass on a dead
@@ -474,19 +472,17 @@ exactly like a live one. That is not hypothetical here: a draft justified the wa
 reason this project had already overturned, and it was clean on all fourteen patterns. The
 fact-check is a separate pass and this gate is not it.
 
-A note on how that sentence was written, because the gate caught the first draft. It originally
-named the absent config file, in backticks, to say the file does not exist. `check-repo-paths.py`
-reads every repo path a doc names and asserts it resolves in a clone, so it correctly refused a
-document pointing at a file no reader could open. Naming a path to say it is missing is
-indistinguishable, to a checker, from naming it to say it is there. The fix was to reword rather
-than to carve out an exception, since the exception would have blinded the gate to the real case
-it exists for.
+The path gate constrains how any of this can be written down. `check-repo-paths.py` reads every
+repo path a doc names and asserts it resolves in a clone, so a document cannot name an absent file
+even in order to say it is absent: naming a path to say it is missing is indistinguishable, to a
+checker, from naming it to say it is there. The way through is to reword the sentence rather than
+carve out an exception, since the exception would blind the gate to the real case it exists for.
 
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
-in `crates/solana-core`, which executes all four suites there for 120 tests rather than the
-89 unit tests and 23 properties this line named until 2026-07-27, clippy with warnings as
-errors on both the host and `wasm32-wasip2`, the release build of the shipped wasm target,
-the fail-closed certification self-test, then all eight plugin components in a matrix.
+in `crates/solana-core`, which executes all four suites there for 120 tests, clippy with
+warnings as errors on both the host and `wasm32-wasip2`, the release build of the shipped
+wasm target, the fail-closed certification self-test, then all eight plugin components in a
+matrix.
 Everything is offline and deterministic, and `--locked` throughout, so a green run also
 proves the committed lockfiles are the ones that work. That is the claim a reproducibility
 promise actually rests on, and it now rests on a clean runner rather than on this machine.
@@ -623,13 +619,11 @@ it restores the source on every exit path and refuses to interpret a mutation un
 baseline was green first, and run from outside a checkout it fails loudly with exit 2 rather
 than passing silently.
 
-This sentence used to point at `.tools/`, which is git-ignored. That was accurate when written
-and became false when the runner was ported, which is the same defect one level up: a claim
-about evidence that a reader cannot reach. `scripts/check-shadowed-scripts.py` now fails if an
-ignored copy shadows a tracked script, since remembering this rule did not prevent committing
-it twice in one day. Its two scopes were written from that one incident, `.tools/` on the ignored
-side and `scripts/` on the tracked side, so it covered the pair it was built for and nothing
-wider. Both scopes are derived from git now, which is what puts the rest of the tree under it.
+A runner that lives only in a git-ignored directory is the same defect one level up: a claim about
+evidence that a reader cannot reach. `scripts/check-shadowed-scripts.py` fails if an ignored copy
+shadows a tracked script, since remembering the rule did not prevent committing one twice in one
+day. Its scopes are derived from git rather than from the single `.tools/` and `scripts/` pair that
+produced it, which is what puts the rest of the tree under it.
 
 ## One layer you can operate rather than read
 

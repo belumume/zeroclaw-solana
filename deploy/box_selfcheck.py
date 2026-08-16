@@ -3,15 +3,27 @@
 
 WHY THE DIRECTION IS INVERTED, because this is the design decision worth defending.
 
-The obvious shape is a CI job that reaches into the box and inspects it. That shape is dead here
-and the reason is measured rather than assumed: port 22 is blocked network-wide from the operator's
-location, direct HTTPS to the instance IP is blocked, the OCI Bastion endpoint is blocked on both
-22 and 443, and Compute Instance Run Command reports `desired-state: ENABLED` while being absent
-from the live plugin list, so the agent never instantiated it. Every inbound route is shut.
+The obvious shape is a CI job that reaches into the box and inspects it. That shape is impractical
+here, and the reasons are measured rather than assumed: port 22 is blocked network-wide from the
+operator's location (control: `github.com:22` times out while `:443` opens in about a second), and
+Compute Instance Run Command reports `desired-state: ENABLED` while being absent from the live
+plugin list, so the agent never instantiated it.
+
+NOT every inbound route is shut, and that distinction matters because the opposite claim sends a
+reader away from the one that works. OCI Bastion plus Cloud Shell REACHES the node: Bastion runs,
+it accepts the ed25519 key the node authorises (the RSA-only constraint belongs to Cloud Shell's
+FIPS OpenSSH, not to Bastion), and sessions have been created and used through it. What that route
+is not is CHEAP or unattended: it needs a browser, a session that expires, and a human-ish hop.
 
 So the box checks ITSELF and pushes the verdict outward through the Cloudflare tunnel it already
-runs for the x402 gate. Nothing needs to reach in. A checker anywhere fetches one JSON document
-over plain HTTPS, and `check_box_drift.py` is that checker.
+runs for the x402 gate. Nothing needs to reach in, and a checker anywhere fetches one JSON
+document over plain HTTPS.
+
+THAT FETCHER DOES NOT EXIST YET. `deploy/make_invariants.py` writes the manifest this file
+consumes, and this file computes a verdict, but nothing schedules the run and nothing retrieves
+the result: `box_selfcheck` appears in zero of the six workflows and in no unit here. Until both
+halves exist the inversion is a design that works when invoked by hand rather than a gate, and
+describing it otherwise is the failure it was written to prevent.
 
 That inversion is strictly better than the inbound design, not merely a workaround for a blocked
 port: a verdict computed on the box can see the deployed bytes, the live memory and the running
@@ -72,8 +84,8 @@ B58 = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
 
 # A line that FORBIDS a network necessarily names it, so the network-prose check has to tell a
 # prohibition apart from an assertion to the customer. Deliberately a small, boring marker set:
-# this is a semantic distinction and regex does those badly (measured F1 ~0.22-0.33 for the class),
-# so the honest posture is a narrow list plus a stated ceiling rather than a clever pattern.
+# this is a semantic distinction and regex does those badly, so the honest posture is a narrow
+# list plus a stated ceiling rather than a clever pattern.
 #
 # CEILING, so nobody reads a green as stronger than it is: a prohibition phrased with none of these
 # markers still reads as an assertion and FALSE-POSITIVES, and an assertion that happens to carry
@@ -370,6 +382,31 @@ def run_checks() -> Result:
     return r
 
 
+def redact(text: str) -> str:
+    """Strip the two things a PUBLICLY SERVED detail line must never carry.
+
+    The verdict is fetched over plain HTTPS by anyone, so a detail line is public copy rather than
+    a local log line. Two classes have to go, and only two:
+
+      the home directory   an absolute path carries the account name on any box that is not this
+                           one. `$HOME/.zeroclaw/x` becomes `~/.zeroclaw/x`, which is the form the
+                           reproduction doc uses anyway, so nothing legible is lost.
+      a chat recipient     a WhatsApp JID is a phone number. Nothing here needs to name it, and
+                           `announce_settlements.sh` already avoids carrying one for the same reason.
+
+    DELIBERATELY NARROW, because the obvious wider version would gut the checker. Base58 tokens are
+    NOT redacted: the merchant address and the USDC mint are exactly what the mint and manifest
+    checks assert, they are public constants published in the write-up, and a verdict that hides
+    them cannot state which mint it found. Over-redaction here would leave a green checker saying
+    nothing, which is the failure mode this file's docstring already warns about.
+    """
+    home = str(Path.home())
+    for form in (home, home.replace("\\", "/")):
+        if form and form != "/":
+            text = text.replace(form, "~")
+    return re.sub(r"\b\d+@(?:g\.us|s\.whatsapp\.net)", "<recipient>", text)
+
+
 def build_verdict(r: Result) -> dict:
     sha = "unknown"
     try:
@@ -381,7 +418,10 @@ def build_verdict(r: Result) -> dict:
         "generated_at_epoch": int(time.time()),
         "deployed_sha": sha,
         "ok": r.ok,
-        "checks": r.checks,
+        # Redacted HERE rather than at the serving layer, so what lands on disk is already safe.
+        # The gate that serves this is a dumb file reader; putting the defense in the writer means
+        # a second consumer (a copy, an operator paste, a future endpoint) inherits it too.
+        "checks": [dict(c, detail=redact(c["detail"])) for c in r.checks],
     }
 
 
@@ -576,6 +616,42 @@ def self_test() -> int:
         )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+    # REDACTION, driven both directions. This verdict is served publicly, so a detail line is
+    # public copy; and the over-redaction control matters more than the redaction one, because a
+    # checker that hides the values it asserts reports green while saying nothing.
+    home = str(Path.home())
+    r = Result()
+    r.add("probe", False, f"cannot read {home}/.zeroclaw/SHOP-INVARIANTS.json")
+    # All zeros rather than a plausible number: it matches the JID shape the redactor keys on, so
+    # it exercises the same path, while being unmistakably synthetic to the identifier gate that
+    # scans this tree. A realistic-looking fixture is flagged by that gate and rightly so.
+    r.add("probe2", False, "would send to 00000000000@s.whatsapp.net")
+    r.add(
+        "probe3",
+        True,
+        f"mint {GOOD_MINT} and merchant {GOOD_MERCHANT} both match the manifest",
+    )
+    details = [c["detail"] for c in build_verdict(r)["checks"]]
+
+    report("redaction: the home path is gone", home not in details[0])
+    report("redaction: it leaves a legible ~ path", "~/.zeroclaw/" in details[0])
+    report("redaction: a chat recipient is gone", "5511987654321" not in details[1])
+    report("redaction: the JID is replaced, not deleted", "<recipient>" in details[1])
+    # The over-correction controls. A wider redactor would pass the two above and destroy these.
+    report(
+        "redaction: the USDC mint SURVIVES (over-correction control)",
+        GOOD_MINT in details[2],
+    )
+    report(
+        "redaction: the merchant address SURVIVES (over-correction control)",
+        GOOD_MERCHANT in details[2],
+    )
+    # And the writer is what carries it, not the caller: an unredacted Result must not reach disk.
+    report(
+        "redaction: build_verdict applies it rather than the caller",
+        home not in json.dumps(build_verdict(r)),
+    )
 
     print(f"\n{passed} passed, {failed} failed")
     return 0 if failed == 0 else 1

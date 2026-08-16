@@ -21,6 +21,8 @@ on:
     branches: [main]
     paths:
       - "scripts/verify-proof.py"
+      - "scripts/verify_proof_ledger_control.py"
+      - "scripts/verify_proof_selfcheck_control.py"
       - "docs/DEVNET-PROOF.md"
       - ".github/workflows/proof-check.yml"
 
@@ -68,3 +70,22 @@ jobs:
           done
           echo "devnet RPC was unreachable on three attempts"
           exit 1
+
+      # THE CONTROLS FOR THE STEP ABOVE, and they ran nowhere until now. Two of that script's
+      # claims are OPTIONAL: they print PENDING against a node whose build predates them, and a
+      # claim whose only observed output is PENDING has not been shown to work. It would keep
+      # printing PENDING just as happily with its verdict logic deleted, and would keep printing
+      # it after the feature shipped and the check quietly stopped running.
+      #
+      # Each control serves crafted payloads from a loopback server and requires the checker to
+      # reach the right verdict on every branch, including each FAIL. So a green run above means
+      # the claims held, rather than that a blind checker found nothing.
+      #
+      # Placed HERE rather than in ci.yml deliberately: both controls run verify-proof.py as a
+      # subprocess, which makes real RPC calls, and a third-party endpoint refusing a request
+      # must never turn a pull request red. This workflow already owns that dependency.
+      - name: the optional live claims can actually go red
+        run: |
+          set -o pipefail
+          python3 scripts/verify_proof_ledger_control.py
+          python3 scripts/verify_proof_selfcheck_control.py

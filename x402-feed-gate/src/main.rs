@@ -30,6 +30,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use solana_core::rpc::RpcTransport;
@@ -283,7 +284,7 @@ fn main() {
         cfg.receiving_ata().to_base58(),
         cfg.mint.to_base58()
     );
-    eprintln!("  GET /reading  |  GET /price  |  GET /health");
+    eprintln!("  GET /reading  |  GET /price  |  GET /health  |  GET /selfcheck");
 
     for request in server.incoming_requests() {
         let url = request.url().to_string();
@@ -306,6 +307,7 @@ fn main() {
         let path = url.split('?').next().unwrap_or("/");
         let response_body: (u16, String, Option<String>) = match path {
             "/health" => handle_health(&ledger, &restore_stats, cfg.daily_cap),
+            "/selfcheck" => handle_selfcheck(),
             "/price" => {
                 let nonce = issue_nonce(&nonce_counter);
                 (402, cfg.challenge(&nonce).to_json(), None)
@@ -470,6 +472,191 @@ fn handle_health(
 struct RestoreStats {
     applied: usize,
     skipped: usize,
+}
+
+/// Publishes the box self-check verdict so a checker anywhere can read it.
+///
+/// `deploy/box_selfcheck.py` runs ON the box and writes a verdict JSON, because
+/// the box cannot be reached inbound cheaply: port 22 is blocked network-wide
+/// from the operator's location, and Run Command is absent from the node's live
+/// plugin list. The verdict therefore has to travel outward, and this gate
+/// already runs a Cloudflare tunnel, so it is the door. Until this route existed
+/// the verdict was computed and then stayed on the disk that produced it.
+///
+/// This handler only publishes. It does not run the check, judge it, or
+/// summarise it: the verdict object is served as written, with two server-added
+/// fields, so a change to what the checker asserts needs no change here.
+fn handle_selfcheck() -> (u16, String, Option<String>) {
+    let zeroclaw_home = std::env::var("ZEROCLAW_HOME").ok();
+    let home = std::env::var("HOME").ok();
+    let path = match resolve_verdict_path(zeroclaw_home.as_deref(), home.as_deref()) {
+        Ok(p) => p,
+        Err(reason) => return selfcheck_unavailable(&reason),
+    };
+
+    // mtime first, then the bytes. Reading the file and then failing to stat it
+    // would leave the age unknown on a verdict that is present, and an age that
+    // silently defaulted would be indistinguishable from a fresh one.
+    let loaded = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .and_then(|mtime| std::fs::read(&path).map(|bytes| (bytes, mtime)))
+        // The io error's own text is short and carries no path (std's fs errors
+        // do not append one), which matters because this detail ships in a
+        // public body and the path holds $HOME.
+        .map_err(|e| format!("verdict unreadable: {e}"));
+
+    render_selfcheck(loaded, SystemTime::now())
+}
+
+/// Where the verdict lives, resolved the way `deploy/box_selfcheck.py` resolves
+/// it: `ZEROCLAW_HOME` if set, else `$HOME/.zeroclaw`, then
+/// `state/box-selfcheck.json` under that.
+///
+/// THE TWO MUST BE CHANGED TOGETHER. `box_selfcheck.py` takes its root from
+/// `os.environ.get("ZEROCLAW_HOME", Path.home() / ".zeroclaw")`; if this
+/// disagrees, a box running with the override writes a verdict where this route
+/// does not look, and a present verdict is then served as 503. That is worse
+/// than a plain miss, because 503 here means "no verdict was produced", so a
+/// reader applies the remedy for a checker that is not running while the
+/// checker is running fine.
+///
+/// Env is read by the caller and passed in, so both branches are testable
+/// without mutating process-global state from a threaded test harness.
+///
+/// HOME rather than a literal path, for the same reason `/health` reads it that
+/// way: the deployed copy must not carry an operator username, and this
+/// response is public.
+fn resolve_verdict_path(zeroclaw_home: Option<&str>, home: Option<&str>) -> Result<String, String> {
+    // Set-but-EMPTY is the case that `.ok()` alone does not cover: `std::env::var`
+    // returns `Ok("")` for `ZEROCLAW_HOME=` in a unit file, which is a shape a
+    // shell produces by accident rather than on purpose.
+    //
+    // This is the ONE point where mirroring Python exactly would be wrong, so it
+    // is deliberate rather than an oversight: `os.environ.get` also returns `""`
+    // there, and `Path("") / "state"` is the RELATIVE path `state/...`, while the
+    // naive Rust equivalent is `/state/...` at the filesystem root. Both are
+    // useless, neither is what an operator meant, and only one of them can be
+    // reached by a reader who then wonders why the root of the disk is being
+    // stat'd. Falling back to `$HOME/.zeroclaw` is the reading that can be right.
+    let root = match zeroclaw_home.filter(|v| !v.is_empty()) {
+        Some(explicit) => explicit.to_string(),
+        None => match home.filter(|v| !v.is_empty()) {
+            Some(h) => format!("{h}/.zeroclaw"),
+            None => {
+                return Err(
+                    "neither ZEROCLAW_HOME nor HOME is set, so the verdict path is unknown"
+                        .to_string(),
+                )
+            }
+        },
+    };
+    Ok(format!("{root}/state/box-selfcheck.json"))
+}
+
+/// The pure half of `/selfcheck`: verdict bytes and their mtime in, status and
+/// body out. Split out so all three branches are drivable without a filesystem,
+/// and so the age arithmetic can be tested against a clock the test controls.
+fn render_selfcheck(
+    verdict: Result<(Vec<u8>, SystemTime), String>,
+    now: SystemTime,
+) -> (u16, String, Option<String>) {
+    let (bytes, mtime) = match verdict {
+        Ok(v) => v,
+        Err(reason) => return selfcheck_unavailable(&reason),
+    };
+
+    let mut parsed: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return selfcheck_unavailable(&format!("verdict is not valid JSON: {e}")),
+    };
+
+    // Built with serde_json rather than format!, matching every other response
+    // in this file: a hand-built body compiles fine while emitting broken JSON,
+    // and the checker reading this endpoint would see a 200 either way. Here it
+    // also does the merge, which string concatenation cannot do safely at all.
+    match parsed.as_object_mut() {
+        Some(obj) => {
+            // The age comes from the FILE'S MTIME, never from the verdict's own
+            // `generated_at`. That field is written by the same process that
+            // writes the file, so it cannot see a run that died before writing,
+            // and it travels with the bytes if the file is copied from
+            // somewhere else. The mtime is the independent signal.
+            //
+            // A future mtime (a clock step, a copy that preserved a newer
+            // stamp) saturates at zero rather than failing the request: the
+            // verdict is present, and reporting it as missing would be a
+            // sharper error than reporting it as very fresh.
+            let age = now
+                .duration_since(mtime)
+                .unwrap_or(Duration::ZERO)
+                .as_secs();
+            obj.insert("age_seconds".to_string(), serde_json::json!(age));
+            obj.insert("served_at".to_string(), serde_json::json!(rfc3339_utc(now)));
+        }
+        // A bare scalar or an array parses as JSON and still cannot receive the
+        // two fields. Serving it unmerged would hand the fetcher a 200 with no
+        // age, which is the one thing a staleness check needs.
+        None => return selfcheck_unavailable("verdict is not a JSON object"),
+    }
+
+    (200, parsed.to_string(), None)
+}
+
+/// No verdict is a 503 with a reason, never a 200 with a partial body.
+///
+/// This endpoint exists so a fetcher can tell "the box asserted its invariants"
+/// from "the box said nothing", and those two must not share a status code. A
+/// missing verdict readable as a pass is worse than no endpoint, because the
+/// green then gets quoted as evidence — which is the same reasoning that makes
+/// the checker itself fail closed.
+fn selfcheck_unavailable(detail: &str) -> (u16, String, Option<String>) {
+    let body = serde_json::json!({
+        "error": "no verdict",
+        "detail": detail,
+    })
+    .to_string();
+    (503, body, None)
+}
+
+/// Epoch time to `YYYY-MM-DDTHH:MM:SSZ`.
+///
+/// The same shape the verdict writer emits for its own `generated_at`
+/// (`time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())`), so the two timestamps
+/// in one response can be compared without either side parsing two formats.
+///
+/// Hand-rolled because this crate carries no date dependency and one timestamp
+/// does not justify the supply-chain surface of adding one. The days-to-civil
+/// step is Hinnant's algorithm, which is exact across leap years and century
+/// rules rather than an approximation that drifts near either.
+fn rfc3339_utc(t: SystemTime) -> String {
+    // Before the epoch is not a real case for a file this process just stat'd,
+    // and clamping keeps the signature infallible rather than pushing an error
+    // no caller could act on into the response.
+    let secs = t
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    format!("{year:04}-{month:02}-{day:02}T{hh:02}:{mm:02}:{ss:02}Z")
+}
+
+/// Days since 1970-01-01 to a proleptic Gregorian (year, month, day).
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    // Shift the epoch to 0000-03-01 so leap day lands at the end of the cycle
+    // and no month arithmetic has to special-case February.
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (year, month, day)
 }
 
 /// The core request handler: no payment -> 402 challenge; a payment -> verify,
@@ -819,5 +1006,315 @@ mod health_tests {
             v["ledger"]["lock_healthy"], false,
             "a poisoned lock must be reported, not hidden behind normal-looking numbers"
         );
+    }
+}
+
+#[cfg(test)]
+mod selfcheck_tests {
+    use super::*;
+
+    /// The clock every case is measured against, and the epoch `rfc3339_utc` is
+    /// pinned to. Fixed rather than `now()` so the arithmetic is checkable
+    /// rather than approximately right.
+    const FIXED_NOW_EPOCH: u64 = 1_700_000_000;
+
+    fn at(epoch: u64) -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(epoch)
+    }
+
+    /// Shaped like what `deploy/box_selfcheck.py::build_verdict` writes: the
+    /// generated_at pair, the deployed sha, the verdict, and the per-check
+    /// detail lines. Kept full rather than minimised so the merge is exercised
+    /// against the document that will actually arrive.
+    fn verdict_bytes(generated_at_epoch: u64) -> Vec<u8> {
+        serde_json::json!({
+            "generated_at": "2023-11-14T22:13:20Z",
+            "generated_at_epoch": generated_at_epoch,
+            "deployed_sha": "68d83ded97bf0c58",
+            "ok": true,
+            "checks": [
+                {"name": "skills_match_manifest", "ok": true, "detail": "8 of 8 byte-identical"},
+                {"name": "no_foreign_mint_in_state", "ok": true, "detail": "0 candidates"},
+            ],
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    /// `ZEROCLAW_HOME` is read, because `deploy/box_selfcheck.py` honours it and
+    /// a route that did not would serve 503 for a verdict sitting on disk.
+    ///
+    /// Its control is the test below. Either one alone passes on a resolver that
+    /// ignores the other input entirely: hardcode the override and this passes
+    /// while the default is broken; hardcode `$HOME` and the reverse. Read them
+    /// as one case split in two, which is also why they assert the two roots
+    /// produce DIFFERENT paths — a resolver returning a constant fails that and
+    /// nothing else here.
+    #[test]
+    fn zeroclaw_home_is_honoured_when_it_is_set() {
+        let overridden = resolve_verdict_path(Some("/srv/zc"), Some("/home/node")).unwrap();
+        assert_eq!(overridden, "/srv/zc/state/box-selfcheck.json");
+
+        let default = resolve_verdict_path(None, Some("/home/node")).unwrap();
+        assert_ne!(
+            overridden, default,
+            "the override and the default resolved to one path, so one input is being ignored"
+        );
+    }
+
+    /// The default still works when the override is absent, which is the state
+    /// of every box that has not set it — including the one in production.
+    #[test]
+    fn the_default_root_is_used_when_zeroclaw_home_is_unset() {
+        assert_eq!(
+            resolve_verdict_path(None, Some("/home/node")).unwrap(),
+            "/home/node/.zeroclaw/state/box-selfcheck.json"
+        );
+    }
+
+    /// A set-but-empty variable falls back rather than resolving to the root of
+    /// the filesystem. `std::env::var` returns `Ok("")` for `ZEROCLAW_HOME=` in
+    /// a unit file, so `.ok()` alone would take that branch and stat
+    /// `/state/box-selfcheck.json`.
+    ///
+    /// Driven on both variables, since `HOME=` is the same shape and reaching
+    /// `/.zeroclaw/state/...` is the same defect one level down.
+    #[test]
+    fn an_empty_env_value_falls_back_rather_than_resolving_to_the_filesystem_root() {
+        assert_eq!(
+            resolve_verdict_path(Some(""), Some("/home/node")).unwrap(),
+            "/home/node/.zeroclaw/state/box-selfcheck.json",
+            "an empty override was treated as a real path"
+        );
+        // An empty HOME with a real override is still the override.
+        assert_eq!(
+            resolve_verdict_path(Some("/srv/zc"), Some("")).unwrap(),
+            "/srv/zc/state/box-selfcheck.json"
+        );
+        // Nothing usable is an error with a reason, never a path at the root.
+        for (zc, home) in [
+            (None, None),
+            (Some(""), None),
+            (None, Some("")),
+            (Some(""), Some("")),
+        ] {
+            let resolved = resolve_verdict_path(zc, home);
+            assert!(
+                resolved.is_err(),
+                "resolved to {resolved:?} with nothing usable to resolve from"
+            );
+        }
+    }
+
+    /// The resolved path reaches the response: an unresolvable path is the same
+    /// 503 as an unreadable file, with its own reason rather than a generic one.
+    #[test]
+    fn an_unresolvable_path_is_503_with_its_own_reason() {
+        let reason = resolve_verdict_path(None, None).unwrap_err();
+        let (status, body, _) = render_selfcheck(Err(reason), at(FIXED_NOW_EPOCH));
+        assert_eq!(status, 503);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["error"], "no verdict");
+        assert!(
+            v["detail"]
+                .as_str()
+                .is_some_and(|d| d.contains("ZEROCLAW_HOME")),
+            "the reason must name what was missing: {body}"
+        );
+    }
+
+    /// BRANCH 1: a verdict that is present and parses is served whole, with the
+    /// two server-added fields merged in.
+    ///
+    /// The control is that every field of the original survives. Without it, a
+    /// handler that discarded the verdict and returned only the two added
+    /// fields would satisfy a "200 with an age" assertion.
+    #[test]
+    fn a_present_verdict_is_served_whole_with_the_two_added_fields() {
+        let (status, body, hdr) = render_selfcheck(
+            Ok((verdict_bytes(FIXED_NOW_EPOCH), at(FIXED_NOW_EPOCH - 90))),
+            at(FIXED_NOW_EPOCH),
+        );
+        assert_eq!(status, 200);
+        assert!(hdr.is_none());
+
+        let v: serde_json::Value =
+            serde_json::from_str(&body).unwrap_or_else(|e| panic!("invalid JSON ({e}): {body}"));
+        assert_eq!(v["age_seconds"], 90);
+        assert_eq!(v["served_at"], "2023-11-14T22:13:20Z");
+
+        // The control: the verdict itself came through untouched.
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["deployed_sha"], "68d83ded97bf0c58");
+        assert_eq!(v["generated_at_epoch"], FIXED_NOW_EPOCH);
+        assert_eq!(v["checks"].as_array().map(Vec::len), Some(2));
+        assert_eq!(v["checks"][0]["name"], "skills_match_manifest");
+    }
+
+    /// BRANCH 2: an absent or unreadable verdict is a 503, and it is not
+    /// readable as a pass.
+    ///
+    /// The control is that second half. A 503 carrying a truthy-looking body is
+    /// the exact failure this route exists to prevent, and asserting only the
+    /// status code would not catch it.
+    #[test]
+    fn an_absent_verdict_is_503_and_carries_no_verdict_shaped_field() {
+        let (status, body, hdr) = render_selfcheck(
+            Err("verdict unreadable: No such file or directory (os error 2)".to_string()),
+            at(FIXED_NOW_EPOCH),
+        );
+        assert_eq!(status, 503, "a missing verdict must never be a 200");
+        assert!(hdr.is_none());
+
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["error"], "no verdict");
+        assert!(
+            v["detail"].as_str().is_some_and(|d| !d.is_empty()),
+            "the reason must be stated: {body}"
+        );
+        assert!(
+            v.get("ok").is_none(),
+            "no verdict must not be readable as a pass: {body}"
+        );
+        assert!(v.get("age_seconds").is_none(), "no verdict has no age");
+    }
+
+    /// BRANCH 3: content that does not parse is the same 503, reached by a
+    /// different route.
+    ///
+    /// Driven over four shapes because "does not parse" hides three distinct
+    /// cases: truncated (a run killed mid-write), empty (a run that created the
+    /// file and died), and JSON that parses to something the two fields cannot
+    /// be merged into. The scalar and the array are the ones that would
+    /// otherwise slip through as a 200 with no age.
+    #[test]
+    fn malformed_content_is_503_rather_than_a_partial_200() {
+        for bad in [
+            &b"{\"ok\": true, \"checks\": ["[..], // truncated mid-write
+            &b""[..],                             // created, never written
+            &b"true"[..],                         // parses, but not an object
+            &b"[1, 2, 3]"[..],                    // parses, but not an object
+        ] {
+            let (status, body, _) = render_selfcheck(
+                Ok((bad.to_vec(), at(FIXED_NOW_EPOCH - 5))),
+                at(FIXED_NOW_EPOCH),
+            );
+            assert_eq!(
+                status,
+                503,
+                "malformed verdict served as {status}: {:?}",
+                String::from_utf8_lossy(bad)
+            );
+            let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(v["error"], "no verdict");
+            assert!(v.get("age_seconds").is_none());
+        }
+    }
+
+    /// The control for `age_seconds` being a measurement rather than a field
+    /// that is always present and always zero.
+    ///
+    /// Two mtimes against one clock must give two different ages, and each must
+    /// be the exact difference. A hardcoded zero, a hardcoded constant, and a
+    /// subtraction taken from the wrong end all fail this.
+    #[test]
+    fn age_tracks_the_mtime_it_was_given() {
+        let age_of = |mtime_epoch: u64| -> u64 {
+            let (_, body, _) = render_selfcheck(
+                Ok((verdict_bytes(FIXED_NOW_EPOCH), at(mtime_epoch))),
+                at(FIXED_NOW_EPOCH),
+            );
+            let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+            v["age_seconds"].as_u64().expect("age must be a number")
+        };
+
+        assert_eq!(age_of(FIXED_NOW_EPOCH - 60), 60);
+        assert_eq!(age_of(FIXED_NOW_EPOCH - 3_600), 3_600);
+        assert_ne!(
+            age_of(FIXED_NOW_EPOCH - 60),
+            age_of(FIXED_NOW_EPOCH - 3_600),
+            "two different mtimes produced one age, so the age is not measured"
+        );
+
+        // Same file, later clock: the age has to grow on its own.
+        let (_, later, _) = render_selfcheck(
+            Ok((verdict_bytes(FIXED_NOW_EPOCH), at(FIXED_NOW_EPOCH - 60))),
+            at(FIXED_NOW_EPOCH + 240),
+        );
+        let v: serde_json::Value = serde_json::from_str(&later).unwrap();
+        assert_eq!(v["age_seconds"], 300);
+    }
+
+    /// Why the contract specifies the mtime: a verdict's own `generated_at` is
+    /// written by the process that writes the file, so it cannot see a run that
+    /// died before writing, and it travels with the bytes if the file is copied
+    /// from elsewhere.
+    ///
+    /// The fixture makes the two disagree deliberately. A stale file claiming a
+    /// current `generated_at_epoch` must still report its real age, which is
+    /// what an implementation reading the convenient field would get wrong
+    /// while passing every other case here.
+    #[test]
+    fn age_comes_from_the_mtime_not_from_the_verdict_own_timestamp() {
+        let (_, body, _) = render_selfcheck(
+            // The document says it was generated a second ago; the file says it
+            // was last written two hours ago.
+            Ok((
+                verdict_bytes(FIXED_NOW_EPOCH - 1),
+                at(FIXED_NOW_EPOCH - 7_200),
+            )),
+            at(FIXED_NOW_EPOCH),
+        );
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            v["age_seconds"], 7_200,
+            "the age followed the verdict's own timestamp instead of the file's mtime"
+        );
+        // The control: the misleading field is still served, untouched. The fix
+        // is to ignore it for the age, not to strip it from the verdict.
+        assert_eq!(v["generated_at_epoch"], FIXED_NOW_EPOCH - 1);
+    }
+
+    /// An mtime ahead of the clock (a step, or a copy that preserved a newer
+    /// stamp) saturates at zero rather than failing the request, because the
+    /// verdict is present and a 503 there would be the sharper error.
+    #[test]
+    fn a_future_mtime_reports_zero_rather_than_failing() {
+        let (status, body, _) = render_selfcheck(
+            Ok((verdict_bytes(FIXED_NOW_EPOCH), at(FIXED_NOW_EPOCH + 500))),
+            at(FIXED_NOW_EPOCH),
+        );
+        assert_eq!(status, 200);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["age_seconds"], 0);
+    }
+
+    /// `served_at` is pinned against known epochs rather than pattern matched,
+    /// so a formatter emitting a well-shaped wrong date fails.
+    ///
+    /// The cases are where calendar arithmetic actually breaks: both leap-year
+    /// rules, the century that is not a leap year, and both ends of a year.
+    #[test]
+    fn served_at_is_a_correct_rfc3339_utc_timestamp() {
+        for (epoch, expected) in [
+            (0_u64, "1970-01-01T00:00:00Z"),
+            (FIXED_NOW_EPOCH, "2023-11-14T22:13:20Z"),
+            (951_782_400, "2000-02-29T00:00:00Z"), // leap day, /400 rule
+            (4_107_542_400, "2100-03-01T00:00:00Z"), // 2100 is NOT a leap year
+            (1_709_164_800, "2024-02-29T00:00:00Z"), // leap day, /4 rule
+            (1_735_689_599, "2024-12-31T23:59:59Z"), // last second of a year
+            (1_735_689_600, "2025-01-01T00:00:00Z"), // first second of the next
+        ] {
+            assert_eq!(rfc3339_utc(at(epoch)), expected, "epoch {epoch}");
+        }
+
+        // And it is that value which reaches the body, not merely a function
+        // the body might not be calling.
+        let (_, body, _) = render_selfcheck(
+            Ok((verdict_bytes(FIXED_NOW_EPOCH), at(FIXED_NOW_EPOCH))),
+            at(1_735_689_600),
+        );
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["served_at"], "2025-01-01T00:00:00Z");
     }
 }

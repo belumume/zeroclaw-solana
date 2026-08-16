@@ -14,22 +14,40 @@ schedule, and gates the same feed behind x402: a machine that wants the reading 
 per request, and the node covers its own gas. That is the whole loop.
 
 The node is an Ampere ARM instance on Oracle's free tier, not a board on a desk, and it is named
-here because the rest of this page asks you to trust what runs where. What the arrangement buys is
-the part that matters: its signing key was generated on that box and has never left it, and a
+here because the rest of this page asks you to trust what runs where. What the arrangement buys:
+its signing key was generated on that box and has never left it, and a
 `systemd --user` timer with lingering publishes on a schedule no laptop is in. A Raspberry Pi with
 a DHT11 is a drop-in for the reading source and the on-chain half is identical either way. Today the
 reading comes from a keyless public weather API on that host rather than from a physical probe.
 
 **A shop that takes money without holding keys.** A merchant agent on Telegram and WhatsApp
-quotes an order in BRL at a stated ECB rate, issues a Solana Pay link, and settles in mainnet
-USDC. It marks an order paid only when four things agree: the reference, the exact amount, the
-exact mint, and the watched destination. A payment in a token the payer minted themselves does
-not qualify.
+quotes an order in BRL at a rate it fetches rather than states, issues a Solana Pay link, and
+settles in mainnet USDC. It marks an order paid only when four things agree: the reference, the
+exact amount, the exact mint, and the watched destination. A payment in a token the payer minted
+themselves does not qualify.
+
+The rate was the one money-touching number a language model could assert with nothing checking
+it, which is why it is now fetched in code. `scripts/rate_crosscheck.py` reads BRL/USD from
+Brazil's central bank (BCB PTAX) and refuses unless the ECB's published figure, via Frankfurter,
+agrees within a stated band. Neither source needs a credential, and neither is a fallback for the
+other: there is no last-known rate, so a source that cannot be reached stops the quote rather than
+ageing one. On 2026-08-14 the two sat 0.91% apart, which is the error a single source would have
+carried into every order without saying so. `pay_link.py` performs that fetch itself and
+re-derives the amount, so the order value in BRL is the whole contract; a rate passed on the
+command line is a cross-check that can add a refusal and cannot relax one.
+`scripts/check-pay-link-rate-agreement.py` holds the pay path's duplicated constants to the
+original by reading them out of its source, because the deployed workspace receives a single file
+and cannot import the rest.
+
+What that leaves open, said plainly: the order *value* is still the caller's, so "table 4,
+R$ 0.05" passes every check above. This removes one free parameter of two. The shop on the node
+has not picked the change up yet, so the enforcement is in the repo and the deploy is what
+remains.
 
 Built for a small operator who wants an agent touching money without handing it a signing key.
 
 **And it has been running, not demoed.** The rubric asks whether a stranger would still be running
-this in a month. Read as of 2026-08-09T23:15Z, and re-derive it yourself rather than believing the
+this in a month. Read as of 2026-08-15T19:41Z, and re-derive it yourself rather than believing the
 figures, because they move every twenty minutes:
 
 ```bash
@@ -39,28 +57,28 @@ python3 scripts/verify-proof.py          # stdlib only, no install, no key
 That checks the live claims. To count the history yourself, the underlying call is
 `getSignaturesForAddress` on a feed account, which any devnet RPC will answer unauthenticated.
 
-**Two independent devices, 1,937 publishes between them, zero failed.** That is the DePIN claim
+**Two independent devices, 2,292 publishes between them, zero failed.** That is the DePIN claim
 rather than a gadget claim: the same on-chain oracle program serves both, each device holds its own
 key, and neither can sign for the other.
 
-**Measured 2026-08-09T23:15Z, and the publish counts only climb.** Do not read them as current;
+**Measured 2026-08-15T19:41Z, and the publish counts only climb.** Do not read them as current;
 re-derive with one `getSignaturesForAddress` per account, which returns the complete history because
 the oldest signature is the account's own creation.
 
 | Feed account | Publishes | Failed | Span | Median gap | Largest gap |
 |---|---|---|---|---|---|
-| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 1,158+ | 0 | 16.5 d | 20.5 min | **61.5 min** |
-| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 779 | 0 | 12.4 d | 20.0 min | **36.0 h** |
+| `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (ARM node) | 1,514+ | 0 | 21.6 d | 20.5 min | **61.5 min** |
+| `3aMsPjXuMwRNqW3Yy6aqATp1N8nDXc4ZQMpGEncTVx8K` (second device, run **completed** 2026-08-06) | 778 | 0 | 12.4 d | 20.0 min | **36.0 h** |
 
 The ARM node's 61.5 minutes is its worst run in
-sixteen days. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
+the span above. The second device's 36 hours is a laptop that sleeps, and disclosing it beside the
 node's figure is the point: a reader who runs the command finds both, and an outlier they discover
 for themselves discredits everything around it.
 
 **The second device's run is finished, and its row is a completed result rather than a running
 counter.** It stopped on 2026-08-06 and the numbers above will not grow. Its purpose was to show
 the same on-chain program accepting signed readings from a second independent device holding a
-second key, which 779 publishes at zero failures over 12.4 days establishes. **Only the ARM node
+second key, which 778 publishes at zero failures over 12.4 days establishes. **Only the ARM node
 is still publishing**, and every continuity claim in this submission rests on that row alone. A
 reader checking this a fortnight from now will find the node's count higher and the second
 device's identical, which is what these two rows are each supposed to mean.
@@ -79,7 +97,7 @@ rather than the pair's. Both are the sort of thing the call above would have sho
 
 ---
 
-## The custody argument, which is the part that does not depend on trusting us
+## Custody: the limit is enforced on chain, not in our code
 
 An approval prompt is not a boundary. The sentence a human reads before approving was written
 by the model, so influencing the model influences the description. An attacker needs no key,

@@ -407,6 +407,10 @@ mkdir -p ~/.zeroclaw/agents/demo/workspace/tools
 cp skills/solana-pay/scripts/gen_reference.py ~/.zeroclaw/agents/demo/workspace/tools/
 cp skills/solana-pay/scripts/pay_link.py ~/.zeroclaw/agents/demo/workspace/tools/  # wraps solana: -> tappable pay-page link
 cp x402-feed-gate/scripts/summarize_earnings.py ~/.zeroclaw/agents/demo/workspace/tools/  # x402 earnings report (SOP reads it)
+cp demo/confirm_settlements.py ~/.zeroclaw/agents/demo/workspace/tools/  # settlement verdicts read off the chain, never composed
+# Two SOPs, not three. `payment-confirmation` is deliberately NOT installed: its confirmation step
+# is a sentence telling the model not to invent a settlement, which is not a binding, and on
+# 2026-07-26 the agent reported one from a substitute script when the tool was missing.
 for s in evening-reconciliation node-earnings-report; do
   cp -r sops/$s ~/.zeroclaw/agents/demo/workspace/sops/
   cp -r sops/$s ~/.zeroclaw/data/sops/                          # CLI tooling reads here
@@ -417,6 +421,82 @@ zeroclaw sop validate                # ✅
 The generator copy into `workspace/tools/` matters: **channel turns run jailed to the agent
 workspace**, so a skill referencing its own directory breaks in channels even though it
 works from the CLI.
+
+### Schedule the deterministic receipts (optional, 1 min)
+
+The SOP above is not installed because its confirmation step is prose. The replacement is
+`deploy/announce_settlements.sh`, which derives every field of the outgoing message from the chain
+via `confirm_settlements.py` and hands the bytes to `zeroclaw channel send`. No model is in that
+path at any point.
+
+It was runnable by hand and scheduled by nothing, which is the same as not running:
+
+```
+mkdir -p ~/.zeroclaw/bin ~/.config/systemd/user
+cp deploy/announce_settlements.sh ~/.zeroclaw/bin/     # fixed path: a unit cannot locate this repo
+cp deploy/zc-announce.service deploy/zc-announce.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now zc-announce.timer
+systemctl --user list-timers zc-announce.timer     # NEXT/LEFT populated = armed
+systemctl --user start zc-announce.service         # one run now
+journalctl --user -u zc-announce.service -n 20     # "nothing to announce" is the healthy idle line
+```
+
+Note `~/zeroclaw` is the **host** clone from step 2, not this repo, so the unit cannot reach the
+script there. The copy above is what gives it a fixed path, and the script reads nothing relative to
+its own directory, so it behaves identically from either location.
+
+A minute is affordable because most runs end at the first step with nothing to announce, and it is
+what makes "the owner hears within about a minute of settlement" true rather than aspirational.
+
+Two things worth knowing before you enable it. The service is `Type=oneshot`, so a SUCCEEDED run
+reports `ActiveState=inactive` and reads as dead to a naive check. `deploy/box_selfcheck.py` reads
+`Result` as well, for exactly this. And the script sends FIRST and commits to the ledger AFTER, so a
+failed send re-announces on the next tick rather than swallowing a confirmation; a visible duplicate
+is recoverable and a silent miss is not, when the customer has already paid.
+
+If the binary or the confirmer is absent it exits 2 and says which, rather than announcing nothing
+quietly.
+
+### Publish the box's own drift verdict (optional, 1 min)
+
+`deploy/box_selfcheck.py` runs on the box and asserts that the deployed skills and tools are
+byte-identical to a named commit, that the network-bearing config fields still say mainnet, and that
+no funds-critical constant has drifted into state. That verdict is worth more than anything an
+outside prober can produce, because it can see deployed bytes and running services. That only holds
+if something schedules it and something retrieves it.
+
+```
+mkdir -p ~/.zeroclaw/bin ~/.config/systemd/user
+python3 deploy/make_invariants.py                      # writes the manifest the check compares against
+cp deploy/box_selfcheck.py ~/.zeroclaw/bin/
+cp deploy/zc-selfcheck.service deploy/zc-selfcheck.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now zc-selfcheck.timer
+systemctl --user start zc-selfcheck.service
+cat ~/.zeroclaw/state/box-selfcheck.json | head -20    # the verdict the gate publishes
+```
+
+The gate serves it at `/selfcheck`, over the tunnel it already runs, so nothing has to reach into
+the box. Three responses, and the status code carries the meaning rather than the body: **200** with
+the verdict, **503** when the route is live but no verdict is on disk (the timer is not running),
+**404** when the deployed gate predates the route. `scripts/verify-proof.py` reads all three and
+treats only the 404 as pending, because "not shipped yet" and "the check stopped running" need
+opposite responses.
+
+A verdict that says `ok` while being hours old is the failure this is built to make visible, so the
+served body carries `age_seconds` derived from the file's own mtime rather than from any field
+inside it, and the verifier fails on a stale one.
+
+The unit exits 1 when the box has drifted, which marks it failed in
+`systemctl --user list-units --failed`. That is deliberate: it is a second local signal that costs
+nothing, and the verdict file is written before that exit, so a drifted run still publishes what it
+found.
+
+Detail lines are redacted before they are written, since this is served publicly: the home path
+becomes `~` and a chat recipient becomes `<recipient>`. Mint and merchant addresses are left alone
+on purpose: they are public constants and they are exactly what the checks assert, so hiding them
+would leave a green checker saying nothing.
 
 ## 6. Run it (2 min)
 ```

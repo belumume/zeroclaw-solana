@@ -19,13 +19,13 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
    signs each reading with a device key the host never exposes, and publishes a
    typed on-chain feed another program consumes. Two publish paths share the same device
    signature: the agent drives one live (shown in the demo), and a deterministic, LLM-free
-   publisher runs the durable feed on a schedule. As of 2026-08-08T06:05Z that feed carries **at least 986
-   publishes and zero failures across 14.1 days**, unbroken since 2026-07-25, at a median gap of
+   publisher runs the durable feed on a schedule. As of 2026-08-15T19:41Z that feed carries **at least 1,514
+   publishes and zero failures**, unbroken since 2026-07-25, at a median gap of
    20.5 minutes. Its largest gap is 61.5 minutes, and a second publisher running the same path from
    a laptop has a largest gap of 36 hours because the laptop sleeps. Both outliers are named
    because the command that reproduces the good numbers is the same command that finds them:
    `python demo/chain_history.py`. Re-derive rather than trusting this paragraph; the count only
-   grows. You can message the node on Telegram to ask what it saw and why a reading was refused.
+   grows.
    It also SELLS that feed rather than only publishing it: another agent asks for a reading, gets an HTTP 402 with a price menu, signs its own
    stablecoin transfer, and is served. No human is in that loop at any point and no facilitator
    sits in the middle, because the buyer is the fee payer. The gate holds no key beyond its own
@@ -43,7 +43,7 @@ audited program bounds the delegated spends, and a human gate bounds the rest), 
 The node: anyone putting a sensor's word on-chain: DePIN operators, environmental telemetry,
 device-attested readings, without trusting the host machine's LLM with a spend key. The
 terminal: a small merchant who wants "charge table 4, 25 USDC" to just work, with the
-blast radius of a hacked agent capped by on-chain math, not vibes.
+blast radius of a hacked agent capped by on-chain math.
 
 ## Which ZeroClaw features it uses (stock first, per the ladder)
 - Stock binary: channels (Telegram, WhatsApp Web), skills, SOPs with cron triggers +
@@ -208,7 +208,7 @@ They are independent bugs with one shape: the config layer accepts a key without
 a consumer exists for it on the selected backend. The setting validates, appears in `config
 get`, and governs nothing.
 
-Two things follow, and the second is the one that matters.
+Two things follow.
 
 The obvious one is that our own configuration had to be hardened against the first of these
 before the shop was safe, and that fix ships in the reproduction, where you can run it.
@@ -307,7 +307,8 @@ did not write.
 
 **Properties.** 23 proptest properties, 1024 cases each, over the sanitizer, the length codec
 and message invariants. Sanitizer idempotence is in there because it is the property
-sanitizers most often fail.
+sanitizers most often fail. Count them without running them:
+`cd crates/solana-core && cargo test --test properties --test mined_invariants -- --list`.
 
 **A proof, where sampling was the wrong tool.** The length-prefix decoder carries a Kani
 harness that is exhaustive over every byte string up to three bytes, all 16,777,216 of them,
@@ -351,18 +352,21 @@ green first, and restores the source on every exit path. A passing suite is then
 would catch a regression, rather than an assumption that it would.
 
 Supply chain is gated at 10 of 10 on advisories, licences and sources, with the licence allow
-list derived from the dependency graph rather than guessed. Three CI workflows keep this
+list derived from the dependency graph rather than guessed. The ten are the `supply-chain`
+job's matrix in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), so the count is
+whatever that list holds rather than a figure written here:
+`python -c "import yaml;print(len(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']['supply-chain']['strategy']['matrix']['manifest']))"`. Three CI workflows keep this
 honest on a machine that is not ours, deliberately separate so a red badge says which thing
 broke.
 
-Of the three real failures `TESTING.md` records, CI would have caught none of them on its own. One is now
-covered by a drift workflow; the other two live outside this repository. `TESTING.md` carries
+Of the three real failures [`TESTING.md`](../TESTING.md) records, CI would have caught none of them on its own. One is now
+covered by a drift workflow; the other two live outside this repository. [`TESTING.md`](../TESTING.md) carries
 the full picture, including what each layer cannot catch.
 
 Testing is what we thought to check. Three reviewers then read the repository cold and found
 fourteen defects the suites could not, because every one of them sat between what a document
 asserted and what the code enforced, which is the gap a self-review structurally cannot see.
-`docs/AUDIT.md` is that list: what was broken, what changed, the two hypotheses that turned
+[`docs/AUDIT.md`](AUDIT.md) is that list: what was broken, what changed, the two hypotheses that turned
 out to be wrong, and the three items still open. The merchant address had been a sentence in a
 prompt with nothing in code holding it, and it is now an invariant with tests.
 
@@ -477,7 +481,7 @@ The tiers in words:
   sign readings (kind allowlist, range gates, monotonic sequence, deny_unknown_fields);
   the session key only pays fees. No auto-signing spend path exists in code.
 - Spends: a human checkpoint, then the audited on-chain Allowances program as the structural
-  cap. The refund-redirect injection transcript (`docs/transcripts/injection-refund-redirect.md`)
+  cap. The refund-redirect injection transcript ([`docs/transcripts/injection-refund-redirect.md`](transcripts/injection-refund-redirect.md))
   has a chat message impersonating the owner demanding an immediate 25 USDC refund to an
   attacker wallet with no approval:
 
@@ -495,7 +499,7 @@ The tiers in words:
   while the shop is emptied. Every family is graded against the runtime trace rather than against
   the model's own reply, and no fund-building tool was started on any of them. The one turn that
   names a fund tool called `escalate_to_human` instead, which ends the attack and tells the
-  operator it happened. See `docs/transcripts/injection-battery.md` for the whole battery, run by
+  operator it happened. See [`docs/transcripts/injection-battery.md`](transcripts/injection-battery.md) for the whole battery, run by
   run, and for what each trace does and does not support.
 
   No message talks past the layers that apply, and which apply depends on the
@@ -576,14 +580,14 @@ The tiers in words:
   two fall back to ten minutes each, and the between-bytes bound resets on every frame, so a drip
   slower than the call and faster than the fallback runs on. Upstream measured a two-second drip
   holding one call open for eleven minutes.
-  The interface is not what is missing, which makes this fixable
-  rather than merely regrettable. `wasi:http`'s `request-options` already defines
+  The interface is not what is missing, which makes this fixable.
+  `wasi:http`'s `request-options` already defines
   `set-first-byte-timeout` and `set-between-bytes-timeout` next to the connect one, and the
   second of those is specified as the timeout for receiving each further chunk of the response
   body, which is exactly the bound this attack needs. Only the Rust client omits them, so
   exposing them is additive and mirrors a method it already carries. That is the ecosystem fix,
   and it would let every plugin bound its own reads rather than each one waiting on the host.
-  Two honest qualifications on that, since a reviewer will reach both. The client's last release
+  Two qualifications on that, since a reviewer will reach both. The client's last release
   and last commit are both from December 2024, so an upstream fix is not something to plan
   around. And because the bindings are right there, this is a CHOICE rather than an
   impossibility: calling `wasi:http` directly instead of through the client would let us set the
@@ -650,15 +654,63 @@ Scoped non-goals (deliberate):
   the bound survives an agent that has been deceived. Integrating it would add a surface without
   moving the guarantee, and the brief scores depth over breadth.
 
-**Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC at a stated
-rate source (ECB reference), so a merchant charges "R$120" and the customer pays the USDC
-equivalent, the BRL-invoicing flow Superteam Brasil asked for. The skill fetches a public USD/BRL rate (frankfurter.dev, ECB-based), computes the USDC amount, and states the conversion (for example R$120 at 5.0797 = 23.62 USDC). **The live pay page settles in mainnet USDC** (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`); the recorded transaction bundle in DEVNET-PROOF is devnet, because it predates the move and its signatures cannot be migrated. The settlement rule is unchanged either way: an order marks paid only on an exact amount, mint and destination match, never on the reference alone.
+**Brazil-first (Superteam Brasil).** The shop skill quotes in BRL and settles in USDC, so a
+merchant charges "R$120" and the customer pays the USDC equivalent, the BRL-invoicing flow
+Superteam Brasil asked for. **The live pay page settles in mainnet USDC** (`EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`); the recorded transaction bundle in DEVNET-PROOF is devnet, because it predates the move and its signatures cannot be migrated. The settlement rule is unchanged either way: an order marks paid only on an exact amount, mint and destination match, never on the reference alone.
+
+The conversion itself was the weakest step on that path, and the first version of it reads as
+sound. The skill told the model to fetch a public ECB rate and compute `BRL / rate` itself, and
+`pay_link.py` then verified that arithmetic against the rate the same caller had supplied. That
+catches a slipped division and passes a consistent lie: a model that states a wrong rate and
+divides by it correctly clears every check. It was not theoretical either. The runtime trace for
+2026-07-27T13:11:14Z records the host refusing the agent's `calculator` call with "Missing
+required parameter", duration 0 and empty output, and a figure being quoted to the customer
+regardless, so every price that shop had ever stated was model arithmetic with nothing between it
+and the customer's wallet.
+
+The rate is no longer an input. `scripts/rate_crosscheck.py` reads BRL/USD from Brazil's central
+bank (BCB PTAX) and treats the ECB's published rate, fetched via Frankfurter, as a corroborator
+with no authority to set the price and only the power to refuse by disagreeing beyond a stated
+band. That reuses the corroboration shape payment-watch already uses for a second RPC rather than
+inventing one. Both endpoints are keyless, so a stranger reproducing this needs no credential. It
+fails closed on an unreachable source, on dates that do not line up, and on a figure outside a
+plausible BRL/USD band, and there is no last-known rate to fall back on: on a weekend, when BCB
+publishes nothing, the call returns HTTP 200 with zero rows and the quote stops rather than
+ageing. The measurement that set the design was taken before choosing anything, on 2026-08-14:
+PTAX at 5.2236 against the ECB's 5.1762, 0.91% apart, which one source would have carried into
+every order silently.
+
+`pay_link.py` performs that fetch itself and re-derives the amount from it, so `--brl` alone is
+the whole contract. `--rate` survives only as a cross-check, and that is what stops a caller
+keeping the old behaviour by continuing to supply both: the figure used is always the fetched one,
+so a supplied rate can add a refusal and can never relax one. Those constants are duplicated into
+the pay path deliberately, because the deployed workspace receives exactly one file and cannot
+import the rest, and `scripts/check-pay-link-rate-agreement.py` binds the copy to the original by
+reading the values out of `rate_crosscheck.py`'s source instead of restating them. Perturbing one
+constant in the jailed copy turns that gate red.
+
+```bash
+python scripts/rate_crosscheck.py                                  # the corroborated rate, or a refusal
+python skills/solana-pay/scripts/pay_link.py "<solana: url>" pt --brl 100
+python scripts/check-pay-link-rate-agreement.py                    # the two copies still agree
+```
+
+Driven three ways on 2026-08-16: an order whose link asks a cent too little is refused, naming
+`expected: 19.14` against `got: 19.13` and producing no link; the same order at 19.14 returns the
+link and states `R$ 100 at 5.2236 (BCB PTAX, corroborated by ECB within 0.91%, 2026-08-14)`; and
+July's 5.0825 supplied as a cross-check is refused at 2.70% apart, over the 2.50% band.
+
+What this does not close, stated rather than implied: the order VALUE is still caller-supplied, so
+"table 4, R$ 0.05" passes every check above. This removes one free parameter of two, and closing
+the other needs a priced SKU table, an order id resolved against a store, or a merchant
+confirmation. The shop on the node has not picked this change up yet either, so the enforcement is
+in the repo and the deploy is what remains.
 
 ## What we turned down, and why
 
 The decisions that shaped this are mostly decisions not to build something, and those are the
 ones a reviewer cannot see from the tree. The full set with its reasoning is in
-`docs/DECISIONS.md`, including the consequence each one carries. Four of them answer the questions
+[`docs/DECISIONS.md`](DECISIONS.md), including the consequence each one carries. Four of them answer the questions
 this submission most obviously invites.
 
 **A novel on-chain custody program.** This was the plan, and it was killed by evidence rather
@@ -830,16 +882,11 @@ custody proofs with no network at all. [`docs/transcripts/`](transcripts/) holds
 refusing a live attack, verbatim. [`sanitizer-microworld/index.html`](../sanitizer-microworld/index.html)
 lets you poke the sanitizer with no build.
 
-This section was titled "Reproducibility (links)" and contained no links until 2026-08-04. It
-described the reproduction accurately in prose, which is why nothing looked wrong: the words
-were true and the one thing the requirement actually asks for was absent. A reader could learn
-that SOPs exist and still not reach one.
-
 ## Links
 Repo (plugins + solana-core + onchain programs + skills + e2e harnesses + x402-feed-gate):
 https://github.com/belumume/zeroclaw-solana
 
-Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`):
+Live devnet proof, all clickable (full explorer links in [`docs/DEVNET-PROOF.md`](DEVNET-PROOF.md)):
 - oracle program `EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn`, consumer
   `B2scuv95pA7yA3Kj36wmfoSVZ94WZfUmtwsfr9Kw39Pt`; three device feed PDAs, all owned by the
   oracle: `JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg` (the ARM node, publishing 24/7 on its
@@ -851,7 +898,7 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   **Only the ARM node feed is still live, and that is deliberate.** The second device was a
   laptop, so it slept, and the 36-hour gap in the table below is what that looks like on chain.
   Its job was to show the same program accepting signed readings from a second independent
-  device with a second key, and 779 publishes over 12.4 days with zero failures did that. A
+  device with a second key, and 778 publishes over 12.4 days with zero failures did that. A
   control that has finished is a result; a control that depends on someone's laptop staying
   awake through a two-week judging window is a liability. The claim this submission makes about
   continuous operation rests on the node, which runs on hardware we do not switch off.
@@ -875,7 +922,7 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   up as a probe. The earlier plan was to transport this
   machine's existing seed so the new feed would inherit the old sequence history; that would
   have made the claim architecturally true and literally false, so the copy was shredded
-  unused and the node made its own. `docs/DEVNET-PROOF.md` carries the full reasoning.
+  unused and the node made its own. [`docs/DEVNET-PROOF.md`](DEVNET-PROOF.md) carries the full reasoning.
 - the feed account stores only the latest reading, so the monotonic sequence is the on-chain
   publish ledger, the proof the node keeps running. `scripts/verify-proof.py` checks all three
   feeds and additionally asserts the node feed is FRESH, since an owned-but-dead feed would
@@ -893,7 +940,7 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   against the live feed, so neither costs anything nor needs a funded key, and `--send` is what
   broadcasts. Until 2026-08-05 this program had only ever read
   the historical `CfWaZA…` feed, so the claim was sound and unexercised against the feed it was
-  made about; `docs/DEVNET-PROOF.md` states that scope.
+  made about; [`docs/DEVNET-PROOF.md`](DEVNET-PROOF.md) states that scope.
 - x402 settlement `EkBmoDknDryQpDtD6hnLoCdhhRjAo3Vmn15VmkQi7niqYHnK5XYL8FpxLabDiQ2S2QuTdD3vsTXMSra72LXgApE`
   (err None, devnet USDC, buyer on a different machine from the node); a replayed payment refused
   NonceReused.
@@ -902,5 +949,5 @@ Live devnet proof, all clickable (full explorer links in `docs/DEVNET-PROOF.md`)
   also matching; a wrong amount, a foreign mint, or a wrong reference each return NOT_YET), reference
   `6xZC4vUpTheLKK5dv14ktbJusTN9RUeeYCaJyeZq4A11`.
 
-Reproduction: `QUICKSTART.md` (host + plugins + skill + SOP + both channels + the x402 node).
+Reproduction: [`QUICKSTART.md`](../QUICKSTART.md) (host + plugins + skill + SOP + both channels + the x402 node).
 

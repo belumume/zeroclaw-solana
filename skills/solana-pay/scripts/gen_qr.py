@@ -3,6 +3,7 @@
 
 Usage: python3 tools/gen_qr.py '<solana:...url...>' '<out.png>'
 Requires the `qrcode` + `pillow` packages (see QUICKSTART)."""
+
 import sys
 
 import qrcode
@@ -14,7 +15,9 @@ def main() -> None:
     url, out = sys.argv[1], sys.argv[2]
     if not url.startswith("solana:"):
         sys.exit("refusing: not a solana: URL")
-    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4)
+    qr = qrcode.QRCode(
+        error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4
+    )
     qr.add_data(url)
     qr.make(fit=True)
     qr.make_image(fill_color="black", back_color="white").save(out)

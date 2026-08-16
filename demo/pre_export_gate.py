@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """Ten checks answering one question: is this cut safe to export, and safe to post?
 
-WHY IT LIVES IN demo/ AND NOT scripts/. `scripts/**` belongs to MAIN per the cross-session
-`PROTOCOL.md` in the `.zcx-sync/` channel beside this checkout, and this branch must not
-write there. (That path is named relatively on purpose: spelling it absolutely put the
-operator's account name into this file, and `check-identifier-leaks.py` caught it here on
-the first run after staging -- in the very file whose job is screening frames for it.) Every
-sibling of this file (take.py, x402_earnings.py, chain_history.py, verify_qr_scannable.py)
-is submission-branch work in demo/, so this joins them. Consequence worth stating rather
-than discovering: `scripts/check-all.py` discovers gates from `git ls-files scripts/check-*.py`,
+WHY IT LIVES IN demo/ AND NOT scripts/. It sits with the other demo tooling (take.py,
+x402_earnings.py, chain_history.py, verify_qr_scannable.py) because it is part of the same
+capture-and-export path. Consequence worth stating rather than discovering:
+`scripts/check-all.py` discovers gates from `git ls-files scripts/check-*.py`,
 so this gate is NOT in that sweep and has to be run by name. It runs check-all itself as
 check 9, so the relationship is one-directional and deliberate.
 
@@ -33,7 +29,7 @@ coverage. "No slides" is not mechanically gated: a terminal beat holding output 
 for seconds at a time and any frozen-frame threshold that catches a slide also fails a good
 take. "Real voice, not synthetic" is not gated either -- check 4 refuses the one known
 synthetic artifact by content hash, which is a fact about that file and not a detector for
-the class. Both remain human judgement, and PLAN Part 10 owns them.
+the class. Both remain human judgement and are checked by a person before export.
 
   python demo/pre_export_gate.py <video.mp4>
   python demo/pre_export_gate.py <video.mp4> --fps 2 --no-network
@@ -85,7 +81,10 @@ SILENCE_LUFS = -60.0
 # NOT_CHECKED and not a pass.
 VOID_CUT = REPO / ".demo-assets" / "cut" / "zeroclaw-solana-demo.mp4"
 
-# C2 forbids filming or linking a devnet EXPLORER PAGE. It does NOT forbid devnet, and the
+# THE RULE, stated rather than cited: do not film or link a devnet EXPLORER PAGE. It was carried
+# here as "C2", a label in a plan document that is gitignored and reaches no clone, so a reader
+# outside this machine had a constraint referenced and no way to resolve it.
+# It does NOT forbid devnet, and the
 # distinction is load-bearing: the submission's honest claim is mainnet settlement over
 # devnet data, so several beats legitimately print the word. Gating on bare "devnet" would
 # fail good takes -- the over-broad-matcher trap this repo has hit repeatedly. These are
@@ -121,8 +120,12 @@ LINK_SURFACES = (
     "docs/ONE-PAGER.md",  # submission form field 4
     "index.html",  # the landing page, form field 5
     "README.md",  # what a judge reaches from the repo link
-    "docs/SUBMISSION-PLAN.md",  # the form-field map itself
 )
+# `docs/SUBMISSION-PLAN.md` WAS listed here and is removed rather than restored. It is gitignored
+# and absent from this root, so on a fresh clone this sweep silently covered two surfaces instead
+# of three -- and silently is the whole problem, because the loop below used to `continue` past a
+# missing file. A curated list may only name surfaces a CLONE receives; anything else is a hole
+# that reads as coverage. The check below makes that structural rather than remembered.
 # Floor, same reasoning as the sibling gates: a broken extraction returns an empty set, the
 # loop is skipped, and the result is byte-identical to a clean sweep. Live count is ~12.
 MIN_LINKS = 5
@@ -267,12 +270,22 @@ def ocr(png: Path) -> str:
 
 
 def judge_links() -> list[str]:
+    # A NAMED SURFACE THAT IS ABSENT IS A DEFECT, NOT A SKIP. This used to `continue`, so a
+    # surface that was gitignored or renamed dropped out of the sweep and the result was
+    # byte-identical to a clean one. That is the same shape as the MIN_LINKS floor below and
+    # needs the same treatment: refuse to report rather than report over a smaller scope.
+    missing = [rel for rel in LINK_SURFACES if not (REPO / rel).is_file()]
+    if missing:
+        raise SystemExit(
+            f"NOT CHECKED: link surface(s) named but absent: {', '.join(missing)}. "
+            "Either the file moved or it is not in the clone. Refusing to sweep a partial "
+            "set, because a smaller scope produces the same output as a clean one."
+        )
     seen: dict[str, None] = {}
     for rel in LINK_SURFACES:
-        p = REPO / rel
-        if not p.is_file():
-            continue
-        for m in URL_RE.finditer(p.read_text(encoding="utf-8", errors="replace")):
+        for m in URL_RE.finditer(
+            (REPO / rel).read_text(encoding="utf-8", errors="replace")
+        ):
             seen.setdefault(m.group(0).rstrip(URL_TRAILING), None)
     return sorted(seen)
 
