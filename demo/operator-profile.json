@@ -1,0 +1,56 @@
+{
+  "_doc": "The operator's REAL browser environment, measured rather than invented. It exists because a fixture I invent describes the environment I imagine, and his is bigger, messier and differently shaped. Twice in two days the same harness passed every check while a defect was live on the deployed page, and both times HE found it, not the harness: first the fakes had the wrong SHAPE (register-only, where a real wallet both registers AND injects window.solana), then the wrong SIZE (two wallets against his eight). Keeping these numbers in a data file rather than in test code is the point: a number embedded in a test reads as a number someone picked, and a re-measurement should be a data edit that the harness picks up, not a code change.",
+
+  "_how_to_remeasure": "Open the live pay page in the browser that carries his wallets, dispatch `wallet-standard:app-ready` with a register callback, wait ~1.5s, then read the collected names alongside innerWidth/innerHeight/devicePixelRatio. The browser-automation tool returns {} for an async IIFE, so use top-level await and end on a synchronous JSON.stringify.",
+
+  "measured_at": "2026-08-16",
+  "measured_how": "live pay page, operator's own connected browser profile",
+
+  "wallets": {
+    "_doc": "Every Wallet Standard registration observed. ORDER IS REGISTRATION ORDER, which is what the picker sees before any hoisting.",
+    "registered": [
+      "Backpack",
+      "Phantom",
+      "MetaMask",
+      "Solflare",
+      "Jupiter",
+      "Magic Eden",
+      "Glow",
+      "Petra"
+    ],
+    "count": 8,
+    "_rendered_note": "Only SEVEN of the eight render on the live page: enumerateWallets filters on Solana feature presence and the real MetaMask exposes none. The harness deliberately renders all eight, because FAKE_WALLETS stamps Solana features onto every name, and eight is the worst case geometry should be asserted against. That is not a claim about what his browser shows.",
+    "rendered_on_live_page": 7,
+    "filtered_out": ["MetaMask"],
+    "_corrections": "An earlier invented set listed 'Brave Wallet'. It was never installed. The eighth is Petra."
+  },
+
+  "geometry": {
+    "_doc": "Measured off the live picker, not estimated. The per-row height matters more than it looks: at the earlier assumed 50px, eight rows occupy 400px and the QR clears the fold; at the real 67px they occupy about 536px, which is what makes a below-the-fold defect reachable.",
+    "row_height_px": 67,
+    "_row_height_was_assumed": 50,
+    "last_row_bottom_px": 650,
+    "fold_px": 743,
+    "_defect_reproduced": false,
+    "_scope": "One viewport. The QR-below-fold defect did NOT reproduce at this size, and that is a measurement at one point rather than a general clearance."
+  },
+
+  "viewport": {
+    "width": 1495,
+    "height": 799,
+    "screen_width": 1680,
+    "screen_height": 1050,
+    "device_pixel_ratio": 1.25
+  },
+
+  "historical_brave_measurement": {
+    "_doc": "Kept because it stands on its own conditions and is the origin of the whole concern. The card grew 887 -> 1286 and the QR's bottom edge landed at 972 against a 900-tall viewport. His window happened to be 982 tall and cleared it by ten pixels, which is the only reason he did not hit it.",
+    "card_height_before": 887,
+    "card_height_after": 1286,
+    "qr_bottom_px": 972,
+    "viewport_height": 900,
+    "his_window_height": 982
+  },
+
+  "_fabrication_corrected": "A viewport of 1512x982 was once attributed to him and was actually from my own test matrix. The measured truth for that incident: viewport 1000px, content 1026px, overflow 26px, scrolled 12px. He DID hit it."
+}
