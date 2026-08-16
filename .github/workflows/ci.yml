@@ -838,3 +838,11 @@ jobs:
       - name: sanitizer-microworld compiles for the browser
         working-directory: sanitizer-microworld
         run: cargo check --locked --target wasm32-unknown-unknown
+
+      # The page invites a judge to beat the sanitizer and says BEATEN if they do. A banner that
+      # can only ever say CONTRACT HOLDS is an uncalibrated instrument, and worse than no banner
+      # because it invites a challenge it cannot honour. This extracts the page's own clause
+      # checker and plants one violation per clause, with a positive control so a check that
+      # always fails cannot satisfy it. Offline: it reads the generated file and runs node.
+      - name: the microworld's win condition can actually say BEATEN
+        run: node sanitizer-microworld/check_verdict.js
