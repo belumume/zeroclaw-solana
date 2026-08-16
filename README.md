@@ -12,6 +12,18 @@ network.
 [`QUICKSTART.md`](QUICKSTART.md#fastest-path-three-checks-nothing-installed-13-to-35-seconds)
 opens with them.
 
+<p align="center">
+  <img src="docs/assets/readme-cast.svg" alt="A real, unedited run of python3 scripts/verify-proof.py from a fresh clone of this repo, including one live claim that failed on the day it was captured." width="820">
+</p>
+
+That is a real run against a fresh clone, not a mockup: 10 static claims that cannot go red once
+true, and 5 live ones that can, one of which is red above because it currently is. A check that
+can only ever print PASS proves nothing about itself;
+[`scripts/verify_proof_selfcheck_control.py`](scripts/verify_proof_selfcheck_control.py) drives
+this one through all eight branches from a loopback server to prove it can fail. Captured on the
+date printed in its own title bar. Run the two commands yourself and the state will likely differ
+by the time you do.
+
 [![The ZeroClaw shop chat: a customer orders R$ 2, and the agent replies with a payment link and the conversion to 0.39 USDC on Solana mainnet at the quoted ECB rate](docs/assets/demo-poster.jpg)](https://youtu.be/a0jT0feuMAg)
 
 The still above links to a 2:15 demo. The [landing page](https://belumume.github.io/zeroclaw-solana/)
