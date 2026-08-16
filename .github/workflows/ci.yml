@@ -835,9 +835,21 @@ jobs:
       # a plain cdylib for wasm32-unknown-unknown, so the target has to be added explicitly.
       - name: add the browser wasm target
         run: rustup target add wasm32-unknown-unknown
+      # BUILD rather than check, because the wasm is the input to the page generator and the drift
+      # step below cannot run without it. sanitizer.wasm is deliberately not committed.
       - name: sanitizer-microworld compiles for the browser
         working-directory: sanitizer-microworld
-        run: cargo check --locked --target wasm32-unknown-unknown
+        run: cargo build --release --locked --target wasm32-unknown-unknown
+
+      # index.html is GENERATED and committed, so it drifts from its generator in both directions:
+      # an edit to build_page.py that nobody rebuilds ships nothing, and an edit to the page is
+      # erased by the next build. webshop-pay has this same step for the same reason, after that
+      # page and its generator drifted once.
+      - name: the microworld page matches its generator
+        run: |
+          cp sanitizer-microworld/target/wasm32-unknown-unknown/release/sanitizer.wasm \
+             sanitizer-microworld/sanitizer.wasm
+          python3 sanitizer-microworld/build_page.py --check
 
       # The page invites a judge to beat the sanitizer and says BEATEN if they do. A banner that
       # can only ever say CONTRACT HOLDS is an uncalibrated instrument, and worse than no banner

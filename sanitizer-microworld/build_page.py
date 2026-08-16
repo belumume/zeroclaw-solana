@@ -9,6 +9,7 @@ most readers will never run.
 import base64
 import io
 import os
+import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -223,11 +224,19 @@ async function boot() {
   setValue(PRESETS[0].value, PRESETS[0].note);
 }
 
+// ONE definition of the cap. It is passed to the wasm call in `run` AND checked by the bounded
+// clause further down, and nothing kept the two in step when they were separate literals:
+// changing the call would have left the clause silently asserting the wrong bound. Declared
+// ABOVE `run` rather than below it, because `boot` is async and calls through to `run`, so
+// relying on the const being initialised by then would be reasoning about the temporal dead zone
+// instead of removing the question.
+const CAP = 96;
+
 function run(text) {
   const enc = new TextEncoder().encode(text);
   const ptr = wasm.alloc(enc.length);
   new Uint8Array(wasm.memory.buffer, ptr, enc.length).set(enc);
-  const res = wasm.sanitize(ptr, enc.length, 96);
+  const res = wasm.sanitize(ptr, enc.length, CAP);
   const len = new DataView(wasm.memory.buffer).getUint32(res, true);
   const body = new Uint8Array(wasm.memory.buffer, res + 4, len);
   return JSON.parse(new TextDecoder().decode(body));
@@ -267,7 +276,6 @@ function stat(label, value, tone) {
 // property next to it. It is deliberately checked against r.text, the sanitized field, and NOT
 // against r.labelled: the label is a prefix this page adds around the field, so checking the
 // labelled string would test the wrong thing and could report a false BEATEN.
-const CAP = 96;
 function forbidden(ch) {
   const c = ch.codePointAt(0);
   return c < 0x20 || (c >= 0x7f && c <= 0x9f)          // control (Cc)
@@ -361,6 +369,54 @@ boot();
 """
 
 html = HTML.replace("__WASM_B64__", wasm_b64).replace("__PRESETS__", preset_js)
+
+# `--check` REGENERATES AND DIFFS instead of writing. The committed index.html is the artifact a
+# reader double-clicks and it is GENERATED from this file, so the two drift silently in both
+# directions: an edit here that nobody rebuilds ships nothing, and an edit to the page directly is
+# erased by the next build. `webshop-pay/build.py --check` exists in this repo for exactly that
+# reason, after that page and its generator drifted once.
+#
+# THE WASM PAYLOAD IS EXCLUDED FROM THE COMPARISON, and that is a correctness requirement rather
+# than a convenience. A wasm built by a different rustc is a different blob, so comparing whole
+# pages would go red on any machine whose toolchain differs from whoever last committed, which is
+# a false drift report and would train people to ignore the gate. What genuinely drifts is the
+# TEMPLATE: the markup, the JS, the clause checker, the presets. Those are compared exactly.
+#
+# It compares TEXT, not bytes. Both sides use newline="\n", and reading the committed file in text
+# mode normalises line endings, so a checkout that translated them cannot manufacture a mismatch.
+if "--check" in sys.argv:
+    if not os.path.exists(OUT):
+        print(f"FAIL  {OUT} does not exist, so there is nothing to compare")
+        raise SystemExit(1)
+
+    def without_payload(page):
+        """The page with the base64 wasm replaced by its length, so toolchains cannot differ."""
+        m = re.search(r'const WASM_B64 = "([A-Za-z0-9+/=]*)";', page)
+        if not m:
+            return None
+        return page[: m.start(1)] + f"<{len(m.group(1))} b64 chars>" + page[m.end(1) :]
+
+    committed = io.open(OUT, encoding="utf-8").read()
+    a, b = without_payload(committed), without_payload(html)
+    if a is None or b is None:
+        print(
+            "FAIL  could not locate the WASM_B64 payload, so the comparison would be meaningless"
+        )
+        raise SystemExit(1)
+    if a == b:
+        print(
+            f"PASS  index.html matches build_page.py "
+            f"({len(b):,} template bytes; the wasm payload is excluded by design)"
+        )
+        raise SystemExit(0)
+    print(
+        f"FAIL  index.html has DRIFTED from build_page.py\n"
+        f"        committed {len(a):,} template bytes, regenerated {len(b):,}\n"
+        f"      Run `python3 sanitizer-microworld/build_page.py` and commit the result.\n"
+        f"      The page is generated; editing it directly is erased by the next build."
+    )
+    raise SystemExit(1)
+
 io.open(OUT, "w", encoding="utf-8", newline="\n").write(html)
 print(f"wrote {OUT}")
 print(f"  wasm  {len(wasm_b64) * 3 // 4:,} bytes -> {len(wasm_b64):,} base64")

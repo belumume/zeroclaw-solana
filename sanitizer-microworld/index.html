@@ -153,11 +153,19 @@ async function boot() {
   setValue(PRESETS[0].value, PRESETS[0].note);
 }
 
+// ONE definition of the cap. It is passed to the wasm call in `run` AND checked by the bounded
+// clause further down, and nothing kept the two in step when they were separate literals:
+// changing the call would have left the clause silently asserting the wrong bound. Declared
+// ABOVE `run` rather than below it, because `boot` is async and calls through to `run`, so
+// relying on the const being initialised by then would be reasoning about the temporal dead zone
+// instead of removing the question.
+const CAP = 96;
+
 function run(text) {
   const enc = new TextEncoder().encode(text);
   const ptr = wasm.alloc(enc.length);
   new Uint8Array(wasm.memory.buffer, ptr, enc.length).set(enc);
-  const res = wasm.sanitize(ptr, enc.length, 96);
+  const res = wasm.sanitize(ptr, enc.length, CAP);
   const len = new DataView(wasm.memory.buffer).getUint32(res, true);
   const body = new Uint8Array(wasm.memory.buffer, res + 4, len);
   return JSON.parse(new TextDecoder().decode(body));
@@ -197,7 +205,6 @@ function stat(label, value, tone) {
 // property next to it. It is deliberately checked against r.text, the sanitized field, and NOT
 // against r.labelled: the label is a prefix this page adds around the field, so checking the
 // labelled string would test the wrong thing and could report a false BEATEN.
-const CAP = 96;
 function forbidden(ch) {
   const c = ch.codePointAt(0);
   return c < 0x20 || (c >= 0x7f && c <= 0x9f)          // control (Cc)
