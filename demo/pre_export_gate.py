@@ -118,6 +118,7 @@ TZ_MARKERS = (
 # gaining a link is exactly when a dead one ships.
 LINK_SURFACES = (
     "docs/ONE-PAGER.md",  # submission form field 4
+    "docs/ARGUMENT.md",  # the long form field 4 links to, one hop from a judge
     "index.html",  # the landing page, form field 5
     "README.md",  # what a judge reaches from the repo link
 )
