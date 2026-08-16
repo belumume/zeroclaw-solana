@@ -84,7 +84,11 @@ CB_SET_UNIT_PRICE = 3
 DEFAULT_MAX_PRIORITY_LAMPORTS = (
     10_000  # 0.00001 SOL; a purchase needs no more than this.
 )
-DEFAULT_UNIT_LIMIT = 200_000  # Solana's per-instruction default when none is set.
+# With no explicit SetComputeUnitLimit, Solana budgets 200,000 CU PER INSTRUCTION, capped at
+# 1,400,000 for the transaction. A flat 200,000 therefore UNDERCOUNTS the fee on any
+# multi-instruction transaction, which is the direction that lets too large a fee through.
+DEFAULT_UNIT_LIMIT_PER_IX = 200_000
+MAX_UNIT_LIMIT = 1_400_000
 
 # data = [disc:u8][amount:u64 LE][delegator:32][mint:32]
 TRANSFER_DATA_LEN = 1 + 8 + 32 + 32
@@ -476,7 +480,10 @@ def certify_x402_payment_tx(
 
     # Every permitted program's DATA is constrained. Naming a program safe says nothing about
     # what it is being asked to do, which is how an appended SOL transfer certifies cleanly.
-    cb_state = {"limit": DEFAULT_UNIT_LIMIT, "price": 0}
+    cb_state = {
+        "limit": min(DEFAULT_UNIT_LIMIT_PER_IX * len(ixs), MAX_UNIT_LIMIT),
+        "price": 0,
+    }
     for k, ix in enumerate(ixs):
         prog = ix["program"]
         if prog == allowance:
@@ -1140,6 +1147,19 @@ def _self_test() -> int:  # noqa: PLR0915 - a flat list of cases reads better th
             append(
                 COMPUTE_BUDGET_B58,
                 bytes([CB_SET_UNIT_PRICE]) + (1000).to_bytes(8, "little"),
+            ),
+        ),
+    )
+    # 50,000 micro-lamports/CU is exactly the ceiling if the default limit were a flat 200,000.
+    # The real default is per-INSTRUCTION, so on a multi-instruction transaction the true fee is
+    # a multiple of that and must be refused. This case only passes with the correct default.
+    refuses(
+        "a fee that only fits under a per-transaction reading of the default limit is refused",
+        _rebuild(
+            real["within_cap"],
+            append(
+                COMPUTE_BUDGET_B58,
+                bytes([CB_SET_UNIT_PRICE]) + (50_000).to_bytes(8, "little"),
             ),
         ),
     )
