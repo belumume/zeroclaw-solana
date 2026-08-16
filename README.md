@@ -57,8 +57,14 @@ Brazilian central bank's published USD rate and refuses unless a second source a
 stated band, and it fails closed rather than guessing.
 [`check-pay-link-rate-agreement.py`](scripts/check-pay-link-rate-agreement.py) holds the pay
 path's copy of those constants to the original, because the deployed workspace gets exactly one
-file and cannot import the rest. **The shop on the node has not picked this up yet**, so today it
-still does that arithmetic itself; the enforcement is in the repo and the deploy is what remains.
+file and cannot import the rest. **The node runs this**, so the model no longer supplies the rate
+on the live shop. Driven against the deployed file, a wrong figure is refused by name
+(`expected: 19.14` for R$ 100 at 5.2236, BCB PTAX corroborated by ECB within 0.91%) and the
+correct one settles.
+
+What the rate work does NOT close, stated because it is the remaining hole rather than a caveat:
+the order VALUE is still supplied by the caller. "Table 4, R$ 0.05" passes every check. One free
+parameter of two is gone.
 
 **The feed has published to devnet since 2026-07-25 and not one of its transactions has failed.**
 Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.
