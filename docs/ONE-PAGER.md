@@ -219,6 +219,14 @@ the shortvec decoder, one covering all 16,777,216 three-byte inputs. A different
 against solana-sdk's own deserializer rather than invariants we chose. Every gate ships a control
 proving it can fail, because zero findings is also what a broken detector prints.
 
+The repo also gates on its own documentation being reachable.
+`scripts/check-doc-reachability.py` walks outward from the surfaces a stranger actually lands on and
+fails when a tracked document is reachable by no path, because a file that exists and is linked from
+nowhere is invisible to the only audience that matters. A sibling,
+`scripts/check-root-divergence.py`, compares the two working roots and fails where a gate, a CI
+workflow or a proof bundle differs between them, since the failure that costs most is not a missing
+check but two copies quietly enforcing different things.
+
 Two more, both exercisable. **A second deployed program reads the feed on
 chain**, which is the difference between an oracle and a memo: `consumer_example` CPI-reads the feed
 account, checks the owner and gates on freshness, so the data is consumable by something other than
