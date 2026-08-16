@@ -84,7 +84,10 @@ SHAPES = re.compile(rf"\b{_N}\s+(?:inject(?:ion|ed)\s+shapes?)", re.IGNORECASE)
 # QUICKSTART states the count TWICE in one sentence: "five injected shapes ... The five refusals
 # are ...". Guarding only the first lets a future bump update one and miss the other, which is the
 # same half-corrected shape this gate exists to prevent.
-REFUSALS = re.compile(rf"\bThe\s+{_N}\s+refusals\b", re.IGNORECASE)
+# `\s+are` is load-bearing rather than incidental. Without it this matches ONE-PAGER's "at least
+# one refusal and at least one acceptance", which counts a replay control's outcomes and has
+# nothing to do with the certifier. Pinned as a must-not-fire case below.
+REFUSALS = re.compile(rf"\b{_N}\s+refusals?\s+are\b", re.IGNORECASE)
 
 CANNOT_CHECK = 2
 
@@ -211,6 +214,19 @@ def selftest() -> int:
         check("a half-corrected sentence fires on the stale half", len(got), 1)
         check(
             "and it names the refusals clause", bool(got) and "refusals" in got[0], True
+        )
+
+        # OVER-CORRECTION CONTROL for REFUSALS, verbatim from docs/ONE-PAGER.md: dropping the
+        # trailing "are" makes this count a replay control's outcomes rather than the certifier's,
+        # and it fired on the real tree when the pattern was briefly widened.
+        (tmp / "replay.md").write_text(
+            "requiring at least one refusal **and** at least one acceptance, so a dead program\n",
+            encoding="utf-8",
+        )
+        check(
+            "a refusal COUNT about something else is ignored",
+            scan(tmp, ["replay.md"], 7),
+            [],
         )
 
         # An .html surface must be scanned like any other: an extension pathspec cannot see
