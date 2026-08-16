@@ -26,10 +26,12 @@
 //!         cargo build --target wasm32-wasip2 --release
 #![deny(unsafe_code)]
 
+pub mod args;
 pub mod compose;
 pub mod pay;
 pub mod resolve;
 
+pub use args::{parse as parse_args, ChallengeSource, ParsedArgs};
 pub use compose::{atomic_to_ui, compose, SpendArgs};
 pub use pay::{authorise, AuthorisedPayment, Challenge, PayConfig, PriceExtra, PriceOption};
 pub use resolve::mint_decimals;
