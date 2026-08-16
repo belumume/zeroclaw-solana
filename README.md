@@ -138,6 +138,7 @@ claims separately, and names what it does not cover.
 
 | If you want | Read |
 |---|---|
+| One image you can paste into a chat | [`docs/assets/field-card.png`](docs/assets/field-card.png). Regenerate it with `python3 scripts/build-field-card.py` |
 | The whole submission on one page | [`docs/ONE-PAGER.md`](docs/ONE-PAGER.md) |
 | The same case at length, with the reasoning and the controls | [`docs/ARGUMENT.md`](docs/ARGUMENT.md) |
 | What this is and why it is built this way | [`docs/WRITEUP.md`](docs/WRITEUP.md) |
