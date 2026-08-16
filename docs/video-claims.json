@@ -1,0 +1,90 @@
+{
+  "_what": "Every checkable claim the demo video makes, mapped to its timestamp and to the command or artifact that re-derives it. The video is frozen and submitted, so it cannot be corrected; this is the only remaining way to make what it says checkable.",
+  "_how_to_use": "Play the cut, or read the caption track at docs/assets/zeroclaw-demo.vtt. For any claim, run the command in `verify`. Every verify is copy-paste runnable FROM THE REPO ROOT with no other step, which is a requirement rather than a style: a command needing an unstated cd is a dead end for exactly the stranger this file is for. Each plugin is its own standalone workspace, so a cargo command carries its own cd. Claims marked capability are re-derivable today; claims marked recording are about that specific take and are checkable only where an artifact captured them.",
+  "_honesty": "Two kinds of claim are deliberately distinguished. A CAPABILITY claim says the system does something, and a command re-derives it now. A RECORDING claim says a particular thing happened on camera. Presenting the second as if a command proved it would be the overclaim this file exists to prevent.",
+  "video": {
+    "file": "docs/assets/zeroclaw-demo-1080p.mp4",
+    "captions": "docs/assets/zeroclaw-demo.vtt",
+    "duration_seconds": 135.33,
+    "narration": "the operator's own voice and hands; no synthetic narration"
+  },
+  "claims": [
+    {
+      "id": "brl-order",
+      "at": "00:11.42-00:17.82",
+      "spoken": "I asked the agent to make a payment. I want to make a payment of two reais.",
+      "kind": "capability",
+      "asserts": "An order is placed conversationally, in BRL, through a real chat channel.",
+      "verify": "python3 skills/solana-pay/scripts/pay_link.py '<solana: URL>' pt --brl 2",
+      "note": "The order VALUE is caller-supplied and is bounded, not sourced. See task #93 and the band in pay_link.py."
+    },
+    {
+      "id": "brl-conversion",
+      "at": "00:33.38-00:46.96",
+      "spoken": "it converts the requested amount I asked in Brazilian currency to USD. It knows the exchange rate.",
+      "kind": "capability",
+      "asserts": "The BRL figure is converted to the settlement token amount.",
+      "verify": "python3 scripts/rate_crosscheck.py",
+      "note": "STRONGER NOW THAN ON CAMERA, and worth saying rather than leaving implied. The shipped code fetches BCB PTAX and corroborates against the ECB, refusing on divergence over 2.5%, on an unreachable source, on mismatched dates and on an implausible band. `--rate` is a cross-check that can only add a refusal. The video says the agent knows the rate; the code does not take the agent's word for it."
+    },
+    {
+      "id": "solana-pay-qr",
+      "at": "00:49.86-00:58.64",
+      "spoken": "we've now opened the payment link in the browser, and here we have a Solana Pay QR code.",
+      "kind": "capability",
+      "asserts": "The link is a Solana Pay transfer request, rendered as a scannable QR.",
+      "verify": "python3 scripts/verify-proof.py   # the pay page is one of the live claims",
+      "note": "The page is also the pinned build; webshop-pay/build.py --check asserts the deployed page matches its sources."
+    },
+    {
+      "id": "recipient-is-fixed",
+      "at": "00:49.86-00:58.64",
+      "spoken": "(shown on screen rather than narrated: the merchant address on the pay page)",
+      "kind": "capability",
+      "asserts": "The recipient is a hardcoded invariant, not something the model chooses.",
+      "verify": "python3 skills/solana-pay/scripts/test_pay_link.py",
+      "note": "The suite includes the wallet from the real wrong-recipient incident. A link not carrying this shop's address is refused."
+    },
+    {
+      "id": "watcher-and-page",
+      "at": "01:03.16-01:13.30",
+      "spoken": "This is a terminal that's monitoring for transaction, and this is the same link opened in the browser on desktop.",
+      "kind": "capability",
+      "asserts": "Settlement is watched independently of the page.",
+      "verify": "cd plugins/payment-watch && cargo test --locked",
+      "note": "payment-watch matches on a CONJUNCTION of reference, amount, mint and destination, not on the reference alone."
+    },
+    {
+      "id": "wallet-signs",
+      "at": "01:25.28-01:29.10",
+      "spoken": "let's scan the QR code. Then approve payment in Solflare.",
+      "kind": "capability",
+      "asserts": "The customer's own wallet signs. No key is held by the agent.",
+      "verify": "python3 scripts/check-custody-tier.py",
+      "note": "Custody tier is read from the compiled wasm import table, not from a manifest claim."
+    },
+    {
+      "id": "mainnet-settlement",
+      "at": "01:39.24-01:46.22",
+      "spoken": "Okay, transaction successful on mainnet. Let's see it on the Explorer.",
+      "kind": "recording",
+      "asserts": "That specific payment settled on Solana mainnet.",
+      "verify": "read the signature off the explorer view at 01:49-01:55 and query it against any mainnet RPC",
+      "note": "NOT IN THE OFFLINE PROOF BUNDLE, and that is a measured gap rather than an oversight in this file. docs/proof-bundle/mainnet-transactions.json was captured 2026-08-01T15:39:03Z and holds three transactions, all predating this shoot, so the payment in the video is not among them. Mainnet does not prune like devnet, so the transaction remains queryable by signature; what is missing is a captured artifact that verifies with no network. Recovering the signature from the frames by OCR was attempted and FAILED: tesseract returned unreadable output at both --psm 3 and --psm 11 on the explorer frames, which is a statement about the instrument on camera-shot footage and NOT evidence the signature is absent from the screen."
+    },
+    {
+      "id": "both-sides-detect",
+      "at": "01:58.62-02:08.02",
+      "spoken": "it automatically detected the transaction both on both sides, the terminal and the page, the same payment link.",
+      "kind": "recording",
+      "asserts": "The watcher and the page each detected the settlement without a reload.",
+      "verify": "python3 demo/verify_wallet_picker.py   # the page's polling path",
+      "note": "The page's 6-second settlement poll is the mechanism. The AGENT announcing a settlement is a different claim and is NOT shown here: that path is tracked in #44 and its deterministic replacement is not yet deployed."
+    }
+  ],
+  "_not_claimed": [
+    "That the agent holds or signs with any key. It does not; the customer's wallet signs.",
+    "That the agent announced the settlement. The page and the watcher detected it; the agent announcement path is separate and undeployed.",
+    "That the order value is verified. It is bounded to a plausible range and is otherwise caller-supplied."
+  ]
+}
