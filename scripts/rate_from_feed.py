@@ -16,10 +16,12 @@ So this script REFUSES until someone pins the constants below to a real rate fee
 whole point: it fails closed rather than pricing an order off whatever account it is handed.
 Closing the price hole is blocked on PUBLISHING a rate feed, not on this reader.
 
-WHAT IT STILL WOULD NOT CLOSE, once a feed exists. The order VALUE stays model-supplied, so
-"table 4, R$ 0.05" passes every check here. Pinning the rate removes one free parameter of two.
-Closing the second needs a priced SKU table, an order id resolved against a store, or a
-merchant confirmation. This is a step, not the end of the road.
+WHAT IT STILL WOULD NOT CLOSE, once a feed exists. The order VALUE stays model-supplied.
+pay_link.py refuses an implausible one, so "table 4, R$ 0.05" no longer produces a link, but a
+plausible wrong amount still does. Pinning the rate removes one free parameter of two and the
+band narrows the second. Closing it needs a price source the model cannot author: a priced SKU
+table, an order id resolved against a store, or a merchant confirmation. This is a step, not
+the end of the road.
 
 NETWORK NOTE. The feed is DEVNET and the settlement is MAINNET. Devnet SOL is free and
 `register_device` is permissionless, so a devnet feed is cheap for anyone to stand up and a

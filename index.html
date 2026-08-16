@@ -238,10 +238,12 @@
 <pre><code>python3 scripts/rate_crosscheck.py                  # the corroborated rate, or a refusal
 python3 scripts/check-pay-link-rate-agreement.py   # the pay path's copy still matches</code></pre>
 <p class="note">
-  What this does not close: the order <em>value</em> is still supplied by the caller, so
-  "table 4, R$ 0.05" passes every check here. This removes one free parameter of two. The shop on
-  the node has not picked the change up yet, so the enforcement is in the repo and the deploy is
-  what remains.
+  What this does not close: the order <em>value</em> is still supplied by the caller. An
+  implausible one is refused in code, so "table 4, R$ 0.05" no longer produces a link, but a
+  plausible wrong amount still does. That band is wide on purpose, because this shop has no
+  catalog and a narrow one would refuse legitimate orders. One free parameter of two is gone and
+  the second is narrowed. The shop on the node has not picked either change up yet, so the
+  enforcement is in the repo and the deploy is what remains.
 </p>
 
 <h2><span class="n">03</span>The customer's own page refuses, in their language</h2>

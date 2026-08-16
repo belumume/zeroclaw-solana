@@ -63,8 +63,10 @@ on the live shop. Driven against the deployed file, a wrong figure is refused by
 correct one settles.
 
 What the rate work does NOT close, stated because it is the remaining hole rather than a caveat:
-the order VALUE is still supplied by the caller. "Table 4, R$ 0.05" passes every check. One free
-parameter of two is gone.
+the order VALUE is still supplied by the caller. An implausible one is now refused in code, so
+"Table 4, R$ 0.05" no longer produces a link, but a PLAUSIBLE wrong amount still does: R$ 25
+for a R$ 60 order sits inside any band a shop without a catalog can justify. One free parameter
+of two is gone and the second is narrowed rather than closed.
 
 **The feed has published to devnet since 2026-07-25 and not one of its transactions has failed.**
 Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.

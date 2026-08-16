@@ -39,10 +39,12 @@ command line is a cross-check that can add a refusal and cannot relax one.
 original by reading them out of its source, because the deployed workspace receives a single file
 and cannot import the rest.
 
-What that leaves open, said plainly: the order *value* is still the caller's, so "table 4,
-R$ 0.05" passes every check above. This removes one free parameter of two. The shop on the node
-has not picked the change up yet, so the enforcement is in the repo and the deploy is what
-remains.
+What that leaves open, said plainly: the order *value* is still the caller's. An implausible
+one is refused in code, so "table 4, R$ 0.05" no longer produces a link, but a plausible wrong
+amount still does. That band is wide on purpose, because this shop has no catalog and a narrow
+one would refuse legitimate orders. One free parameter of two is gone and the second is
+narrowed. The shop on the node has not picked either change up yet, so the enforcement is in
+the repo and the deploy is what remains.
 
 Built for a small operator who wants an agent touching money without handing it a signing key.
 

@@ -411,13 +411,18 @@ not built, so it is a stated boundary rather than a solved one.
 One narrower class inside that boundary is closed, and it is separated out here
 because the two are easy to confuse. The BRL conversion used to be computed by the model and
 checked by nothing: the pay link carried an `amount=` that no code had ever recomputed.
-`pay_link.py` now takes the order value and the rate, redoes the division at two decimal places
-half-up, compares the result against the `amount=` in the link, and refuses to emit on
-disagreement. That catches an ARITHMETIC error. It does not touch the paragraph above, because
-the model supplies the order value and the rate as well as the amount, so a consistent lie
-passes every check: an injected agent that says R$ 0.05 at a rate of 1.0 and asks for 0.05 USDC
-is internally coherent and will be emitted. Arithmetic is now machine-checked; intent is not,
-and the two failures look identical in the link.
+`pay_link.py` now fetches the rate itself from a central bank, corroborated by a second source,
+redoes the division at two decimal places half-up, compares the result against the `amount=` in
+the link, and refuses to emit on disagreement. The rate is no longer an input at all: a supplied
+one is a cross-check that can only add a refusal. The order value is additionally required to fall
+inside a plausibility band, the same treatment the rate already had, so the sub-currency-unit case
+no longer produces a link.
+
+That still does not touch the paragraph above, and the reason is worth being exact about. The band
+is wide on purpose: this shop has no catalog, so a narrow one would refuse legitimate orders. A
+PLAUSIBLE wrong value therefore still passes, and R$ 25 for a R$ 60 order is internally coherent
+and will be emitted. Arithmetic is machine-checked and implausibility is refused; INTENT is not,
+and those two failures still look identical in the link.
 
 Second, narrower: the sender is displayed, never asserted. `from` is a heuristic (the owner
 whose balance decreased most) and is not part of the match condition. So a PAID proves *the
@@ -700,11 +705,13 @@ Driven three ways on 2026-08-16: an order whose link asks a cent too little is r
 link and states `R$ 100 at 5.2236 (BCB PTAX, corroborated by ECB within 0.91%, 2026-08-14)`; and
 July's 5.0825 supplied as a cross-check is refused at 2.70% apart, over the 2.50% band.
 
-What this does not close, stated rather than implied: the order VALUE is still caller-supplied, so
-"table 4, R$ 0.05" passes every check above. This removes one free parameter of two, and closing
-the other needs a priced SKU table, an order id resolved against a store, or a merchant
-confirmation. The shop on the node has not picked this change up yet either, so the enforcement is
-in the repo and the deploy is what remains.
+What this does not close, stated rather than implied: the order VALUE is still caller-supplied. An
+implausible one is now refused in code, so "table 4, R$ 0.05" no longer produces a link, but a
+plausible wrong one still does. This removes one free parameter of two and narrows the second
+rather than closing it. Closing it needs a price source the model cannot author: a priced SKU
+table, an order id resolved against a store, or a merchant confirmation that certifies the
+serialized bytes rather than a sentence the model wrote. The shop on the node has not picked
+either change up yet, so the enforcement is in the repo and the deploy is what remains.
 
 ## What we turned down, and why
 
