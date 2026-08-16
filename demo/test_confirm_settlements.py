@@ -11,7 +11,7 @@ not been shown to be any safer, so every refusal path is driven explicitly:
   an unreachable chain         must announce nothing AND exit 2
   a transaction it cannot fetch must announce nothing and leave it for the next run
 
-THREE LAYERS, because a control on one proves nothing about the others.
+FOUR LAYERS, because a control on one proves nothing about the others.
 
   1. PURE DETECTOR. settlement_from_tx is a function over one RPC response, so the
      success/err/outgoing branches are driven directly with no network and no clock.
@@ -24,6 +24,12 @@ THREE LAYERS, because a control on one proves nothing about the others.
      case is REQUIRED to flip to announcing. Each asserts its target string is present
      in the source FIRST, so a control gone stale fails loudly instead of certifying an
      unmodified detector.
+
+  4. SCAN CACHE AND COMMIT NARROWING, driven with an RPC that COUNTS its calls, because
+     the claim being made there is about work avoided and no assertion on output can see
+     it. Both directions are required: repeated runs must stop re-fetching, AND a new
+     payment must still be announced on the tick it arrives. A cache that quietly
+     suppressed real settlements would satisfy the first half perfectly.
 
 No network. Signatures in the fixtures are real mainnet signatures from this merchant's
 own token account, so the base58 validity filter is exercised against real shapes.
@@ -397,6 +403,262 @@ if MUT_OUT in SRC:
     check(
         "DISABLING the delta check makes the OUTGOING transfer announce (control discriminates)",
         m["settlement_from_tx"](TX_OUT, SIG_OUT) is not None,
+    )
+
+print("\nLAYER 4  scan cache and commit narrowing")
+
+# A window shaped like the box's own on 2026-08-16: 21 signatures, 6 already in the ledger,
+# 11 that are not incoming settlements, 4 that are. The four real signatures above are the
+# settlements; the rest are synthetic but base58-valid, because load_cache re-validates
+# every entry and a fixture with a '0' or an 'l' in it would be silently discarded, which
+# would make the cache look broken when it is the fixture that is wrong.
+_B58_SAFE = "123456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+
+def synth(tag: str) -> str:
+    value = tag + "z" * (88 - len(tag))
+    assert cs.is_signature(value), f"fixture is not a valid signature: {tag}"
+    return value
+
+
+CACHE_POS = [
+    SIG_PAID,
+    SIG_ERR,
+    SIG_OUT,
+    SIG_KNOWN,
+]  # role here: all four are settlements
+CACHE_LEDGERED = [synth("L" + _B58_SAFE[i]) for i in range(6)]
+CACHE_NEG = [synth("N" + _B58_SAFE[i]) for i in range(11)]
+CACHE_WINDOW = CACHE_POS + CACHE_LEDGERED + CACHE_NEG
+CACHE_NEW = synth("W9")
+
+assert len(set(CACHE_WINDOW)) == 21, "window fixture has duplicates"
+
+TX_IN = tx("1000000", "1390000")  # +0.39 USDC, an incoming settlement
+TX_NOT = tx("1390000", "1000000")  # outgoing, so never a settlement
+
+
+def counting_rpc(signatures, positives, unfetchable=frozenset()):
+    """An injected RPC that records how many transactions it was asked to read."""
+    tally = {"getTransaction": 0}
+
+    def rpc(method, params):
+        tally[method] = tally.get(method, 0) + 1
+        if method == "getTokenAccountsByOwner":
+            return {"value": [{"pubkey": ATA}]}
+        if method == "getSignaturesForAddress":
+            return [{"signature": s} for s in signatures]
+        if method == "getTransaction":
+            if params[0] in unfetchable:
+                return None
+            return TX_IN if params[0] in positives else TX_NOT
+        return None
+
+    return rpc, tally
+
+
+def run_counted(argv, signatures, positives, unfetchable=frozenset(), module=None):
+    """Drive main() with a counting RPC. Returns (code, send_lines, stderr, fetches).
+
+    `module` is a namespace dict, which is what load_mutant hands back, so the mutant and
+    the real module are driven through exactly the same path.
+    """
+    ns = cs.__dict__ if module is None else module
+    rpc, tally = counting_rpc(signatures, positives, unfetchable)
+    real = ns["make_rpc"]
+    ns["make_rpc"] = lambda *a, **k: rpc
+    out, err = io.StringIO(), io.StringIO()
+    try:
+        with redirect_stdout(out), redirect_stderr(err):
+            code = ns["main"](argv)
+    finally:
+        ns["make_rpc"] = real
+    sends = [ln for ln in out.getvalue().splitlines() if ln.startswith(cs.SEND_PREFIX)]
+    return code, sends, err.getvalue(), tally["getTransaction"]
+
+
+def fresh_box():
+    """A throwaway ledger already holding the six recorded signatures, plus a cache path."""
+    box = Path(tempfile.mkdtemp(prefix="scan-cache-"))
+    ledger = box / "confirmed-payments-v2.jsonl"
+    ledger.write_text(
+        "".join(json.dumps({"signature": s}) + "\n" for s in CACHE_LEDGERED),
+        encoding="utf-8",
+    )
+    return ledger, box / "settlement-scan-cache.json"
+
+
+# THE INCIDENT'S OWN SHAPE: the send keeps failing, so the same four stay pending and the
+# scan runs again every tick. What must stop growing is the transaction reads.
+ledger, cache = fresh_box()
+scan = ["--ledger", str(ledger), "--cache", str(cache), "--dry-run"]
+
+code, sends, err, cold = run_counted(scan, CACHE_WINDOW, set(CACHE_POS))
+check("cold scan announces all four pending settlements", len(sends) == 4, sends)
+check("cold scan fetches every unrecorded signature (21 - 6 = 15)", cold == 15, cold)
+
+code, sends, err, warm = run_counted(scan, CACHE_WINDOW, set(CACHE_POS))
+check("second tick still announces the same four", len(sends) == 4, sends)
+check(
+    "second tick fetches ONLY the four pending settlements, not the 11 negatives",
+    warm == 4,
+    warm,
+)
+
+code, sends, err, warm2 = run_counted(scan, CACHE_WINDOW, set(CACHE_POS))
+check(
+    "and a third tick does not creep back up (the saving is stable, not one-shot)",
+    warm2 == 4,
+    warm2,
+)
+check(
+    "the run reports its own fetch count, so a dead cache is visible in the journal",
+    "[4 transaction(s) fetched]" in err,
+    err,
+)
+
+# POSITIVES ARE NEVER CACHED. This is the safety invariant, not an optimisation detail:
+# every announced field must still be read from the chain on the run that announces it.
+cached = set(json.loads(cache.read_text(encoding="utf-8"))["not_settlements"])
+check("the cache holds exactly the 11 permanent negatives", len(cached) == 11, cached)
+check(
+    "and holds NO announced signature, so no receipt field can come from a file",
+    not (cached & set(CACHE_POS)),
+    cached & set(CACHE_POS),
+)
+
+# OVER-CORRECTION CONTROL. A cache that suppressed real settlements would pass every check
+# above. A genuinely new payment must be announced on the tick it arrives, because the
+# per-minute latency claim is published in QUICKSTART.md, the SOP and the write-up.
+code, sends, err, fetched = run_counted(
+    scan, [CACHE_NEW] + CACHE_WINDOW, set(CACHE_POS) | {CACHE_NEW}
+)
+check(
+    "a NEW payment arriving while the cache is warm is announced immediately",
+    len(sends) == 5 and any(CACHE_NEW in s for s in sends),
+    sends,
+)
+check(
+    "and cost exactly one extra fetch: the new one (4 pending + 1)",
+    fetched == 5,
+    fetched,
+)
+
+# A cache the run cannot parse must cost RPC calls, never a missed receipt.
+cache.write_text("{ not json at all", encoding="utf-8")
+code, sends, err, corrupt = run_counted(scan, CACHE_WINDOW, set(CACHE_POS))
+check(
+    "a CORRUPT cache degrades to a full re-fetch, not to silence",
+    corrupt == 15 and len(sends) == 4,
+    (corrupt, len(sends)),
+)
+
+# A transaction that could not be read is a transport blip, not a verdict. Caching it
+# would make one bad second permanent.
+ledger, cache = fresh_box()
+scan = ["--ledger", str(ledger), "--cache", str(cache), "--dry-run"]
+blip = CACHE_NEG[0]
+run_counted(scan, CACHE_WINDOW, set(CACHE_POS), unfetchable={blip})
+cached = set(json.loads(cache.read_text(encoding="utf-8"))["not_settlements"])
+check(
+    "an UNFETCHABLE transaction is never cached, so the next run retries it",
+    blip not in cached and len(cached) == 10,
+    len(cached),
+)
+
+# --no-cache is the control that proves the cache is what caused the drop above, rather
+# than something else in the fixture quietly changing the fetch count.
+ledger, cache = fresh_box()
+nocache = ["--ledger", str(ledger), "--no-cache", "--dry-run"]
+run_counted(nocache, CACHE_WINDOW, set(CACHE_POS))
+code, sends, err, again = run_counted(nocache, CACHE_WINDOW, set(CACHE_POS))
+check(
+    "--no-cache re-derives every verdict on every run (pre-change behaviour, 15)",
+    again == 15,
+    again,
+)
+check("--no-cache writes no cache file at all", not cache.exists())
+
+# COMMIT NARROWING. The commit step re-derives from chain; without --only it appends
+# everything it finds, so a payment that settles between the announce and the commit is
+# recorded having never been sent, and is then never announced. That is the swallow the
+# whole send-first/commit-after ordering exists to prevent.
+ledger, cache = fresh_box()
+announced = CACHE_POS[:2]
+arrived_mid_run = CACHE_POS[2]
+commit = ["--ledger", str(ledger), "--no-cache"]
+only_args = [arg for s in announced for arg in ("--only", s)]
+code, sends, err, fetched = run_counted(
+    commit + only_args, CACHE_WINDOW, set(CACHE_POS)
+)
+written = {
+    json.loads(ln)["signature"]
+    for ln in ledger.read_text(encoding="utf-8").splitlines()
+    if ln.strip()
+}
+check("a narrowed commit exits 0", code == 0, err)
+check(
+    "it records exactly the announced signatures",
+    written == set(CACHE_LEDGERED) | set(announced),
+    written - set(CACHE_LEDGERED),
+)
+check(
+    "a settlement that arrived mid-run is NOT recorded, so the next tick announces it",
+    arrived_mid_run not in written,
+    written,
+)
+check(
+    "and it fetches only what it was asked about, not the whole window",
+    fetched == len(announced),
+    fetched,
+)
+
+# The un-narrowed commit is the behaviour being replaced. Driving it proves the swallow was
+# real rather than theoretical: without --only the mid-run arrival lands in the ledger.
+ledger, cache = fresh_box()
+run_counted(["--ledger", str(ledger), "--no-cache"], CACHE_WINDOW, set(CACHE_POS))
+written = {
+    json.loads(ln)["signature"]
+    for ln in ledger.read_text(encoding="utf-8").splitlines()
+    if ln.strip()
+}
+check(
+    "WITHOUT --only the mid-run arrival is silently recorded (the swallow was real)",
+    arrived_mid_run in written,
+    written,
+)
+
+check(
+    "--only rejects anything that is not a base58 signature",
+    run_counted(
+        ["--ledger", str(ledger), "--no-cache", "--only", "not-a-signature"],
+        CACHE_WINDOW,
+        set(CACHE_POS),
+    )[0]
+    == 1,
+)
+
+# MUTATION CONTROL. Disable the cache-hit skip and the fetch count must climb back to the
+# uncached number. Without this, "warm == 4" is equally consistent with a fixture that
+# simply had four unrecorded signatures.
+MUT_CACHE = "        if signature in cached_negative:"
+check("mutation target for the cache skip is present in the source", MUT_CACHE in SRC)
+
+if MUT_CACHE in SRC:
+    m = load_mutant(MUT_CACHE, "        if False:")
+    ledger, cache = fresh_box()
+    scan = ["--ledger", str(ledger), "--cache", str(cache), "--dry-run"]
+    run_counted(scan, CACHE_WINDOW, set(CACHE_POS), module=m)
+    _, sends, _, mutant_warm = run_counted(scan, CACHE_WINDOW, set(CACHE_POS), module=m)
+    check(
+        "DISABLING the cache skip DOES restore all 15 fetches (the skip is load-bearing)",
+        mutant_warm == 15,
+        mutant_warm,
+    )
+    check(
+        "while the mutant still announces the same four (mutation was surgical)",
+        len(sends) == 4,
+        sends,
     )
 
 print(f"\n{CHECKS - FAILS}/{CHECKS} checks passed")

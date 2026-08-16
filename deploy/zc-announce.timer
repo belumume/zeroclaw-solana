@@ -1,13 +1,22 @@
 # Per-minute poll for settled payments.
 #
-# WHY A MINUTE IS AFFORDABLE, which is the SOP's own argument and survives it: most runs end at the
-# first step with nothing to announce, because there is usually no open reference. The expensive
-# path only runs when a payment actually landed. A per-minute tick therefore costs one cheap read
-# almost every time and does real work rarely.
+# WHY A MINUTE IS AFFORDABLE, and it is NOT the SOP's reason. The SOP can end a run at its first
+# step because it works from a list of open references, and usually there are none.
+# `confirm_settlements.py` has no such concept: it inverted the question precisely to avoid needing
+# one, so it has no early exit at all. Every tick reads the signature window and then fetches each
+# transaction in it the ledger has not recorded. Measured on the box 2026-08-16, that was 17 RPC
+# calls a tick and 8,126 a day, 11 of the 15 fetches re-deriving a verdict about the same unrelated
+# transactions -- a verdict that, on a finalized transaction, cannot change.
+#
+# The cadence is affordable because the confirmer caches those permanent negatives. A tick that
+# finds nothing new costs the two cheap reads and no transaction fetches at all, so the cost scales
+# with what actually arrived rather than with the size of the window.
 #
 # WHY NOT SLOWER. The claim this exists to support is that the owner learns of a payment within
-# about a minute of it settling on chain. A five-minute tick would make that sentence false, and the
-# sentence is the deliverable.
+# about a minute of it settling on chain -- stated in QUICKSTART.md, the SOP, and the write-up. A
+# five-minute tick would make that sentence false, and the sentence is the deliverable. It is also
+# why the fix for the cost was a cache rather than a backoff: a backoff buys quiet by delaying a real
+# payment's receipt, which is the one thing here that is not ours to trade.
 #
 # Persistent=false ON PURPOSE. After downtime there is no value in firing a catch-up run
 # immediately: the next ordinary tick is at most a minute away, and a catch-up burst on boot would
