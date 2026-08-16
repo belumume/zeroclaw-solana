@@ -35,8 +35,8 @@ receiver it looks for a key that is NEVER PRESENT: the program credits ASSOCIATE
 so the destination is `ATA(receiver, mint)` and the receiver WALLET does not appear at all. A
 membership check would refuse every legitimate payment while passing hand-built fixtures.
 
-WHAT AN ALLOWLIST OF PROGRAMS DOES NOT DO, learned from an adversarial review of the first draft:
-naming a program safe says nothing about what it is asked to do. System was allowlisted so a
+WHAT AN ALLOWLIST OF PROGRAMS DOES NOT DO: naming a program safe says nothing about what it is
+asked to do. System was allowlisted so a
 durable nonce could be advanced, and `SystemInstruction::Transfer` is the same program, so an
 appended plain SOL transfer from the fee payer certified cleanly. ComputeBudget was allowlisted so
 a priority fee could be set, and an unbounded `SetComputeUnitPrice` burns the signer's lamports.
@@ -1074,8 +1074,8 @@ def _self_test() -> int:  # noqa: PLR0915 - a flat list of cases reads better th
         "an unknown program appended is refused",
         _rebuild(real["within_cap"], append(bytes([7]) * 32, b"\x00")),
     )
-    # THE FINDING AN ADVERSARIAL REVIEW OF THE FIRST DRAFT PRODUCED. System was allowlisted for
-    # the nonce advance, and System variant 2 is a plain SOL transfer from the fee payer.
+    # System is allowlisted for the nonce advance, and System variant 2 is a plain SOL transfer
+    # from the fee payer, so the allowlist alone lets the signer's lamports leave.
     sol_transfer = (2).to_bytes(4, "little") + (1_000_000_000).to_bytes(8, "little")
     refuses(
         "an appended plain SOL TRANSFER under the allowlisted System program is refused",

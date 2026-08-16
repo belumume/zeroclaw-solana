@@ -6,8 +6,9 @@ tell you any of them is doing work: delete a condition and a suite whose negativ
 really exercised by it goes on printing green. So each check here is neutered in a copy of the
 source, the copy's own self-test is run, and the run is REQUIRED to fail.
 
-FOUR PROPERTIES THIS FILE NEEDS TO BE WORTH ANYTHING, each of which has silently broken somewhere
-in this repo or in an earlier draft of this very file:
+FOUR PROPERTIES THIS FILE NEEDS TO BE WORTH ANYTHING. Each names a way a mutation control can
+report success while proving nothing, and every one of them is a live failure mode rather than a
+hypothetical:
 
   the substitution must APPLY. An anchor keyed on source text rots the moment that line is edited,
   after which the "mutant" is byte-identical to the original and the control certifies nothing
@@ -22,8 +23,8 @@ in this repo or in an earlier draft of this very file:
 
   a check cited as the REASON another is only diagnostic must itself be anchored. Otherwise the
   pair is mutually redundant with neither half proven, and deleting the backstop leaves the whole
-  suite green. An adversarial review found exactly that here: the recurring-pull row was justified
-  by the discriminator check, and the discriminator check had no row.
+  suite green. The recurring-pull row is justified by the discriminator check, so the discriminator
+  check carries a row of its own.
 
 Mutations replace a CONDITION, never a line, so indentation is untouched and the mutant always
 compiles. A mutant that fails to parse would be recorded as "did not pass" for the wrong reason.
