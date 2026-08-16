@@ -28,6 +28,8 @@
 
 pub mod compose;
 pub mod pay;
+pub mod resolve;
 
 pub use compose::{atomic_to_ui, compose, SpendArgs};
 pub use pay::{authorise, AuthorisedPayment, Challenge, PayConfig, PriceExtra, PriceOption};
+pub use resolve::mint_decimals;
