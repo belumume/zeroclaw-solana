@@ -42,7 +42,7 @@ command line is a cross-check that can add a refusal and cannot relax one.
 original by reading them out of its source, because the deployed workspace receives a single file
 and cannot import the rest.
 
-What that leaves open, said plainly: the order *value* is still the caller's. An implausible
+What that leaves open: the order *value* is still the caller's. An implausible
 one is refused in code, so "table 4, R$ 0.05" no longer produces a link, but a plausible wrong
 amount still does. That band is wide on purpose, because this shop has no catalog and a narrow
 one would refuse legitimate orders. One free parameter of two is gone and the second is
@@ -147,7 +147,6 @@ The shop quotes in BRL; the page a Brazilian customer actually opens is in Portu
 Custody tier is declared per component: T0 reads run automatically, T1 emits an unsigned
 transaction a human approves, and no component holds a fund-signing key.
 
-That last sentence is table stakes and we would rather be judged on the one that follows it.
 Key-free is what every careful entry in this space says, and it is a claim about what our code
 *declines to do*, which is only as good as our code. **The load-bearing difference is WHERE the
 limit is enforced.** Ours is not in the plugin, not in the host, and not in the prompt: it is a

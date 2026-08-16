@@ -128,10 +128,37 @@ ROGUE_UNICODE = [
 
 EM_DASH = "—"
 
-# These mirror .tools/slop_check.py exactly, so the 25-clean / 4-flagged baseline measured with
-# that helper transfers to this gate unchanged. Tightening any of them is a WIDENING and would
-# need its own controls plus a re-measurement of every document, so it is deliberately not done
-# here. One known looseness is recorded rather than silently fixed: `\benhance\b` does not match
+# THREE FIXED PHRASES, and the narrowness is the whole design. Each is a pure frame in this
+# corpus: prose announcing that it is about to be honest, or telling the reader which part to find
+# interesting, wrapped around a fact that lands harder without it. Each was removed once by a human
+# editing pass and later reappeared on a DIFFERENT judge-facing surface. That is the shape a
+# per-file review cannot see: the removal and the return live in separate documents, so nothing
+# compares them, and each document read on its own looks fine.
+#
+# This is deliberately NOT the broad class. Whether a given contrast or emphasis carries
+# information is a judgement, and the note above records why this gate refuses to be asked for one.
+# A two-to-four word literal with no legitimate reading here needs no judgement, which is the bar
+# that separates what belongs in a gate from what belongs in a reviewer's eye.
+#
+# Whitespace between the words is matched across at most ONE line break. These documents are hard
+# wrapped near 95 characters, so a same-line pattern would silently miss any instance that happened
+# to straddle a wrap, and the miss would look exactly like absence. Bounding it at one newline keeps
+# the match from spanning a paragraph break and pairing two unrelated words.
+_GAP = r"(?:[ \t]+|[ \t]*\n[ \t]*)"
+ANNOUNCED_FRAMES = [
+    "said" + _GAP + "plainly",
+    "the" + _GAP + "interesting" + _GAP + "part",
+    "what" + _GAP + "matters" + _GAP + "here",
+]
+
+# Every pattern here except `announced_frames` mirrors .tools/slop_check.py exactly, so the
+# 25-clean / 4-flagged baseline measured with that helper transfers to this gate unchanged.
+# Tightening any of them is a WIDENING and would need its own controls plus a re-measurement of
+# every document, so it is deliberately not done here. `announced_frames` is a local addition with
+# no counterpart in that helper, and it met exactly that bar before landing: run across all 42
+# tracked prose documents for a live count, and paired in the suite with a must-fire case per
+# phrase plus must-not-fire cases drawn from the scored honesty this gate must never eat.
+# One known looseness is recorded rather than silently fixed: `\benhance\b` does not match
 # "enhanced", because the trailing letter removes the word boundary.
 #
 # A SECOND looseness, recorded 2026-08-04 because a clean run on this check is easy to read as
@@ -192,6 +219,11 @@ CHECKS = [
     (
         "process_revealing",
         r"\b(verified empirically|one-time approved|across multiple sessions)\b",
+        re.I,
+    ),
+    (
+        "announced_frames",
+        r"\b(?:" + "|".join(ANNOUNCED_FRAMES) + r")\b",
         re.I,
     ),
 ]

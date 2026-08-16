@@ -95,7 +95,7 @@ with no inbound port, and its trace is traffic-driven, so from outside a quiet s
 stopped one look identical. That half is asserted here and machine-checked by a `/health`
 endpoint on the x402 gate, which asks systemd on the node directly.
 
-A second and stronger check runs beside it, and the direction is the interesting part.
+A second and stronger check runs beside it, in the other direction.
 [`deploy/box_selfcheck.py`](deploy/box_selfcheck.py) runs **on** the node, compares the deployed
 bytes against the manifest written at deploy time, and publishes a verdict outward through the same
 tunnel at `/selfcheck`. Nothing reaches in, and the box reports on itself, which lets it see
