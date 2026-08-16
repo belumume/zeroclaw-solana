@@ -217,10 +217,11 @@ MUST_NOT_FIRE = [
     # a trace and must survive: it exists to stop a reader who is holding stale config from
     # following instructions that now lose money. Its subject is what the reader's system is doing,
     # not what this document used to say, and cutting it would take a real safety warning with it.
-    "Read this if you followed an earlier copy of this page. Until 2026-08-05 this section told "
-    "you to point payment_watch at devnet and to pass a devnet mint on every call. Both "
+    "**Read this if you followed an earlier copy of this page.** Until 2026-08-05 this section "
+    "told you to point `payment_watch` at devnet and to pass a devnet mint on every call. Both "
     "instructions are now wrong, and following them is the exact failure the old text warned "
-    "about, with the chain the other way round.",
+    "about, with the chain the other way round: the watcher would poll devnet for a payment that "
+    "settled on mainnet, the order would sit at NOT_YET forever, and nothing would error.",
 ]
 
 # Spans that MATCH a pattern above and are deliberately kept, each with the reason.
