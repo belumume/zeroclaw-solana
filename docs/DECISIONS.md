@@ -301,16 +301,37 @@ catalog to read, and inventing one decides what this shop sells. That is a produ
 band derived from a menu we made up would refuse legitimate orders at a shop selling something
 else.
 
-**Rejected for now: a merchant confirmation that certifies the serialized bytes.** The right shape,
-and the one that would make the value provable rather than sourced: the operator approves the exact
-bytes rather than a sentence a model composed, which is the argument `certify_publish_tx.py`
-already makes on the publish path. It needs `request_approval` on the whatsapp-web channel. That is
-our own upstream contribution and it MERGED on 2026-08-13 as
-[zeroclaw-labs/zeroclaw#9385](https://github.com/zeroclaw-labs/zeroclaw/pull/9385), so the upstream
-blocker is gone. What blocks it now is deployment rather than code: the box runs an agent binary
-built before that merge. Re-derive the upstream half with
-`gh pr view 9385 --repo zeroclaw-labs/zeroclaw --json state,mergedAt` rather than trusting this
-paragraph.
+**Rejected on merit: a merchant confirmation carried by the host's approval gate.** Approving the
+exact bytes rather than a sentence a model composed is the right shape, and it is the argument
+`certify_publish_tx.py` already makes on the publish path. The mechanism that looked like it would
+carry that shape is `request_approval` on the whatsapp-web channel, our own upstream contribution,
+merged 2026-08-13 as
+[zeroclaw-labs/zeroclaw#9385](https://github.com/zeroclaw-labs/zeroclaw/pull/9385). Measured
+against upstream, it does not, for three reasons that are independent and none of which a deploy
+fixes.
+
+It is unreachable from this path. `request_approval` is a method on the Rust `Channel` trait whose
+only production caller is the agent turn loop's approval gate, which fires before a tool runs. A
+workspace-jailed script is inside that gated call and cannot re-enter it, and a WASM tool plugin
+cannot reach it either: `wit/v0/channel.wit` has a channel plugin EXPORT `channel` so the host
+calls into it, while `world tool-plugin` imports logging and nothing else.
+
+It would not certify the bytes if it were reachable. The prompt is rendered by `summarize_args`,
+which truncates every string value at 80 characters, and a `pay_link.py` invocation carrying a
+verbatim customer message is far longer, so the approver would be shown an ellipsis where the
+evidence is. The prompt carries the tool name and that argument summary only, so it cannot place
+the customer's own words beside the amount, which is the binding this decision is about.
+
+It is also unreleased. The newest release is `v0.8.4` from 2026-08-02 and the merge sits 154
+commits ahead of it, so any use of it needs a source build rather than an upgrade. Re-derive all
+three rather than trusting this paragraph:
+`gh pr view 9385 --repo zeroclaw-labs/zeroclaw --json state,mergedAt`,
+`gh api repos/zeroclaw-labs/zeroclaw/contents/crates/zeroclaw-runtime/src/approval/mod.rs -H "Accept: application/vnd.github.raw" | grep -n truncate_for_summary`,
+and `gh api repos/zeroclaw-labs/zeroclaw/compare/v0.8.4...92109e4d10f6c59c6141d68faf30d526cb62e93a --jq '{status,ahead_by}'`.
+
+What that leaves is narrower and worth stating: an approval gate can certify that a COMMAND will
+run, and the binding this needs is between an amount and a customer's utterance, which is not a
+tool argument the gate ever sees.
 
 **Chosen: bind the value to the text it came from.** `pay_link.py` requires `--quote`, the verbatim
 message the figure was given in, and `--brl` must equal one figure marked `R$` or `reais` in that

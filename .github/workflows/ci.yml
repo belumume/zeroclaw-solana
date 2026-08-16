@@ -473,6 +473,16 @@ jobs:
       - name: the TLV controls can fail
         run: bash scripts/mutation-check-tlv.sh
 
+      # THE DEPLOY-STALENESS GATE'S CONTROLS BELONG HERE, not beside the gate itself. The gate
+      # asks a live box a question and lives in proof-check.yml; these controls ask it four
+      # questions whose answers this clone's own history already fixes, so they are offline,
+      # deterministic, and must redden a pull request the moment the detector stops detecting.
+      # That split matters because the gate's healthy answer today is a RED, and a red proves
+      # nothing on its own: a wrong ref prints the same shape. These controls are what make its
+      # verdict evidence.
+      - name: the deploy-staleness controls can fail
+        run: python3 scripts/mutation-check-deploy-staleness.py
+
       # WIRED 2026-08-04. This gate flags a script that a document credits with a RUNTIME
       # role where nothing invokes it, because a control which is claimed and enforced by no
       # runtime path is worse than an absent one: an absent control is visible, an inert one
