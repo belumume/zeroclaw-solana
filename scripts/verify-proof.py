@@ -290,6 +290,80 @@ def is_transport_error(e):
     return isinstance(e, (TimeoutError, ConnectionError))
 
 
+def locate_commit(sha):
+    """Where a commit the gate names sits relative to THIS clone. Never a verdict.
+
+    The gate reports the commit its binary was compiled from. That is a claim, and the one
+    thing a reader holding a clone can check about it is whether the commit is real here at
+    all, and if so how far back it is. Both answers are informative and neither is a fault:
+    a clone made before that commit landed, a shallow clone, and a clone of a fork all fail
+    to find a perfectly good commit, so an absence says something about the clone at least
+    as often as about the binary.
+
+    Returns a short human phrase, always. Every failure path -- no git on PATH, not a
+    repository, a sha this clone has never seen -- resolves to a sentence rather than to an
+    exception or to None, because the caller prints it inline and a None there would read as
+    a defect in the gate.
+    """
+    # A `git-dirty` build reports `<head>-dirty`. The head part is still worth locating, so the
+    # suffix is stripped rather than making the whole value unlookupable -- but the answer says
+    # which commit it located, because that commit is NOT what was compiled. The caller's own
+    # source line carries that warning too; saying it twice is cheaper than a reader taking a
+    # located commit as confirmation the binary matches it.
+    note = ""
+    if isinstance(sha, str) and sha.endswith("-dirty"):
+        sha, note = sha[: -len("-dirty")], " (the clean commit it was built on top of)"
+    if (
+        not isinstance(sha, str)
+        or not 7 <= len(sha) <= 40
+        or sha.strip("0123456789abcdef") != ""
+    ):
+        # Includes the gate's own `unavailable` case, whose commit is the literal "unknown".
+        return "not a commit id, so nothing to look up here"
+    root = str(Path(__file__).resolve().parent.parent)
+    try:
+        import subprocess
+
+        kind = subprocess.run(
+            ["git", "-C", root, "cat-file", "-t", sha],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+        if kind.returncode != 0 or kind.stdout.strip() != "commit":
+            return f"not a commit this clone holds{note}, which a shallow or older clone also looks like"
+        anc = subprocess.run(
+            ["git", "-C", root, "merge-base", "--is-ancestor", sha, "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+        if anc.returncode != 0:
+            return f"a real commit here{note}, but not an ancestor of your HEAD"
+        behind = subprocess.run(
+            ["git", "-C", root, "rev-list", "--count", f"{sha}..HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+        n = behind.stdout.strip()
+        if behind.returncode != 0 or not n.isdigit():
+            return f"an ancestor of your HEAD{note}; distance unreadable"
+        return (
+            f"your HEAD is that same commit{note}"
+            if n == "0"
+            else f"an ancestor of your HEAD, {n} commit(s) back{note}"
+        )
+    except Exception as e:
+        return f"could not be looked up ({type(e).__name__})"
+
+
 def main():
     fails = 0
     static_fails = 0
@@ -772,6 +846,9 @@ def main():
     # have not shipped this yet" or "the check silently stopped running", and those need opposite
     # responses.
     selfcheck_gates = False
+    # Bound before the try for the same reason `health` is, one screen up: the build-provenance
+    # report below reads it, and an unbound name there would crash the verifier itself.
+    sc = None
     sc_url = os.environ.get(
         "SHOP_SELFCHECK_URL", "https://x402.perfpilot.dev/selfcheck"
     )
@@ -836,6 +913,71 @@ def main():
         print(f"FAIL  box self-check unreachable: {e}")
         selfcheck_gates = True
         fails += 1
+
+    # WHICH COMMIT THE BINARY ANSWERING YOU WAS BUILT FROM.
+    #
+    # The line above reports `deployed_sha`, and a reader comparing that against the repository
+    # believes they have checked the gate. They have not. `deployed_sha` names the commit the
+    # WORKSPACE deploy was generated from -- the config, skills and SOPs listed in
+    # deploy/deploy-targets.json. A compiled binary is deliberately not in that file map, so the
+    # gate can be rebuilt without moving `deployed_sha` and the workspace can be redeployed
+    # without rebuilding the gate. Two facts, and only one of them is about this binary.
+    #
+    # A DIFFERENCE BETWEEN THEM IS NOT AN ERROR, and this block must never be read as though it
+    # were. They answer different questions, they move independently by design, and today they
+    # legitimately differ. Nothing here compares them for agreement, and nothing here gates: the
+    # value is a property of a remote binary, so a gate on it would turn main red on someone
+    # else's deploy, which is the same reasoning the receipt and ledger blocks already carry.
+    #
+    # WHAT IS CHECKABLE IS DIFFERENT, and there are two of them. Whether /health and /selfcheck
+    # report the SAME commit, since one binary serves both and a disagreement means two processes
+    # answered. And where that commit sits in the clone the reader is holding, which is the only
+    # part of the gate's claim a stranger can test locally.
+    gate_h = ((health or {}).get("gate") or {}).get("build_commit")
+    src_h = ((health or {}).get("gate") or {}).get("build_commit_source")
+    gate_s = (sc or {}).get("gate_build_commit")
+    src_s = (sc or {}).get("gate_build_commit_source")
+    commit = gate_s or gate_h
+    source = src_s or src_h
+    if health is None and sc is None:
+        # Both routes already failed above with their own reasons. A third line about a field
+        # inside a body nobody received would be noise dressed as a finding.
+        pass
+    elif commit is None:
+        print(
+            "PEND  gate build provenance not yet observable: the deployed gate predates the "
+            "build_commit field, so which commit this binary was compiled from is unknown. "
+            "Not gating. It becomes readable on the next deploy."
+        )
+    else:
+        # Every source means something different about how much the commit is worth, so the
+        # value never travels without it. `git` was observed in the repository at build time.
+        # `git-dirty` means uncommitted code went into the binary, so the commit does NOT name
+        # what was built and the value carries a -dirty suffix. `env` means a build-time
+        # override asserted it rather than anything observing it. `unavailable` means the build
+        # had no repository and the commit is the literal string "unknown".
+        trust = {
+            "git": "read from the repository at build time",
+            "git-dirty": "UNCOMMITTED code went into this binary, so the commit does not name "
+            "what was built",
+            "env": "asserted by a build-time override rather than observed",
+            "unavailable": "the build had no repository, so this is a placeholder rather than "
+            "a commit",
+        }.get(source, f"source {source!r} is not one this verifier recognises")
+        agree = ""
+        if gate_h and gate_s:
+            agree = (
+                "; /health and /selfcheck agree"
+                if gate_h == gate_s
+                else f"; DISAGREES with /health ({gate_h[:12]}), so two processes answered"
+            )
+        print(
+            f"INFO  gate binary built from {commit[:12]} (source {source!r}: {trust}"
+            f"{agree}). In this clone: {locate_commit(commit)}. This is the binary's own "
+            f"build, a different fact from the deploy commit above, which covers the workspace "
+            f"files rather than this binary; they move independently and a difference between "
+            f"them is expected rather than a fault. Not gating"
+        )
 
     # Report the two kinds separately, because collapsing them into one number is exactly
     # how a dead system prints a clean bill of health. An audit put it plainly: of the

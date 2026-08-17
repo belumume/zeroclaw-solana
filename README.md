@@ -153,6 +153,20 @@ mtime rather than from any field the writer controls.
 [`scripts/verify_proof_selfcheck_control.py`](scripts/verify_proof_selfcheck_control.py) drives all
 eight branches from a loopback server, so the claim is known to be capable of going red.
 
+You can also ask the gate which commit its own binary was compiled from. That is a different fact
+from the deploy commit beside it, and the two are expected to differ: `deployed_sha` names the
+commit the workspace deploy came from, covering the files in
+[`deploy/deploy-targets.json`](deploy/deploy-targets.json), and a compiled binary is not one of
+them, so each can move without the other. `verify-proof.py` prints both, or read them directly:
+
+```bash
+curl -s https://x402.perfpilot.dev/selfcheck | jq '{deployed_sha, gate_build_commit, gate_build_commit_source}'
+```
+
+Read the source field alongside the commit. `git` means it was observed in the repository at build
+time; `git-dirty` means uncommitted code went into the binary, so the commit does not name what was
+built; `env` means a build flag asserted it; `unavailable` means the build had no repository at all.
+
 **The node serves that route**, so the check reads the verdict and gates on it. The live count is
 derived from what actually gated rather than pinned: a claim the deployed build cannot yet answer
 prints PENDING and is never tallied as a verified one, and the count rises on its own when that
