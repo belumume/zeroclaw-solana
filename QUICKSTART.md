@@ -265,6 +265,10 @@ distribute, which is why the manifest points there rather than into a build layo
 whoever compiled it. `scripts/check-quickstart-plugin-install.py` executes the loop above and
 asserts the manifests resolve afterwards, so this paragraph and that command cannot drift apart.
 
+Unset `CARGO_TARGET_DIR` before that loop if you keep it set. Cargo then writes outside `target/`,
+the `cp` finds nothing, `|| break` stops after the first plugin, and the loop still exits 0, so
+you get one built component, none installable, and no failure to go on.
+
 Each plugin dir carries `manifest.toml` (minimal permissions) and a README with its config
 keys, custody tier and threat model. Seven of the nine plugins carry a captured
 prompt-injection transcript. The two that do not, `token-risk-check` and `lending-health`,
