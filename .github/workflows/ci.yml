@@ -695,6 +695,18 @@ jobs:
       - name: that gate's always-loaded scope is load-bearing
         run: python3 scripts/mutation-check-plugin-count-agreement.py
 
+      # The same shape again, one axis over, and this one had already gone wrong. Four judge-facing
+      # surfaces said `10 static + 4 live claims` while verify-proof.py derives its live total as
+      # `3 + two optional claims` and a fresh clone printed 5/5. The repo's own captured terminal
+      # cast had been showing a denominator of five the whole time; nothing compared the two. This
+      # parses the verifier with `ast` for both ceilings rather than running it, so it needs no
+      # network and reports the CEILING rather than whatever a remote box serves today. Offline.
+      - name: the docs quote claim counts the verifier can reach
+        run: python3 scripts/check-live-claim-count-agreement.py
+
+      - name: that gate's own controls
+        run: python3 scripts/check-live-claim-count-agreement.py --selftest
+
       # The same file one step further in: not a number QUICKSTART states, but a COMMAND it tells
       # a stranger to paste. Followed verbatim, section 2 built every component into the target
       # directory and then told the reader to install a plugin whose manifest declares a bare

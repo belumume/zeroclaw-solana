@@ -124,11 +124,10 @@ mtime rather than from any field the writer controls.
 [`scripts/verify_proof_selfcheck_control.py`](scripts/verify_proof_selfcheck_control.py) drives all
 eight branches from a loopback server, so the claim is known to be capable of going red.
 
-**The node is still running the build that predates that route**, so today the check prints PENDING
-and the live claim count stays at four rather than five. That is the designed state and not a gap:
-the number is derived from what actually gated, so a pending claim can never be tallied as a
-verified one, and it rises on its own when the deploy lands. Run `scripts/verify-proof.py` and the
-PENDING line says so in as many words.
+**The node serves that route**, so the check reads the verdict and gates on it. The live count is
+derived from what actually gated rather than pinned: a claim the deployed build cannot yet answer
+prints PENDING and is never tallied as a verified one, and the count rises on its own when that
+deploy lands. Run `scripts/verify-proof.py` and each line names which of the four outcomes it hit.
 
 Live on-chain evidence, all clickable, is in
 [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md). The verifier above reports static and live

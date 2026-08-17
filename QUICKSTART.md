@@ -61,9 +61,8 @@ would misalign every offset if read as legacy.
 **`verify-proof.py` is the only one that needs the network,** and it needs no credential for
 it. It queries public devnet and prints PASS or FAIL per claim, ending in `10/10 static
 claims` plus every live claim it could gate. The split matters: only the live ones can go red.
-The live count is derived from what actually gated rather than pinned, so it reads 4 once the
-node serves the x402 ledger block and 3 until then, and a claim reporting PENDING is never
-tallied as verified.
+The live count is derived from what actually gated rather than pinned, so it rises as each
+optional claim starts gating, and a claim reporting PENDING is never tallied as verified.
 
 Or open any explorer link in `docs/DEVNET-PROOF.md`; the programs, the feed sequence history,
 and the devnet x402 settlements are all public devnet. The gate has also settled once on

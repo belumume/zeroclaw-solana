@@ -901,7 +901,7 @@ tests. [`plugins/`](../plugins) holds all nine components. [`x402-feed-gate`](..
 is the earning node.
 
 **Check it rather than believing it.** [`scripts/verify-proof.py`](../scripts/verify-proof.py)
-checks ten static and four live claims with stdlib only.
+checks ten static and up to five live claims with stdlib only.
 [`scripts/verify_proof_offline.py`](../scripts/verify_proof_offline.py) verifies the captured
 custody proofs with no network at all. [`docs/transcripts/`](transcripts/) holds the agent
 refusing a live attack, verbatim. [`sanitizer-microworld/index.html`](../sanitizer-microworld/index.html)

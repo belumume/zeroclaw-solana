@@ -192,7 +192,7 @@ python3 scripts/replay_allowance_probe.py
 
 ```bash
 git clone https://github.com/belumume/zeroclaw-solana && cd zeroclaw-solana
-python3 scripts/verify-proof.py           # 10 static + 4 live claims, stdlib only
+python3 scripts/verify-proof.py           # 10 static + up to 5 live claims, stdlib only
 python3 scripts/verify_proof_offline.py   # the custody proofs, no network at all
 python3 scripts/certify_publish_tx.py     # five injection shapes, all refused
 ```

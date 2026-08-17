@@ -301,7 +301,7 @@ python demo/verify_settlement_poll.py     # the page polls for settlement, not o
 
 <h2><span class="n">04</span>Reproduce it: clone, then three commands</h2>
 <pre><code>git clone https://github.com/belumume/zeroclaw-solana &amp;&amp; cd zeroclaw-solana
-python3 scripts/verify-proof.py           # 10 static + 4 live claims, stdlib only
+python3 scripts/verify-proof.py           # 10 static + up to 5 live claims, stdlib only
 python3 scripts/verify_proof_offline.py   # the custody proofs, no network at all
 python3 scripts/certify_publish_tx.py     # five injection shapes, all refused</code></pre>
 <p>
