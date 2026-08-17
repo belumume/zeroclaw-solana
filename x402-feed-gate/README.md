@@ -19,12 +19,46 @@ GET /reading                       -> 402 + { x402Version: 2, resource: {...},
 GET /reading  (PAYMENT-SIGNATURE: <signed>) -> 200 + { paid, settlement: <sig>, reading: {...} }
                                         + headers PAYMENT-RESPONSE / X-Payment-Response
 GET /price                          -> the 402 challenge alone
-GET /health                         -> { gate, shop: {unit, active, state, trace_age_seconds},
+GET /health                         -> { gate: {build_commit, build_commit_source},
+                                          shop: {unit, active, state, trace_age_seconds},
+                                          receipts: {log_readable, lines_scanned, records_found,
+                                                     delivery: {status, ...}, stale_after_seconds},
                                           ledger: {daily_cap_atomic_units, restored_sales_at_startup,
                                                    unparseable_lines_skipped, redeemed_nonces,
                                                    tracked_payer_days, settled_atomic_units,
                                                    lock_healthy}, proves }
+GET /selfcheck                      -> the box self-check verdict verbatim (deployed_sha, ok,
+                                          checks, ...) plus age_seconds, served_at, and
+                                          gate_build_commit / gate_build_commit_source /
+                                          gate_build_proves; 503 when no verdict exists
 ```
+
+### Which commit is which
+
+Two different commits are published and they answer two different questions.
+
+`deployed_sha`, on `/selfcheck`, comes from the verdict `deploy/box_selfcheck.py` writes on the
+box. It names the commit the WORKSPACE deploy was generated from: the config, skills and SOPs
+listed in `deploy/deploy-targets.json`.
+
+`build_commit`, on both routes, is baked into this binary at compile time by `build.rs`. It names
+the commit THIS PROCESS was compiled from. The binary is deliberately not in that deploy file map,
+for the same reason the nine plugins are not, so the two values move independently and a difference
+between them is ordinary rather than a fault. Before this field existed, a reader comparing
+`deployed_sha` against a repository was checking the deploy while believing they were checking the
+gate, and nothing on the box could tell them otherwise.
+
+Read `build_commit_source` before comparing anything:
+
+| source | meaning |
+|---|---|
+| `git` | read from the repository, tree clean. A bare 40-character sha |
+| `git-dirty` | read from the repository, tree NOT clean. The value carries a `-dirty` suffix, because a dirty tree's HEAD does not name the code that was compiled and an equality check must not quietly pass |
+| `env` | `X402_GATE_BUILD_COMMIT` was set at build time and taken verbatim. The route for a build with no repository attached, a tarball or a container over a copied tree. An assertion by whoever built, not an observation |
+| `unavailable` | no git, no repository, no override. The commit is the literal string `unknown`, which is neither hex nor 40 characters and so cannot be mistaken for one |
+
+A missing git never fails the build, and the value is never an empty string: `""` reads as
+present-and-fine to a consumer and as absent to a human, so the two would disagree about one byte.
 
 The `accepts` array is the x402 tiered price menu, a single reading and a day-pass, in one round trip. Each row's `extra.memo` nonce must be echoed by the payment as a Memo
 instruction, binding it to this exact challenge.
@@ -159,8 +193,9 @@ X402_DAILY_CAP       per-payer atomic-unit daily cap (default 20000000)
 ## Build & test
 
 ```
-cargo test                         # 37 gate tests (verification, cap logic, ledger restart,
-                                   #   /health, x402 v2 wire conformance)
+cargo test                         # 55 gate tests, 20 lib + 35 bin (verification, cap logic,
+                                   #   ledger restart, /health, /selfcheck, build provenance,
+                                   #   x402 v2 wire conformance)
                                    # re-derive: cargo test 2>&1 | grep '^test result'
 cargo clippy --all-targets -- -D warnings
 cargo build --release
