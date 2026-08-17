@@ -199,7 +199,9 @@ def render(out_path):
     from PIL import Image, ImageDraw, ImageFont
 
     reg_path, bold_path = resolve_fonts()
-    f = lambda p, s: ImageFont.truetype(p, s)
+
+    def f(path, size):
+        return ImageFont.truetype(path, size)
 
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
