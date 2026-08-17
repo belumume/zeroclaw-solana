@@ -192,9 +192,10 @@ for name, status, body, pattern in CASES:
 # unknown rather than as a failure or as a bare None leaking into the line.
 #
 # NOTHING HERE GATES, so unlike the tally control above there is no count to assert. What is
-# asserted is that each input reaches a DIFFERENT sentence: absent, observed, dirty, placeholder,
-# and two processes disagreeing are five distinguishable states, and a report that collapsed any
-# of them would be worth nothing.
+# asserted is that each input reaches a DIFFERENT sentence -- absent, observed, dirty,
+# placeholder, a commit this clone does not hold, and two processes disagreeing -- and a report
+# that collapsed any of them into the same words would be worth nothing. The count is derived
+# from BUILD_CASES below rather than typed here, so it cannot drift when a case is added.
 HEAD_SHA = subprocess.run(
     ["git", "rev-parse", "HEAD"],
     capture_output=True,
@@ -202,6 +203,11 @@ HEAD_SHA = subprocess.run(
     encoding="utf-8",
     errors="replace",
 ).stdout.strip()
+# Without this the git-derived cases would silently degrade to an empty sha, which reads as the
+# absent branch and would make three of the six cases MISS for a reason no message explains.
+assert len(HEAD_SHA) == 40, (
+    f"could not read HEAD; this control cannot run ({HEAD_SHA!r})"
+)
 ABSENT = 40 * "f"  # well-formed, and no repository holds it
 
 
