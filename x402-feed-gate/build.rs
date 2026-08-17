@@ -28,12 +28,16 @@
 //!                 It is taken verbatim, so it is a statement by whoever built
 //!                 rather than an observation, and the source label is what makes
 //!                 that distinction legible instead of hidden.
-//!   `git`         read from the repository, tree clean.
-//!   `git-dirty`   read from the repository, tree NOT clean. The commit then
-//!                 carries a `-dirty` suffix, because a dirty tree's HEAD does
-//!                 not name the code that was compiled and a bare sha there would
-//!                 read as if it did. The suffix means an equality check against
-//!                 a real commit cannot quietly pass.
+//!   `git`         read from the repository, with everything this binary
+//!                 compiles committed.
+//!   `git-dirty`   read from the repository, with an uncommitted change to
+//!                 something this binary compiles. The commit then carries a
+//!                 `-dirty` suffix, because HEAD does not name the code that was
+//!                 built and a bare sha there would read as if it did. The suffix
+//!                 means an equality check against a real commit cannot quietly
+//!                 pass. Judged over the crate and its path dependency rather
+//!                 than the whole monorepo, so an uncommitted demo script does
+//!                 not label an untouched binary as divergent.
 //!   `unavailable` no git, no repository, no override. The commit is the literal
 //!                 string `unknown`.
 //!
@@ -64,6 +68,15 @@ fn main() {
 
 /// The commit and the label naming where it came from.
 fn provenance() -> (String, String) {
+    // SET-BUT-EMPTY FALLS THROUGH, which is the whole reason this is two checks
+    // rather than one. `X402_GATE_BUILD_COMMIT=` in a unit file or a CI matrix
+    // gives `Ok("")`, so matching on `Ok` alone would take this branch and
+    // publish an empty commit under the `env` label: an asserted value that
+    // asserts nothing, which is worse than the absent one it displaced. The same
+    // shape already bit `ZEROCLAW_HOME` in `main.rs`.
+    //
+    // Verified by building with the variable set to the empty string: source
+    // came back `git` with the tree's real HEAD, not `env`.
     if let Ok(forced) = std::env::var("X402_GATE_BUILD_COMMIT") {
         let forced = sanitize(&forced);
         if !forced.is_empty() {
@@ -81,15 +94,29 @@ fn provenance() -> (String, String) {
     // `--porcelain` prints one line per changed path and nothing whatsoever for a
     // clean tree, so emptiness is the signal and no parsing is involved.
     //
-    // UNTRACKED FILES COUNT AS DIRTY, which is the conservative direction rather
-    // than an oversight. An untracked file that some module references is
-    // compiled into this binary exactly like a tracked one, and the commit does
-    // not contain it. Erring the other way would let real divergence report clean.
+    // SCOPED TO WHAT THIS BINARY COMPILES, not to the whole repository. The crate
+    // is one directory of a monorepo, so an unscoped `git status` reports dirty
+    // for an uncommitted change to the demo scripts, a root document, anything at
+    // all. None of those can alter these bytes, and a flag that fires during
+    // every ordinary working day is one people learn to ignore, which costs more
+    // than the rare case it was added for.
+    //
+    // UNTRACKED FILES COUNT AS DIRTY inside that scope, which is the conservative
+    // direction rather than an oversight. An untracked file that some module
+    // references is compiled into this binary exactly like a tracked one, and the
+    // commit does not contain it. Erring the other way would let real divergence
+    // report clean.
     //
     // A git that answered `rev-parse` and then failed here is treated as dirty
     // too: the honest answer to "is this tree clean" that we could not obtain is
     // not "yes".
-    let dirty = match git(&["status", "--porcelain"]) {
+    let scope = compiled_sources();
+    let mut args: Vec<&str> = vec!["status", "--porcelain"];
+    if !scope.is_empty() {
+        args.push("--");
+        args.extend(scope.iter().map(String::as_str));
+    }
+    let dirty = match git(&args) {
         Some(out) => !out.is_empty(),
         None => true,
     };
@@ -98,6 +125,33 @@ fn provenance() -> (String, String) {
         (format!("{head}-dirty"), "git-dirty".to_string())
     } else {
         (head, "git".to_string())
+    }
+}
+
+/// Everything that ends up inside this binary: the crate itself and the one path
+/// dependency it compiles in. This is the pathspec the dirty check runs against.
+///
+/// AN EMPTY RETURN MEANS "NO PATHSPEC", which asks git about the whole
+/// repository. That is the fallback rather than the goal, and it is deliberately
+/// the direction the failure runs in: a pathspec built from a guess that turns
+/// out to be wrong matches nothing, git prints nothing, and a dirty tree reports
+/// clean. Reporting a change as clean is the one error this flag must not make,
+/// so a scope that cannot be confirmed on disk is discarded in favour of the
+/// noisy answer.
+///
+/// The dependency path is the one `Cargo.toml` declares. Reading the manifest to
+/// re-derive it would be the same literal by a longer route, and `cargo metadata`
+/// inside a build script is a heavier tool than one `is_dir` check earns.
+fn compiled_sources() -> Vec<String> {
+    let manifest = match std::env::var("CARGO_MANIFEST_DIR") {
+        Ok(m) if !m.is_empty() => m,
+        _ => return Vec::new(),
+    };
+    let core = format!("{manifest}/../crates/solana-core");
+    if std::path::Path::new(&core).is_dir() {
+        vec![manifest, core]
+    } else {
+        Vec::new()
     }
 }
 
@@ -154,13 +208,16 @@ fn sanitize(raw: &str) -> String {
 /// FILE holding a `gitdir:` pointer and the real HEAD lives under
 /// `.git/worktrees/<name>/`. Asking git resolves that; guessing does not.
 ///
-/// HONEST LIMIT. This catches every way the COMMIT can move (a commit, an amend,
-/// a checkout, a branch switch all rewrite HEAD or the ref it names) and every
-/// edit inside this crate. It does not catch a tree that became dirty somewhere
-/// ELSE in the repository while this crate and HEAD both stood still, so the
-/// `-dirty` flag is best effort where the commit is not. The direction of that
-/// error is worth stating plainly: such a build can report clean while the
-/// repository was not.
+/// The watch set is kept in step with `compiled_sources`, which is what makes the
+/// dirty flag refreshable rather than merely narrow: the paths the flag is
+/// computed over are the paths whose change re-computes it.
+///
+/// HONEST LIMIT. This catches every way the COMMIT can move, since a commit, an
+/// amend, a checkout and a branch switch all rewrite HEAD or the ref it names. It
+/// catches an edit to anything this binary is built from. What it cannot catch is
+/// an edit that leaves BOTH the compiled sources and HEAD untouched, which by
+/// construction is an edit that changes neither the commit nor the code, so
+/// nothing this script reports would have differed.
 fn watch_paths() -> Vec<String> {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
     let mut paths = vec![
@@ -168,6 +225,12 @@ fn watch_paths() -> Vec<String> {
         format!("{manifest}/Cargo.toml"),
         format!("{manifest}/build.rs"),
     ];
+    // The path dependency, so a change there refreshes the dirty flag as well as
+    // rebuilding the crate. Cargo rebuilds on a dependency change either way; it
+    // does not re-run this script unless a watched path moved.
+    for extra in compiled_sources().into_iter().skip(1) {
+        paths.push(extra);
+    }
 
     if let Some(head_path) = git(&["rev-parse", "--git-path", "HEAD"]) {
         // A symbolic HEAD names a ref file that the sha actually lives in, and

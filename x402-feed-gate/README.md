@@ -52,8 +52,8 @@ Read `build_commit_source` before comparing anything:
 
 | source | meaning |
 |---|---|
-| `git` | read from the repository, tree clean. A bare 40-character sha |
-| `git-dirty` | read from the repository, tree NOT clean. The value carries a `-dirty` suffix, because a dirty tree's HEAD does not name the code that was compiled and an equality check must not quietly pass |
+| `git` | read from the repository, with everything this binary compiles committed. A bare 40-character sha |
+| `git-dirty` | read from the repository, with an uncommitted change to something this binary compiles. The value carries a `-dirty` suffix, because HEAD does not name the code that was built and an equality check must not quietly pass. Judged over this crate and its path dependency rather than the whole monorepo, so an uncommitted demo script does not label an untouched binary as divergent |
 | `env` | `X402_GATE_BUILD_COMMIT` was set at build time and taken verbatim. The route for a build with no repository attached, a tarball or a container over a copied tree. An assertion by whoever built, not an observation |
 | `unavailable` | no git, no repository, no override. The commit is the literal string `unknown`, which is neither hex nor 40 characters and so cannot be mistaken for one |
 
@@ -193,7 +193,7 @@ X402_DAILY_CAP       per-payer atomic-unit daily cap (default 20000000)
 ## Build & test
 
 ```
-cargo test                         # 55 gate tests, 20 lib + 35 bin (verification, cap logic,
+cargo test                         # 57 gate tests, 20 lib + 37 bin (verification, cap logic,
                                    #   ledger restart, /health, /selfcheck, build provenance,
                                    #   x402 v2 wire conformance)
                                    # re-derive: cargo test 2>&1 | grep '^test result'

@@ -491,8 +491,9 @@ fn handle_health(
                    between them is ordinary rather than a fault, and only reading both \
                    tells you which half is behind. Read build_commit_source before \
                    comparing anything: `git` means it was read from the repository, \
-                   `git-dirty` means the tree was not clean so the commit does not name \
-                   the code that was compiled and the value carries a -dirty suffix, \
+                   `git-dirty` means something this binary compiles was uncommitted, so \
+                   the commit does not name the code that was built and the value \
+                   carries a -dirty suffix, \
                    `env` means a build-time override asserted it rather than it being \
                    observed, and `unavailable` means the build had no repository at all \
                    and the commit is the literal string unknown. It proves what this \
@@ -1122,8 +1123,9 @@ fn render_selfcheck(
                      so the two move independently and a difference between them is \
                      ordinary rather than a fault. Read gate_build_commit_source before \
                      comparing: `git` means it was read from the repository, `git-dirty` \
-                     means the tree was not clean so the commit does not name the code \
-                     that was compiled and the value carries a -dirty suffix, `env` means \
+                     means something this binary compiles was uncommitted so the commit \
+                     does not name the code that was built and the value carries a \
+                     -dirty suffix, `env` means \
                      a build-time override asserted it rather than it being observed, and \
                      `unavailable` means the build had no repository and the commit is the \
                      literal string unknown. It says what this binary was built from, \
@@ -2432,6 +2434,91 @@ mod build_provenance_tests {
             ),
             other => panic!("unknown provenance source {other:?}"),
         }
+    }
+
+    /// `build.rs` scopes its dirty check to this crate and `solana-core`, so a
+    /// THIRD path dependency would compile into the binary while sitting outside
+    /// the check, and an uncommitted change to it would report `git`. That is a
+    /// false clean, the one direction this flag must never fail in.
+    ///
+    /// The lockfile is the instrument because it needs no subprocess: a path
+    /// dependency is exactly a package with no `source`, and `--locked` already
+    /// guarantees the lockfile matches the manifest. Cross-checked once against
+    /// `cargo metadata`, which reported the same two local packages out of the
+    /// same 129, so this is not one parser agreeing with itself.
+    ///
+    /// This is a scope guard rather than a style rule. If it goes red, widen
+    /// `compiled_sources()` in `build.rs` to cover the new dependency, then
+    /// update the expectation here.
+    #[test]
+    fn the_dirty_check_covers_every_path_dependency() {
+        let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.lock"))
+            .expect("the crate ships its own lockfile");
+        let (local, total) = local_packages(&lock);
+
+        // The denominator travels with the count, so a parse that read nothing
+        // cannot pass as a clean result. An empty lockfile yields an empty
+        // `local` AND a zero total, and only the second distinguishes it from a
+        // real answer.
+        assert!(total > 1, "the lockfile parsed to {total} packages");
+        assert_eq!(
+            local,
+            vec!["solana-core", "x402-feed-gate"],
+            "path dependencies changed ({} of {total} packages are local). build.rs \
+             scopes its dirty check to a fixed set, so anything new here is compiled \
+             in while sitting outside that check.",
+            local.len()
+        );
+    }
+
+    /// The control for the case above, and it is not optional.
+    ///
+    /// Written as a planted string rather than by editing the real lockfile,
+    /// because editing it does not work: cargo re-resolves an inconsistent
+    /// lockfile and rewrites it before the test ever opens it, so a mutation
+    /// there passes GREEN while proving nothing. That was measured, not assumed.
+    ///
+    /// The planted shape is not invented either. It is what the two real path
+    /// dependencies look like in this crate's own lockfile: a `[[package]]` block
+    /// with a name and a version and no `source`.
+    #[test]
+    fn a_third_path_dependency_would_be_noticed() {
+        let planted = "\
+[[package]]\nname = \"x402-feed-gate\"\nversion = \"0.1.0\"\n
+[[package]]\nname = \"solana-core\"\nversion = \"0.1.0\"\n
+[[package]]\nname = \"serde\"\nversion = \"1.0.0\"\nsource = \"registry+https://x\"\n
+[[package]]\nname = \"a-new-local-crate\"\nversion = \"0.1.0\"\n";
+
+        let (local, total) = local_packages(planted);
+        assert_eq!(total, 4);
+        assert_eq!(
+            local,
+            vec!["a-new-local-crate", "solana-core", "x402-feed-gate"],
+            "a package with no source was not counted as local, so the case above \
+             would stay green while a new path dependency sat outside the scope"
+        );
+
+        // And the registry package must NOT be counted, or every build would look
+        // like it had a hundred path dependencies and the check would be useless
+        // in the opposite direction.
+        assert!(!local.contains(&"serde"));
+    }
+
+    /// Package names in a lockfile, split into the ones with no `source` (which
+    /// is exactly what a path dependency is) and the total parsed.
+    fn local_packages(lock: &str) -> (Vec<&str>, usize) {
+        let blocks: Vec<&str> = lock.split("[[package]]").skip(1).collect();
+        let mut local: Vec<&str> = blocks
+            .iter()
+            .filter(|b| !b.lines().any(|l| l.trim_start().starts_with("source = ")))
+            .filter_map(|b| {
+                b.lines()
+                    .find_map(|l| l.trim().strip_prefix("name = "))
+                    .map(|v| v.trim_matches('"'))
+            })
+            .collect();
+        local.sort_unstable();
+        (local, blocks.len())
     }
 
     /// The sentinel cannot be mistaken for a commit by a reader or by a
