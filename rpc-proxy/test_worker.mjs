@@ -20,7 +20,7 @@ import worker from "./src/index.js";
 const REF_SETTLED = "9TNKoCvVow1ktRgMMapJ9d9GWhgTYCA9i3r3MZ71FUT2"; // settled, pruned on the fast endpoint
 const REF_UNPAID = "5Zzguz4NsSRFxGkHfM4KmJTNVPMJ2P3jFa2y8bTHY4kW"; // valid pubkey, zero history
 const ORIGIN = "https://belumume.github.io";
-const MIN_OFFLINE = 8; // measured; raise when an offline case is added or this under-asserts
+const MIN_OFFLINE = 10; // measured; raise when an offline case is added or this under-asserts
 
 let pass = 0,
   fail = 0,
@@ -129,6 +129,37 @@ console.log("rpc-proxy controls\n");
   const r6b = await ask(env(), sigsReq(REF_SETTLED));
   check("6b a REJECTING fetch degrades to an error response rather than crashing", r6b.json.error?.code === -32603);
   offlineScored++;
+
+  // 6c/6d. THE NEGATIVE MARKER MUST NOT BE REFRESHED ON A SKIPPED ESCALATION. This is the bug the
+  // last commit fixed, and review pointed out that nothing would have caught it or a regression
+  // back to it -- on a branch whose whole thesis is "make the controls actually run". The KV mock
+  // does not model expirationTtl, so expiry itself is not simulated; what IS asserted is the thing
+  // that went wrong: whether `neg:` gets WRITTEN AGAIN on a call that skipped the escalation.
+  // Unguarded, every 6s poll rewrote it and the 60s TTL never elapsed, so the deep lookup fired
+  // once per session instead of once a minute.
+  {
+    let deepCalls = 0;
+    globalThis.fetch = async (url) => {
+      if (!String(url).includes("publicnode")) deepCalls++;
+      return { ok: true, json: async () => ({ jsonrpc: "2.0", id: 1, result: [] }) };
+    };
+    const e = { ...env(), HELIUS_API_KEY: "test-key-not-a-real-credential" };
+    const negKey = `neg:getSignaturesForAddress:${REF_UNPAID}`;
+
+    await ask(e, sigsReq(REF_UNPAID)); // escalates, writes the marker
+    const afterFirst = e.SETTLEMENTS.store.get(negKey);
+    const deepAfterFirst = deepCalls;
+    e.SETTLEMENTS.store.set(negKey, "SENTINEL"); // a rewrite would clobber this
+    await ask(e, sigsReq(REF_UNPAID)); // marker present -> must SKIP and not rewrite
+
+    check("6c the escalation is skipped while the negative marker is present", deepCalls === deepAfterFirst,
+      `deep calls went ${deepAfterFirst} -> ${deepCalls}`);
+    check("6d and the marker is NOT rewritten on that skip, so its TTL can actually elapse",
+      e.SETTLEMENTS.store.get(negKey) === "SENTINEL",
+      `marker is now ${JSON.stringify(e.SETTLEMENTS.store.get(negKey))}; a rewrite means the TTL refreshes forever`);
+    offlineScored += 2;
+    void afterFirst;
+  }
 
   // SIMULATED, and named so: a real outage cannot be summoned. Everything else here is real.
   globalThis.fetch = async () => ({ ok: false, json: async () => ({}) });
