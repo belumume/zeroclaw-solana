@@ -23,7 +23,7 @@ code and the expectation.
 about behaviour over time. A KAT is one point.
 
 **Unit tests.** 89 in `solana-core`, plus 19 in `oracle-publish`, 41 in
-`payment-watch`, 26 in `x402-feed-gate`. These cover branches, error variants, and
+`payment-watch`, 37 in `x402-feed-gate`. These cover branches, error variants, and
 the specific adversarial cases we thought of. Every one of these counts drifts as its
 suite grows, and a figure repeated across three surfaces goes stale on whichever one
 nobody re-derived. Each is `grep -c '^\s*#\[test\]'` over that crate's sources, so

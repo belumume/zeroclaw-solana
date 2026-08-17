@@ -159,7 +159,7 @@ X402_DAILY_CAP       per-payer atomic-unit daily cap (default 20000000)
 ## Build & test
 
 ```
-cargo test                         # 26 gate tests (verification, cap logic, ledger restart,
+cargo test                         # 37 gate tests (verification, cap logic, ledger restart,
                                    #   /health, x402 v2 wire conformance)
                                    # re-derive: cargo test 2>&1 | grep '^test result'
 cargo clippy --all-targets -- -D warnings
