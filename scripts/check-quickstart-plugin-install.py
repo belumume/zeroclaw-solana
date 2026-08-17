@@ -161,9 +161,33 @@ def manifest_wasm_path(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def package_name(text: str) -> str | None:
-    m = re.search(r'^\s*name\s*=\s*"([^"]+)"', text, re.MULTILINE)
-    return m.group(1) if m else None
+def artifact_name(text: str) -> str | None:
+    """The crate name cargo would build the artifact under, or None.
+
+    SECTION-AWARE ON PURPOSE, and both halves of that were reviewer-caught. A bare first-match
+    for `name = "..."` reads whichever table comes first, so a `[workspace.package]` or a
+    dependency table sitting above `[package]` would be picked up and silently mis-name the
+    artifact -- and a wrong name here reads as the copy step failing, which is a confident red
+    pointing at correct prose.
+
+    `[lib].name` WINS over `[package].name` because that is what cargo does, and it is one line
+    from mattering: every plugin already carries a `[lib]` table, none of them names itself
+    today, and adding a name to one would move the artifact out from under this check.
+
+    Not a TOML parser. It reads top-level table headers and the first `name` inside each, which
+    is the whole of what is needed and cannot be confused by an inline table or an array of
+    tables the way the flat regex could.
+    """
+    section, names = None, {}
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("[") and s.endswith("]"):
+            section = s.strip("[]").strip()
+            continue
+        m = re.match(r'name\s*=\s*"([^"]+)"', s)
+        if m and section is not None and section not in names:
+            names[section] = m.group(1)
+    return names.get("lib") or names.get("package")
 
 
 def build_fixture(root: Path, names: list[str], dest: Path) -> list[str]:
@@ -184,7 +208,7 @@ def build_fixture(root: Path, names: list[str], dest: Path) -> list[str]:
             continue
         try:
             man_text = man.read_text(encoding="utf-8")
-            pkg = package_name(cargo.read_text(encoding="utf-8"))
+            pkg = artifact_name(cargo.read_text(encoding="utf-8"))
         except Exception as exc:
             problems.append(f"plugins/{n} is unreadable ({exc})")
             continue
@@ -362,6 +386,55 @@ def selftest() -> int:
     report(
         "a loop with no build is refused",
         loop_is_safe("for d in plugins/*/; do echo hi; done") is not None,
+    )
+
+    # ---- artifact naming ----------------------------------------------------------------------
+    # Getting this wrong does not look like a naming bug. The stub emits one filename, the
+    # manifest names another, and the gate reports the copy step as broken -- a confident red
+    # against correct prose, which is the failure direction that gets a gate deleted.
+    report(
+        "the package name is read",
+        artifact_name('[package]\nname = "oracle-publish"\n') == "oracle-publish",
+    )
+    report(
+        "a [lib] name WINS, because that is the artifact cargo writes",
+        artifact_name('[package]\nname = "pkg"\n\n[lib]\nname = "lib_override"\n')
+        == "lib_override",
+    )
+    report(
+        "a [lib] with no name of its own leaves the package name standing",
+        artifact_name('[package]\nname = "pkg"\n\n[lib]\ncrate-type = ["cdylib"]\n')
+        == "pkg",
+    )
+    # THE REVIEWER'S CASE. A flat first-match regex returns "shared" here and mis-names every
+    # artifact in the tree.
+    report(
+        "a name in an earlier unrelated table does NOT win",
+        artifact_name(
+            '[workspace.package]\nname = "shared"\n\n[package]\nname = "real"\n'
+        )
+        == "real",
+    )
+    report(
+        "a dependency's name key is not mistaken for the crate's",
+        artifact_name(
+            '[dependencies.serde]\nname = "serde"\n\n[package]\nname = "real"\n'
+        )
+        == "real",
+    )
+    report(
+        "a manifest with no name at all yields None",
+        artifact_name("[package]\n") is None,
+    )
+    # Every real plugin resolves, so the parser is exercised against the tree it guards rather
+    # than against fixtures alone.
+    real_names = [
+        artifact_name((ROOT / "plugins" / n / "Cargo.toml").read_text(encoding="utf-8"))
+        for n in (plugin_dirs(ROOT) or [])
+    ]
+    report(
+        "every real plugin resolves to a name",
+        len(real_names) >= FLOOR and all(real_names),
     )
 
     # ---- the verdict, both directions, against the REAL tree ----------------------------------
