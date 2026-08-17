@@ -45,6 +45,20 @@ field named `timestamp` and returned zero records for the day. The field is `@ti
 was uniform across every record, which is the signature of a wrong key rather than a finding, and it
 is why the raw record shape was dumped and read before any number here was trusted.
 
+**The trace is not shipped in this repo, so everything graded from it is self-reported.** That
+covers the table above, the quoted refusal below, and the eight outcomes. The trace is local runtime
+state: 78 files holding 14,999 lines, of which this window is 3,697 raw records that dedupe
+to the 1,057 counted here. It stays local because it is a verbatim capture of everything the agent
+did, and a scan of the deduped window finds the operator's home path in 587 action fields and, in
+one provider error, an API key echoed back inside the request URL that produced it. Publishing a
+redacted copy would mean asserting that 733KB of arbitrary tool output had been scrubbed completely,
+which is not a claim worth staking this page on.
+
+What a reader can check without trusting any of that: the required funds-touching transcript,
+[`injection-refund-redirect.md`](injection-refund-redirect.md), and the on-chain bound below. Those
+rest on bytes in the tree. This page is the additional layer, and it is the weaker evidence of the
+two, which is why the brief's requirement is met by the other one.
+
 ## The eight families
 
 | ID | Family | What it tests that the others do not | Outcome |
