@@ -438,6 +438,12 @@ fn handle_health(
     });
     drop(guard);
 
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let channels = channels_json(read_shop_log(), now, CHANNEL_FRESH_SECS);
+
     let body = serde_json::json!({
         "gate": "ok",
         "shop": {
@@ -446,6 +452,7 @@ fn handle_health(
             "state": state,
             "trace_age_seconds": trace_age,
         },
+        "channels": channels,
         "ledger": ledger_json,
         "proves": "this gate answered, plus the shop unit's state and when it last \
                    handled traffic. The ledger block is the per-payer daily cap made \
@@ -454,13 +461,391 @@ fn handle_health(
                    log rather than handing every payer a fresh allowance, which is what \
                    a Restart=always unit would otherwise do on every restart. Counts and \
                    sums only, never payers or nonces, because this endpoint is public. \
-                   Does NOT prove the channel binding or the model provider are working: \
-                   only a synthetic round-trip proves those. A restored count of zero is \
+                   The channels block reports the newest send outcome the shop log \
+                   records per channel: a `connected` entry is positive evidence that \
+                   the channel binding delivered a message that recently, and it is the \
+                   ONLY value here that is evidence of anything working. `stale`, \
+                   `unknown` and an empty observed map are all absence of evidence and \
+                   must never be read as health, but neither do they prove the channel \
+                   binding is broken, because this shop sends only when a customer \
+                   writes to it and silence is what a quiet shop looks like. Read \
+                   send_records_found against lines_scanned before believing a zero: \
+                   zero of zero means nothing was read, and zero of many means the log \
+                   holds no record this parser recognises. It does not prove the model \
+                   provider is reachable, and only a synthetic round-trip proves that. \
+                   A restored count of zero is \
                    also the honest answer on a node that has genuinely sold nothing yet, \
                    so it is evidence of survival only once sales exist.",
     })
     .to_string();
     (200, body, None)
+}
+
+/// How old the newest successful send may be and still be reported as `connected`.
+///
+/// TWENTY-FOUR HOURS, and what matters is the direction it errs in rather than the
+/// number. This shop is traffic-driven: the note on `handle_health` records that
+/// 200 sampled trace records contain no heartbeat and no periodic poll anywhere,
+/// and the one periodic unit on the box only sends when a payment actually
+/// settles. So there is no send this endpoint can expect on a schedule, and a
+/// tight window would paint a perfectly healthy shop that nobody messaged
+/// overnight as broken. That is the same conflation of QUIET with DEAD that hid
+/// the 2026-07-26 outage, pointed the other way, and a liveness line that cries
+/// wolf stops being read at all.
+///
+/// A day is long enough that a quiet night cannot trip it, and short enough that a
+/// channel which fell off its session days ago stops being quoted as evidence.
+/// Past it the verdict is `stale`, never `disconnected`: an absence of sends is not
+/// proof of death, and claiming otherwise would be the same overreach in reverse.
+const CHANNEL_FRESH_SECS: u64 = 86_400;
+
+/// How much of the tail of the shop log to read on each request.
+///
+/// This endpoint is public and unauthenticated, so an unbounded read of a file
+/// that grows forever is a denial-of-service lever pointed at ourselves. Only the
+/// NEWEST record per channel is wanted, and that lives at the end.
+const CHANNEL_LOG_TAIL_BYTES: u64 = 1_048_576;
+
+/// The outcome of one send, as recovered from the shop log.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SendOutcome {
+    ok: bool,
+    /// Epoch seconds, and only when the record carried a timestamp this parser
+    /// could read as a number. `None` means the send happened at a time we cannot
+    /// establish, which is deliberately NOT the same as recently.
+    at: Option<u64>,
+}
+
+/// Where the shop daemon's stdout lands.
+///
+/// `HOME`-derived for the same reason `trace_age` is: the deployed copy must not
+/// carry an operator username and this response is public.
+///
+/// `ZC_SHOP_LOG` overrides it because the SOURCE is the weakest part of this whole
+/// block. See `scan_send_records` for what is and is not established about it.
+fn shop_log_path() -> Option<String> {
+    if let Ok(p) = std::env::var("ZC_SHOP_LOG") {
+        if !p.trim().is_empty() {
+            return Some(p);
+        }
+    }
+    std::env::var("HOME")
+        .ok()
+        .map(|h| format!("{h}/.zeroclaw/daemon.log"))
+}
+
+/// Read the tail of the shop log, with its mtime.
+///
+/// The error strings deliberately carry no path. std's fs errors do not append
+/// one, and the path holds `$HOME`, which would put an operator username in a
+/// public body.
+fn read_shop_log() -> Result<(String, Option<u64>, bool), String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let path = shop_log_path()
+        .ok_or_else(|| "HOME is unset, so the shop log cannot be located".to_string())?;
+    let meta = std::fs::metadata(&path).map_err(|e| format!("shop log unreadable: {e}"))?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+
+    let len = meta.len();
+    let start = len.saturating_sub(CHANNEL_LOG_TAIL_BYTES);
+    let mut f = std::fs::File::open(&path).map_err(|e| format!("shop log unreadable: {e}"))?;
+    if start > 0 {
+        f.seek(SeekFrom::Start(start))
+            .map_err(|e| format!("shop log unreadable: {e}"))?;
+    }
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)
+        .map_err(|e| format!("shop log unreadable: {e}"))?;
+
+    // Lossy on purpose: a log is not guaranteed UTF-8 and refusing to answer
+    // because one byte was not would turn a cosmetic fault into an outage. A
+    // replacement character cannot forge a record, since every field this parser
+    // accepts is checked for shape.
+    let text = String::from_utf8_lossy(&buf).into_owned();
+    // A seek lands mid-line, and half a line is not a record. Dropping it keeps
+    // lines_scanned honest as well: a truncated line would be counted as read.
+    let text = if start > 0 {
+        text.split_once('\n')
+            .map(|(_, rest)| rest.to_string())
+            .unwrap_or_default()
+    } else {
+        text
+    };
+    Ok((text, mtime, start > 0))
+}
+
+/// Is this the shape of a channel ref (`<type>` or `<type>.<alias>`)?
+///
+/// Prose sitting under a `channel` key does not match, and neither does a
+/// sentence, so a line has to be machine-written to qualify as a record.
+fn is_channel_ref(s: &str) -> bool {
+    if s.is_empty() || s.len() > 64 || s.starts_with('.') || s.ends_with('.') {
+        return false;
+    }
+    let mut dots = 0;
+    for c in s.chars() {
+        match c {
+            'a'..='z' | '0'..='9' | '_' | '-' => {}
+            '.' => {
+                dots += 1;
+                if dots > 1 {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// Did this record report a send that landed?
+///
+/// Resolved by candidate list rather than one hardcoded key, because the emitter
+/// is upstream's and its field names are external identifiers that rot. A status
+/// string this does not recognise returns `None` rather than a guess: the
+/// memory-store records in a real log carry `"status":"stored"`, and reading an
+/// unrecognised status as either outcome would invent a verdict.
+fn send_outcome(obj: &serde_json::Map<String, serde_json::Value>) -> Option<bool> {
+    for key in ["status", "result", "outcome"] {
+        if let Some(s) = obj.get(key).and_then(|v| v.as_str()) {
+            return match s.trim().to_ascii_lowercase().as_str() {
+                "success" | "sent" | "delivered" | "ok" => Some(true),
+                "error" | "failed" | "failure" | "err" => Some(false),
+                _ => None,
+            };
+        }
+    }
+    for key in ["success", "ok", "delivered"] {
+        if let Some(b) = obj.get(key).and_then(|v| v.as_bool()) {
+            return Some(b);
+        }
+    }
+    None
+}
+
+/// When did this record happen, in epoch seconds?
+///
+/// NUMBERS ONLY, AND THAT IS A DECISION RATHER THAN AN OMISSION. A record whose
+/// time cannot be read is reported as undatable and can never reach `connected`,
+/// so the cost of not parsing a string timestamp is an honest `unknown` while the
+/// cost of parsing one wrong is a fabricated `connected`. Only one of those two
+/// errors is recoverable by a reader.
+fn record_epoch(obj: &serde_json::Map<String, serde_json::Value>) -> Option<u64> {
+    for key in ["timestamp", "ts", "time", "at", "sent_at", "observed_at"] {
+        let Some(v) = obj.get(key) else { continue };
+        let n = if let Some(u) = v.as_u64() {
+            u
+        } else if let Some(f) = v.as_f64() {
+            if f <= 0.0 {
+                continue;
+            }
+            f as u64
+        } else {
+            continue;
+        };
+        // Milliseconds when the value is far past any plausible second count.
+        return Some(if n > 100_000_000_000 { n / 1000 } else { n });
+    }
+    None
+}
+
+/// Recover the NEWEST send record per channel id from the shop log.
+///
+/// WHAT IS ESTABLISHED ABOUT THE FORMAT, stated here because the honest answer is
+/// "less than you would want". A real shop log is the daemon's stdout: mostly
+/// prose, with tool results printed as whole-line compact JSON. That is the shape
+/// this reads. What could NOT be established from any source reachable off the box
+/// is that a send emits a record with these fields at all: no code in the host
+/// tree and none in this repo writes one. So a zero here is at least as likely to
+/// mean the assumption is wrong as it is to mean nothing was sent, which is
+/// exactly why the block reports `lines_scanned` beside `send_records_found` and
+/// why every path short of a dated success reports `unknown`.
+///
+/// WHOLE-LINE JSON ONLY, which is a filter and NOT the defence against fiction.
+/// This log is known to contain model-authored text that imitates tool output,
+/// including invented channel ids that resolve from nowhere in any config. A
+/// whole-line parse rejects the forms actually observed, where the imitation sits
+/// inside a `print(...)` call or a comment, and it rejects the substring search
+/// that would otherwise swallow those whole. It does NOT reject a model that
+/// happens to print a well-formed object on its own line.
+///
+/// THE REAL DEFENCE IS DATABILITY, and it lives in `channel_verdict`: nothing
+/// reaches `connected` without a numeric timestamp inside the freshness window.
+/// The observed fabrications are frozen in the past and carry string timestamps,
+/// so they land on `unknown` or `stale` whatever they claim. The honest ceiling is
+/// that a fabrication carrying a fresh numeric epoch would still be believed, and
+/// no parser reading this log can close that.
+///
+/// LAST OCCURRENCE WINS, because the log is append-only, so file order is time
+/// order and the last record for a channel is its newest.
+fn scan_send_records(log: &str) -> (usize, std::collections::BTreeMap<String, SendOutcome>) {
+    let mut scanned = 0usize;
+    let mut latest = std::collections::BTreeMap::new();
+    for line in log.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        scanned += 1;
+        if !line.starts_with('{') {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(obj) = v.as_object() else { continue };
+        let Some(channel) = obj.get("channel").and_then(|c| c.as_str()) else {
+            continue;
+        };
+        if !is_channel_ref(channel) {
+            continue;
+        }
+        // A send record names who it was sent to. Requiring it is what separates a
+        // send from every other record that happens to carry a channel and a status.
+        let addressed = obj
+            .get("target")
+            .and_then(|t| t.as_str())
+            .is_some_and(|s| !s.trim().is_empty());
+        if !addressed {
+            continue;
+        }
+        let Some(ok) = send_outcome(obj) else {
+            continue;
+        };
+        latest.insert(
+            channel.to_string(),
+            SendOutcome {
+                ok,
+                at: record_epoch(obj),
+            },
+        );
+    }
+    (scanned, latest)
+}
+
+/// Turn one channel's newest outcome into its reported verdict.
+///
+/// FOUR STATES, and only one of them is good news.
+///   `connected` a dated success inside the freshness window. Positive evidence.
+///   `failing`   the newest record is a failure. Positive evidence, the bad kind.
+///   `stale`     a success we can show is older than the window.
+///   `unknown`   a success we cannot date, so we decline to call it recent.
+///
+/// THE MTIME IS SOUND IN EXACTLY ONE DIRECTION and the code leans on that. A
+/// record cannot be newer than the file's last write, so the file's age is a LOWER
+/// BOUND on the record's age. A lower bound past the window therefore proves the
+/// record is stale. A lower bound inside the window proves nothing at all, because
+/// the record may still be from last year, so that case reports `unknown` rather
+/// than borrowing the file's freshness for a record that has none.
+fn channel_verdict(
+    o: &SendOutcome,
+    now: u64,
+    mtime_age: Option<u64>,
+    stale_after: u64,
+) -> serde_json::Value {
+    if !o.ok {
+        return serde_json::json!({
+            "status": "failing",
+            "last_success_age_seconds": null,
+            "age_basis": "none",
+            "detail": "the newest send record on this channel reports a failure",
+        });
+    }
+    if let Some(at) = o.at {
+        let age = now.saturating_sub(at);
+        let fresh = age <= stale_after;
+        return serde_json::json!({
+            "status": if fresh { "connected" } else { "stale" },
+            "last_success_age_seconds": age,
+            "age_basis": "record_timestamp",
+            "detail": if fresh {
+                "a send on this channel landed within the freshness window"
+            } else {
+                "the newest successful send is older than the freshness window, which \
+                 is what a quiet shop and a dropped session look like alike"
+            },
+        });
+    }
+    match mtime_age {
+        Some(m) if m > stale_after => serde_json::json!({
+            "status": "stale",
+            "last_success_age_seconds": m,
+            "age_basis": "log_mtime_lower_bound",
+            "detail": "the record carries no readable timestamp, but the whole log has \
+                       not been written to inside the window, so the send is at least \
+                       this old",
+        }),
+        _ => serde_json::json!({
+            "status": "unknown",
+            "last_success_age_seconds": null,
+            "age_basis": "none",
+            "detail": "a successful send is recorded but carries no readable timestamp, \
+                       so it cannot be shown to be recent and is not counted as evidence",
+        }),
+    }
+}
+
+/// The `channels` block.
+///
+/// Takes its inputs rather than reading the world, so both directions are
+/// drivable from a test: a log with a fresh success must report `connected`, and a
+/// log without one must not.
+fn channels_json(
+    loaded: Result<(String, Option<u64>, bool), String>,
+    now: u64,
+    stale_after: u64,
+) -> serde_json::Value {
+    let (text, mtime, tail_only) = match loaded {
+        Ok(v) => v,
+        // An absent or unreadable log is reported as unknown rather than as a dead
+        // channel, for the same reason a missing `systemctl` is: claiming an outage
+        // because the instrument is missing is worse than reporting it is missing.
+        Err(reason) => {
+            return serde_json::json!({
+                "source": "shop daemon log",
+                "log_readable": false,
+                "tail_only": false,
+                "lines_scanned": 0,
+                "send_records_found": 0,
+                "stale_after_seconds": stale_after,
+                "observed": {},
+                "detail": reason,
+            });
+        }
+    };
+
+    let (scanned, latest) = scan_send_records(&text);
+    let mtime_age = mtime.map(|m| now.saturating_sub(m));
+    let mut observed = serde_json::Map::new();
+    for (channel, outcome) in &latest {
+        observed.insert(
+            channel.clone(),
+            channel_verdict(outcome, now, mtime_age, stale_after),
+        );
+    }
+
+    // EVERY CHANNEL ID SEEN GETS ITS OWN ENTRY, none are merged and none are
+    // filtered against a list of ids we believe are real. An invented id is then
+    // VISIBLE to whoever reads this rather than silently folded into a real
+    // channel's verdict, and this block needs no copy of the channel config to
+    // rot against.
+    serde_json::json!({
+        "source": "shop daemon log",
+        "log_readable": true,
+        "tail_only": tail_only,
+        "lines_scanned": scanned,
+        "send_records_found": latest.len(),
+        "stale_after_seconds": stale_after,
+        "observed": observed,
+        "detail": "the newest send outcome per channel id. Only `connected` is \
+                   evidence the channel works; read send_records_found against \
+                   lines_scanned before believing an empty result.",
+    })
 }
 
 /// What the startup rebuild found, kept so `/health` can report it.
@@ -902,6 +1287,18 @@ mod health_tests {
             lower.contains("model provider"),
             "limit is not specific: {body}"
         );
+        // Added with the channels block. The block makes a partial claim about the
+        // channel binding, so the honesty clause has to say which value is
+        // evidence and which are merely the absence of it. Without this a reader
+        // takes any channels block at all as a green light.
+        assert!(
+            lower.contains("absence of evidence"),
+            "the channels clause must say what a non-connected value is NOT: {body}"
+        );
+        assert!(
+            lower.contains("connected"),
+            "the channels clause must name the only value that is evidence: {body}"
+        );
     }
 
     /// A missing `systemctl` must read as unknown, never as a dead shop. On a
@@ -1006,6 +1403,340 @@ mod health_tests {
             v["ledger"]["lock_healthy"], false,
             "a poisoned lock must be reported, not hidden behind normal-looking numbers"
         );
+    }
+
+    // ---- channels block -------------------------------------------------
+    //
+    // Driven through `channels_json` rather than through `handle_health`, so no
+    // case depends on an env var or on a file existing. Two tests here would set
+    // `ZC_SHOP_LOG` and race each other, because cargo runs them as threads in one
+    // process, and the flake would read as a broken parser.
+
+    const NOW: u64 = 1_800_000_000;
+    const DAY: u64 = 86_400;
+
+    /// A shop log that looks like a real one: mostly prose, with tool results
+    /// printed as whole-line compact JSON, and one memory-store record whose
+    /// `"status":"stored"` must not be mistaken for a send.
+    fn log_with(records: &[&str]) -> String {
+        let mut s = String::from(
+            "🦀 ZeroClaw Channel Server\n  📡 Channels: telegram.shop, whatsapp.shop\n\
+             \n  Listening for messages... (Ctrl+C to stop)\n\
+             {\"category\":\"daily\",\"key\":\"sensor_state\",\"status\":\"stored\"}\n\
+             {\"exit_code\":0,\"stderr\":\"\",\"stdout\":\"1784900098\\n\"}\n",
+        );
+        for r in records {
+            s.push_str(r);
+            s.push('\n');
+        }
+        s
+    }
+
+    fn ok_record(channel: &str, at: u64) -> String {
+        format!(
+            "{{\"status\":\"success\",\"channel\":\"{channel}\",\
+             \"target\":\"+15550100\",\"timestamp\":{at}}}"
+        )
+    }
+
+    fn observed(v: &serde_json::Value, channel: &str) -> serde_json::Value {
+        v["observed"][channel].clone()
+    }
+
+    /// THE CONTROL, and it is the whole point of this block. A check that can only
+    /// ever report health is worth less than no check, because it launders an
+    /// absence of information into a green.
+    ///
+    /// Three directions, because two would still leave the interesting one
+    /// untested. A fresh dated success must read `connected`. A log with no send
+    /// record at all must not, and must report nothing rather than something
+    /// reassuring. And a success that is real but OLD must not read `connected`
+    /// either, which is the case a naive "did we ever succeed" parser passes.
+    #[test]
+    fn only_a_fresh_dated_success_reads_connected() {
+        // Direction 1: fresh.
+        let fresh = channels_json(
+            Ok((
+                log_with(&[&ok_record("whatsapp.shop", NOW - 300)]),
+                Some(NOW),
+                false,
+            )),
+            NOW,
+            DAY,
+        );
+        assert_eq!(observed(&fresh, "whatsapp.shop")["status"], "connected");
+        assert_eq!(
+            observed(&fresh, "whatsapp.shop")["last_success_age_seconds"],
+            300
+        );
+        assert_eq!(
+            observed(&fresh, "whatsapp.shop")["age_basis"],
+            "record_timestamp"
+        );
+        assert_eq!(fresh["send_records_found"], 1);
+
+        // Direction 2: a log that is perfectly readable and holds no send at all.
+        // It must report an empty map, NOT a channel in some hopeful state.
+        let none = channels_json(Ok((log_with(&[]), Some(NOW), false)), NOW, DAY);
+        assert_eq!(none["log_readable"], true);
+        assert_eq!(none["send_records_found"], 0);
+        assert_eq!(
+            none["observed"].as_object().map(serde_json::Map::len),
+            Some(0),
+            "an empty log must observe no channels: {none}"
+        );
+        // The denominator, which is what makes that zero readable. Zero of zero
+        // and zero of many are different verdicts about this parser.
+        assert!(
+            none["lines_scanned"].as_u64().unwrap_or(0) >= 5,
+            "the scan denominator must be reported: {none}"
+        );
+
+        // Direction 3: a real success, dated, but older than the window.
+        let stale = channels_json(
+            Ok((
+                log_with(&[&ok_record("whatsapp.shop", NOW - (3 * DAY))]),
+                Some(NOW),
+                false,
+            )),
+            NOW,
+            DAY,
+        );
+        assert_eq!(observed(&stale, "whatsapp.shop")["status"], "stale");
+        assert_ne!(observed(&stale, "whatsapp.shop")["status"], "connected");
+        assert_eq!(
+            observed(&stale, "whatsapp.shop")["last_success_age_seconds"],
+            3 * DAY
+        );
+    }
+
+    /// An absent or unreadable log must read unknown, never as a dead channel, on
+    /// exactly the reasoning that governs a missing `systemctl` above: an outage
+    /// claimed because the instrument is missing is worse than a reported missing
+    /// instrument.
+    ///
+    /// The paired direction is that the failure must not be silent either. A block
+    /// that simply omitted itself would be indistinguishable from a shop with no
+    /// channels, so `log_readable` has to be present and false.
+    #[test]
+    fn an_unreadable_log_is_unknown_rather_than_a_dead_channel() {
+        let v = channels_json(Err("shop log unreadable: not found".into()), NOW, DAY);
+        assert_eq!(v["log_readable"], false);
+        assert_eq!(v["send_records_found"], 0);
+        assert_eq!(v["lines_scanned"], 0);
+        assert_eq!(v["observed"].as_object().map(serde_json::Map::len), Some(0));
+        assert!(
+            v["detail"].as_str().is_some_and(|d| !d.is_empty()),
+            "an unreadable log must say why: {v}"
+        );
+        // And it must not carry the path, which holds $HOME and would put an
+        // operator username in a public body.
+        assert!(!v.to_string().contains("/home/"), "path leaked: {v}");
+    }
+
+    /// The one state that IS positive evidence of a broken channel. Without it the
+    /// block could only ever say "yes" or "I do not know", and a send that is
+    /// actively failing would be reported the same as a shop nobody messaged.
+    #[test]
+    fn a_failed_send_is_reported_as_failing_not_as_silence() {
+        let failed = "{\"status\":\"failed\",\"channel\":\"telegram.shop\",\
+                      \"target\":\"6740286943\",\"timestamp\":1799999900}";
+        let v = channels_json(Ok((log_with(&[failed]), Some(NOW), false)), NOW, DAY);
+        assert_eq!(observed(&v, "telegram.shop")["status"], "failing");
+        assert_eq!(v["send_records_found"], 1);
+
+        // The control: the same channel with a success at the same instant reads
+        // the other way, so the verdict tracks the record rather than the channel.
+        let v2 = channels_json(
+            Ok((
+                log_with(&[&ok_record("telegram.shop", 1_799_999_900)]),
+                Some(NOW),
+                false,
+            )),
+            NOW,
+            DAY,
+        );
+        assert_eq!(observed(&v2, "telegram.shop")["status"], "connected");
+    }
+
+    /// A success nobody can date is not a recent success. This is the case that
+    /// decides whether the block can be fooled, so both branches are pinned.
+    #[test]
+    fn an_undatable_success_never_reads_connected() {
+        let undated =
+            "{\"status\":\"success\",\"channel\":\"whatsapp.shop\",\"target\":\"+15550100\"}";
+
+        // A fresh log gives the record no freshness of its own: the file being
+        // written a moment ago says nothing about when this line was appended.
+        let fresh_file = channels_json(Ok((log_with(&[undated]), Some(NOW), false)), NOW, DAY);
+        assert_eq!(observed(&fresh_file, "whatsapp.shop")["status"], "unknown");
+        assert_eq!(
+            observed(&fresh_file, "whatsapp.shop")["last_success_age_seconds"],
+            serde_json::Value::Null
+        );
+
+        // A log untouched for a week proves the record is at least that old, which
+        // is the one direction an mtime is sound in.
+        let old_file = channels_json(
+            Ok((log_with(&[undated]), Some(NOW - (7 * DAY)), false)),
+            NOW,
+            DAY,
+        );
+        assert_eq!(observed(&old_file, "whatsapp.shop")["status"], "stale");
+        assert_eq!(
+            observed(&old_file, "whatsapp.shop")["age_basis"],
+            "log_mtime_lower_bound"
+        );
+    }
+
+    /// The shop log is known to contain model-authored text imitating tool output,
+    /// with invented channel ids that resolve from nowhere in any config. A parser
+    /// that believed it would report a channel healthy on the strength of fiction,
+    /// which is this whole task's failure class wearing a green badge.
+    ///
+    /// TWO SHAPES, because they are defeated by two different mechanisms and only
+    /// testing the easy one would overstate the defence.
+    #[test]
+    fn model_authored_imitations_of_tool_output_do_not_read_as_connected() {
+        // Shape 1, as actually observed: the imitation sits inside a call and a
+        // comment, so it is not a whole-line object and never becomes a record.
+        let embedded = "  print(send_message_to_peer(channel='whatsapp.default', \
+                        target='+15550100', message='settled'))\n  \
+                        # {\"status\": \"success\", \"channel\": \"whatsapp.default\", \
+                        \"target\": \"+15550100\"}";
+        let v = channels_json(Ok((log_with(&[embedded]), Some(NOW), false)), NOW, DAY);
+        assert_eq!(
+            v["send_records_found"], 0,
+            "an imitation inside prose became a record: {v}"
+        );
+        assert_eq!(v["observed"].as_object().map(serde_json::Map::len), Some(0));
+
+        // Shape 2, the harder one: a well-formed object on its own line, with the
+        // string timestamp and the invented channel id the real fabrication used.
+        // It DOES become a record, and that is correct -- nothing in the bytes
+        // marks it as fiction. What must hold is that it cannot reach `connected`,
+        // because its timestamp is not a number this parser will date.
+        let standalone = "{\"status\": \"success\", \"channel\": \"whatsapp.default\", \
+                          \"target\": \"YetAnotherSenderWalletAddress\", \
+                          \"timestamp\": \"2026-07-27T10:00:00Z\"}";
+        let v2 = channels_json(Ok((log_with(&[standalone]), Some(NOW), false)), NOW, DAY);
+        assert_eq!(v2["send_records_found"], 1);
+        assert_eq!(observed(&v2, "whatsapp.default")["status"], "unknown");
+        assert_ne!(observed(&v2, "whatsapp.default")["status"], "connected");
+
+        // And it is reported under its own invented id rather than folded into a
+        // real channel, so an operator reading this sees the invention.
+        assert!(
+            v2["observed"].get("whatsapp.shop").is_none(),
+            "an invented id must not be merged into a real channel: {v2}"
+        );
+    }
+
+    /// Channels are reported independently. A healthy one must not vouch for a
+    /// broken one, which is what any rolled-up boolean would have done.
+    #[test]
+    fn one_healthy_channel_does_not_vouch_for_another() {
+        let bad = "{\"status\":\"error\",\"channel\":\"telegram.shop\",\
+                   \"target\":\"6740286943\",\"timestamp\":1799999000}";
+        let v = channels_json(
+            Ok((
+                log_with(&[&ok_record("whatsapp.shop", NOW - 60), bad]),
+                Some(NOW),
+                false,
+            )),
+            NOW,
+            DAY,
+        );
+        assert_eq!(observed(&v, "whatsapp.shop")["status"], "connected");
+        assert_eq!(observed(&v, "telegram.shop")["status"], "failing");
+        assert_eq!(v["send_records_found"], 2);
+    }
+
+    /// The log is append-only, so the last record for a channel is its newest. A
+    /// parser that kept the FIRST hit would keep reporting a months-old success
+    /// after the channel started failing, which is the worst available error.
+    #[test]
+    fn the_newest_record_wins_not_the_first() {
+        let old_ok = ok_record("whatsapp.shop", NOW - 120);
+        let new_bad = "{\"status\":\"failed\",\"channel\":\"whatsapp.shop\",\
+                       \"target\":\"+15550100\",\"timestamp\":1799999990}";
+        let v = channels_json(
+            Ok((log_with(&[&old_ok, new_bad]), Some(NOW), false)),
+            NOW,
+            DAY,
+        );
+        assert_eq!(
+            observed(&v, "whatsapp.shop")["status"],
+            "failing",
+            "a later failure must supersede an earlier success: {v}"
+        );
+
+        // The control, same two records in the other order.
+        let v2 = channels_json(
+            Ok((log_with(&[new_bad, &old_ok]), Some(NOW), false)),
+            NOW,
+            DAY,
+        );
+        assert_eq!(observed(&v2, "whatsapp.shop")["status"], "connected");
+    }
+
+    /// Records that are not sends must not be counted as sends. A real log carries
+    /// tool results with a `status` field that has nothing to do with a channel,
+    /// and the `"status":"stored"` line in the fixture is one of them.
+    #[test]
+    fn non_send_records_are_not_counted_as_sends() {
+        let near_misses = [
+            // A status we do not recognise is not an outcome.
+            "{\"status\":\"queued\",\"channel\":\"whatsapp.shop\",\"target\":\"+1\"}",
+            // No target: not addressed to anyone, so not a send.
+            "{\"status\":\"success\",\"channel\":\"whatsapp.shop\"}",
+            // Prose under a channel key is not a channel ref.
+            "{\"status\":\"success\",\"channel\":\"the whatsapp one\",\"target\":\"+1\"}",
+            // An empty target is the same as none.
+            "{\"status\":\"success\",\"channel\":\"whatsapp.shop\",\"target\":\"  \"}",
+        ];
+        for line in near_misses {
+            let v = channels_json(Ok((log_with(&[line]), Some(NOW), false)), NOW, DAY);
+            assert_eq!(v["send_records_found"], 0, "counted a non-send: {line}");
+        }
+
+        // The over-correction control. The filters above must not be so tight that
+        // a genuine record stops matching, which is how a narrowing silently turns
+        // a check off. Same fixture, one real record added.
+        let v = channels_json(
+            Ok((
+                log_with(&[&ok_record("whatsapp.shop", NOW - 30)]),
+                Some(NOW),
+                false,
+            )),
+            NOW,
+            DAY,
+        );
+        assert_eq!(
+            v["send_records_found"], 1,
+            "the filters reject a real record: {v}"
+        );
+    }
+
+    /// `handle_health` must actually carry the block. The pure-function tests above
+    /// prove the logic and would all pass with the block wired to nothing.
+    #[test]
+    fn the_health_body_carries_the_channels_block() {
+        let (_, body, _) = health_empty();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let c = &v["channels"];
+        assert!(
+            c.is_object(),
+            "no channels block in the health body: {body}"
+        );
+        assert!(c["log_readable"].is_boolean());
+        assert!(
+            c["lines_scanned"].is_u64(),
+            "the denominator must be numeric"
+        );
+        assert!(c["send_records_found"].is_u64());
+        assert!(c["observed"].is_object());
+        assert_eq!(c["stale_after_seconds"], CHANNEL_FRESH_SECS);
     }
 }
 
