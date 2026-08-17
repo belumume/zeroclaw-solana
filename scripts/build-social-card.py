@@ -99,12 +99,35 @@ FONT_SETS = [
         "C:/Windows/Fonts/NotoSans-Bold.ttf",
     ),
     (
-        "DejaVu Sans",
+        "DejaVu (system)",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     ),
+    (
+        "DejaVu (system, non-Debian layout)",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    ),
+    (
+        "macOS (Helvetica)",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Helvetica.ttc",
+    ),
     ("Arial", "C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
 ]
+
+
+def _matplotlib_dejavu():
+    """matplotlib ships DejaVu. Used only if no system font resolved, never imported first."""
+    try:
+        import matplotlib
+    except Exception:
+        return None
+    d = pathlib.Path(matplotlib.__file__).parent / "mpl-data" / "fonts" / "ttf"
+    reg, bold = d / "DejaVuSans.ttf", d / "DejaVuSans-Bold.ttf"
+    if reg.is_file() and bold.is_file():
+        return ("DejaVu (matplotlib copy)", str(reg), str(bold))
+    return None
 
 
 def resolve_fonts():
@@ -112,6 +135,10 @@ def resolve_fonts():
         if pathlib.Path(reg).exists() and pathlib.Path(bold).exists():
             print(f"  font: {name}  ({reg})")
             return reg, bold
+    mpl = _matplotlib_dejavu()
+    if mpl:
+        print(f"  font: {mpl[0]}  ({mpl[1]})")
+        return mpl[1], mpl[2]
     sys.exit("no usable font found; refusing to render in an unknown face")
 
 
@@ -275,10 +302,18 @@ def main():
         "--refresh", action="store_true", help="re-measure the figures from chain first"
     )
     a = ap.parse_args()
+    # Pre-check rather than letting render() raise: a missing Pillow is a setup problem with a
+    # one-line fix, and a raw ModuleNotFoundError from inside the renderer reads like a code bug.
+    import importlib.util
+
+    if importlib.util.find_spec("PIL") is None:
+        print("FAIL  Pillow is required to render. pip install Pillow")
+        return 2
     if a.refresh:
         refresh()
     render(a.out)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
