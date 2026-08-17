@@ -1016,13 +1016,11 @@ def main():
             "env": "asserted by a build-time override rather than observed",
             "unavailable": "the build had no repository, so this is a placeholder rather than "
             "a commit",
-            # A source of the wrong type is looked up as None rather than as itself: a list is
-            # unhashable and would raise here, which is the same crash-the-whole-run failure the
-            # type guard above exists to prevent, one line further down.
-        }.get(
-            source if isinstance(source, str) else None,
-            f"source {source!r} is not one this verifier recognises",
-        )
+            # `source` is str-or-None by construction: it is selected by an isinstance filter
+            # where it is bound, so a list can never reach this lookup and be unhashable here.
+            # A None reads as an unrecognised source and takes the default, which is the right
+            # answer for a commit that arrived without one.
+        }.get(source, f"source {source!r} is not one this verifier recognises")
         # ISINSTANCE, NOT TRUTHINESS, and this branch is reachable with a perfectly good commit:
         # one route can answer with a readable commit while the OTHER answers with a number or a
         # non-object gate. `commit` then resolves from the good route and lands here, where a
