@@ -219,6 +219,12 @@ def _github_blob_verdict(url):
     # regardless of the commit it pinned. The mirror case is worse: where a file exists only at the
     # pinned ref, the same mangling 404s and `_UNAMBIGUOUS_REF` trusts it, failing a live link.
     path = path.split("#", 1)[0].split("?", 1)[0]
+    # The REF needs the same treatment, and for the same reason. `_GH_BLOB` captures it as `[^/]+`,
+    # which happily accepts a `?`, so a malformed `blob/deadbeef?plain=1/docs/x.md` would rebuild
+    # the exact double-`?` this function just stopped producing on the path side. A well-formed
+    # GitHub URL cannot put a query mid-path, so this is not reachable from a real link today --
+    # but the whole class of defect in this file has been "the half I did not think to strip".
+    ref = ref.split("#", 1)[0].split("?", 1)[0]
     # Quote the path so a space or other reserved character cannot inject further URL structure.
     # `safe="/"` keeps directory separators, which the contents API needs verbatim.
     quoted = urllib.parse.quote(path, safe="/")

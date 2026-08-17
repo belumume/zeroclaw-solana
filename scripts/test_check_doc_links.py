@@ -39,12 +39,14 @@ passed = failed = notrun = 0
 # the suite printed "16 passed, 0 failed" -- byte-identical to its pre-API-routing count -- because
 # the whole github block short-circuits to NOT RUN. That is indistinguishable from success in an
 # exit code, and the block's own comment calls those controls "the point". Assert the count.
-# 28 is MEASURED, not chosen: it is the count that runs with `gh` auth cleared, so the floor is the
+# 30 is MEASURED, not chosen: it is the count that runs with `gh` auth cleared, so the floor is the
 # offline baseline and any silent loss of an offline case goes red. It is deliberately NOT the
-# with-auth total (37), because the github block is legitimately allowed to be unavailable.
-# Calibrated in both directions before shipping: raising this to 999 exits 1 with a legible message,
-# leaving it at 28 exits 0 -- an uncalibrated floor is decorative.
-MIN_CASES_OFFLINE = 28
+# with-auth total (39), because the github block is legitimately allowed to be unavailable.
+# Calibrated in both directions before shipping: raising it to 999 exits 1 with a legible message,
+# leaving it at the measured value exits 0 -- an uncalibrated floor is decorative.
+# RAISE THIS when you add an offline case, or the floor quietly under-asserts by exactly the number
+# you added. It went 28 -> 30 when the review follow-up added two.
+MIN_CASES_OFFLINE = 30
 
 
 def check(name, cond, detail: object = ""):
@@ -167,6 +169,21 @@ check(
     "15b CONTROL: a plain path is unchanged by the same stripping",
     _p2 == "docs/a.md",
     _p2,
+)
+
+# (a2) The REF half of the same defect, raised by review OF THE FIX. `_GH_BLOB` captures the ref as
+#      `[^/]+`, which accepts a `?`, so a malformed URL rebuilds the same double-`?` on the other
+#      side. Not reachable from a well-formed GitHub URL; added because every defect in this file
+#      has been "the half I did not think to strip".
+_m3 = cdl._GH_BLOB.match("https://github.com/o/r/blob/deadbeef?plain=1/docs/x.md")
+_r3 = _m3.group(3).split("#", 1)[0].split("?", 1)[0] if _m3 else None
+check("15c a query string is stripped from the REF too", _r3 == "deadbeef", _r3)
+_m4 = cdl._GH_BLOB.match("https://github.com/o/r/blob/deadbeefdeadbeef/docs/x.md")
+_r4 = _m4.group(3).split("#", 1)[0].split("?", 1)[0] if _m4 else None
+check(
+    "15d CONTROL: a clean ref is unchanged by the same stripping",
+    _r4 == "deadbeefdeadbeef",
+    _r4,
 )
 
 # (b) A VERSION-LIKE REF must NOT be trusted on a 404. `v2` looks unambiguous and is not: it is a
