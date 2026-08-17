@@ -223,7 +223,7 @@ BUILD_CASES = [
         "field absent on both routes",
         {"shop": {}},
         {},
-        r"^PEND\s+gate build provenance not yet observable",
+        r"^PEND\s+gate build provenance unknown: it predates the build_commit field",
     ),
     (
         "observed in git at build time",
@@ -257,6 +257,41 @@ BUILD_CASES = [
         {"gate": {"build_commit": ABSENT, "build_commit_source": "git"}, "shop": {}},
         {"gate_build_commit": HEAD_SHA, "gate_build_commit_source": "git"},
         r"DISAGREES with /health.*so two processes answered",
+    ),
+    # THE FOUR BELOW ARE REGRESSION CASES OVER A REAL DEPLOYED SHAPE, not hypotheticals.
+    # `"gate": "ok"` is what /health served before the build-provenance deploy, so it is what any
+    # box that has not been redeployed still serves and what a rollback restores. Pointed at one
+    # of those, the block used to index straight into remote JSON and raise inside `main()`, which
+    # has no top-level handler, killing the entire run: no tally, and every PASS and FAIL above it
+    # lost, over a field that gates nothing.
+    #
+    # ONE CASE PER LOOKUP, because they are three different reads and a single fixture exercises
+    # only one of them: the `gate` object itself, `build_commit` inside it on /health, and
+    # `gate_build_commit` on /selfcheck. All four must reach the SAME pending verdict as an
+    # absent field, since the reader's action is identical, and must name the shape they saw.
+    (
+        "gate is a string, the pre-deploy shape",
+        {"gate": "ok", "shop": {}},
+        {},
+        r"^PEND\s+gate build provenance unknown: it answered with gate=str",
+    ),
+    (
+        "gate is a list",
+        {"gate": [HEAD_SHA], "shop": {}},
+        {},
+        r"^PEND\s+gate build provenance unknown: it answered with gate=list",
+    ),
+    (
+        "build_commit on /health is a number",
+        {"gate": {"build_commit": 19, "build_commit_source": "git"}, "shop": {}},
+        {},
+        r"^PEND\s+gate build provenance unknown: it answered with build_commit=int",
+    ),
+    (
+        "gate_build_commit on /selfcheck is a list",
+        {"shop": {}},
+        {"gate_build_commit": [HEAD_SHA], "gate_build_commit_source": ["git"]},
+        r"^PEND\s+gate build provenance unknown: it answered with gate_build_commit=list",
     ),
 ]
 
@@ -328,7 +363,7 @@ try:
 finally:
     if os.path.exists(mut_path):
         os.remove(mut_path)
-mutant_blind = "gate build provenance not yet observable" in mut_out
+mutant_blind = "gate build provenance unknown" in mut_out
 print(f"  breaking the field lookup collapses it to unknown: {mutant_blind}")
 
 srv.shutdown()

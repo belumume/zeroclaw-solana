@@ -933,21 +933,56 @@ def main():
     # report the SAME commit, since one binary serves both and a disagreement means two processes
     # answered. And where that commit sits in the clone the reader is holding, which is the only
     # part of the gate's claim a stranger can test locally.
-    gate_h = ((health or {}).get("gate") or {}).get("build_commit")
-    src_h = ((health or {}).get("gate") or {}).get("build_commit_source")
+    #
+    # A NON-OBJECT `gate` IS A REAL DEPLOYED SHAPE, NOT A DEFENSIVE HYPOTHETICAL, and this is the
+    # reason the type checks below must never be deleted as paranoia. Until the build-provenance
+    # deploy landed, /health served `"gate": "ok"` -- a STRING, verifiable in this repository's own
+    # history at the commit before it. Every box that has not been redeployed still serves it, and
+    # rolling the gate binary back restores it in one command with the backup already on the node.
+    #
+    # So the shape a reader is MOST likely to point this verifier at is the one that used to index
+    # straight into remote JSON and raise inside `main()`, which has no top-level handler. That
+    # killed the WHOLE run: no tally, and every PASS and FAIL above it lost, over a field that
+    # gates nothing. Measured four ways before the guard existed, all four fatal.
+    #
+    # ONE VERDICT, NOT TWO. An old binary and a binary answering in a shape this cannot parse are
+    # the same actionable fact for a reader: the provenance is unknown and nothing else is wrong.
+    # Giving the unparseable case its own alarming branch would make the ordinary pre-deploy state
+    # look like a defect, so both land on the same PENDING, and the message avoids asserting
+    # "predates the field", which is true of only one of them.
+    raw_gate = (health or {}).get("gate")
+    gate_h = raw_gate.get("build_commit") if isinstance(raw_gate, dict) else None
+    src_h = raw_gate.get("build_commit_source") if isinstance(raw_gate, dict) else None
     gate_s = (sc or {}).get("gate_build_commit")
     src_s = (sc or {}).get("gate_build_commit_source")
-    commit = gate_s or gate_h
-    source = src_s or src_h
+    # Only a string is a commit. Anything else present is recorded so the line can say what shape
+    # arrived, and is then treated exactly as absent.
+    odd_shapes = [
+        f"gate={type(raw_gate).__name__}"
+        for _ in (1,)
+        if raw_gate is not None and not isinstance(raw_gate, dict)
+    ] + [
+        f"{n}={type(v).__name__}"
+        for n, v in (("gate_build_commit", gate_s), ("build_commit", gate_h))
+        if v is not None and not isinstance(v, str)
+    ]
+    commit = next((v for v in (gate_s, gate_h) if isinstance(v, str)), None)
+    source = next((v for v in (src_s, src_h) if isinstance(v, str)), None)
     if health is None and sc is None:
         # Both routes already failed above with their own reasons. A third line about a field
         # inside a body nobody received would be noise dressed as a finding.
         pass
     elif commit is None:
+        why = (
+            f"it answered with {', '.join(odd_shapes)}, which this verifier cannot read as a "
+            f"commit"
+            if odd_shapes
+            else "it predates the build_commit field"
+        )
         print(
-            "PEND  gate build provenance not yet observable: the deployed gate predates the "
-            "build_commit field, so which commit this binary was compiled from is unknown. "
-            "Not gating. It becomes readable on the next deploy."
+            f"PEND  gate build provenance unknown: {why}, so which commit this binary was "
+            f"compiled from cannot be established. Nothing else is wrong and nothing is claimed "
+            f"either way. Not gating. It becomes readable on the next deploy."
         )
     else:
         # Every source means something different about how much the commit is worth, so the
@@ -963,7 +998,13 @@ def main():
             "env": "asserted by a build-time override rather than observed",
             "unavailable": "the build had no repository, so this is a placeholder rather than "
             "a commit",
-        }.get(source, f"source {source!r} is not one this verifier recognises")
+            # A source of the wrong type is looked up as None rather than as itself: a list is
+            # unhashable and would raise here, which is the same crash-the-whole-run failure the
+            # type guard above exists to prevent, one line further down.
+        }.get(
+            source if isinstance(source, str) else None,
+            f"source {source!r} is not one this verifier recognises",
+        )
         agree = ""
         if gate_h and gate_s:
             agree = (
