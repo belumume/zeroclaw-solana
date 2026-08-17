@@ -296,8 +296,30 @@ jobs:
       # skipped every URL and quietly stopped checking real links. Case 1 is the QUICKSTART URL
       # verbatim, and one case re-reads QUICKSTART so the suite fails rather than passes quietly
       # if it is ever guarding a shape the repository no longer has.
+      # GH_TOKEN, and the reason is the whole finding. Nine of this suite's cases exercise the
+      # github.com API resolvers, and they self-skip when `gh` cannot authenticate. A runner does
+      # not authenticate `gh` by default, so without this the block printed NOT RUN and the suite
+      # reported "16 passed" -- byte-identical to its count before those cases existed. The
+      # controls the suite calls "the point" were gating nothing here, and no exit code could say
+      # so. The same fix was applied to regression-gate.yml and this second caller was missed.
       - name: the link gate still skips illustrations and still checks real links
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/test_check_doc_links.py
+
+      # The settlement proxy's own controls. Raised by review as BLOCKING and it was right: this
+      # suite covers the code that exists specifically to stop a settled pay link being paid twice,
+      # and it was referenced by nothing -- the same "controls that gate nothing, and no exit code
+      # says so" failure this PR is about, reproduced in the newest code the PR adds.
+      #
+      # Its eight OFFLINE cases carry a floor and run here unconditionally. Its three LIVE cases
+      # self-skip as NOT RUN without HELIUS_API_KEY, which a fork's PR will not have, so this step
+      # is honest on a fork rather than red: the floor still fails the run if the offline cases
+      # stop scoring. Set the secret on this repo to exercise the live three in CI too.
+      - name: the settlement proxy refuses what it should and finds what it should
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+        run: node rpc-proxy/test_worker.mjs
 
       # This suite was TRACKED and invoked by nothing. Of the thirteen tracked
       # scripts/test_*.py it was the only one absent from this file, so it ran when

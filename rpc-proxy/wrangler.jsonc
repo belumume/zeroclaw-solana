@@ -1,0 +1,25 @@
+{
+  // Read-only Solana RPC proxy for the pay page. See src/index.js for why this exists:
+  // the page's only browser-serving endpoint prunes, and the endpoints that retain history
+  // refuse any request carrying an Origin header. A Worker sends none.
+  "name": "zeroclaw-rpc-proxy",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-17",
+  "observability": { "enabled": true },
+
+  "vars": {
+    // Explicit allowlist rather than "*". This proxy is small and read-only, but an open
+    // CORS policy on someone else's infrastructure invites use as a free relay.
+    // The pay page is served from GitHub Pages; the localhost entry is for the harness,
+    // which serves the built page on an ephemeral port.
+    "ALLOWED_ORIGINS": "https://belumume.github.io,http://127.0.0.1"
+  },
+
+  // Settlements are recorded permanently, so once this Worker has seen a payment it can answer for
+  // it after every upstream has pruned it. Absent, the Worker still works -- it loses only the
+  // durability and falls back to live lookups, which is why the code guards on env.SETTLEMENTS.
+  // Created 2026-08-17 with: npx wrangler kv namespace create SETTLEMENTS
+  "kv_namespaces": [
+    { "binding": "SETTLEMENTS", "id": "6878dd33830f4f968c7bc4da5903e301" }
+  ]
+}

@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
+import re
 import socketserver
 import sys
 import threading
@@ -60,6 +61,12 @@ MERCHANT_MARKER = "var MERCHANT='"
 RPC_MARKER = "var RPC='"
 
 MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # mainnet USDC
+
+# Used ONLY to tell a PRUNED lookup apart from an UNPAID reference when the page's own RPC returns
+# nothing. It is deliberately not the page's endpoint: the point is to have a second opinion from a
+# node with deeper retention, so a node's housekeeping cannot masquerade as an unsettled payment.
+# Never used for the behaviour assertions, which must run against whatever the page actually names.
+FIXTURE_ARCHIVAL_RPC = "https://api.mainnet-beta.solana.com"
 
 # A real, finalized mainnet settlement. The operator paid this order from his phone wallet on
 # 2026-08-06 and then reproduced the defect by reloading the link. It is a permanent fixture: a
@@ -127,10 +134,81 @@ def check_fixtures(endpoint: str) -> list[str]:
 
     settled = [e for e in (paid or []) if not e.get("err")]
     if not settled:
-        problems.append(
-            f"PAID_REFERENCE {PAID_REFERENCE} has no confirmed non-errored signature; "
-            "the paid direction would pass for the wrong reason"
-        )
+        # ZERO SIGNATURES HAS TWO CAUSES AND THEY ARE OPPOSITE VERDICTS. Either the reference was
+        # never paid (a real failure), or this endpoint has PRUNED the slot it was paid in (a fact
+        # about the node, not the chain). They are byte-identical in the response.
+        #
+        # MEASURED 2026-08-17: this fired, and it was pruning. The reference has 5 finalized,
+        # non-errored signatures at slots ~437,6xx,xxx on api.mainnet-beta.solana.com, and 0 on
+        # the pinned solana-rpc.publicnode.com, whose firstAvailableBlock is 439,097,325. The
+        # transactions simply predate that node's retention window.
+        #
+        # The old comment on PAID_REFERENCE claimed this fixture "cannot go stale" because "a
+        # settled transaction does not un-settle". True about the transaction, false about the
+        # LOOKUP, which is what the check actually depends on.
+        #
+        # So: ask an ARCHIVAL endpoint before reporting a failure. A disagreement between the two
+        # is the finding -- it means the page's own RPC can no longer see this settlement, which a
+        # reader following the link would also hit.
+        archival_settled = []
+        try:
+            arch = rpc(
+                FIXTURE_ARCHIVAL_RPC,
+                "getSignaturesForAddress",
+                [PAID_REFERENCE, {"limit": 20, "commitment": "confirmed"}],
+            )
+            archival_settled = [e for e in (arch or []) if not e.get("err")]
+        except (OSError, ValueError) as e:
+            problems.append(
+                f"PAID_REFERENCE {PAID_REFERENCE} returned nothing from {endpoint} and the "
+                f"archival cross-check could not run ({e}); pruned and unpaid are "
+                "indistinguishable here, so this is UNRESOLVED rather than a pass or a fail"
+            )
+        else:
+            if archival_settled:
+                print(f"paid fixture    : {PAID_REFERENCE}")
+                print(
+                    f"                  NOT VISIBLE on the pinned RPC {endpoint} (pruned), "
+                    f"settled per {FIXTURE_ARCHIVAL_RPC} by "
+                    f"{archival_settled[-1]['signature']}"
+                )
+                # PRUNED IS ONLY A DEFECT IF THE PAGE CANNOT RECOVER FROM IT. Asserting "the
+                # pinned RPC must see this" would be a gate keyed to one REMEDY rather than to
+                # the invariant, and it would stay red forever after the page grew a fallback --
+                # punishing the fix. The invariant is: a settled reference must never leave the
+                # card payable, because that invites a SECOND payment. Either the pinned RPC sees
+                # it, or the page escalates to an archival endpoint that does.
+                page_src = (PAGE_DIR / "src" / "app.js").read_text(encoding="utf-8")
+                # Keyed on the MECHANISM, not on a constant's NAME. The first version of this
+                # looked for `ARCHIVAL_RPC`, and when the escalation shipped as `SETTLEMENT_PROXY`
+                # the gate reported the money bug as unfixed -- punishing the fix for choosing a
+                # different word. What actually matters is that the settlement lookup consults a
+                # SECOND endpoint: `rpc()` takes an optional third argument, so an escalation is a
+                # getSignaturesForAddress call with one.
+                escalations = re.findall(
+                    r"rpc\(\s*'getSignaturesForAddress'\s*,\s*\[[^\]]*\]\s*,", page_src
+                )
+                has_fallback = len(escalations) >= 1
+                if has_fallback:
+                    print(
+                        "                  pinned RPC pruned it, and the page ESCALATES to "
+                        "ARCHIVAL_RPC, so the card still refuses"
+                    )
+                else:
+                    problems.append(
+                        f"MONEY BUG: the pinned RPC {endpoint} can no longer see the settlement "
+                        f"for {PAID_REFERENCE} (finalized on chain), and the page has NO archival "
+                        "fallback. settledSignature() returns null, checkAlreadyPaid() returns "
+                        "false, and the card stays PAYABLE -- a customer reloading this link can "
+                        "pay a SECOND time. Re-pin the page's RPC, or give it an archival "
+                        "escalation for the empty case."
+                    )
+            else:
+                problems.append(
+                    f"PAID_REFERENCE {PAID_REFERENCE} has no confirmed non-errored signature on "
+                    f"{endpoint} OR on {FIXTURE_ARCHIVAL_RPC}; the paid direction would pass for "
+                    "the wrong reason"
+                )
     else:
         print(f"paid fixture    : {PAID_REFERENCE}")
         print(

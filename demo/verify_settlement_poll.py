@@ -24,7 +24,9 @@ MERCHANT = "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
 MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 # An unsettled reference, so the card stays payable and the poll keeps running for the whole window.
 UNSETTLED = "6NpAbULXSDAYHCwMd5tmor9rBq9V2Y3EG6gLMDptk11w"
-WINDOW_MS = 15000  # POLL_MS is 6s, so a correct build makes at least two calls in this window.
+WINDOW_MS = (
+    15000  # POLL_MS is 6s, so a correct build makes at least two calls in this window.
+)
 
 
 def pay_url(reference: str) -> str:
@@ -46,15 +48,29 @@ def count_reference_calls(page_html: str | None, url: str) -> tuple[int, str]:
 
         def on_request(req):
             nonlocal calls
-            if req.method == "POST" and req.post_data and "getSignaturesForAddress" in req.post_data:
+            if (
+                req.method == "POST"
+                and req.post_data
+                and "getSignaturesForAddress" in req.post_data
+            ):
                 calls += 1
 
         page.on("request", on_request)
 
         if page_html is not None:
             # Control build: serve a locally mutated page rather than the deployed one.
-            page.route("**/index.html*", lambda r: r.fulfill(status=200, content_type="text/html", body=page_html))
-            page.route("https://zeroclaw-shop-pay.pages.dev/?*", lambda r: r.fulfill(status=200, content_type="text/html", body=page_html))
+            page.route(
+                "**/index.html*",
+                lambda r: r.fulfill(
+                    status=200, content_type="text/html", body=page_html
+                ),
+            )
+            page.route(
+                "https://zeroclaw-shop-pay.pages.dev/?*",
+                lambda r: r.fulfill(
+                    status=200, content_type="text/html", body=page_html
+                ),
+            )
 
         page.goto(url, wait_until="networkidle")
         page.wait_for_timeout(WINDOW_MS)
@@ -67,35 +83,78 @@ def main() -> int:
     url = pay_url(UNSETTLED)
 
     live_calls, live_cls = count_reference_calls(None, url)
-    print(f"deployed page : {live_calls} reference call(s) in {WINDOW_MS/1000:.0f}s, card={live_cls!r}")
+    print(
+        f"deployed page : {live_calls} reference call(s) in {WINDOW_MS / 1000:.0f}s, card={live_cls!r}"
+    )
 
     # CONTROL: the same page with the poll disabled. If this scores the same as the deployed build,
     # the measurement cannot discriminate and proves nothing.
     built = Path("webshop-pay/index.html").read_text(encoding="utf-8")
     if "watchForSettlement();" not in built:
-        print("FAIL  control anchor 'watchForSettlement();' absent from the built page", file=sys.stderr)
+        print(
+            "FAIL  control anchor 'watchForSettlement();' absent from the built page",
+            file=sys.stderr,
+        )
         return 2
-    control_html = built.replace("watchForSettlement();", "/*poll disabled for control*/;", 1)
+    control_html = built.replace(
+        "watchForSettlement();", "/*poll disabled for control*/;", 1
+    )
     ctrl_calls, ctrl_cls = count_reference_calls(control_html, url)
     print(f"control (poll off): {ctrl_calls} reference call(s), card={ctrl_cls!r}")
 
     ok = True
     if live_calls < 2:
-        print(f"FAIL  deployed page made {live_calls} call(s); a 6s poll must make at least 2 in {WINDOW_MS/1000:.0f}s", file=sys.stderr)
+        print(
+            f"FAIL  deployed page made {live_calls} call(s); a 6s poll must make at least 2 in {WINDOW_MS / 1000:.0f}s",
+            file=sys.stderr,
+        )
         ok = False
-    if ctrl_calls != 1:
-        print(f"FAIL  control made {ctrl_calls} call(s); with the poll off it must make exactly 1", file=sys.stderr)
+    # The control proves the POLL is what produces repeated calls -- not that the load-time check
+    # costs exactly one request. It asserted `== 1`, which pinned an implementation detail rather
+    # than the invariant, and went red the moment the settlement check gained a legitimate second
+    # lookup: on an EMPTY answer the page escalates to the settlement proxy to tell "never paid"
+    # apart from "aged out of the endpoint's retention window", which is what closed a
+    # double-payment hole. Two calls for ONE settlement check is correct and bounded.
+    #
+    # What must stay true, and what is asserted instead: with the poll disabled the page performs a
+    # BOUNDED single check rather than a repeating series, and strictly fewer calls than the polling
+    # build over the same window. An upper bound of 2 keeps it a real assertion -- a third call
+    # would mean the escalation had itself started looping.
+    CTRL_MAX = 2
+    if not (1 <= ctrl_calls <= CTRL_MAX):
+        print(
+            f"FAIL  control made {ctrl_calls} call(s); with the poll off the page must make a "
+            f"bounded single settlement check (1..{CTRL_MAX}: the lookup, plus at most one "
+            f"escalation on an empty answer)",
+            file=sys.stderr,
+        )
+        ok = False
+    if ctrl_calls >= live_calls:
+        print(
+            f"FAIL  control made {ctrl_calls} call(s) and the polling build made {live_calls}; "
+            "the poll must produce strictly more, or this control is not demonstrating that the "
+            "poll is what drives repeated calls",
+            file=sys.stderr,
+        )
         ok = False
     if live_cls != "card" or ctrl_cls != "card":
-        print("FAIL  an unsettled reference must stay payable in both builds", file=sys.stderr)
+        print(
+            "FAIL  an unsettled reference must stay payable in both builds",
+            file=sys.stderr,
+        )
         ok = False
 
     if not ok:
         return 1
     print()
-    print("PASS  the page polls the reference while the card is payable, and the control")
-    print("      with the poll removed makes exactly one call, so the difference is the poll")
-    print("      and not the page loading twice.")
+    print(
+        "PASS  the page polls the reference while the card is payable, and the control"
+    )
+    print(
+        f"      with the poll removed makes {ctrl_calls} (a bounded single check), against "
+        f"{live_calls} with it,"
+    )
+    print("      so the difference is the poll and not the page loading twice.")
     return 0
 
 
