@@ -575,6 +575,115 @@ def main():
         if is_transport_error(e):
             transport_fails += 1
 
+    # CLAIM: a receipt this shop sent actually reached a customer.
+    #
+    # Every check above observes a PROCESS or a PAGE. None of them can tell a shop whose
+    # send path is refused from one that is serving customers, because a live process with
+    # a dead channel passes all three. The gate now reads the settlement announcer's own
+    # record of what it delivered and reports it here, which is the first signal in this
+    # file that is an EFFECT of the channel working rather than a state around it.
+    #
+    # WHY THE ANNOUNCER RATHER THAN THE SHOP DAEMON. The announcer is a shell script that
+    # never consults a model, and its `sent:` and `SEND FAILED` lines are the receipt
+    # actually landing or not. The shop daemon's log cannot answer this: the announcer is a
+    # separate unit whose stdout goes to the journal, so a reader pointed at the daemon log
+    # would scan forever and never see a delivery.
+    #
+    # NOT GATED, and that is a decision rather than caution. A gate on live box state can
+    # turn main red with no repo change, and a channel reconnect is exactly the transient
+    # that would do it. It is also not gateable on the merits: the announcer sends only when
+    # a payment settles, so an absence of receipts is what a quiet Tuesday looks like as much
+    # as what a broken send path looks like, and a red that means either means neither.
+    #
+    # SO ONLY `connected` IS EVIDENCE. Everything else prints what is missing and asserts
+    # nothing, including the empty case, which must not be read as an outage.
+    rc = (health or {}).get("receipts")
+    if health is None:
+        # /health already failed above with its own reason. A second line about a block
+        # inside a body nobody received would be noise dressed as a finding.
+        pass
+    elif rc is None:
+        print(
+            "PEND  receipt delivery not yet observable: the deployed gate predates the "
+            "/health receipts block. Not gating. It becomes a live claim on the next deploy."
+        )
+    else:
+        # .get with no default throughout, so a field the endpoint stops sending reads as
+        # None and is reported as malformed rather than defaulting into something quiet.
+        d = rc.get("delivery")
+        scanned = rc.get("lines_scanned")
+        found = rc.get("records_found")
+        if (
+            not isinstance(d, dict)
+            or not isinstance(scanned, int)
+            or not isinstance(found, int)
+        ):
+            print(
+                f"INFO  receipt delivery block malformed: delivery={type(d).__name__}, "
+                f"lines_scanned={scanned!r}, records_found={found!r}; not gating"
+            )
+        elif rc.get("log_readable") is not True:
+            print(
+                f"INFO  receipt delivery unknown: the announcer's record could not be read "
+                f"({rc.get('detail')}). Nothing is claimed either way, not gating"
+            )
+        else:
+            status = d.get("status")
+            age = d.get("last_success_age_seconds")
+            chan = d.get("channel")
+            run = rc.get("last_run") or {}
+            # The denominator travels with the count, always. A zero out of zero lines and
+            # a zero out of hundreds are different verdicts about this instrument, and only
+            # one of them is a statement about the shop.
+            basis = f"{found} delivery record(s) in {scanned} line(s) read from {rc.get('source')}"
+            run_note = ""
+            if isinstance(run.get("announced"), int):
+                committed = (
+                    "committed" if run.get("ledger_committed") else "NOT committed"
+                )
+                run_note = (
+                    f"; last run announced {run['announced']}, ledger {committed}"
+                )
+            if status == "connected":
+                mins = (
+                    f"{age / 60:.0f} min ago"
+                    if isinstance(age, (int, float))
+                    else "age unreported"
+                )
+                print(
+                    f"INFO  receipt delivery: a receipt landed {mins} ({basis}){run_note}, "
+                    f"not gating"
+                )
+            elif status == "failing":
+                where = f" via {chan}" if chan else ""
+                # The attempt age, NOT the success age, which is null here and must stay
+                # null: nothing was delivered. Printing it is the whole point of the
+                # separate field, because a refusal minutes old is a transient the next
+                # tick may clear and one weeks old is an outage nobody noticed.
+                att = d.get("last_attempt_age_seconds")
+                when = (
+                    f" {att / 60:.0f} min ago"
+                    if isinstance(att, (int, float))
+                    else " at an unknown time"
+                )
+                print(
+                    f"INFO  receipt delivery: the newest send FAILED{where}{when} ({basis})"
+                    f"{run_note}. This is positive evidence of a broken send path, but it is "
+                    f"live box state, so it is reported and not gated"
+                )
+            elif status == "stale":
+                print(
+                    f"INFO  receipt delivery: newest receipt is older than the window "
+                    f"({basis}){run_note}. Not evidence of health and not evidence of an "
+                    f"outage either, not gating"
+                )
+            else:
+                print(
+                    f"INFO  receipt delivery: no datable delivery found ({basis}){run_note}. "
+                    f"A shop that sold nothing produces exactly this, so it reads as an "
+                    f"absence of sales rather than a fault, not gating"
+                )
+
     # CLAIM: the x402 daily cap survives a restart.
     #
     # The gate rebuilds its spend ledger and its redeemed nonces from the earnings log at
