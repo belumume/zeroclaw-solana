@@ -316,8 +316,17 @@ published on-chain claims twice a day. A third re-checks interface parity agains
 HEAD, because the interface is unfrozen and drifting away from it once already came close to
 making every plugin fail to register; it runs daily at 05:41 UTC and has been running since
 2026-07-25, so unlike the other two it reports on a moving target we do not control. Count its
-runs yourself rather than believing this sentence:
-`gh run list --workflow=host-drift.yml --limit 100 --json conclusion --jq 'length'`.
+runs yourself rather than believing this sentence, with no account and no token:
+
+```bash
+python3 -c "import urllib.request,json; print(json.load(urllib.request.urlopen('https://api.github.com/repos/belumume/zeroclaw-solana/actions/workflows/host-drift.yml/runs?per_page=1'))['total_count'], 'runs')"
+```
+
+A workflow that does not exist returns 404 there, so a count is an answer rather than an endpoint
+that always succeeds. That endpoint allows 60 unauthenticated calls an hour per address, so an
+HTTP 403 means a shared address has spent them rather than anything about this repository.
+`gh run list --workflow=host-drift.yml --limit 100 --json conclusion` shows each run's verdict if
+you already have `gh` authenticated.
 See [`TESTING.md`](TESTING.md) for what each of those can and cannot catch.
 
 Building the ZeroClaw host needs three feature flags, and one of them removes a channel in
