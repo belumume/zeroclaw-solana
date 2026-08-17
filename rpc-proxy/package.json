@@ -1,0 +1,9 @@
+{
+  "name": "zeroclaw-rpc-proxy",
+  "private": true,
+  "type": "module",
+  "description": "Read-only Solana settlement proxy for the pay page. See src/index.js.",
+  "scripts": {
+    "test": "node test_worker.mjs"
+  }
+}

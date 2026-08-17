@@ -307,6 +307,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/test_check_doc_links.py
 
+      # The settlement proxy's own controls. Raised by review as BLOCKING and it was right: this
+      # suite covers the code that exists specifically to stop a settled pay link being paid twice,
+      # and it was referenced by nothing -- the same "controls that gate nothing, and no exit code
+      # says so" failure this PR is about, reproduced in the newest code the PR adds.
+      #
+      # Its eight OFFLINE cases carry a floor and run here unconditionally. Its three LIVE cases
+      # self-skip as NOT RUN without HELIUS_API_KEY, which a fork's PR will not have, so this step
+      # is honest on a fork rather than red: the floor still fails the run if the offline cases
+      # stop scoring. Set the secret on this repo to exercise the live three in CI too.
+      - name: the settlement proxy refuses what it should and finds what it should
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+        run: node rpc-proxy/test_worker.mjs
+
       # This suite was TRACKED and invoked by nothing. Of the thirteen tracked
       # scripts/test_*.py it was the only one absent from this file, so it ran when
       # someone remembered to type it and protected nothing during judging -- the

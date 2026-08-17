@@ -169,7 +169,10 @@ export default {
     // 3. Escalate ONLY on an empty answer. An empty list is the ambiguous case -- pruned or never
     //    paid -- and the deep endpoint is the only thing that can tell them apart.
     const empty = result == null || (Array.isArray(result) && result.length === 0);
-    if (empty) {
+    // Skip the metered escalation if we asked recently and got nothing. The FAST lookup above still
+    // ran, so a payment that lands during the quiet window is still seen on the next poll.
+    const negRecent = empty && env.SETTLEMENTS ? await env.SETTLEMENTS.get(`neg:${cacheKey}`) : null;
+    if (empty && !negRecent) {
       deepTried = true;
       const deepUrl = deepEndpoint(env);
       const deep = deepUrl
@@ -192,11 +195,25 @@ export default {
     headers["x-zc-deep-status"] = deepStatus;
     headers["x-zc-allowed-0"] = JSON.stringify(allowed[0] || "");
 
-    // 4. Record a NON-EMPTY answer only. Caching an empty one would freeze "not paid" forever and
-    //    recreate the double-payment bug with a longer memory, which is strictly worse.
-    const worthCaching = Array.isArray(result) ? result.length > 0 : result != null;
-    if (env.SETTLEMENTS && worthCaching) {
+    // 4. Record a settlement PERMANENTLY. Never record an empty answer at the same key: that would
+    //    freeze "not paid" forever and recreate the double-payment bug with a longer memory.
+    const settled = Array.isArray(result) ? result.length > 0 : result != null;
+    if (env.SETTLEMENTS && settled) {
       await env.SETTLEMENTS.put(cacheKey, JSON.stringify(result));
+    }
+
+    // 4b. An empty answer gets a SHORT-LIVED negative marker under a DIFFERENT key, purely to stop
+    //     the escalation hammering a metered upstream. Without it the cost is unbounded in the most
+    //     ordinary case: the page polls an unpaid reference every 6s for 20 minutes, every poll
+    //     finds the fast endpoint empty, and every one of those ~200 polls escalates. One open tab
+    //     on an unpaid link would drive ~200 paid lookups.
+    //
+    //     TTL is deliberately shorter than the poll interval is long: 30s means a real payment is
+    //     still noticed within one extra poll, so the page's whole reason for polling survives.
+    //     The key is namespaced apart from the settlement key so a negative can NEVER be mistaken
+    //     for a settlement, and the read path below only consults it to skip the escalation.
+    if (env.SETTLEMENTS && !settled) {
+      await env.SETTLEMENTS.put(`neg:${cacheKey}`, "1", { expirationTtl: 60 });
     }
 
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: id ?? null, result }), { headers });

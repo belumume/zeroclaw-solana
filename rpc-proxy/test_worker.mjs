@@ -48,6 +48,10 @@ function kv() {
 // gitignored secrets file the rest of this project uses; NEVER hardcoded, never printed.
 import { readFileSync } from "node:fs";
 const HELIUS_API_KEY = (() => {
+  // ENV FIRST, so this works on a CI runner where the gitignored secrets file does not exist.
+  // The file is the local convenience; the variable is what the workflow supplies. Without this
+  // ordering the CI wiring would look correct and the live cases would silently self-skip forever.
+  if (process.env.HELIUS_API_KEY) return process.env.HELIUS_API_KEY;
   try {
     for (const line of readFileSync(new URL("../.secrets/api-keys.env", import.meta.url), "utf8").split("\n")) {
       const i = line.indexOf("=");
@@ -168,8 +172,21 @@ if (!reachable || !HELIUS_API_KEY) {
   const e2 = env();
   const r2 = await ask(e2, sigsReq(REF_UNPAID));
   const empty = Array.isArray(r2.json.result) && r2.json.result.length === 0;
-  check("10 LIVE CONTROL: an unpaid reference stays empty, and is NOT cached", empty && e2.SETTLEMENTS.store.size === 0,
-    `empty=${empty} cached=${e2.SETTLEMENTS.store.size}`);
+  // Asserts the INVARIANT, not the store's size. The size was a proxy for "not cached" and went
+  // red when a short-lived NEGATIVE marker was added to stop an unpaid reference escalating to a
+  // metered upstream on all ~200 polls of a 20-minute window. A namespaced `neg:` key with a TTL
+  // is not a settlement; what must never happen is an empty answer being recorded UNDER THE
+  // SETTLEMENT KEY, because that would serve "not paid" forever and rebuild the double-payment bug.
+  const settlementKey = `getSignaturesForAddress:${REF_UNPAID}`;
+  const noSettlementRecorded = !e2.SETTLEMENTS.store.has(settlementKey);
+  // And it must STILL read empty on a second call rather than serving anything from the marker.
+  const r2b = await ask(e2, sigsReq(REF_UNPAID));
+  const stillEmpty = Array.isArray(r2b.json.result) && r2b.json.result.length === 0;
+  check(
+    "10 LIVE CONTROL: an unpaid reference stays empty and is never recorded as settled",
+    empty && noSettlementRecorded && stillEmpty,
+    `empty=${empty} noSettlementKey=${noSettlementRecorded} stillEmptyOnRepeat=${stillEmpty} keys=${[...e2.SETTLEMENTS.store.keys()]}`,
+  );
 }
 
 console.log(`\n${pass} passed, ${fail} failed, ${notrun} not run`);
