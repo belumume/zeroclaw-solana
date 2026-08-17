@@ -27,9 +27,11 @@ as a plain equality.
 
 THE CEILING IS PARSED, NOT RUN. Running the script would report today's RUNTIME denominator, which
 depends on what a remote box happens to be serving, and would need the network. This reads the
-source with `ast`: it counts the `ACCOUNTS` and `TXS` literals for the static side, and evaluates
-the `live_total` expression with every condition forced true for the live side. Offline,
-deterministic, and it fails loudly rather than guessing if either shape stops resolving.
+source with `ast`: it counts the `ACCOUNTS` and `TXS` literals for the static side, and for the
+live side takes the LARGER branch of each conditional, which is the total over every combination
+of its conditions. Taking the true branch instead would be right only while every optional claim
+happens to be written `1 if cond else 0`. Offline, deterministic, and it fails loudly rather than
+guessing if either shape stops resolving.
 
 THE WORD "one" IS NOT A COUNT, and this is the one carve-out. Measured over the tracked prose
 corpus, the pattern hits 13 times: 12 are real count claims and the 13th is `README.md`'s image
@@ -114,12 +116,17 @@ class DerivationError(Exception):
 
 
 def _ceiling(node: ast.AST) -> int:
-    """Largest value the expression can take, forcing every condition true."""
+    """Largest value the expression can take over every combination of its conditions."""
     if isinstance(node, ast.Constant) and isinstance(node.value, int):
         return node.value
     if isinstance(node, ast.IfExp):
-        # `1 if ledger_gates else 0`: the ceiling is the branch taken when the claim gates.
-        return _ceiling(node.body)
+        # Take the LARGER branch rather than the true one. Reading `node.body` would be
+        # right for today's `1 if ledger_gates else 0` and would silently UNDER-count an
+        # inverted `0 if ledger_gates else 1`, which is the worst direction: a ceiling too
+        # low makes correct prose look wrong, and the gate would not raise, because the
+        # shape is one it recognises. `max` needs no assumption about which way it is
+        # written and is the actual ceiling of a conditional either way.
+        return max(_ceiling(node.body), _ceiling(node.orelse))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return _ceiling(node.left) + _ceiling(node.right)
     raise DerivationError(
@@ -188,7 +195,7 @@ def check(root: Path) -> tuple[int, list[str]]:
 
     lines.append(
         f"derived from {VERIFIER}: static {static_ceiling}, live ceiling {live_ceiling} "
-        f"(every optional claim gating)"
+        "(the largest total the live expression can reach)"
     )
 
     disagree: list[str] = []
@@ -357,6 +364,25 @@ def selftest() -> int:
         report(
             "and the derived ceiling reports as 6",
             any("live ceiling 6" in x for x in out),
+        )
+
+    # 6b. AN INVERTED CONDITIONAL still derives the same ceiling. Reading only the true branch
+    #     would return 4 here and make correct prose look wrong, without raising, because the
+    #     shape is one the deriver recognises. Raised in review on this PR.
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        inverted = VERIFIER_FIXTURE.replace(
+            "(1 if selfcheck_gates else 0)", "(0 if selfcheck_gates else 1)"
+        )
+        assert "(0 if selfcheck_gates else 1)" in inverted, (
+            "case 6b mutation did not apply"
+        )
+        _fixture(tmp, _agreeing_docs(), verifier=inverted)
+        rc, out = run(tmp)
+        report("an inverted conditional still derives a ceiling of 5", rc == 0)
+        report(
+            "and it is not under-counted as 4",
+            any("live ceiling 5" in x for x in out),
         )
 
     # 7. OVER-CORRECTION: the word "one" is ordinary English, not a total. This is the single
