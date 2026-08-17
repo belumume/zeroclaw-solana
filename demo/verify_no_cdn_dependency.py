@@ -41,7 +41,21 @@ SHOP = Path(__file__).resolve().parent.parent / "webshop-pay"
 APP = SHOP / "src" / "app.js"
 
 # Declared, pinned data endpoints the page is DESIGNED to call. Not code.
-ALLOWED_DATA_HOSTS = {"solana-rpc.publicnode.com"}
+#
+# The second entry is OURS -- a Worker in this repo (`rpc-proxy/`), not a third party. It is
+# consulted only when the first host reports no settlement, to tell "never paid" apart from "aged
+# out of a rolling retention window"; conflating those left a settled pay link PAYABLE and invited
+# a second payment. It serves DATA over fetch and never a script, so assertion 3 is untouched.
+#
+# DECLARING it here rather than widening the check is the point. This file's own docstring records
+# that a first draft asserted zero third-party requests of ANY kind and had to be corrected,
+# because the page must call an RPC to read the chain at all. An allowlist keeps each endpoint
+# auditable and keeps a NEW undeclared host failing, which is what just happened -- this gate
+# caught the proxy the moment it shipped, correctly, and that is the behaviour to preserve.
+ALLOWED_DATA_HOSTS = {
+    "solana-rpc.publicnode.com",
+    "zeroclaw-rpc-proxy.cf-eeyw6.workers.dev",
+}
 
 PAYABLE = (
     "solana:C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ"
