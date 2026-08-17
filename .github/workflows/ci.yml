@@ -296,7 +296,15 @@ jobs:
       # skipped every URL and quietly stopped checking real links. Case 1 is the QUICKSTART URL
       # verbatim, and one case re-reads QUICKSTART so the suite fails rather than passes quietly
       # if it is ever guarding a shape the repository no longer has.
+      # GH_TOKEN, and the reason is the whole finding. Nine of this suite's cases exercise the
+      # github.com API resolvers, and they self-skip when `gh` cannot authenticate. A runner does
+      # not authenticate `gh` by default, so without this the block printed NOT RUN and the suite
+      # reported "16 passed" -- byte-identical to its count before those cases existed. The
+      # controls the suite calls "the point" were gating nothing here, and no exit code could say
+      # so. The same fix was applied to regression-gate.yml and this second caller was missed.
       - name: the link gate still skips illustrations and still checks real links
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/test_check_doc_links.py
 
       # This suite was TRACKED and invoked by nothing. Of the thirteen tracked

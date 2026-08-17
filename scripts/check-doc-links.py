@@ -45,6 +45,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -174,18 +175,27 @@ def rpc(method, params, attempts=4, endpoint=None):
     raise RuntimeError(f"RPC still rate-limited after {attempts} attempts: {last}")
 
 
+# The trailing group accepts the two commonest deep-link forms a doc uses to cite a thread:
+# `/issues/1#issuecomment-5` and `/pull/1/files`. Anchoring hard to end-of-URL sent both down the
+# throttled web path, which is the exact false-404 surface this routing exists to remove.
 _GH_WEB = re.compile(
-    r"^https://github\.com/([^/]+)/([^/]+)/(issues|pull)/(\d+)/?$", re.I
+    r"^https://github\.com/([^/]+)/([^/]+)/(issues|pull)/(\d+)"
+    r"(?:/(?:files|commits|checks))?/?(?:[#?].*)?$",
+    re.I,
 )
 _GH_BLOB = re.compile(
     r"^https://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+?)/?$", re.I
 )
-# A ref that CANNOT be the first segment of a longer, slash-bearing branch name: a commit sha,
-# or one of the conventional single-segment names. Used only to decide whether a 404 is
-# trustworthy -- see the asymmetry argument in _github_blob_verdict.
-_UNAMBIGUOUS_REF = re.compile(
-    r"[0-9a-fA-F]{7,40}|main|master|HEAD|v[0-9][A-Za-z0-9.\-]*"
-)
+# A ref whose 404 can be TRUSTED, because it cannot be the first segment of a longer
+# slash-bearing branch name. Used only on the failure branch -- see the asymmetry argument in
+# _github_blob_verdict.
+#
+# `v[0-9]...` IS DELIBERATELY ABSENT, and that is a fix rather than an oversight. As a TAG `v2` is
+# unambiguous; as a branch prefix it is not, and `blob/v2/hotfix/docs/x.md` splits to ref='v2',
+# path='hotfix/docs/x.md', 404s, and would then be trusted -- the precise false FAIL this guard was
+# written to prevent, while the sibling `feature/...` case correctly defers. A version-tagged blob
+# link now defers instead, which costs a fallback to the web path and never a wrong verdict.
+_UNAMBIGUOUS_REF = re.compile(r"[0-9a-fA-F]{7,40}|main|master|HEAD")
 
 
 def _github_blob_verdict(url):
@@ -202,8 +212,19 @@ def _github_blob_verdict(url):
     if not m:
         return None
     owner, repo, ref, path = m.group(1), m.group(2), m.group(3), m.group(4)
-    path = path.split("#", 1)[0]  # a heading anchor is not part of the path
-    p = _gh(["api", f"repos/{owner}/{repo}/contents/{path}?ref={ref}", "--jq", ".size"])
+    # Strip the FRAGMENT and the QUERY. Dropping the query was a FALSE PASS, verified live: a
+    # `?plain=1` link built `contents/<path>?plain=1?ref=<sha>`, and with two `?` in one URL the
+    # ref is ignored, so the call resolved against the DEFAULT BRANCH and returned 37036 rc=0 for a
+    # ref (`deadbeefdeadbeef`) that does not exist. Any ?plain=1 / ?raw=1 blob link therefore passed
+    # regardless of the commit it pinned. The mirror case is worse: where a file exists only at the
+    # pinned ref, the same mangling 404s and `_UNAMBIGUOUS_REF` trusts it, failing a live link.
+    path = path.split("#", 1)[0].split("?", 1)[0]
+    # Quote the path so a space or other reserved character cannot inject further URL structure.
+    # `safe="/"` keeps directory separators, which the contents API needs verbatim.
+    quoted = urllib.parse.quote(path, safe="/")
+    p = _gh(
+        ["api", f"repos/{owner}/{repo}/contents/{quoted}?ref={ref}", "--jq", ".size"]
+    )
     if p is None:
         return None
     size = (p.stdout or "").strip()
