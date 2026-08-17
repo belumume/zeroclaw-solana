@@ -174,6 +174,101 @@ def rpc(method, params, attempts=4, endpoint=None):
     raise RuntimeError(f"RPC still rate-limited after {attempts} attempts: {last}")
 
 
+_GH_WEB = re.compile(
+    r"^https://github\.com/([^/]+)/([^/]+)/(issues|pull)/(\d+)/?$", re.I
+)
+_GH_BLOB = re.compile(
+    r"^https://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+?)/?$", re.I
+)
+
+
+def _github_blob_verdict(url):
+    """(ok, detail) for a github.com /blob/<ref>/<path> link, via the authenticated contents API.
+
+    Same throttle as `_github_api_verdict`, same 404-means-nothing problem, different route.
+    Measured 2026-08-17: after the issue links were fixed this gate still reported three
+    problems, ALL of them blobs, and the authenticated contents API resolved all three --
+    12,142 / 37,036 / 22,894 bytes. Zero were dead.
+
+    Returns None when it cannot reach a verdict, so the caller falls back to the web path.
+    """
+    m = _GH_BLOB.match(url)
+    if not m:
+        return None
+    owner, repo, ref, path = m.group(1), m.group(2), m.group(3), m.group(4)
+    path = path.split("#", 1)[0]  # a heading anchor is not part of the path
+    try:
+        p = subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{owner}/{repo}/contents/{path}?ref={ref}",
+                "--jq",
+                ".size",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except Exception:
+        return None
+    size = (p.stdout or "").strip()
+    if p.returncode == 0 and size:
+        return True, f"API ok ({size} B at {ref[:12]})"
+    err = (p.stderr or "").lower()
+    if "not found" in err or "404" in err:
+        return False, "API 404 (path genuinely absent at that ref)"
+    return None
+
+
+def _github_api_verdict(url):
+    """(ok, detail) for a github.com issue/PR link, resolved through the AUTHENTICATED API.
+
+    WHY THIS EXISTS, and it is a violation of the assumption `check_url` is built on.
+    That function treats a 4xx as a VERDICT -- the server understood and answered -- and
+    retries only 5xx/429, which is correct for every host we check except one. GitHub's WEB
+    frontend answers a throttled anonymous client with **404**, so a rate-limited fetch is
+    byte-identical to a dead link, and the retry logic cannot help because 404 is never
+    retried by design.
+
+    MEASURED 2026-08-17: this gate reported 16 problems on one run and 8 on another minutes
+    later, DIFFERENT MEMBERS EACH TIME. Every issue URL it called 404 was then re-checked
+    through the authenticated API: 12 of 12 existed, 0 genuinely unresolvable. A cited source
+    blob it called 404 exists at that commit at 12,142 bytes. The anonymous API budget was
+    untouched at 57 of 60, so the throttle is the web frontend specifically rather than a
+    quota anything had burned. A gate that cries wolf on a dozen live links gets learned
+    around, which is worse than no gate.
+
+    Returns None when the API route is unavailable, so the caller falls back to the web path
+    rather than treating a missing tool as a verdict about the link.
+    """
+    m = _GH_WEB.match(url)
+    if not m:
+        return None
+    owner, repo, kind, num = m.group(1), m.group(2), m.group(3), m.group(4)
+    # The API calls both issues and PRs "issues"; a PR resolves through that route too.
+    try:
+        p = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}/issues/{num}", "--jq", ".state"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except Exception:
+        return None  # gh absent or unusable -> not a verdict, fall back
+    state = (p.stdout or "").strip()
+    if p.returncode == 0 and state:
+        return True, f"API ok ({kind} is {state})"
+    err = (p.stderr or "").lower()
+    if "not found" in err or "404" in err:
+        return False, "API 404 (genuinely absent)"
+    return None  # auth failure, network, rate limit -> could-not-check, fall back
+
+
 def check_url(url, attempts=3):
     """(ok, detail) for a non-explorer link.
 
@@ -192,7 +287,18 @@ def check_url(url, attempts=3):
     those to mean "the server had a bad day, ask again" rather than "this does not exist".
     A transport failure is retried for the same reason, and a link that never answers is
     reported as UNREACHABLE rather than as broken, so the two stay distinguishable downstream.
+
+    GITHUB ISSUE AND PR LINKS GO THROUGH THE AUTHENTICATED API FIRST, because GitHub answers a
+    throttled anonymous client with 404 and this function is built on 4xx being a truthful
+    answer. See `_github_api_verdict`. It returns None whenever it cannot reach a verdict, so
+    an absent `gh` or a failed auth falls through to the web path below rather than becoming a
+    claim about the link.
     """
+    for resolver in (_github_api_verdict, _github_blob_verdict):
+        gh = resolver(url)
+        if gh is not None:
+            return gh
+
     last = None
     for attempt in range(attempts):
         if attempt:
