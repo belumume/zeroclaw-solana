@@ -166,9 +166,11 @@ def job_bodies(wf_nc: str) -> list[tuple[str, str]]:
     SEVERAL `jobs:` MAPS, because the input is every workflow file concatenated. A top-level key
     closes the current map and the scan then looks for the next one, rather than stopping. Written
     the other way first, and it silently parsed ci.yml alone: `host-drift.yml`'s plugin build
-    dropped out of the buildable corpus and the count printed 10 jobs where 15 exist. Nothing went
-    red, because the crates that job builds are covered elsewhere too. The DENOMINATOR in the
-    summary line is the only thing that showed it.
+    dropped out of the buildable corpus, and the summary's job total counted ci.yml's jobs rather
+    than the corpus. Nothing went red, because the crates that job builds are covered elsewhere
+    too. The DENOMINATOR in the summary line is the only thing that showed it, which is the
+    argument for printing it. The selftest pins a string unique to a LATER file's compiling job,
+    so the totals here do not have to be restated as jobs are added.
     """
     out: list[tuple[str, str]] = []
     name: str | None = None
