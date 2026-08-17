@@ -556,6 +556,15 @@ def test_recipient_kind() -> None:
             "[channels.whatsapp.shop]" in r.stderr,
             r.stderr,
         )
+        # The refusal must not ECHO the jid it rejected. box_selfcheck.py's redactor states as
+        # an invariant that this script carries no jid, and printing the rejected value directly
+        # above "set ZC_RECIPIENT" would hand an operator the wrong string to paste -- into the
+        # one override that is deliberately not domain-checked. Two reasons, same direction.
+        check(
+            "the refusal does not echo the rejected jid anywhere in its output",
+            DECOY_JID not in r.stderr and DECOY_JID not in r.stdout,
+            r.stderr + r.stdout,
+        )
     finally:
         box.cleanup()
 

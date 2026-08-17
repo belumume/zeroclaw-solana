@@ -44,6 +44,13 @@
 # named, never guess at a destination -- and a delayed receipt is recoverable where a receipt
 # broadcast to a room is not.
 #
+# SCOPE: this check governs the AUTO-RESOLVED path only. An explicit ZC_RECIPIENT is taken as
+# given and is not domain-checked, which is the same "explicit beats derived" convention
+# ZC_CHANNEL_ID follows just below. Note the two are not equally safe and the difference is
+# worth knowing: a wrong ZC_CHANNEL_ID fails CLOSED at the binary, which does not know the id,
+# while a wrong ZC_RECIPIENT fails OPEN and delivers. So an operator overriding this one is
+# accepting the destination themselves.
+#
 # ------------------------------------------------------------------------------------------
 # TWO VALUES, ONE VARIABLE. `$ZC_CHANNEL` used to feed both the config lookup and `--channel-id`,
 # and those two want DIFFERENT strings:
@@ -156,9 +163,13 @@ else
     GROUP_ONLY="${GROUP_MATCHES%%$'\n'*}"
   fi
 fi
+# The jid itself is NOT echoed, for two reasons that point the same way. A jid is a phone
+# number or a room id and this file is stated elsewhere to carry neither -- box_selfcheck.py's
+# redactor says so by name -- and printing the rejected value directly above "set ZC_RECIPIENT"
+# hands an operator the wrong string to paste, which is the one mistake the override cannot
+# catch. Naming the section is enough to act on; the operator can read their own config.
 if [ -z "$RECIPIENT" ] && [ -n "$GROUP_ONLY" ]; then
   echo "[channels.${CHANNEL}] in $CFG carries a GROUP jid and no direct-chat jid." >&2
-  echo "  Resolved group: $GROUP_ONLY" >&2
   echo "  A settlement receipt names a payer, an amount and a signature, so it is not sent to a" >&2
   echo "  group. The group entry in that section is the non-matching allowlist placeholder that" >&2
   echo "  scripts/whatsapp_posture_guard.sh requires, not a destination, and the section's own" >&2
