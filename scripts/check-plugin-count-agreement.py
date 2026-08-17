@@ -24,6 +24,33 @@ guessing at tense. Source comments are out of scope for the same reason: `paymen
 records "two of the eight plugins had one" as a survey taken at a point in time, and rewriting a
 measurement to match today's tree would destroy the record rather than update it.
 
+THE ALWAYS-LOADED SCOPE IS THE SECOND HALF, and without it this gate had a structural blind spot
+rather than a gap in its list. Every surface above comes from `git ls-files`, and all five of this
+root's always-loaded files are GITIGNORED, so the injected copy -- the one every session reads on
+every turn -- was exempt from this check by construction. Measured: this gate printed
+`all 6 claim(s) agree` while `docs/COMPLIANCE-AUDIT.md` was telling every session that CI runs
+`all 8 components in a matrix` against a matrix of nine. A gate cannot find what it never opens,
+however good its pattern is.
+
+That scope is DERIVED from `CLAUDE.local.md`'s own `@`-imports, transitively, rather than listed.
+The point of deriving is that the gate's idea of what is always-loaded cannot drift from what a
+session actually loads: change an import and the scope follows in the same commit. A hand-written
+list would rot exactly the way the prose it checks rots.
+
+DATED RECORDS ARE EXEMPT, and this scope forces a per-CLAIM discriminator where the tracked scope
+needed only a per-DOCUMENT one. `HISTORICAL` above works because exactly one tracked document is
+wholly about superseded belief. The always-loaded files are dated logs: a notes and a compliance
+ledger, both of which preserve superseded text deliberately and label it. Excluding either whole
+file would give back the blind spot; excluding neither would report a 2026-07-27 deploy record
+("all 8 plugins registered", true then, false now, and rewriting it would destroy the record).
+
+So an always-loaded claim whose OWN LINE carries a history marker is reported and not gated. Two
+properties make that honest rather than a loophole. It is narrow -- measured, 23 of 1,422 lines
+across the five files carry one -- and it is VISIBLE, printed as a NOTE with the marker that
+earned it, so a claim silenced by a stray word is a claim someone can see was silenced. Its
+ceiling: in a hard-wrapped document a marker on the neighbouring line does not count, and the
+remedy is to write it in the same sentence, which is the same convention TOTALITY already imposes.
+
 Exit 0 they agree, 1 a claim disagrees, 2 could not check. A could-not-check is NOT a pass: a
 pattern that stopped matching, or a surface list that resolved to nothing, would otherwise report
 agreement over an empty scan, which is this repo's most-repeated instrument failure.
@@ -59,6 +86,19 @@ SURFACES = (
 
 # Excluded by name, with the reason, because its subject IS superseded belief.
 HISTORICAL = {"docs/WHAT-WE-GOT-WRONG.md"}
+
+# The always-loaded tier's entry point. Everything else in that scope is read out of this file's
+# own `@`-imports, so the scope is a fact about the tree rather than a claim in this script.
+ALWAYS_LOADED_ENTRY = "CLAUDE.local.md"
+
+# A history marker exempts an ALWAYS-LOADED claim on the same line, never a tracked one. The
+# tracked scope's behaviour is deliberately unchanged by this widening: loosening it would be a
+# second change, and one with no measurement behind it.
+HISTORY_MARKER = re.compile(
+    r"historical|superseded|no longer the state|kept as provenance|was true (?:then|at the time)"
+    r"|dated survey|retracted|provenance, not as state",
+    re.IGNORECASE,
+)
 
 WORDS = {
     "one": 1,
@@ -145,6 +185,72 @@ def surfaces(root: Path) -> tuple[list[Path], list[str]]:
     return found, problems
 
 
+def always_loaded(root: Path) -> tuple[list[Path], list[str], bool]:
+    """(paths, problems, entry present) for the always-loaded tier.
+
+    Walked transitively from the entry point, because an import can import. A path that escapes
+    the root is a problem rather than a skip: a project entry point cannot reach outside its own
+    root by any path form, so one that appears to is a claim about the tree that is not true.
+
+    ABSENT IS NOT BROKEN. A clone, a CI runner and an agent worktree carry none of these files --
+    they are gitignored, which is the whole reason this scope had to be added -- so the entry
+    point missing means this checkout has no always-loaded tier to scan. That is reported as
+    NOT CHECKED by the caller and does not gate. PRESENT-BUT-EMPTY is the opposite case and IS a
+    problem: the file is there, the derivation returned nothing, and a scope that collapsed to
+    one file while reporting agreement is the false green this gate is built against.
+    """
+    entry = root / ALWAYS_LOADED_ENTRY
+    if not entry.is_file():
+        return [], [], False
+
+    found: list[Path] = [entry]
+    problems: list[str] = []
+    seen = {entry.resolve()}
+    queue = [entry]
+    while queue:
+        cur = queue.pop(0)
+        rel_cur = cur.relative_to(root).as_posix()
+        try:
+            text = cur.read_text(encoding="utf-8")
+        except Exception as exc:
+            problems.append(f"{rel_cur} is unreadable ({exc})")
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            if not line.startswith("@"):
+                continue
+            raw = line[1:].strip()
+            if not raw or any(c.isspace() for c in raw):
+                continue
+            target = root / raw
+            try:
+                resolved = target.resolve()
+                resolved.relative_to(root.resolve())
+            except (ValueError, OSError):
+                problems.append(
+                    f"{rel_cur}:{i} imports {raw!r}, which resolves outside the root; nothing "
+                    f"there is actually loaded, so the scope this names is not the scope in use"
+                )
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if not target.is_file():
+                problems.append(
+                    f"{rel_cur}:{i} imports {raw!r}, which is not on disk. The import silently "
+                    f"loads nothing, so this scope cannot be scanned as declared."
+                )
+                continue
+            found.append(target)
+            queue.append(target)
+
+    if len(found) == 1 and not problems:
+        problems.append(
+            f"{ALWAYS_LOADED_ENTRY} is present and yielded ZERO @-imports, so the derivation has "
+            f"stopped matching and the scope collapsed to the entry point alone"
+        )
+    return found, problems, True
+
+
 def claims_in(text: str) -> list[tuple[int, str, int]]:
     """(line number, matched text, asserted count) for every count claim.
 
@@ -180,6 +286,19 @@ def check(root: Path) -> tuple[int, list[str]]:
     if problems:
         return 2, ["cannot check:"] + [f"  - {p}" for p in problems]
 
+    al_paths, al_problems, al_present = always_loaded(root)
+    if al_problems:
+        return (
+            2,
+            ["cannot check the always-loaded scope:"]
+            + [f"  - {p}" for p in al_problems]
+            + [
+                "  This scope is derived from the entry point's own @-imports so it cannot drift "
+                "from what a session loads. A break in the derivation means the scope no longer "
+                "describes that, and agreement reported over it would cover less than it claims."
+            ],
+        )
+
     total, bad = 0, []
     for p in paths:
         rel = p.relative_to(root).as_posix()
@@ -197,14 +316,51 @@ def check(root: Path) -> tuple[int, list[str]]:
     # A scan that matched NOTHING is a broken pattern wearing a clean verdict. The denominator is
     # printed beside the count for the same reason: `0 findings` and `0 of 0 claims` read
     # identically to a human and mean opposite things.
+    #
+    # KEYED ON THE TRACKED SCOPE ALONE, deliberately. Those surfaces are DECLARED to carry counts,
+    # so zero there means the pattern died. The always-loaded files are derived and may honestly
+    # contain no total-set claim on any given day; gating on their zero would turn an ordinary
+    # rewrite into a cannot-check, and the pattern's liveness is already proven here.
     if total == 0:
         return 2, [
             f"cannot check: scanned {len(paths)} surface(s) and found ZERO count claims, so the "
             "pattern has stopped matching. Reporting agreement over nothing would be a false green."
         ]
 
+    al_total, al_exempt = 0, []
+    for p in al_paths:
+        rel = p.relative_to(root).as_posix()
+        try:
+            text = p.read_text(encoding="utf-8")
+        except Exception as exc:
+            return 2, [f"cannot check: always-loaded {rel} is unreadable ({exc})"]
+        src = text.splitlines()
+        for ln, matched, n in claims_in(text):
+            al_total += 1
+            marker = HISTORY_MARKER.search(re.sub(r"\s+", " ", src[ln - 1]))
+            if marker is not None:
+                al_exempt.append(
+                    f"  {rel}:{ln}  {matched!r} says {n}; not gated, the line calls itself a "
+                    f"record ({marker.group(0).lower()!r})"
+                )
+                continue
+            if n != want:
+                bad.append(f"  {rel}:{ln}  says {matched!r}, but git tracks {want}")
+
     lines.append(f"plugin directories tracked: {want}")
-    lines.append(f"count claims found: {total} across {len(paths)} surface(s)")
+    lines.append(f"count claims found: {total} across {len(paths)} tracked surface(s)")
+    if al_present:
+        lines.append(
+            f"always-loaded: {al_total} claim(s) across {len(al_paths)} file(s) derived from "
+            f"{ALWAYS_LOADED_ENTRY}'s @-imports, {len(al_exempt)} exempt as dated record(s)"
+        )
+        lines.extend(al_exempt)
+    else:
+        lines.append(
+            f"always-loaded: NOT CHECKED. No {ALWAYS_LOADED_ENTRY} in this checkout, so the "
+            f"always-loaded tier is absent here (it is gitignored, so a clone, a runner and an "
+            f"agent worktree all lack it). The verdict below covers the tracked surfaces only."
+        )
     if bad:
         lines.append(f"{len(bad)} claim(s) disagree with the tree:")
         lines.extend(bad)
@@ -214,7 +370,8 @@ def check(root: Path) -> tuple[int, list[str]]:
             "states the right one."
         )
         return 1, lines
-    lines.append(f"all {total} claim(s) agree")
+    gated = total + al_total - len(al_exempt)
+    lines.append(f"all {gated} gated claim(s) agree")
     return 0, lines
 
 
@@ -351,6 +508,140 @@ def selftest() -> int:
         rc, _ = check(tmp)
         report("prose that was correct FAILS once a plugin is added", rc == 1)
 
+    # ---- the history marker, both directions ------------------------------------------------
+    # Every fire string is a REAL line from this root's always-loaded files; the silent ones are
+    # the live claims that must keep being gated. Without the second group the marker could be
+    # matching everything, which would hand back the blind spot while looking like a narrowing.
+    for text, label in (
+        ("Everything below this paragraph is the HISTORICAL record", "'HISTORICAL'"),
+        ("it is NO LONGER THE STATE.**", "'no longer the state'"),
+        ("kept as provenance, not as state", "'kept as provenance'"),
+        (
+            "so it is a DATED SURVEY and was true then",
+            "'dated survey' / 'was true then'",
+        ),
+        ("This cell is SUPERSEDED below the first paragraph", "'superseded'"),
+    ):
+        report(f"marker fires: {label}", HISTORY_MARKER.search(text) is not None)
+    for text, label in (
+        ("all 8 components in a matrix", "the live CI claim that must stay gated"),
+        ("`plugins/` holds all nine components.", "an ordinary inventory line"),
+        (
+            "history is not drift, and the discriminator is the document",
+            "'history' alone",
+        ),
+        ("RECORD: the count re-measured today", "'record' alone"),
+    ):
+        report(f"marker silent: {label}", HISTORY_MARKER.search(text) is None)
+
+    # ---- the always-loaded scope --------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as td:
+        # The fixture root is a SUBDIRECTORY of the temp dir, so the escaping-import case below
+        # writes its target inside the tree that gets cleaned up rather than beside it.
+        tmp = Path(td) / "root"
+        tmp.mkdir()
+        (tmp / "plugins" / "p0" / "src").mkdir(parents=True)
+        (tmp / "plugins" / "p0" / "src" / "lib.rs").write_text("", encoding="utf-8")
+        subprocess.run(["git", "-C", str(tmp), "init", "-q"], capture_output=True)
+        subprocess.run(["git", "-C", str(tmp), "add", "-A"], capture_output=True)
+        for rel in SURFACES:
+            p = tmp / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("`plugins/` holds all one components.\n", encoding="utf-8")
+
+        entry = tmp / ALWAYS_LOADED_ENTRY
+        goal = tmp / ".claude" / "GOAL.md"
+        notes = tmp / "NOTES.md"
+        goal.parent.mkdir(parents=True, exist_ok=True)
+
+        # ABSENT is not broken, and it is the shape every clone and runner is in.
+        rc, out = check(tmp)
+        _, _, present = always_loaded(tmp)
+        report("no entry point: the scope is absent, not broken", present is False)
+        report("and the tracked verdict still passes", rc == 0)
+        report(
+            "and the output says the tier was NOT CHECKED rather than passing quietly",
+            any("NOT CHECKED" in ln for ln in out),
+        )
+
+        # PRESENT but yielding nothing is the opposite case: the derivation broke.
+        entry.write_text("no imports here at all\n", encoding="utf-8")
+        rc, out = check(tmp)
+        report("entry point with zero @-imports is cannot-check", rc == 2)
+        report(
+            "and it says the scope collapsed", any("ZERO @-imports" in ln for ln in out)
+        )
+
+        # A named import that is not on disk loads nothing; scanning less than declared is not a
+        # pass, for the same reason a missing declared surface is not.
+        entry.write_text("@.claude/GOAL.md\n", encoding="utf-8")
+        rc, out = check(tmp)
+        report("an @-import that is not on disk is cannot-check", rc == 2)
+        report("and it names the import it lost", any("GOAL.md" in ln for ln in out))
+
+        # An import that escapes the root cannot be what a session loads.
+        entry.write_text("@../outside.md\n", encoding="utf-8")
+        (tmp.parent / "outside.md").write_text("all nine plugins\n", encoding="utf-8")
+        _, probs, _ = always_loaded(tmp)
+        report(
+            "an @-import escaping the root is a problem, not a silent skip",
+            any("outside the root" in p for p in probs),
+        )
+
+        # THE DERIVATION IS TRANSITIVE: an import can import.
+        goal.write_text("@NOTES.md\n", encoding="utf-8")
+        notes.write_text("nothing here\n", encoding="utf-8")
+        entry.write_text("@.claude/GOAL.md\n", encoding="utf-8")
+        found, probs, _ = always_loaded(tmp)
+        report(
+            "the walk is transitive: entry -> GOAL -> NOTES",
+            not probs
+            and {p.name for p in found} == {"CLAUDE.local.md", "GOAL.md", "NOTES.md"},
+        )
+        report("a scope with no claims in it is not a failure", check(tmp)[0] == 0)
+
+        # THE CONTROL THIS WIDENING EXISTS FOR. A wrong count in a GITIGNORED always-loaded file,
+        # with every tracked surface correct, must go RED. Before the widening this exact tree
+        # printed agreement, because `git ls-files` never names the file that is wrong.
+        notes.write_text("CI runs all 8 components in a matrix.\n", encoding="utf-8")
+        rc, out = check(tmp)
+        report("a wrong count in an always-loaded file FAILS", rc == 1)
+        report(
+            "and the failure names that file, its line and both numbers",
+            any(
+                "NOTES.md:1" in ln and "8 components" in ln and "tracks 1" in ln
+                for ln in out
+            ),
+        )
+
+        # RESTORE: the same tree with the claim corrected is green again, so the red above came
+        # from the claim rather than from the file's mere presence.
+        notes.write_text("CI runs all one components in a matrix.\n", encoding="utf-8")
+        report("correcting that one claim restores the pass", check(tmp)[0] == 0)
+
+        # OVER-CORRECTION, the direction that gives the blind spot back. A dated record is
+        # exempt, and it must be PRINTED as exempt rather than dropped.
+        notes.write_text(
+            "HISTORICAL record of the 2026-07 deploy: all 8 components registered.\n",
+            encoding="utf-8",
+        )
+        rc, out = check(tmp)
+        report("a marked dated record does not gate", rc == 0)
+        report(
+            "and it is reported rather than silently skipped",
+            any("exempt" in ln for ln in out) and any("NOTES.md:1" in ln for ln in out),
+        )
+
+        # AND THE MARKER IS NOT A BLANKET: the same wrong claim one line down, unmarked, fires.
+        notes.write_text(
+            "HISTORICAL record of the 2026-07 deploy.\nCI runs all 8 components today.\n",
+            encoding="utf-8",
+        )
+        report(
+            "a marker on a DIFFERENT line does not exempt the claim",
+            check(tmp)[0] == 1,
+        )
+
     for f in failures:
         print(f"  FAIL  {f}")
     print(f"selftest: {cases - len(failures)}/{cases}")
@@ -360,10 +651,19 @@ def selftest() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--selftest", action="store_true")
+    # --root exists because the always-loaded tier is GITIGNORED, so it is present in the trunk
+    # root and absent from every worktree and clone. Without it, the half of this gate that
+    # matters most can only be exercised from one directory on one machine, and a verification
+    # nobody else can repeat is an assertion. The mutation controls use it too.
+    ap.add_argument(
+        "--root",
+        default=None,
+        help="check this tree instead of the script's own repo root",
+    )
     args = ap.parse_args()
     if args.selftest:
         return selftest()
-    rc, lines = check(ROOT)
+    rc, lines = check(Path(args.root).resolve() if args.root else ROOT)
     for ln in lines:
         print(ln)
     return rc

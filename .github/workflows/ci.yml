@@ -687,6 +687,14 @@ jobs:
       - name: that gate's own controls
         run: python3 scripts/check-plugin-count-agreement.py --selftest
 
+      # The mutation half, and it covers the part of that gate a runner otherwise never sees. Its
+      # always-loaded scope reads GITIGNORED files, so on a runner that scope is empty and the
+      # step above exercises the tracked surfaces only. These controls build their own fixture
+      # root in a temp directory and drive the real gate at it, then disable the scope and the
+      # history exemption one at a time and require each verdict to flip. Offline and hermetic.
+      - name: that gate's always-loaded scope is load-bearing
+        run: python3 scripts/mutation-check-plugin-count-agreement.py
+
       # The same file one step further in: not a number QUICKSTART states, but a COMMAND it tells
       # a stranger to paste. Followed verbatim, section 2 built every component into the target
       # directory and then told the reader to install a plugin whose manifest declares a bare
