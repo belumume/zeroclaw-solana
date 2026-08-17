@@ -621,9 +621,13 @@ its own vocabulary so the mechanisms are legible, not buried:
 
 Scoped non-goals (deliberate):
 - **No running T2 fund-signer.** The suite lands in the T0/T1 sweet spot, keeping a compromised model away from a fund-signing key.
-- **SF Allowances over Squads.** We use the brief-endorsed audited Allowances program for
-  agent-spend caps rather than a Squads multisig; Squads is the heavier "add last" human
-  co-signer path, not the agent-spend-cap primitive this needs.
+- **SF Allowances over Squads.** We use the brief-endorsed audited program for agent-spend caps
+  rather than a Squads multisig; Squads is the heavier "add last" human co-signer path, not the
+  agent-spend-cap primitive this needs. Its full name is Solana Foundation **Subscriptions &
+  Allowances**, `De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`, and the source is public at
+  [solana-foundation/subscriptions, pinned commit `debb4f7`](https://github.com/solana-foundation/subscriptions/tree/debb4f75ff7571218b39de3b633074dd843e70db).
+  The shorthand "SF Allowances" used elsewhere on this page is that program; searching the shorthand
+  alone does not find it, which is why the real name and the pin are given here.
 - **Solana Pay URL, not a Blink/Action.** The `solana:` transfer-request IS the zero-key receive
   rail; a device-co-signed oracle publish structurally cannot be a Blink (it needs a device
   signature, not a wallet's).
