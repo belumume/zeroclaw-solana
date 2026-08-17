@@ -207,6 +207,7 @@ def always_loaded(root: Path) -> tuple[list[Path], list[str], bool]:
     problems: list[str] = []
     seen = {entry.resolve()}
     queue = [entry]
+    parsed = 0  # @-lines that resolved to a path, self-references included
     while queue:
         cur = queue.pop(0)
         rel_cur = cur.relative_to(root).as_posix()
@@ -231,6 +232,7 @@ def always_loaded(root: Path) -> tuple[list[Path], list[str], bool]:
                     f"there is actually loaded, so the scope this names is not the scope in use"
                 )
                 continue
+            parsed += 1
             if resolved in seen:
                 continue
             seen.add(resolved)
@@ -243,10 +245,16 @@ def always_loaded(root: Path) -> tuple[list[Path], list[str], bool]:
             found.append(target)
             queue.append(target)
 
+    # The two ways a scope can collapse to the entry point are reported differently, because the
+    # message is the whole diagnostic and one of them would otherwise be false. ZERO parsed lines
+    # means the syntax stopped matching. A self-reference parsed fine and simply added nothing.
     if len(found) == 1 and not problems:
         problems.append(
             f"{ALWAYS_LOADED_ENTRY} is present and yielded ZERO @-imports, so the derivation has "
             f"stopped matching and the scope collapsed to the entry point alone"
+            if parsed == 0
+            else f"{ALWAYS_LOADED_ENTRY} is present and its {parsed} @-import(s) all resolve back "
+            f"to itself, so the scope is the entry point alone"
         )
     return found, problems, True
 
@@ -570,6 +578,16 @@ def selftest() -> int:
         report("entry point with zero @-imports is cannot-check", rc == 2)
         report(
             "and it says the scope collapsed", any("ZERO @-imports" in ln for ln in out)
+        )
+
+        # A SELF-IMPORT is also a collapsed scope, and it must not borrow the message above: the
+        # syntax parsed perfectly, so saying it yielded zero imports would be a false diagnostic.
+        entry.write_text(f"@{ALWAYS_LOADED_ENTRY}\n", encoding="utf-8")
+        _, probs, _ = always_loaded(tmp)
+        report(
+            "a self-referential import is reported as such, not as zero imports",
+            any("resolve back" in p for p in probs)
+            and not any("ZERO @-imports" in p for p in probs),
         )
 
         # A named import that is not on disk loads nothing; scanning less than declared is not a

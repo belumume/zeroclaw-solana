@@ -150,7 +150,12 @@ def main() -> int:
                 "the anchor is gone; this control tests nothing",
             )
         else:
-            p = GATE.parent / "_mutant_pca_scope.py"
+            # THE MUTANT LIVES IN THE TEMP DIR, not in `scripts/`. The sibling mutation control
+            # has to place its mutant beside the real gate because that gate resolves its repo
+            # root as `__file__.parent.parent`, so a copy elsewhere finds no tree to check. This
+            # gate takes `--root`, so location is irrelevant here and the fixed-name file in a
+            # shared directory would only be a way for two concurrent runs to collide.
+            p = base / "_mutant_pca_scope.py"
             try:
                 p.write_text(mutant_b, encoding="utf-8")
                 rc_m, out_m = run(p, bad)
@@ -175,7 +180,7 @@ def main() -> int:
                 "the anchor is gone; this control tests nothing",
             )
         else:
-            p = GATE.parent / "_mutant_pca_exempt.py"
+            p = base / "_mutant_pca_exempt.py"
             try:
                 p.write_text(mutant_c, encoding="utf-8")
                 rc_m, out_m = run(p, marked)
