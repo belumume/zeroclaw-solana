@@ -19,6 +19,32 @@
 # carries no phone number and cannot drift away from the channel it sends to.
 #
 # ------------------------------------------------------------------------------------------
+# A GROUP JID IS NOT A RECIPIENT. The section lookup used to take the FIRST jid of either
+# domain, and on the live box that resolved to a GROUP:
+#
+#   recipient resolved: ...@g.us   (kind: g.us)
+#
+# The shop section carries no direct-chat jid at all -- the dm allowlist lives in
+# `peer_groups.<name>.external_peers`, a different table -- so the only jid inside the section
+# is the deliberately non-matching `allowed_groups` entry that scripts/whatsapp_posture_guard.sh
+# requires. That entry exists to neutralise a host fail-open where an EMPTY allowed_groups means
+# permit-ALL; it is a placeholder chosen to match nothing. Using it as a destination is using a
+# value for the exact opposite of its stated purpose, and the same section's `group_policy`
+# declares groups out of scope for this channel besides. A receipt names a payer, an amount, a
+# timestamp and a signature, so a group is the one place it must never land.
+#
+# SO THE DISCRIMINATOR IS THE ADDRESS SPACE, NOT THE CONFIG KEY. `s.whatsapp.net` is WhatsApp's
+# individual-user domain and `g.us` its group domain; that is a protocol fact and cannot drift
+# when a key is renamed or peers move to another table. Keying on `allowed_peers` instead would
+# read as more precise and is the more brittle of the two: this box does not use that key, so a
+# key-based resolver would be silently looking for something that is not there.
+#
+# When only a group jid is available the run REFUSES and names ZC_RECIPIENT. That matches the
+# convention this file already holds for an id it cannot resolve -- fail loud with the remedy
+# named, never guess at a destination -- and a delayed receipt is recoverable where a receipt
+# broadcast to a room is not.
+#
+# ------------------------------------------------------------------------------------------
 # TWO VALUES, ONE VARIABLE. `$ZC_CHANNEL` used to feed both the config lookup and `--channel-id`,
 # and those two want DIFFERENT strings:
 #
@@ -114,17 +140,35 @@ fi
 # must set ZC_RECIPIENT, and the error below says so rather than guessing at another id shape.
 # Matches are collected whole and the first taken by expansion rather than piped through `head`,
 # which under `pipefail` can turn a healthy read into a SIGPIPE failure.
+#
+# Only the DIRECT-CHAT domain is a candidate, wherever in the section it appears and whatever key
+# carries it. Group jids are collected separately for the diagnosis alone -- see the header.
 SECTION_RE="$(printf '%s' "$CHANNEL" | sed 's/[].[^$*\/]/\\&/g')"
+GROUP_ONLY=""
 if [ -n "${ZC_RECIPIENT:-}" ]; then
   RECIPIENT="$ZC_RECIPIENT"
 else
-  MATCHES="$(sed -n "/^\[channels\.${SECTION_RE}\]/,/^\[/p" "$CFG" \
-    | grep -oE '[0-9]+@(g\.us|s\.whatsapp\.net)' || true)"
-  RECIPIENT="${MATCHES%%$'\n'*}"
+  SECTION="$(sed -n "/^\[channels\.${SECTION_RE}\]/,/^\[/p" "$CFG")"
+  DM_MATCHES="$(printf '%s\n' "$SECTION" | grep -oE '[0-9]+@s\.whatsapp\.net' || true)"
+  RECIPIENT="${DM_MATCHES%%$'\n'*}"
+  if [ -z "$RECIPIENT" ]; then
+    GROUP_MATCHES="$(printf '%s\n' "$SECTION" | grep -oE '[0-9]+@g\.us' || true)"
+    GROUP_ONLY="${GROUP_MATCHES%%$'\n'*}"
+  fi
+fi
+if [ -z "$RECIPIENT" ] && [ -n "$GROUP_ONLY" ]; then
+  echo "[channels.${CHANNEL}] in $CFG carries a GROUP jid and no direct-chat jid." >&2
+  echo "  Resolved group: $GROUP_ONLY" >&2
+  echo "  A settlement receipt names a payer, an amount and a signature, so it is not sent to a" >&2
+  echo "  group. The group entry in that section is the non-matching allowlist placeholder that" >&2
+  echo "  scripts/whatsapp_posture_guard.sh requires, not a destination, and the section's own" >&2
+  echo "  group_policy puts groups out of scope for this channel." >&2
+  echo "  Set ZC_RECIPIENT to the direct-chat jid that should receive receipts." >&2
+  exit 2
 fi
 [ -n "$RECIPIENT" ] || {
   echo "no recipient resolved from [channels.${CHANNEL}] in $CFG" >&2
-  echo "  the section must carry a WhatsApp JID, or set ZC_RECIPIENT explicitly" >&2
+  echo "  the section must carry a WhatsApp direct-chat JID, or set ZC_RECIPIENT explicitly" >&2
   exit 2
 }
 
