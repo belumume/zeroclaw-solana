@@ -212,7 +212,17 @@ and publishing it would ship a username rather than a capability. It is named he
 for its reasoning, not as evidence you can re-run. The checks a reader *can* run
 are the ones in this document with commands next to them.
 
-The one runtime check that does ship is `scripts/whatsapp_posture_guard.sh`, which runs as
+`scripts/demo-preflight.py` is a different tool that happens to share that name, and it
+does ship. It hardcodes no machine: it runs the offline verifiers, probes the public
+deployed surface with GET and HEAD only, and writes a dated capture of the x402
+challenge so a capture is never passed off as a live fetch. A reader runs it against the
+same URLs we do, and every URL is overridable so the instrument can be watched failing.
+It is not a `check-*.py` gate and must not be renamed into one: both CI discovery walks
+key on that prefix, and this one needs the public internet and a live host.
+
+    python3 scripts/demo-preflight.py
+
+The runtime check that gates startup is `scripts/whatsapp_posture_guard.sh`, which runs as
 `ExecStartPre` and refuses to start the shop when the WhatsApp group posture is fail-open.
 It exists as a start gate rather than a comment because on this host build an empty
 `allowed_groups` means permit-all rather than permit-none, and the live config neutralises

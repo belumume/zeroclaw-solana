@@ -187,3 +187,7 @@ docs/PASTE-THESE-EIGHT.md
 UPSTREAM-PR-RESCUE.md
 # Outbound channel for things only the operator can do. Operator-facing, not a judge surface.
 OPERATOR-INBOX.md
+
+# Dated live captures written by scripts/demo-preflight.py. Runtime artifacts with a
+# timestamp in the name: re-derivable by running the script, never tracked.
+preflight-captures/
