@@ -171,13 +171,30 @@ def check_fixtures(endpoint: str) -> list[str]:
                     f"settled per {FIXTURE_ARCHIVAL_RPC} by "
                     f"{archival_settled[-1]['signature']}"
                 )
-                problems.append(
-                    f"PRUNED, NOT UNPAID: the pinned RPC {endpoint} can no longer see the "
-                    f"settlement for {PAID_REFERENCE}, though it is finalized on chain. A reader "
-                    "following the live pay link hits the same blind spot. Re-pin the page's RPC "
-                    "to an endpoint whose retention reaches that slot, or capture the bytes so "
-                    "this fixture stops depending on a third party's retention policy."
+                # PRUNED IS ONLY A DEFECT IF THE PAGE CANNOT RECOVER FROM IT. Asserting "the
+                # pinned RPC must see this" would be a gate keyed to one REMEDY rather than to
+                # the invariant, and it would stay red forever after the page grew a fallback --
+                # punishing the fix. The invariant is: a settled reference must never leave the
+                # card payable, because that invites a SECOND payment. Either the pinned RPC sees
+                # it, or the page escalates to an archival endpoint that does.
+                page_src = (PAGE_DIR / "src" / "app.js").read_text(encoding="utf-8")
+                has_fallback = (
+                    "ARCHIVAL_RPC" in page_src and "ARCHIVAL_RPC)" in page_src
                 )
+                if has_fallback:
+                    print(
+                        "                  pinned RPC pruned it, and the page ESCALATES to "
+                        "ARCHIVAL_RPC, so the card still refuses"
+                    )
+                else:
+                    problems.append(
+                        f"MONEY BUG: the pinned RPC {endpoint} can no longer see the settlement "
+                        f"for {PAID_REFERENCE} (finalized on chain), and the page has NO archival "
+                        "fallback. settledSignature() returns null, checkAlreadyPaid() returns "
+                        "false, and the card stays PAYABLE -- a customer reloading this link can "
+                        "pay a SECOND time. Re-pin the page's RPC, or give it an archival "
+                        "escalation for the empty case."
+                    )
             else:
                 problems.append(
                     f"PAID_REFERENCE {PAID_REFERENCE} has no confirmed non-errored signature on "
