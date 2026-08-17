@@ -575,99 +575,103 @@ def main():
         if is_transport_error(e):
             transport_fails += 1
 
-    # CLAIM: a message this shop sent actually landed on a channel.
+    # CLAIM: a receipt this shop sent actually reached a customer.
     #
     # Every check above observes a PROCESS or a PAGE. None of them can tell a shop whose
-    # WhatsApp session dropped from one that is serving customers, because a live process
-    # with a dead channel passes all three. The gate now reads the newest send outcome per
-    # channel out of the shop log and reports it here, which is the first signal in this
+    # send path is refused from one that is serving customers, because a live process with
+    # a dead channel passes all three. The gate now reads the settlement announcer's own
+    # record of what it delivered and reports it here, which is the first signal in this
     # file that is an EFFECT of the channel working rather than a state around it.
+    #
+    # WHY THE ANNOUNCER RATHER THAN THE SHOP DAEMON. The announcer is a shell script that
+    # never consults a model, and its `sent:` and `SEND FAILED` lines are the receipt
+    # actually landing or not. The shop daemon's log cannot answer this: the announcer is a
+    # separate unit whose stdout goes to the journal, so a reader pointed at the daemon log
+    # would scan forever and never see a delivery.
     #
     # NOT GATED, and that is a decision rather than caution. A gate on live box state can
     # turn main red with no repo change, and a channel reconnect is exactly the transient
-    # that would do it. It is also not gateable on the merits: this shop sends only when a
-    # customer writes to it, so an absence of records is what a quiet Tuesday looks like as
-    # much as what a broken binding looks like, and a red that means either means neither.
+    # that would do it. It is also not gateable on the merits: the announcer sends only when
+    # a payment settles, so an absence of receipts is what a quiet Tuesday looks like as much
+    # as what a broken send path looks like, and a red that means either means neither.
     #
     # SO ONLY `connected` IS EVIDENCE. Everything else prints what is missing and asserts
-    # nothing, including the empty case, which must not be read as an outage: the channel
-    # can be verifiably up while this block sees nothing, and if that is what the box
-    # reports then the finding is about the parser's format assumption, not the shop.
-    ch = (health or {}).get("channels")
+    # nothing, including the empty case, which must not be read as an outage.
+    rc = (health or {}).get("receipts")
     if health is None:
         # /health already failed above with its own reason. A second line about a block
         # inside a body nobody received would be noise dressed as a finding.
         pass
-    elif ch is None:
+    elif rc is None:
         print(
-            "PEND  channel liveness not yet observable: the deployed gate predates the "
-            "/health channels block. Not gating. It becomes a live claim on the next deploy."
+            "PEND  receipt delivery not yet observable: the deployed gate predates the "
+            "/health receipts block. Not gating. It becomes a live claim on the next deploy."
         )
     else:
         # .get with no default throughout, so a field the endpoint stops sending reads as
         # None and is reported as malformed rather than defaulting into something quiet.
-        obs = ch.get("observed")
-        scanned = ch.get("lines_scanned")
-        found = ch.get("send_records_found")
+        d = rc.get("delivery")
+        scanned = rc.get("lines_scanned")
+        found = rc.get("records_found")
         if (
-            not isinstance(obs, dict)
+            not isinstance(d, dict)
             or not isinstance(scanned, int)
             or not isinstance(found, int)
         ):
             print(
-                f"INFO  channel liveness block malformed: observed={type(obs).__name__}, "
-                f"lines_scanned={scanned!r}, send_records_found={found!r}; not gating"
+                f"INFO  receipt delivery block malformed: delivery={type(d).__name__}, "
+                f"lines_scanned={scanned!r}, records_found={found!r}; not gating"
             )
-        elif ch.get("log_readable") is not True:
+        elif rc.get("log_readable") is not True:
             print(
-                f"INFO  channel liveness unknown: the shop log could not be read "
-                f"({ch.get('detail')}). No channel is claimed either way, not gating"
+                f"INFO  receipt delivery unknown: the announcer's record could not be read "
+                f"({rc.get('detail')}). Nothing is claimed either way, not gating"
             )
         else:
-
-            def _with(status):
-                return sorted(
-                    k
-                    for k, v in obs.items()
-                    if isinstance(v, dict) and v.get("status") == status
-                )
-
-            connected, failing = _with("connected"), _with("failing")
-            quiet = _with("stale") + _with("unknown")
+            status = d.get("status")
+            age = d.get("last_success_age_seconds")
+            chan = d.get("channel")
+            run = rc.get("last_run") or {}
             # The denominator travels with the count, always. A zero out of zero lines and
-            # a zero out of thousands are different verdicts about this instrument, and
-            # only one of them is a statement about the shop.
-            basis = f"{found} send record(s) in {scanned} log line(s) read"
-            if connected:
-                landed = ", ".join(
-                    f"{k} {obs[k].get('last_success_age_seconds')}s ago"
-                    for k in connected
+            # a zero out of hundreds are different verdicts about this instrument, and only
+            # one of them is a statement about the shop.
+            basis = f"{found} delivery record(s) in {scanned} line(s) read from {rc.get('source')}"
+            run_note = ""
+            if isinstance(run.get("announced"), int):
+                committed = (
+                    "committed" if run.get("ledger_committed") else "NOT committed"
                 )
-                rest = (
-                    f"; also seen: {', '.join(failing + quiet)}"
-                    if (failing or quiet)
-                    else ""
+                run_note = (
+                    f"; last run announced {run['announced']}, ledger {committed}"
+                )
+            if status == "connected":
+                mins = (
+                    f"{age / 60:.0f} min ago"
+                    if isinstance(age, (int, float))
+                    else "age unreported"
                 )
                 print(
-                    f"INFO  channel liveness: delivered on {landed} ({basis}){rest}, not gating"
+                    f"INFO  receipt delivery: a receipt landed {mins} ({basis}){run_note}, "
+                    f"not gating"
                 )
-            elif failing:
+            elif status == "failing":
+                where = f" via {chan}" if chan else ""
                 print(
-                    f"INFO  channel liveness: newest send FAILED on {', '.join(failing)} "
-                    f"({basis}). This is positive evidence of a broken send, but it is live "
-                    f"box state, so it is reported and not gated"
+                    f"INFO  receipt delivery: the newest send FAILED{where} ({basis})"
+                    f"{run_note}. This is positive evidence of a broken send path, but it is "
+                    f"live box state, so it is reported and not gated"
                 )
-            elif quiet:
+            elif status == "stale":
                 print(
-                    f"INFO  channel liveness: no recent delivery on {', '.join(quiet)} "
-                    f"({basis}). Undatable or stale sends are not evidence of health and "
-                    f"not evidence of an outage either, not gating"
+                    f"INFO  receipt delivery: newest receipt is older than the window "
+                    f"({basis}){run_note}. Not evidence of health and not evidence of an "
+                    f"outage either, not gating"
                 )
             else:
                 print(
-                    f"INFO  channel liveness: no send record found ({basis}). A channel can "
-                    f"be verifiably up and still produce this, so it reads as the parser "
-                    f"finding nothing rather than as the shop being down, not gating"
+                    f"INFO  receipt delivery: no datable delivery found ({basis}){run_note}. "
+                    f"A shop that sold nothing produces exactly this, so it reads as an "
+                    f"absence of sales rather than a fault, not gating"
                 )
 
     # CLAIM: the x402 daily cap survives a restart.
