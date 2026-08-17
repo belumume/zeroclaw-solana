@@ -160,8 +160,11 @@ def probe(name, url, expect, method="GET", want_body=False, want_ctype=None):
             # the status itself is one of the retryable shapes.
             retryable = status >= 500 or status in (408, 429)
             if retryable and attempt < ATTEMPTS:
+                # Deliberately does not set `last`. The only route to the post-loop
+                # fallback is the OSError branch's break, which sets it there; on the
+                # final attempt this branch returns using `status` directly. Assigning
+                # here would be dead code that reads as if it fed the fallback.
                 time.sleep(BACKOFF[min(attempt - 1, len(BACKOFF) - 1)])
-                last = urllib.error.HTTPError(url, status, "retryable", headers, None)
                 continue
             return Result(
                 name,
@@ -259,6 +262,25 @@ def verify_proof_note(out):
         elif "live claims verified" in s:
             live = s.split()[0]
     return static, live
+
+
+def capture_label(path):
+    """Render a capture path for the report. Never raises.
+
+    A separate function because the crash it prevents was IN THE FORMATTING, not in the
+    write. `--capture-dir` is a documented override that can point anywhere, and
+    `Path.relative_to` raises for anything outside ROOT, so this line used to kill the
+    run after every probe had finished and after the capture had already landed on disk.
+    The traceback exited 1, which is the NO-GO code, so a crash was indistinguishable
+    from a real substantive finding at the moment a caller was deciding whether to go.
+
+    Relativising is a nicety. It must never cost the report, and it must be reachable by
+    a test without a network round trip, which it was not while it lived inline.
+    """
+    try:
+        return str(path.relative_to(ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(path)
 
 
 def capture_price(result, outdir):
@@ -383,7 +405,7 @@ def main():
         capture_note = "skipped (--no-capture)"
     elif price.verdict == GREEN:
         capture_path = capture_price(price, pathlib.Path(args.capture_dir))
-        capture_note = str(capture_path.relative_to(ROOT)).replace("\\", "/")
+        capture_note = capture_label(capture_path)
     else:
         capture_note = (
             "NOT WRITTEN: /price did not answer, so there is nothing honest to show"

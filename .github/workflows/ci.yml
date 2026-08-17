@@ -314,6 +314,23 @@ jobs:
       - name: transport failures are classified apart from failed claims
         run: python3 scripts/test_verify_proof_transport.py
 
+      # The same distinction one layer out, for the demo pre-flight. That tool decides
+      # go/no-go before a live demo, and the one behaviour everything else rests on is
+      # the retry: a probe that gives up on the first failure reports a dead endpoint
+      # for a link that is fine, and a probe that retries a real 404 hides a finding.
+      # The suite asserts the REQUEST COUNT a localhost server actually saw, because a
+      # classifier can return the right verdict for the wrong reason and only the count
+      # separates those. Hermetic: it starts its own server, so no network is involved.
+      - name: the demo pre-flight tells transport apart from a finding
+        run: python3 scripts/test_demo_preflight.py
+
+      # And the suite above is itself only worth its green if it can go red. This breaks
+      # the retry in both directions and requires the suite to notice each time, with
+      # every substitution asserted against the file first so a rotted anchor exits 2
+      # rather than silently testing unmodified code.
+      - name: that pre-flight suite is load-bearing
+        run: python3 scripts/mutation-check-demo-preflight.py
+
       # The on-chain evidence outlives the links to it. Public devnet RPC prunes
       # after about four days, so every explorer link in DEVNET-PROOF is dead well
       # before judging. This verifies the captured raw transactions instead:
