@@ -180,6 +180,12 @@ _GH_WEB = re.compile(
 _GH_BLOB = re.compile(
     r"^https://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+?)/?$", re.I
 )
+# A ref that CANNOT be the first segment of a longer, slash-bearing branch name: a commit sha,
+# or one of the conventional single-segment names. Used only to decide whether a 404 is
+# trustworthy -- see the asymmetry argument in _github_blob_verdict.
+_UNAMBIGUOUS_REF = re.compile(
+    r"[0-9a-fA-F]{7,40}|main|master|HEAD|v[0-9][A-Za-z0-9.\-]*"
+)
 
 
 def _github_blob_verdict(url):
@@ -202,10 +208,23 @@ def _github_blob_verdict(url):
         return None
     size = (p.stdout or "").strip()
     if p.returncode == 0 and size:
+        # A SUCCESS is self-validating: the ref resolved and the path existed under it, so the
+        # URL was split correctly. No guard needed on this branch.
         return True, f"API ok ({size} B at {ref[:12]})"
     err = (p.stderr or "").lower()
     if "not found" in err or "404" in err:
-        return False, "API 404 (path genuinely absent at that ref)"
+        # A 404 is NOT self-validating, and that asymmetry is the whole point. A branch name
+        # may contain slashes, but _GH_BLOB captures `[^/]+`, so `blob/feature/my-branch/x.md`
+        # arrives here as ref=`feature`, path=`my-branch/x.md` -- and the slash is already gone,
+        # which is why inspecting `ref` for one cannot detect the case. Querying that mis-split
+        # 404s on a LIVE link: a FALSE FAIL, strictly worse than the throttle this routing
+        # replaces, because it is a wrong verdict rather than a noisy one.
+        # So trust a 404 only from a ref that CANNOT be the head of a longer branch name -- a
+        # commit sha or a conventional single-segment name. Otherwise defer to the web path,
+        # which never had to split anything. Refusing to answer beats answering wrong.
+        if _UNAMBIGUOUS_REF.fullmatch(ref):
+            return False, "API 404 (path genuinely absent at that ref)"
+        return None
     return None
 
 

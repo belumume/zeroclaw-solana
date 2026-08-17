@@ -213,6 +213,13 @@ else:
             "13 CONTROL: a github URL that is neither issue/PR nor blob defers",
             "https://github.com/solana-foundation/subscriptions/tree/debb4f7",
         ),
+        (
+            "14 a slash-bearing ref is UNSPLITTABLE, so it defers instead of guessing",
+            # `blob/feature/my-branch/docs/x.md` parses as ref=feature, path=my-branch/docs/x.md.
+            # Querying that would 404 on a LIVE link -- a false FAIL, worse than the throttle
+            # this routing replaces. Refusing to answer is the only correct third option.
+            "https://github.com/x402-foundation/x402/blob/feature/my-branch/specs/x.md",
+        ),
     ):
         check(
             name,
