@@ -27,9 +27,11 @@ as a plain equality.
 
 THE CEILING IS PARSED, NOT RUN. Running the script would report today's RUNTIME denominator, which
 depends on what a remote box happens to be serving, and would need the network. This reads the
-source with `ast`: it counts the `ACCOUNTS` and `TXS` literals for the static side, and evaluates
-the `live_total` expression with every condition forced true for the live side. Offline,
-deterministic, and it fails loudly rather than guessing if either shape stops resolving.
+source with `ast`: it counts the `ACCOUNTS` and `TXS` literals for the static side, and for the
+live side takes the LARGER branch of each conditional, which is the total over every combination
+of its conditions. Taking the true branch instead would be right only while every optional claim
+happens to be written `1 if cond else 0`. Offline, deterministic, and it fails loudly rather than
+guessing if either shape stops resolving.
 
 THE WORD "one" IS NOT A COUNT, and this is the one carve-out. Measured over the tracked prose
 corpus, the pattern hits 13 times: 12 are real count claims and the 13th is `README.md`'s image
@@ -193,7 +195,7 @@ def check(root: Path) -> tuple[int, list[str]]:
 
     lines.append(
         f"derived from {VERIFIER}: static {static_ceiling}, live ceiling {live_ceiling} "
-        f"(every optional claim gating)"
+        "(the largest total the live expression can reach)"
     )
 
     disagree: list[str] = []
