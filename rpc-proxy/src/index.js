@@ -208,11 +208,18 @@ export default {
     //     finds the fast endpoint empty, and every one of those ~200 polls escalates. One open tab
     //     on an unpaid link would drive ~200 paid lookups.
     //
-    //     TTL is deliberately shorter than the poll interval is long: 30s means a real payment is
-    //     still noticed within one extra poll, so the page's whole reason for polling survives.
+    //     TTL is 60s because that is Cloudflare KV's FLOOR -- a smaller value is not achievable,
+    //     so do not "tune" this down expecting fresher escalation.
+    //
+    //     WRITTEN ONLY WHEN AN ESCALATION ACTUALLY RAN. Writing it on every empty answer refreshed
+    //     the TTL on each poll, and since the page polls every 6s the marker never expired -- so
+    //     the deep lookup fired ONCE per polling session rather than once a minute, which is not
+    //     what the paragraph above describes. Gating on `deepTried` makes the marker age out and
+    //     the escalation genuinely periodic. Raised by review of this very commit.
+    //
     //     The key is namespaced apart from the settlement key so a negative can NEVER be mistaken
-    //     for a settlement, and the read path below only consults it to skip the escalation.
-    if (env.SETTLEMENTS && !settled) {
+    //     for a settlement, and the read path above only consults it to skip the escalation.
+    if (env.SETTLEMENTS && !settled && deepTried) {
       await env.SETTLEMENTS.put(`neg:${cacheKey}`, "1", { expirationTtl: 60 });
     }
 
