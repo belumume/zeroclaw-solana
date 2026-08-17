@@ -174,6 +174,148 @@ def rpc(method, params, attempts=4, endpoint=None):
     raise RuntimeError(f"RPC still rate-limited after {attempts} attempts: {last}")
 
 
+_GH_WEB = re.compile(
+    r"^https://github\.com/([^/]+)/([^/]+)/(issues|pull)/(\d+)/?$", re.I
+)
+_GH_BLOB = re.compile(
+    r"^https://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+?)/?$", re.I
+)
+# A ref that CANNOT be the first segment of a longer, slash-bearing branch name: a commit sha,
+# or one of the conventional single-segment names. Used only to decide whether a 404 is
+# trustworthy -- see the asymmetry argument in _github_blob_verdict.
+_UNAMBIGUOUS_REF = re.compile(
+    r"[0-9a-fA-F]{7,40}|main|master|HEAD|v[0-9][A-Za-z0-9.\-]*"
+)
+
+
+def _github_blob_verdict(url):
+    """(ok, detail) for a github.com /blob/<ref>/<path> link, via the authenticated contents API.
+
+    Same throttle as `_github_api_verdict`, same 404-means-nothing problem, different route.
+    Measured 2026-08-17: after the issue links were fixed this gate still reported three
+    problems, ALL of them blobs, and the authenticated contents API resolved all three --
+    12,142 / 37,036 / 22,894 bytes. Zero were dead.
+
+    Returns None when it cannot reach a verdict, so the caller falls back to the web path.
+    """
+    m = _GH_BLOB.match(url)
+    if not m:
+        return None
+    owner, repo, ref, path = m.group(1), m.group(2), m.group(3), m.group(4)
+    path = path.split("#", 1)[0]  # a heading anchor is not part of the path
+    p = _gh(["api", f"repos/{owner}/{repo}/contents/{path}?ref={ref}", "--jq", ".size"])
+    if p is None:
+        return None
+    size = (p.stdout or "").strip()
+    if p.returncode == 0 and size:
+        # A SUCCESS is self-validating: the ref resolved and the path existed under it, so the
+        # URL was split correctly. No guard needed on this branch.
+        return True, f"API ok ({size} B at {ref[:12]})"
+    err = (p.stderr or "").lower()
+    if "not found" in err or "404" in err:
+        # A 404 is NOT self-validating, and that asymmetry is the whole point. A branch name
+        # may contain slashes, but _GH_BLOB captures `[^/]+`, so `blob/feature/my-branch/x.md`
+        # arrives here as ref=`feature`, path=`my-branch/x.md` -- and the slash is already gone,
+        # which is why inspecting `ref` for one cannot detect the case. Querying that mis-split
+        # 404s on a LIVE link: a FALSE FAIL, strictly worse than the throttle this routing
+        # replaces, because it is a wrong verdict rather than a noisy one.
+        # So trust a 404 only from a ref that CANNOT be the head of a longer branch name -- a
+        # commit sha or a conventional single-segment name. Otherwise defer to the web path,
+        # which never had to split anything. Refusing to answer beats answering wrong.
+        if _UNAMBIGUOUS_REF.fullmatch(ref):
+            return False, "API 404 (path genuinely absent at that ref)"
+        return None
+    return None
+
+
+def _gh(args, attempts=3):
+    """Run `gh api` with a retry, returning (rc, stdout, stderr) or None if gh is unusable.
+
+    RETRIED, and the reason is specific rather than general caution. A transient gh failure
+    makes the resolver return None, which falls back to the WEB path -- the very source this
+    routing exists to avoid, because it answers 404 when throttled. So one flaky call
+    reintroduces exactly the false 404 the fix removes, and non-deterministically.
+    MEASURED 2026-08-17: a run reported a single problem, `issues/9394 HTTP 404`; the API said
+    open and the next run was clean. Without this retry the gate stays non-deterministic in
+    the same direction, just far more rarely, which is worse because it is then unreproducible.
+
+    A 404 from the API is NOT retried: that is a verdict, and the whole point is to tell one
+    apart from a throttle.
+    """
+    last = None
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(1.0 * attempt)
+        try:
+            p = subprocess.run(
+                ["gh"] + args,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except FileNotFoundError:
+            return None  # gh not installed at all -> fall back to the web path
+        except Exception as e:
+            last = str(e)
+            continue
+        if p.returncode == 0:
+            return p
+        err = (p.stderr or "").lower()
+        if "not found" in err or "404" in err:
+            return p  # a real verdict; do not retry it
+        last = err
+    # SAY SO rather than degrading quietly. Returning None sends the caller to the web path,
+    # which is the source that answers 404 when throttled, so a persistent gh failure would
+    # silently restore the exact false-404 this routing removes. A fail-open path that emits
+    # nothing is indistinguishable from one that never ran.
+    print(
+        f"  note: gh unavailable after {attempts} attempts, falling back to the web path "
+        f"for this link ({(last or 'no detail')[:80]})",
+        file=sys.stderr,
+    )
+    return None
+
+
+def _github_api_verdict(url):
+    """(ok, detail) for a github.com issue/PR link, resolved through the AUTHENTICATED API.
+
+    WHY THIS EXISTS, and it is a violation of the assumption `check_url` is built on.
+    That function treats a 4xx as a VERDICT -- the server understood and answered -- and
+    retries only 5xx/429, which is correct for every host we check except one. GitHub's WEB
+    frontend answers a throttled anonymous client with **404**, so a rate-limited fetch is
+    byte-identical to a dead link, and the retry logic cannot help because 404 is never
+    retried by design.
+
+    MEASURED 2026-08-17: this gate reported 16 problems on one run and 8 on another minutes
+    later, DIFFERENT MEMBERS EACH TIME. Every issue URL it called 404 was then re-checked
+    through the authenticated API: 12 of 12 existed, 0 genuinely unresolvable. A cited source
+    blob it called 404 exists at that commit at 12,142 bytes. The anonymous API budget was
+    untouched at 57 of 60, so the throttle is the web frontend specifically rather than a
+    quota anything had burned. A gate that cries wolf on a dozen live links gets learned
+    around, which is worse than no gate.
+
+    Returns None when the API route is unavailable, so the caller falls back to the web path
+    rather than treating a missing tool as a verdict about the link.
+    """
+    m = _GH_WEB.match(url)
+    if not m:
+        return None
+    owner, repo, kind, num = m.group(1), m.group(2), m.group(3), m.group(4)
+    # The API calls both issues and PRs "issues"; a PR resolves through that route too.
+    p = _gh(["api", f"repos/{owner}/{repo}/issues/{num}", "--jq", ".state"])
+    if p is None:
+        return None  # gh absent or persistently unusable -> not a verdict, fall back
+    state = (p.stdout or "").strip()
+    if p.returncode == 0 and state:
+        return True, f"API ok ({kind} is {state})"
+    err = (p.stderr or "").lower()
+    if "not found" in err or "404" in err:
+        return False, "API 404 (genuinely absent)"
+    return None  # auth failure, network, rate limit -> could-not-check, fall back
+
+
 def check_url(url, attempts=3):
     """(ok, detail) for a non-explorer link.
 
@@ -192,7 +334,18 @@ def check_url(url, attempts=3):
     those to mean "the server had a bad day, ask again" rather than "this does not exist".
     A transport failure is retried for the same reason, and a link that never answers is
     reported as UNREACHABLE rather than as broken, so the two stay distinguishable downstream.
+
+    GITHUB ISSUE AND PR LINKS GO THROUGH THE AUTHENTICATED API FIRST, because GitHub answers a
+    throttled anonymous client with 404 and this function is built on 4xx being a truthful
+    answer. See `_github_api_verdict`. It returns None whenever it cannot reach a verdict, so
+    an absent `gh` or a failed auth falls through to the web path below rather than becoming a
+    claim about the link.
     """
+    for resolver in (_github_api_verdict, _github_blob_verdict):
+        gh = resolver(url)
+        if gh is not None:
+            return gh
+
     last = None
     for attempt in range(attempts):
         if attempt:

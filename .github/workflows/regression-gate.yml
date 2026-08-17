@@ -257,4 +257,12 @@ jobs:
         run: python3 demo/verify_shoot_links_live.py
 
       - name: every URL and signature a doc names still resolves
+        # GH_TOKEN is load-bearing, not hygiene. The script resolves github.com issue/PR/blob
+        # links through `gh api` because GitHub's WEB frontend answers a throttled anonymous
+        # client with 404, which is byte-identical to a dead link. An unauthenticated `gh`
+        # fails with a setup error carrying neither "not found" nor "404", so both resolvers
+        # return None and every GitHub link falls back to the very web path this replaced.
+        # Without this the fix is inert HERE, which is the only place the incident happened.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/check-doc-links.py

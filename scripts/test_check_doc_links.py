@@ -135,5 +135,98 @@ check(
     "not found; case 1 may now be guarding nothing",
 )
 
+# --- GITHUB RESOLVERS: the API route, and that it can still FAIL ---------------------
+# WHY THESE EXIST. GitHub's WEB frontend answers a throttled anonymous client with 404, and
+# check_url is built on 4xx being a truthful answer, so a rate-limited fetch was byte-identical
+# to a dead link and was never retried. MEASURED 2026-08-17: the gate reported 16 problems on
+# one run and 8 on another minutes later, with different members; all 12 issue URLs it called
+# 404 existed via the authenticated API, and so did all 3 blobs (12,142 / 37,036 / 22,894 B).
+#
+# THE CONTROLS ARE THE POINT. Rerouting to an API that answered "fine" to everything would be a
+# gate that can no longer fail, which is worse than the noise it replaced. So each resolver is
+# pinned in BOTH directions, plus deferral cases proving a non-GitHub host, a non-matching
+# GitHub URL and an unusable `gh` fall through to the web path instead of becoming a verdict.
+#
+# NETWORK-DEPENDENT by nature. A resolver that cannot reach a verdict returns None, so if `gh`
+# is absent or unauthenticated these report NOT-RUN rather than failing the suite -- a missing
+# tool is not evidence about the code.
+print("\ngithub API resolvers")
+
+_probe = cdl._github_api_verdict(
+    "https://github.com/zeroclaw-labs/zeroclaw/issues/9348"
+)
+if _probe is None:
+    print(
+        "  NOT RUN  gh unavailable or unauthenticated; these cases need network + auth"
+    )
+else:
+    for name, fn, url, want in (
+        (
+            "6  issue that exists resolves OK",
+            cdl._github_api_verdict,
+            "https://github.com/zeroclaw-labs/zeroclaw/issues/9348",
+            True,
+        ),
+        (
+            "7  CONTROL: an absent issue still FAILS",
+            cdl._github_api_verdict,
+            "https://github.com/zeroclaw-labs/zeroclaw/issues/99999999",
+            False,
+        ),
+        (
+            "8  blob at a pinned sha resolves OK",
+            cdl._github_blob_verdict,
+            "https://github.com/solana-foundation/subscriptions/blob/"
+            "debb4f75ff7571218b39de3b633074dd843e70db/program/src/errors.rs",
+            True,
+        ),
+        (
+            "9  CONTROL: an absent blob path still FAILS",
+            cdl._github_blob_verdict,
+            "https://github.com/x402-foundation/x402/blob/main/specs/definitely-not-here-9f3a.md",
+            False,
+        ),
+        (
+            "10 CONTROL: an absent ref never PASSES",
+            cdl._github_blob_verdict,
+            "https://github.com/x402-foundation/x402/blob/deadbeefdeadbeef/README.md",
+            False,
+        ),
+        (
+            "11 a heading anchor is stripped before the path lookup",
+            cdl._github_blob_verdict,
+            "https://github.com/x402-foundation/x402/blob/main/"
+            "specs/x402-specification-v2.md#scheme",
+            True,
+        ),
+    ):
+        got = fn(url)
+        check(name, got is not None and got[0] is want, f"got {got}")
+
+    # Deferral: neither resolver may claim a verdict it has no business having.
+    for name, url in (
+        (
+            "12 CONTROL: a non-github host defers to the web path",
+            "https://example.com/whatever",
+        ),
+        (
+            "13 CONTROL: a github URL that is neither issue/PR nor blob defers",
+            "https://github.com/solana-foundation/subscriptions/tree/debb4f7",
+        ),
+        (
+            "14 a slash-bearing ref is UNSPLITTABLE, so it defers instead of guessing",
+            # `blob/feature/my-branch/docs/x.md` parses as ref=feature, path=my-branch/docs/x.md.
+            # Querying that would 404 on a LIVE link -- a false FAIL, worse than the throttle
+            # this routing replaces. Refusing to answer is the only correct third option.
+            "https://github.com/x402-foundation/x402/blob/feature/my-branch/specs/x.md",
+        ),
+    ):
+        check(
+            name,
+            cdl._github_api_verdict(url) is None
+            and cdl._github_blob_verdict(url) is None,
+            f"api={cdl._github_api_verdict(url)} blob={cdl._github_blob_verdict(url)}",
+        )
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
