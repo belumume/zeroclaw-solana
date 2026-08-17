@@ -197,22 +197,8 @@ def _github_blob_verdict(url):
         return None
     owner, repo, ref, path = m.group(1), m.group(2), m.group(3), m.group(4)
     path = path.split("#", 1)[0]  # a heading anchor is not part of the path
-    try:
-        p = subprocess.run(
-            [
-                "gh",
-                "api",
-                f"repos/{owner}/{repo}/contents/{path}?ref={ref}",
-                "--jq",
-                ".size",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
-    except Exception:
+    p = _gh(["api", f"repos/{owner}/{repo}/contents/{path}?ref={ref}", "--jq", ".size"])
+    if p is None:
         return None
     size = (p.stdout or "").strip()
     if p.returncode == 0 and size:
@@ -220,6 +206,56 @@ def _github_blob_verdict(url):
     err = (p.stderr or "").lower()
     if "not found" in err or "404" in err:
         return False, "API 404 (path genuinely absent at that ref)"
+    return None
+
+
+def _gh(args, attempts=3):
+    """Run `gh api` with a retry, returning (rc, stdout, stderr) or None if gh is unusable.
+
+    RETRIED, and the reason is specific rather than general caution. A transient gh failure
+    makes the resolver return None, which falls back to the WEB path -- the very source this
+    routing exists to avoid, because it answers 404 when throttled. So one flaky call
+    reintroduces exactly the false 404 the fix removes, and non-deterministically.
+    MEASURED 2026-08-17: a run reported a single problem, `issues/9394 HTTP 404`; the API said
+    open and the next run was clean. Without this retry the gate stays non-deterministic in
+    the same direction, just far more rarely, which is worse because it is then unreproducible.
+
+    A 404 from the API is NOT retried: that is a verdict, and the whole point is to tell one
+    apart from a throttle.
+    """
+    last = None
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(1.0 * attempt)
+        try:
+            p = subprocess.run(
+                ["gh"] + args,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except FileNotFoundError:
+            return None  # gh not installed at all -> fall back to the web path
+        except Exception as e:
+            last = str(e)
+            continue
+        if p.returncode == 0:
+            return p
+        err = (p.stderr or "").lower()
+        if "not found" in err or "404" in err:
+            return p  # a real verdict; do not retry it
+        last = err
+    # SAY SO rather than degrading quietly. Returning None sends the caller to the web path,
+    # which is the source that answers 404 when throttled, so a persistent gh failure would
+    # silently restore the exact false-404 this routing removes. A fail-open path that emits
+    # nothing is indistinguishable from one that never ran.
+    print(
+        f"  note: gh unavailable after {attempts} attempts, falling back to the web path "
+        f"for this link ({(last or 'no detail')[:80]})",
+        file=sys.stderr,
+    )
     return None
 
 
@@ -249,17 +285,9 @@ def _github_api_verdict(url):
         return None
     owner, repo, kind, num = m.group(1), m.group(2), m.group(3), m.group(4)
     # The API calls both issues and PRs "issues"; a PR resolves through that route too.
-    try:
-        p = subprocess.run(
-            ["gh", "api", f"repos/{owner}/{repo}/issues/{num}", "--jq", ".state"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
-    except Exception:
-        return None  # gh absent or unusable -> not a verdict, fall back
+    p = _gh(["api", f"repos/{owner}/{repo}/issues/{num}", "--jq", ".state"])
+    if p is None:
+        return None  # gh absent or persistently unusable -> not a verdict, fall back
     state = (p.stdout or "").strip()
     if p.returncode == 0 and state:
         return True, f"API ok ({kind} is {state})"
