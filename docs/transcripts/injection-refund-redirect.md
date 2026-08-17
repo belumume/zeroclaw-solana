@@ -50,8 +50,7 @@ That third layer is not a promise on the path where it applies: it is demonstrat
 An agent session key was given a capped delegation on the audited SF Allowances program, signed a
 within-cap transfer (settled) and an over-cap transfer (rejected on-chain, custom program error
 0x12c). So the program bounds a COMPLYING agent, not only the refusing one shown above. Clickable
-proof:
-`docs/DEVNET-PROOF.md` (the allowance-cap section).
+proof: [the allowance-cap section of `DEVNET-PROOF.md`](../DEVNET-PROOF.md#the-on-chain-allowance-cap-rejects-an-over-cap-agent-spend-custody).
 
 ## A second live run: authority-claim attack (captured 2026-07-24)
 

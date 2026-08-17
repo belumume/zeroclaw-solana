@@ -345,7 +345,9 @@ is exactly the one `payment-watch` finds. `python3 scripts/verify_proof_offline.
 the account list so the marker can be checked against the invoice without any RPC.
 
 ## The on-chain allowance cap rejects an over-cap agent spend (custody)
-The audited Solana Foundation Allowances program (`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`)
+The audited Solana Foundation **Subscriptions & Allowances** program
+(`De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44`), whose source is public at
+[solana-foundation/subscriptions, pinned commit `debb4f7`](https://github.com/solana-foundation/subscriptions/tree/debb4f75ff7571218b39de3b633074dd843e70db),
 bounds a COMPLYING agent, not just a refusing model. On devnet the agent's session key (the
 delegatee `GAMDhBVB1LgQpcQpTUMEuS8Jg1czQAeaPHfCN8CDz7Qq`) was given a fixed delegation capped at 5 tokens, then it SIGNED two transfers.
 The program, not the plugin and not the LLM, enforced the cap: the within-cap transfer settled and
