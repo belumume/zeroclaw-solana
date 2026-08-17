@@ -645,6 +645,12 @@ jobs:
       # and reports success. That is not hypothetical here: `e2e-track-a` stopped compiling for 21
       # days exactly that way. Enumerating the class found two more, the on-chain programs, which
       # a reader is told to `anchor build` and which no workflow referenced.
+      #
+      # BUILT, not merely NAMED. The check counted any mention anywhere, and on 2026-08-17 that
+      # let `x402-feed-gate` read as covered on the strength of one matrix entry in the
+      # supply-chain job, which runs cargo-deny. A dependency graph resolves fine around a compile
+      # error. Coverage now requires the naming job to run a compiling command, which turned that
+      # hole red and produced the x402-gate job above.
       - name: every tracked crate is built by some workflow
         run: python3 scripts/check-crate-build-coverage.py
 
@@ -856,6 +862,54 @@ jobs:
       # proving this can fail; it is not run here because it edits a tracked source file.
       - name: Declared custody tier matches the compiled component
         run: python3 scripts/check-custody-tier.py
+
+  x402-gate:
+    name: the x402 gate binary compiles and its tests run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # WHY THIS JOB EXISTS, and it is the same class as e2e-harness-compiles below.
+    #
+    # x402-feed-gate is the paywall binary running on the ARM node. It was listed in the
+    # supply-chain matrix above and NOWHERE ELSE, so the only thing any workflow ever did
+    # to it was read its dependency graph with cargo-deny. A dependency graph resolves
+    # perfectly well around a compile error. Its 57 tests had never run on a runner, and
+    # neither had the build script that bakes the commit into /health and /selfcheck, which
+    # is exactly the code a reader is invited to check the live box against.
+    #
+    # That gap was invisible because it read as covered: check-crate-build-coverage.py
+    # counted the deny matrix entry as a reference and printed the crate green. The gate now
+    # requires the naming job to compile, which is what turned this from a silent hole into
+    # a red check, and this job is the fix rather than an exclusion.
+    #
+    # TEST, NOT CHECK, unlike the reproduce crates below. Those need a local validator to
+    # run, so compiling them is all a runner can answer. These tests are offline by
+    # construction: they plant RPC responses rather than fetching, so the runner can answer
+    # the larger question and the 57 assertions are the point rather than a side effect.
+    #
+    # Verified locally before being added, per the convention that a job is a standing gate
+    # rather than a gamble on a red badge: 20 lib tests and 37 binary tests pass, clippy is
+    # clean at -D warnings across all targets, and the release build succeeds.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: x402-feed-gate
+
+      - name: Tests
+        working-directory: x402-feed-gate
+        run: cargo test --locked
+
+      - name: Clippy
+        working-directory: x402-feed-gate
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      # The box runs the release binary, and build.rs only produces the provenance strings
+      # that /health publishes when it actually runs. A debug test pass does not exercise
+      # the artifact that ships.
+      - name: The shipped release binary builds
+        working-directory: x402-feed-gate
+        run: cargo build --release --locked
 
   differential-fuzz:
     name: differential fuzzer, the run the write-up advertises
