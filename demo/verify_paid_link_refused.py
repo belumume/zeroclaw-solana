@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
+import re
 import socketserver
 import sys
 import threading
@@ -178,9 +179,16 @@ def check_fixtures(endpoint: str) -> list[str]:
                 # card payable, because that invites a SECOND payment. Either the pinned RPC sees
                 # it, or the page escalates to an archival endpoint that does.
                 page_src = (PAGE_DIR / "src" / "app.js").read_text(encoding="utf-8")
-                has_fallback = (
-                    "ARCHIVAL_RPC" in page_src and "ARCHIVAL_RPC)" in page_src
+                # Keyed on the MECHANISM, not on a constant's NAME. The first version of this
+                # looked for `ARCHIVAL_RPC`, and when the escalation shipped as `SETTLEMENT_PROXY`
+                # the gate reported the money bug as unfixed -- punishing the fix for choosing a
+                # different word. What actually matters is that the settlement lookup consults a
+                # SECOND endpoint: `rpc()` takes an optional third argument, so an escalation is a
+                # getSignaturesForAddress call with one.
+                escalations = re.findall(
+                    r"rpc\(\s*'getSignaturesForAddress'\s*,\s*\[[^\]]*\]\s*,", page_src
                 )
+                has_fallback = len(escalations) >= 1
                 if has_fallback:
                     print(
                         "                  pinned RPC pruned it, and the page ESCALATES to "

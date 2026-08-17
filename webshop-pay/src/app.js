@@ -86,6 +86,22 @@ function T(k,en){var d=STR[LANG];return (d&&d[k])||en}
 // makes a swapped address survive a glance, so a mismatch is refused rather than
 // shown, and the full address is rendered on the happy path.
 var MERCHANT='C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ';
+// A SECOND read path, consulted only when the first says "nothing", and only to tell "never paid"
+// apart from "aged out of a rolling retention window". Those two are byte-identical in an RPC
+// answer and they are opposite verdicts: treating pruned as unpaid leaves the card PAYABLE and
+// invites a SECOND payment on a link that is already settled.
+//
+// Measured 2026-08-17: the endpoint above keeps a rolling window whose firstAvailableBlock moved
+// 439,097,325 -> 439,400,964 within hours, and a real settlement from 2026-08-06 had already aged
+// out of it. Of TEN keyless endpoints probed FROM CLOUDFLARE EGRESS (not from a laptop -- that
+// distinction matters and is what made an earlier attempt wrong), ZERO could see it.
+//
+// So this is a Worker we run: it holds a keyed provider's credential server-side, records every
+// settlement it resolves in KV so the answer outlives any upstream's retention, and exposes
+// exactly two read methods. No credential reaches this page, which is the point -- this file is
+// static HTML that anyone can view-source, so a key here would be a published credential.
+// Source and controls: rpc-proxy/ in this repo.
+var SETTLEMENT_PROXY='https://zeroclaw-rpc-proxy.cf-eeyw6.workers.dev';
 // ONE endpoint, and the reason it is not api.mainnet-beta.solana.com is measured rather than
 // stylistic.
 //
@@ -224,13 +240,13 @@ function isPubkey(s){return typeof s==='string'&&/^[1-9A-HJ-NP-Za-km-z]{32,44}$/
 // One JSON-RPC POST. Returns the result, or null for ANY failure -- offline, DNS, abort, HTTP
 // error, a rate-limit 429, malformed JSON, or a JSON-RPC error object. Null is the only failure
 // signal because every caller treats "the chain did not answer" identically: change nothing.
-function rpc(method,params){
+function rpc(method,params,endpoint){
   var ctl=(typeof AbortController!=='undefined')?new AbortController():null;
   var timer=ctl?setTimeout(function(){ctl.abort()},6000):0;
   var opts={method:'POST',headers:{'content-type':'application/json'},
             body:JSON.stringify({jsonrpc:'2.0',id:1,method:method,params:params})};
   if(ctl)opts.signal=ctl.signal;
-  return fetch(RPC,opts)
+  return fetch(endpoint||RPC,opts)
     .then(function(r){return r.ok?r.json():null})
     .then(function(j){return (j&&!j.error&&j.result!==undefined&&j.result!==null)?j.result:null})
     .catch(function(){return null})
@@ -245,14 +261,25 @@ function settledSignature(){
   if(!isPubkey(reference))return Promise.resolve(null);
   return rpc('getSignaturesForAddress',[reference,{limit:20,commitment:'confirmed'}]).then(function(list){
     if(!Array.isArray(list))return null;
-    // The node answers newest-first, so walk backwards to reach the OLDEST entry: the transaction
-    // that settled this order rather than a later one that happens to touch the same key.
-    for(var i=list.length-1;i>=0;i--){
-      var e=list[i];
-      if(e&&!e.err&&isSig(e.signature))return e.signature;
-    }
-    return null;
+    var sig=oldestSettled(list);
+    if(sig)return sig;
+    // EMPTY IS AMBIGUOUS, and the ambiguity costs money. Escalate ONCE to the proxy, which can see
+    // past this endpoint's retention window. The PAYABLE path is untouched: a reference with a
+    // visible settlement returned above at exactly one call, which is what the polling loop and
+    // the filmed demo depend on. A null here is treated exactly as before -- ask again, card stays
+    // payable -- so an unreachable proxy can never turn a good link into a refusal.
+    return rpc('getSignaturesForAddress',[reference,{limit:20,commitment:'confirmed'}],SETTLEMENT_PROXY)
+      .then(function(deep){ return Array.isArray(deep)?oldestSettled(deep):null; });
   });
+}
+// The node answers newest-first, so walk backwards to reach the OLDEST entry: the transaction that
+// settled this order rather than a later one that happens to touch the same key.
+function oldestSettled(list){
+  for(var i=list.length-1;i>=0;i--){
+    var e=list[i];
+    if(e&&!e.err&&isSig(e.signature))return e.signature;
+  }
+  return null;
 }
 // The full ordered account-key list, static keys then any address-lookup-table addresses. This is
 // the index space the lamport balance arrays are aligned with; reading only the static half would
@@ -318,7 +345,13 @@ function checkAlreadyPaid(){
     if(!sig)return false;
     // Only now, and only because the page is about to refuse, does it spend a second round trip.
     // The payable path -- the common one, and the one the demo films -- stays at exactly one call.
+    // Same escalation as the signature lookup, and needed for the same reason: if the settlement
+    // aged out of the pinned endpoint's window, so did its TRANSACTION. Without this the card
+    // refuses correctly but cannot say what was actually paid, so it falls back to echoing the
+    // link's own figure -- which is the one number a customer must never be shown as "settled",
+    // because the link asks for 5.00 while the chain recorded 0.39.
     return rpc('getTransaction',[sig,{encoding:'jsonParsed',commitment:'confirmed',maxSupportedTransactionVersion:0}])
+      .then(function(tx){ return tx || rpc('getTransaction',[sig,{encoding:'jsonParsed',commitment:'confirmed',maxSupportedTransactionVersion:0}],SETTLEMENT_PROXY); })
       .then(function(tx){
         var detail=[],paid=tx?merchantCredit(tx):null;
         if(paid)detail.push(T('paidamt','paid: ')+paid);
