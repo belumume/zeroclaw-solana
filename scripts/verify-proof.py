@@ -290,6 +290,80 @@ def is_transport_error(e):
     return isinstance(e, (TimeoutError, ConnectionError))
 
 
+def locate_commit(sha):
+    """Where a commit the gate names sits relative to THIS clone. Never a verdict.
+
+    The gate reports the commit its binary was compiled from. That is a claim, and the one
+    thing a reader holding a clone can check about it is whether the commit is real here at
+    all, and if so how far back it is. Both answers are informative and neither is a fault:
+    a clone made before that commit landed, a shallow clone, and a clone of a fork all fail
+    to find a perfectly good commit, so an absence says something about the clone at least
+    as often as about the binary.
+
+    Returns a short human phrase, always. Every failure path -- no git on PATH, not a
+    repository, a sha this clone has never seen -- resolves to a sentence rather than to an
+    exception or to None, because the caller prints it inline and a None there would read as
+    a defect in the gate.
+    """
+    # A `git-dirty` build reports `<head>-dirty`. The head part is still worth locating, so the
+    # suffix is stripped rather than making the whole value unlookupable -- but the answer says
+    # which commit it located, because that commit is NOT what was compiled. The caller's own
+    # source line carries that warning too; saying it twice is cheaper than a reader taking a
+    # located commit as confirmation the binary matches it.
+    note = ""
+    if isinstance(sha, str) and sha.endswith("-dirty"):
+        sha, note = sha[: -len("-dirty")], " (the clean commit it was built on top of)"
+    if (
+        not isinstance(sha, str)
+        or not 7 <= len(sha) <= 40
+        or sha.strip("0123456789abcdef") != ""
+    ):
+        # Includes the gate's own `unavailable` case, whose commit is the literal "unknown".
+        return "not a commit id, so nothing to look up here"
+    root = str(Path(__file__).resolve().parent.parent)
+    try:
+        import subprocess
+
+        kind = subprocess.run(
+            ["git", "-C", root, "cat-file", "-t", sha],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+        if kind.returncode != 0 or kind.stdout.strip() != "commit":
+            return f"not a commit this clone holds{note}, which a shallow or older clone also looks like"
+        anc = subprocess.run(
+            ["git", "-C", root, "merge-base", "--is-ancestor", sha, "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+        if anc.returncode != 0:
+            return f"a real commit here{note}, but not an ancestor of your HEAD"
+        behind = subprocess.run(
+            ["git", "-C", root, "rev-list", "--count", f"{sha}..HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+        n = behind.stdout.strip()
+        if behind.returncode != 0 or not n.isdigit():
+            return f"an ancestor of your HEAD{note}; distance unreadable"
+        return (
+            f"your HEAD is that same commit{note}"
+            if n == "0"
+            else f"an ancestor of your HEAD, {n} commit(s) back{note}"
+        )
+    except Exception as e:
+        return f"could not be looked up ({type(e).__name__})"
+
+
 def main():
     fails = 0
     static_fails = 0
@@ -575,6 +649,19 @@ def main():
         if is_transport_error(e):
             transport_fails += 1
 
+    # A BODY CAN PARSE AND STILL NOT BE AN OBJECT. `json.loads` happily returns a bare string or a
+    # list, so `health` survives the block above holding one: the `.get` in there raises, the
+    # except prints and counts a failure, and the name stays bound to the non-mapping. Every block
+    # below assumes a mapping and would raise on it OUTSIDE any try, in a `main()` with no
+    # top-level handler, taking the whole run down and printing no tally at all. Measured on the
+    # receipts block, which is where it landed first, and reachable in the same way further down.
+    #
+    # Normalised once here rather than at each site: the failure has already been reported and
+    # counted, so None is exactly what the downstream blocks' existing "already failed above"
+    # branches expect, and no message changes.
+    if not isinstance(health, dict):
+        health = None
+
     # CLAIM: a receipt this shop sent actually reached a customer.
     #
     # Every check above observes a PROCESS or a PAGE. None of them can tell a shop whose
@@ -772,6 +859,9 @@ def main():
     # have not shipped this yet" or "the check silently stopped running", and those need opposite
     # responses.
     selfcheck_gates = False
+    # Bound before the try for the same reason `health` is, one screen up: the build-provenance
+    # report below reads it, and an unbound name there would crash the verifier itself.
+    sc = None
     sc_url = os.environ.get(
         "SHOP_SELFCHECK_URL", "https://x402.perfpilot.dev/selfcheck"
     )
@@ -836,6 +926,133 @@ def main():
         print(f"FAIL  box self-check unreachable: {e}")
         selfcheck_gates = True
         fails += 1
+
+    # WHICH COMMIT THE BINARY ANSWERING YOU WAS BUILT FROM.
+    #
+    # The line above reports `deployed_sha`, and a reader comparing that against the repository
+    # believes they have checked the gate. They have not. `deployed_sha` names the commit the
+    # WORKSPACE deploy was generated from -- the config, skills and SOPs listed in
+    # deploy/deploy-targets.json. A compiled binary is deliberately not in that file map, so the
+    # gate can be rebuilt without moving `deployed_sha` and the workspace can be redeployed
+    # without rebuilding the gate. Two facts, and only one of them is about this binary.
+    #
+    # A DIFFERENCE BETWEEN THEM IS NOT AN ERROR, and this block must never be read as though it
+    # were. They answer different questions, they move independently by design, and today they
+    # legitimately differ. Nothing here compares them for agreement, and nothing here gates: the
+    # value is a property of a remote binary, so a gate on it would turn main red on someone
+    # else's deploy, which is the same reasoning the receipt and ledger blocks already carry.
+    #
+    # WHAT IS CHECKABLE IS DIFFERENT, and there are two of them. Whether /health and /selfcheck
+    # report the SAME commit, since one binary serves both and a disagreement means two processes
+    # answered. And where that commit sits in the clone the reader is holding, which is the only
+    # part of the gate's claim a stranger can test locally.
+    #
+    # A NON-OBJECT `gate` IS A REAL DEPLOYED SHAPE, NOT A DEFENSIVE HYPOTHETICAL, and this is the
+    # reason the type checks below must never be deleted as paranoia. Until the build-provenance
+    # deploy landed, /health served `"gate": "ok"` -- a STRING, verifiable in this repository's own
+    # history at the commit before it. Every box that has not been redeployed still serves it, and
+    # rolling the gate binary back restores it in one command with the backup already on the node.
+    #
+    # So the shape a reader is MOST likely to point this verifier at is the one that used to index
+    # straight into remote JSON and raise inside `main()`, which has no top-level handler. That
+    # killed the WHOLE run: no tally, and every PASS and FAIL above it lost, over a field that
+    # gates nothing. Measured four ways before the guard existed, all four fatal.
+    #
+    # ONE VERDICT, NOT TWO. An old binary and a binary answering in a shape this cannot parse are
+    # the same actionable fact for a reader: the provenance is unknown and nothing else is wrong.
+    # Giving the unparseable case its own alarming branch would make the ordinary pre-deploy state
+    # look like a defect, so both land on the same PENDING, and the message avoids asserting
+    # "predates the field", which is true of only one of them.
+    # Same normalisation as `health` above, for the same reason: the selfcheck block's own `.get`
+    # raises inside its try on a non-object body, which is reported and counted there, and leaves
+    # this name bound to a string or a list that nothing below could survive.
+    if not isinstance(sc, dict):
+        sc = None
+    raw_gate = (health or {}).get("gate")
+    gate_h = raw_gate.get("build_commit") if isinstance(raw_gate, dict) else None
+    src_h = raw_gate.get("build_commit_source") if isinstance(raw_gate, dict) else None
+    gate_s = (sc or {}).get("gate_build_commit")
+    src_s = (sc or {}).get("gate_build_commit_source")
+    # Only a string is a commit. Anything else present is recorded so the line can say what shape
+    # arrived, and is then treated exactly as absent.
+    odd_shapes = [
+        f"gate={type(raw_gate).__name__}"
+        for _ in (1,)
+        if raw_gate is not None and not isinstance(raw_gate, dict)
+    ] + [
+        f"{n}={type(v).__name__}"
+        for n, v in (("gate_build_commit", gate_s), ("build_commit", gate_h))
+        if v is not None and not isinstance(v, str)
+    ]
+    commit = next((v for v in (gate_s, gate_h) if isinstance(v, str)), None)
+    source = next((v for v in (src_s, src_h) if isinstance(v, str)), None)
+    if health is None and sc is None:
+        # Both routes already failed above with their own reasons. A third line about a field
+        # inside a body nobody received would be noise dressed as a finding.
+        pass
+    elif commit is None:
+        why = (
+            f"it answered with {', '.join(odd_shapes)}, which this verifier cannot read as a "
+            f"commit"
+            if odd_shapes
+            else "it predates the build_commit field"
+        )
+        print(
+            f"PEND  gate build provenance unknown: {why}, so which commit this binary was "
+            f"compiled from cannot be established. Nothing else is wrong and nothing is claimed "
+            f"either way. Not gating. It becomes readable on the next deploy."
+        )
+    else:
+        # Every source means something different about how much the commit is worth, so the
+        # value never travels without it. `git` was observed in the repository at build time.
+        # `git-dirty` means uncommitted code went into the binary, so the commit does NOT name
+        # what was built and the value carries a -dirty suffix. `env` means a build-time
+        # override asserted it rather than anything observing it. `unavailable` means the build
+        # had no repository and the commit is the literal string "unknown".
+        trust = {
+            "git": "read from the repository at build time",
+            "git-dirty": "UNCOMMITTED code went into this binary, so the commit does not name "
+            "what was built",
+            "env": "asserted by a build-time override rather than observed",
+            "unavailable": "the build had no repository, so this is a placeholder rather than "
+            "a commit",
+            # `source` is str-or-None by construction: it is selected by an isinstance filter
+            # where it is bound, so a list can never reach this lookup and be unhashable here.
+            # A None reads as an unrecognised source and takes the default, which is the right
+            # answer for a commit that arrived without one.
+        }.get(source, f"source {source!r} is not one this verifier recognises")
+        # ISINSTANCE, NOT TRUTHINESS, and this branch is reachable with a perfectly good commit:
+        # one route can answer with a readable commit while the OTHER answers with a number or a
+        # non-object gate. `commit` then resolves from the good route and lands here, where a
+        # truthiness test lets the bad value through to be sliced. Measured: an int on /health
+        # beside a valid /selfcheck killed the whole run, and a list on /health printed a
+        # DISAGREES naming a route that had in fact agreed.
+        #
+        # A COMPARISON IS ONLY POSSIBLE BETWEEN TWO COMMITS, so when one side is unreadable the
+        # line says which shape blocked it rather than inventing a verdict. Dropping to silence
+        # would be worse than either: the reader would see a clean single-route report and never
+        # learn that the other endpoint is answering with something nobody can parse.
+        if isinstance(gate_h, str) and isinstance(gate_s, str):
+            agree = (
+                "; /health and /selfcheck agree"
+                if gate_h == gate_s
+                else f"; DISAGREES with /health ({gate_h[:12]}), so two processes answered"
+            )
+        elif odd_shapes:
+            agree = (
+                f"; the two routes cannot be compared because one answered with "
+                f"{', '.join(odd_shapes)}"
+            )
+        else:
+            # Only one route answered at all. Nothing to compare and nothing wrong.
+            agree = ""
+        print(
+            f"INFO  gate binary built from {commit[:12]} (source {source!r}: {trust}"
+            f"{agree}). In this clone: {locate_commit(commit)}. This is the binary's own "
+            f"build, a different fact from the deploy commit above, which covers the workspace "
+            f"files rather than this binary; they move independently and a difference between "
+            f"them is expected rather than a fault. Not gating"
+        )
 
     # Report the two kinds separately, because collapsing them into one number is exactly
     # how a dead system prints a clean bill of health. An audit put it plainly: of the

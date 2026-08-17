@@ -19,6 +19,13 @@ from a distance and need opposite responses -- one means "not shipped yet", the 
 means "the check stopped running" -- so a control that only proved the endpoint can be
 read would leave exactly that confusion untested.
 
+A second phase covers the gate's BUILD PROVENANCE report, which names the commit the
+binary answering the request was compiled from. That one reads /health as well as
+/selfcheck, so this server answers both paths for it, and its absent-field branch is
+only reachable with both served locally: the live node has the field, so no amount of
+crafting a /selfcheck body alone can produce the older-binary case. That branch is the
+one worth controlling, because it must read as unknown rather than as a failure.
+
 Stdlib only, binds an ephemeral port, touches no network and no chain.
 """
 
@@ -121,11 +128,21 @@ CASES = [
 # and a claim that merely prints are indistinguishable from the verdict line alone.
 TALLY = re.compile(r"(\d+)/(\d+) live claims verified")
 
-state = {"status": 200, "body": {}}
+state = {"status": 200, "body": {}, "health": None}
 
 
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
+        # Path-aware only when a health body has been set, so the eight cases above -- which
+        # point only SHOP_SELFCHECK_URL here -- reach exactly the same code they always did.
+        if self.path.startswith("/health") and state["health"] is not None:
+            body = json.dumps(state["health"]).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         body = json.dumps(state["body"]).encode()
         self.send_response(state["status"])
         self.send_header("Content-Type", "application/json")
@@ -165,6 +182,243 @@ for name, status, body, pattern in CASES:
     if not hit:
         ok = False
 
+# SECOND PHASE: the gate's BUILD PROVENANCE line, which reports which commit the binary
+# answering the request was compiled from.
+#
+# It needs its own phase because it is the one report here that reads BOTH routes, so both have
+# to be served locally. The eight cases above leave /health pointed at the live node, where the
+# field is present, so none of them can reach the absent branch -- which is the branch that
+# matters most, since an older gate binary has no build_commit at all and that must read as
+# unknown rather than as a failure or as a bare None leaking into the line.
+#
+# NOTHING HERE GATES, so unlike the tally control above there is no count to assert. What is
+# asserted is that each input reaches a DIFFERENT sentence -- absent, observed, dirty,
+# placeholder, a commit this clone does not hold, and two processes disagreeing -- and a report
+# that collapsed any of them into the same words would be worth nothing. The count is derived
+# from BUILD_CASES below rather than typed here, so it cannot drift when a case is added.
+HEAD_SHA = subprocess.run(
+    ["git", "rev-parse", "HEAD"],
+    capture_output=True,
+    text=True,
+    encoding="utf-8",
+    errors="replace",
+).stdout.strip()
+# Without this the git-derived cases would silently degrade to an empty sha, which reads as the
+# absent branch and would make three of the six cases MISS for a reason no message explains.
+assert len(HEAD_SHA) == 40, (
+    f"could not read HEAD; this control cannot run ({HEAD_SHA!r})"
+)
+ABSENT = 40 * "f"  # well-formed, and no repository holds it
+
+
+def sc_with(**extra):
+    v = verdict(ok=True, age=FRESH)
+    v.update(extra)
+    return v
+
+
+# (label, health body, selfcheck extras, expected line)
+BUILD_CASES = [
+    (
+        "field absent on both routes",
+        {"shop": {}},
+        {},
+        r"^PEND\s+gate build provenance unknown: it predates the build_commit field",
+    ),
+    (
+        "observed in git at build time",
+        {"shop": {}},
+        {"gate_build_commit": HEAD_SHA, "gate_build_commit_source": "git"},
+        r"read from the repository at build time.*your HEAD is that same commit",
+    ),
+    (
+        "built from an uncommitted tree",
+        {"shop": {}},
+        {
+            "gate_build_commit": HEAD_SHA + "-dirty",
+            "gate_build_commit_source": "git-dirty",
+        },
+        r"UNCOMMITTED code went into this binary.*the clean commit it was built on top of",
+    ),
+    (
+        "build had no repository",
+        {"shop": {}},
+        {"gate_build_commit": "unknown", "gate_build_commit_source": "unavailable"},
+        r"placeholder rather than a commit.*not a commit id",
+    ),
+    (
+        "commit is real but not in this clone",
+        {"shop": {}},
+        {"gate_build_commit": ABSENT, "gate_build_commit_source": "git"},
+        r"not a commit this clone holds",
+    ),
+    (
+        "the two routes disagree",
+        {"gate": {"build_commit": ABSENT, "build_commit_source": "git"}, "shop": {}},
+        {"gate_build_commit": HEAD_SHA, "gate_build_commit_source": "git"},
+        r"DISAGREES with /health.*so two processes answered",
+    ),
+    # THE FOUR BELOW ARE REGRESSION CASES OVER A REAL DEPLOYED SHAPE, not hypotheticals.
+    # `"gate": "ok"` is what /health served before the build-provenance deploy, so it is what any
+    # box that has not been redeployed still serves and what a rollback restores. Pointed at one
+    # of those, the block used to index straight into remote JSON and raise inside `main()`, which
+    # has no top-level handler, killing the entire run: no tally, and every PASS and FAIL above it
+    # lost, over a field that gates nothing.
+    #
+    # ONE CASE PER LOOKUP, because they are three different reads and a single fixture exercises
+    # only one of them: the `gate` object itself, `build_commit` inside it on /health, and
+    # `gate_build_commit` on /selfcheck. All four must reach the SAME pending verdict as an
+    # absent field, since the reader's action is identical, and must name the shape they saw.
+    (
+        "gate is a string, the pre-deploy shape",
+        {"gate": "ok", "shop": {}},
+        {},
+        r"^PEND\s+gate build provenance unknown: it answered with gate=str",
+    ),
+    (
+        "gate is a list",
+        {"gate": [HEAD_SHA], "shop": {}},
+        {},
+        r"^PEND\s+gate build provenance unknown: it answered with gate=list",
+    ),
+    (
+        "build_commit on /health is a number",
+        {"gate": {"build_commit": 19, "build_commit_source": "git"}, "shop": {}},
+        {},
+        r"^PEND\s+gate build provenance unknown: it answered with build_commit=int",
+    ),
+    (
+        "gate_build_commit on /selfcheck is a list",
+        {"shop": {}},
+        {"gate_build_commit": [HEAD_SHA], "gate_build_commit_source": ["git"]},
+        r"^PEND\s+gate build provenance unknown: it answered with gate_build_commit=list",
+    ),
+    # THE THREE BELOW ARE THE MIXED CASES, and they are the ones the four above cannot reach.
+    # In each of those the OTHER route is empty, so no readable commit exists and the pending
+    # branch takes the line before the comparison is ever attempted. Here ONE route answers with
+    # a good commit and the other does not, so the report branch runs with a bad value still in
+    # hand. That combination crashed the run on an int, and on a list it printed a DISAGREES
+    # naming a route that had in fact agreed, which is a false claim rather than a crash and
+    # therefore the worse of the two.
+    (
+        "health commit is a number, selfcheck valid",
+        {"gate": {"build_commit": 19, "build_commit_source": "git"}, "shop": {}},
+        {"gate_build_commit": HEAD_SHA, "gate_build_commit_source": "git"},
+        r"^INFO\s+gate binary built from .*cannot be compared because one answered with build_commit=int",
+    ),
+    (
+        "health gate is a string, selfcheck valid",
+        {"gate": "ok", "shop": {}},
+        {"gate_build_commit": HEAD_SHA, "gate_build_commit_source": "git"},
+        r"^INFO\s+gate binary built from .*cannot be compared because one answered with gate=str",
+    ),
+    (
+        "health valid, selfcheck commit is a number",
+        {"gate": {"build_commit": HEAD_SHA, "build_commit_source": "git"}, "shop": {}},
+        {"gate_build_commit": 19, "gate_build_commit_source": "git"},
+        r"^INFO\s+gate binary built from .*cannot be compared because one answered with gate_build_commit=int",
+    ),
+    # A BODY THAT PARSES AND IS NOT AN OBJECT. `json.loads` returns a bare string or a list
+    # perfectly happily, and the fetch blocks only catch the exception their own `.get` raised, so
+    # the name stays bound to the non-mapping and every later block inherits it. Reaching the
+    # provenance line at all is the assertion here: a crash produces no line and the case MISSes.
+    (
+        "/health body is a JSON string",
+        "ok",
+        {},
+        r"^PEND\s+gate build provenance unknown",
+    ),
+    (
+        "/selfcheck body is a JSON list",
+        {"shop": {}},
+        ["ok"],
+        r"^PEND\s+gate build provenance unknown",
+    ),
+]
+
+
+def run_build_case(health_body, sc_extra, script="scripts/verify-proof.py"):
+    state["status"] = 200
+    # A non-dict `sc_extra` is served AS the body rather than merged into a verdict, which is the
+    # only way to exercise a response that parses and is not an object.
+    state["body"] = sc_with(**sc_extra) if isinstance(sc_extra, dict) else sc_extra
+    state["health"] = health_body
+    return subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={
+            **os.environ,
+            "SHOP_SELFCHECK_URL": f"http://127.0.0.1:{port}/selfcheck",
+            "SHOP_HEALTH_URL": f"http://127.0.0.1:{port}/health",
+        },
+    ).stdout
+
+
+# SHARED BY DESIGN, and named rather than left to a loosened threshold. A body that parses and is
+# not an object is normalised to absent, so it lands on the same sentence as a build that predates
+# the field -- correctly, because the endpoint's own FAIL line above has already told the reader
+# the response was unusable, and a second sentence restating it would be noise. Every OTHER case
+# exists to discriminate, so distinctness is asserted over those and a future collision among them
+# still fails loudly.
+SHARED_BY_DESIGN = {"/health body is a JSON string", "/selfcheck body is a JSON list"}
+
+print("\n  build provenance:")
+seen = set()
+for name, health_body, sc_extra, pattern in BUILD_CASES:
+    out = run_build_case(health_body, sc_extra)
+    line = next(
+        (
+            ln.strip()
+            for ln in out.splitlines()
+            if "gate build provenance" in ln or "gate binary built from" in ln
+        ),
+        "",
+    )
+    hit = bool(line and re.search(pattern, line))
+    if name not in SHARED_BY_DESIGN:
+        seen.add(line)
+    print(f"  {name:38s} {'OK  ' if hit else 'MISS'} {line[:70]}")
+    if not hit:
+        ok = False
+
+# Each discriminating input must produce its own sentence. Without this a report that printed one
+# constant string would pass every pattern above that happened to be a substring of it.
+discriminating = len(BUILD_CASES) - len(SHARED_BY_DESIGN)
+distinct = len(seen) == discriminating
+print(f"  {len(seen)} distinct line(s) from {discriminating} input(s): {distinct}")
+
+# MUTATION CONTROL, on the EXTRACTION rather than on the wording. A pattern check proves the
+# printer works on inputs it was handed; it says nothing about whether the field lookup is the
+# thing that fed it. Bogusify both field names, keep everything else, and the observed case must
+# collapse to the absent branch. If it still reports a commit, the line is reading something
+# other than the endpoint and every case above is decorative.
+mutant = open("scripts/verify-proof.py", encoding="utf-8").read()
+for real, bogus in (
+    ('"gate_build_commit"', '"zzz_gate_build_commit"'),
+    ('"build_commit"', '"zzz_build_commit"'),
+):
+    assert real in mutant, (
+        f"mutation anchor {real} not found; this control tests nothing"
+    )
+    mutant = mutant.replace(real, bogus)
+mut_path = "scripts/.verify-proof-buildprov-mutant.py"
+try:
+    with open(mut_path, "w", encoding="utf-8", newline="") as f:
+        f.write(mutant)
+    mut_out = run_build_case(
+        {"shop": {}},
+        {"gate_build_commit": HEAD_SHA, "gate_build_commit_source": "git"},
+        script=mut_path,
+    )
+finally:
+    if os.path.exists(mut_path):
+        os.remove(mut_path)
+mutant_blind = "gate build provenance unknown" in mut_out
+print(f"  breaking the field lookup collapses it to unknown: {mutant_blind}")
+
 srv.shutdown()
 
 # The tally control. A PENDING claim must not be counted, and a judged one must be. If both read
@@ -175,5 +429,5 @@ counts = pend is not None and judged is not None and pend != judged
 print(f"\n  PENDING totals {pend} live claims, a judged verdict totals {judged}")
 print(f"  the claim actually gates rather than only printing: {counts}")
 
-print(f"\nall {len(CASES)} branches reached: {ok}")
-sys.exit(0 if ok and counts else 1)
+print(f"\nall {len(CASES) + len(BUILD_CASES)} branches reached: {ok}")
+sys.exit(0 if ok and counts and distinct and mutant_blind else 1)
