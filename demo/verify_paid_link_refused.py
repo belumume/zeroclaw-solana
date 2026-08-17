@@ -61,6 +61,12 @@ RPC_MARKER = "var RPC='"
 
 MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # mainnet USDC
 
+# Used ONLY to tell a PRUNED lookup apart from an UNPAID reference when the page's own RPC returns
+# nothing. It is deliberately not the page's endpoint: the point is to have a second opinion from a
+# node with deeper retention, so a node's housekeeping cannot masquerade as an unsettled payment.
+# Never used for the behaviour assertions, which must run against whatever the page actually names.
+FIXTURE_ARCHIVAL_RPC = "https://api.mainnet-beta.solana.com"
+
 # A real, finalized mainnet settlement. The operator paid this order from his phone wallet on
 # 2026-08-06 and then reproduced the defect by reloading the link. It is a permanent fixture: a
 # settled transaction does not un-settle, so this case cannot go stale the way a live balance does.
@@ -127,10 +133,57 @@ def check_fixtures(endpoint: str) -> list[str]:
 
     settled = [e for e in (paid or []) if not e.get("err")]
     if not settled:
-        problems.append(
-            f"PAID_REFERENCE {PAID_REFERENCE} has no confirmed non-errored signature; "
-            "the paid direction would pass for the wrong reason"
-        )
+        # ZERO SIGNATURES HAS TWO CAUSES AND THEY ARE OPPOSITE VERDICTS. Either the reference was
+        # never paid (a real failure), or this endpoint has PRUNED the slot it was paid in (a fact
+        # about the node, not the chain). They are byte-identical in the response.
+        #
+        # MEASURED 2026-08-17: this fired, and it was pruning. The reference has 5 finalized,
+        # non-errored signatures at slots ~437,6xx,xxx on api.mainnet-beta.solana.com, and 0 on
+        # the pinned solana-rpc.publicnode.com, whose firstAvailableBlock is 439,097,325. The
+        # transactions simply predate that node's retention window.
+        #
+        # The old comment on PAID_REFERENCE claimed this fixture "cannot go stale" because "a
+        # settled transaction does not un-settle". True about the transaction, false about the
+        # LOOKUP, which is what the check actually depends on.
+        #
+        # So: ask an ARCHIVAL endpoint before reporting a failure. A disagreement between the two
+        # is the finding -- it means the page's own RPC can no longer see this settlement, which a
+        # reader following the link would also hit.
+        archival_settled = []
+        try:
+            arch = rpc(
+                FIXTURE_ARCHIVAL_RPC,
+                "getSignaturesForAddress",
+                [PAID_REFERENCE, {"limit": 20, "commitment": "confirmed"}],
+            )
+            archival_settled = [e for e in (arch or []) if not e.get("err")]
+        except (OSError, ValueError) as e:
+            problems.append(
+                f"PAID_REFERENCE {PAID_REFERENCE} returned nothing from {endpoint} and the "
+                f"archival cross-check could not run ({e}); pruned and unpaid are "
+                "indistinguishable here, so this is UNRESOLVED rather than a pass or a fail"
+            )
+        else:
+            if archival_settled:
+                print(f"paid fixture    : {PAID_REFERENCE}")
+                print(
+                    f"                  NOT VISIBLE on the pinned RPC {endpoint} (pruned), "
+                    f"settled per {FIXTURE_ARCHIVAL_RPC} by "
+                    f"{archival_settled[-1]['signature']}"
+                )
+                problems.append(
+                    f"PRUNED, NOT UNPAID: the pinned RPC {endpoint} can no longer see the "
+                    f"settlement for {PAID_REFERENCE}, though it is finalized on chain. A reader "
+                    "following the live pay link hits the same blind spot. Re-pin the page's RPC "
+                    "to an endpoint whose retention reaches that slot, or capture the bytes so "
+                    "this fixture stops depending on a third party's retention policy."
+                )
+            else:
+                problems.append(
+                    f"PAID_REFERENCE {PAID_REFERENCE} has no confirmed non-errored signature on "
+                    f"{endpoint} OR on {FIXTURE_ARCHIVAL_RPC}; the paid direction would pass for "
+                    "the wrong reason"
+                )
     else:
         print(f"paid fixture    : {PAID_REFERENCE}")
         print(
