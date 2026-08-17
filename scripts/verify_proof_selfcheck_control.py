@@ -293,12 +293,55 @@ BUILD_CASES = [
         {"gate_build_commit": [HEAD_SHA], "gate_build_commit_source": ["git"]},
         r"^PEND\s+gate build provenance unknown: it answered with gate_build_commit=list",
     ),
+    # THE THREE BELOW ARE THE MIXED CASES, and they are the ones the four above cannot reach.
+    # In each of those the OTHER route is empty, so no readable commit exists and the pending
+    # branch takes the line before the comparison is ever attempted. Here ONE route answers with
+    # a good commit and the other does not, so the report branch runs with a bad value still in
+    # hand. That combination crashed the run on an int, and on a list it printed a DISAGREES
+    # naming a route that had in fact agreed, which is a false claim rather than a crash and
+    # therefore the worse of the two.
+    (
+        "health commit is a number, selfcheck valid",
+        {"gate": {"build_commit": 19, "build_commit_source": "git"}, "shop": {}},
+        {"gate_build_commit": HEAD_SHA, "gate_build_commit_source": "git"},
+        r"^INFO\s+gate binary built from .*cannot be compared because one answered with build_commit=int",
+    ),
+    (
+        "health gate is a string, selfcheck valid",
+        {"gate": "ok", "shop": {}},
+        {"gate_build_commit": HEAD_SHA, "gate_build_commit_source": "git"},
+        r"^INFO\s+gate binary built from .*cannot be compared because one answered with gate=str",
+    ),
+    (
+        "health valid, selfcheck commit is a number",
+        {"gate": {"build_commit": HEAD_SHA, "build_commit_source": "git"}, "shop": {}},
+        {"gate_build_commit": 19, "gate_build_commit_source": "git"},
+        r"^INFO\s+gate binary built from .*cannot be compared because one answered with gate_build_commit=int",
+    ),
+    # A BODY THAT PARSES AND IS NOT AN OBJECT. `json.loads` returns a bare string or a list
+    # perfectly happily, and the fetch blocks only catch the exception their own `.get` raised, so
+    # the name stays bound to the non-mapping and every later block inherits it. Reaching the
+    # provenance line at all is the assertion here: a crash produces no line and the case MISSes.
+    (
+        "/health body is a JSON string",
+        "ok",
+        {},
+        r"^PEND\s+gate build provenance unknown",
+    ),
+    (
+        "/selfcheck body is a JSON list",
+        {"shop": {}},
+        ["ok"],
+        r"^PEND\s+gate build provenance unknown",
+    ),
 ]
 
 
 def run_build_case(health_body, sc_extra, script="scripts/verify-proof.py"):
     state["status"] = 200
-    state["body"] = sc_with(**sc_extra)
+    # A non-dict `sc_extra` is served AS the body rather than merged into a verdict, which is the
+    # only way to exercise a response that parses and is not an object.
+    state["body"] = sc_with(**sc_extra) if isinstance(sc_extra, dict) else sc_extra
     state["health"] = health_body
     return subprocess.run(
         [sys.executable, script],
@@ -314,6 +357,14 @@ def run_build_case(health_body, sc_extra, script="scripts/verify-proof.py"):
     ).stdout
 
 
+# SHARED BY DESIGN, and named rather than left to a loosened threshold. A body that parses and is
+# not an object is normalised to absent, so it lands on the same sentence as a build that predates
+# the field -- correctly, because the endpoint's own FAIL line above has already told the reader
+# the response was unusable, and a second sentence restating it would be noise. Every OTHER case
+# exists to discriminate, so distinctness is asserted over those and a future collision among them
+# still fails loudly.
+SHARED_BY_DESIGN = {"/health body is a JSON string", "/selfcheck body is a JSON list"}
+
 print("\n  build provenance:")
 seen = set()
 for name, health_body, sc_extra, pattern in BUILD_CASES:
@@ -327,15 +378,17 @@ for name, health_body, sc_extra, pattern in BUILD_CASES:
         "",
     )
     hit = bool(line and re.search(pattern, line))
-    seen.add(line)
-    print(f"  {name:34s} {'OK  ' if hit else 'MISS'} {line[:70]}")
+    if name not in SHARED_BY_DESIGN:
+        seen.add(line)
+    print(f"  {name:38s} {'OK  ' if hit else 'MISS'} {line[:70]}")
     if not hit:
         ok = False
 
-# Six inputs must produce six sentences. Without this a report that printed one constant string
-# would pass every pattern above that happened to be a substring of it.
-distinct = len(seen) == len(BUILD_CASES)
-print(f"  {len(seen)} distinct line(s) from {len(BUILD_CASES)} input(s): {distinct}")
+# Each discriminating input must produce its own sentence. Without this a report that printed one
+# constant string would pass every pattern above that happened to be a substring of it.
+discriminating = len(BUILD_CASES) - len(SHARED_BY_DESIGN)
+distinct = len(seen) == discriminating
+print(f"  {len(seen)} distinct line(s) from {discriminating} input(s): {distinct}")
 
 # MUTATION CONTROL, on the EXTRACTION rather than on the wording. A pattern check proves the
 # printer works on inputs it was handed; it says nothing about whether the field lookup is the

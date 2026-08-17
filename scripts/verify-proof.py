@@ -649,6 +649,19 @@ def main():
         if is_transport_error(e):
             transport_fails += 1
 
+    # A BODY CAN PARSE AND STILL NOT BE AN OBJECT. `json.loads` happily returns a bare string or a
+    # list, so `health` survives the block above holding one: the `.get` in there raises, the
+    # except prints and counts a failure, and the name stays bound to the non-mapping. Every block
+    # below assumes a mapping and would raise on it OUTSIDE any try, in a `main()` with no
+    # top-level handler, taking the whole run down and printing no tally at all. Measured on the
+    # receipts block, which is where it landed first, and reachable in the same way further down.
+    #
+    # Normalised once here rather than at each site: the failure has already been reported and
+    # counted, so None is exactly what the downstream blocks' existing "already failed above"
+    # branches expect, and no message changes.
+    if not isinstance(health, dict):
+        health = None
+
     # CLAIM: a receipt this shop sent actually reached a customer.
     #
     # Every check above observes a PROCESS or a PAGE. None of them can tell a shop whose
@@ -950,6 +963,11 @@ def main():
     # Giving the unparseable case its own alarming branch would make the ordinary pre-deploy state
     # look like a defect, so both land on the same PENDING, and the message avoids asserting
     # "predates the field", which is true of only one of them.
+    # Same normalisation as `health` above, for the same reason: the selfcheck block's own `.get`
+    # raises inside its try on a non-object body, which is reported and counted there, and leaves
+    # this name bound to a string or a list that nothing below could survive.
+    if not isinstance(sc, dict):
+        sc = None
     raw_gate = (health or {}).get("gate")
     gate_h = raw_gate.get("build_commit") if isinstance(raw_gate, dict) else None
     src_h = raw_gate.get("build_commit_source") if isinstance(raw_gate, dict) else None
@@ -1005,13 +1023,31 @@ def main():
             source if isinstance(source, str) else None,
             f"source {source!r} is not one this verifier recognises",
         )
-        agree = ""
-        if gate_h and gate_s:
+        # ISINSTANCE, NOT TRUTHINESS, and this branch is reachable with a perfectly good commit:
+        # one route can answer with a readable commit while the OTHER answers with a number or a
+        # non-object gate. `commit` then resolves from the good route and lands here, where a
+        # truthiness test lets the bad value through to be sliced. Measured: an int on /health
+        # beside a valid /selfcheck killed the whole run, and a list on /health printed a
+        # DISAGREES naming a route that had in fact agreed.
+        #
+        # A COMPARISON IS ONLY POSSIBLE BETWEEN TWO COMMITS, so when one side is unreadable the
+        # line says which shape blocked it rather than inventing a verdict. Dropping to silence
+        # would be worse than either: the reader would see a clean single-route report and never
+        # learn that the other endpoint is answering with something nobody can parse.
+        if isinstance(gate_h, str) and isinstance(gate_s, str):
             agree = (
                 "; /health and /selfcheck agree"
                 if gate_h == gate_s
                 else f"; DISAGREES with /health ({gate_h[:12]}), so two processes answered"
             )
+        elif odd_shapes:
+            agree = (
+                f"; the two routes cannot be compared because one answered with "
+                f"{', '.join(odd_shapes)}"
+            )
+        else:
+            # Only one route answered at all. Nothing to compare and nothing wrong.
+            agree = ""
         print(
             f"INFO  gate binary built from {commit[:12]} (source {source!r}: {trust}"
             f"{agree}). In this clone: {locate_commit(commit)}. This is the binary's own "
