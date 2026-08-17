@@ -12,6 +12,12 @@ network.
 [`QUICKSTART.md`](QUICKSTART.md#fastest-path-three-checks-nothing-installed-13-to-35-seconds)
 opens with them.
 
+```bash
+python3 scripts/verify_proof_offline.py     # re-verifies the captured transactions from bytes, no network
+python3 scripts/certify_publish_tx.py       # drives five injection shapes at the certifier, no network
+python3 scripts/verify-proof.py             # re-checks every published claim against devnet
+```
+
 <p align="center">
   <img src="docs/assets/readme-cast.svg" alt="A real, unedited run of python3 scripts/verify-proof.py from a fresh clone of this repo, including one live claim that failed on the day it was captured." width="820">
 </p>
@@ -21,7 +27,7 @@ true, and 5 live ones that can, one of which is red above because it currently i
 can only ever print PASS proves nothing about itself;
 [`scripts/verify_proof_selfcheck_control.py`](scripts/verify_proof_selfcheck_control.py) drives
 this one through all eight branches from a loopback server to prove it can fail. Captured on the
-date printed in its own title bar. Run the two commands yourself and the state will likely differ
+date printed in its own title bar. Run `verify-proof.py` yourself and the state will likely differ
 by the time you do.
 
 [![The ZeroClaw shop chat: a customer orders R$ 2, and the agent replies with a payment link and the conversion to 0.39 USDC on Solana mainnet at the quoted ECB rate](docs/assets/demo-poster.jpg)](https://youtu.be/a0jT0feuMAg)
@@ -29,6 +35,27 @@ by the time you do.
 The still above links to a 2:15 demo. The [landing page](https://belumume.github.io/zeroclaw-solana/)
 covers the same ground in text and ends with three checkout links you can open yourself: one has a
 single character changed in the recipient, and the page refuses it. Loading any of them sends nothing.
+
+## Start here
+
+| If you want | Read |
+|---|---|
+| One image you can paste into a chat | [`docs/assets/field-card.png`](docs/assets/field-card.png). Regenerate it with `python3 scripts/build-field-card.py` |
+| The whole submission on one page | [`docs/ONE-PAGER.md`](docs/ONE-PAGER.md) |
+| The same case at length, with the reasoning and the controls | [`docs/ARGUMENT.md`](docs/ARGUMENT.md) |
+| What this is and why it is built this way | [`docs/WRITEUP.md`](docs/WRITEUP.md) |
+| To run it yourself | [`QUICKSTART.md`](QUICKSTART.md) |
+| Proof it is real, on chain | [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md) |
+| Why each design call went the way it did, including what was rejected | [`docs/DECISIONS.md`](docs/DECISIONS.md) |
+| How it is tested, and what each layer cannot catch | [`TESTING.md`](TESTING.md) |
+| What an adversarial audit found here, including what is still open | [`docs/AUDIT.md`](docs/AUDIT.md) |
+| Eight things we believed that were wrong, and the measurement that killed each | [`docs/WHAT-WE-GOT-WRONG.md`](docs/WHAT-WE-GOT-WRONG.md) |
+| Every claim the demo video makes, with the command that re-derives it | [`docs/video-claims.json`](docs/video-claims.json) |
+| Ten verified defects found in the HOST this runs on, all reported upstream | [`docs/HOST-SECURITY-AUDIT.md`](docs/HOST-SECURITY-AUDIT.md) |
+| The agent refusing an attack, verbatim | [`docs/transcripts/`](docs/transcripts/) |
+| To poke the sanitizer yourself, no build needed | [the live microworld](https://belumume.github.io/zeroclaw-solana/sanitizer-microworld/) |
+
+## What runs, and what it does not prove
 
 **A DePIN node that pays for itself.** An ARM box takes an ambient temperature reading for
 Madinah, signs it with a key generated on that box, and lands it in a typed account owned by our
@@ -79,6 +106,8 @@ the order VALUE is still supplied by the caller. An implausible one is now refus
 "Table 4, R$ 0.05" no longer produces a link, but a PLAUSIBLE wrong amount still does: R$ 25
 for a R$ 60 order sits inside any band a shop without a catalog can justify. One free parameter
 of two is gone and the second is narrowed rather than closed.
+
+## How each half is checked
 
 **The feed has published to devnet since 2026-07-25 and not one of its transactions has failed.**
 Every 20 minutes is the median rather than a guarantee: the largest single gap is 61.5 minutes.
@@ -132,25 +161,6 @@ deploy lands. Run `scripts/verify-proof.py` and each line names which of the fou
 Live on-chain evidence, all clickable, is in
 [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md). The verifier above reports static and live
 claims separately, and names what it does not cover.
-
-## Start here
-
-| If you want | Read |
-|---|---|
-| One image you can paste into a chat | [`docs/assets/field-card.png`](docs/assets/field-card.png). Regenerate it with `python3 scripts/build-field-card.py` |
-| The whole submission on one page | [`docs/ONE-PAGER.md`](docs/ONE-PAGER.md) |
-| The same case at length, with the reasoning and the controls | [`docs/ARGUMENT.md`](docs/ARGUMENT.md) |
-| What this is and why it is built this way | [`docs/WRITEUP.md`](docs/WRITEUP.md) |
-| To run it yourself | [`QUICKSTART.md`](QUICKSTART.md) |
-| Proof it is real, on chain | [`docs/DEVNET-PROOF.md`](docs/DEVNET-PROOF.md) |
-| Why each design call went the way it did, including what was rejected | [`docs/DECISIONS.md`](docs/DECISIONS.md) |
-| How it is tested, and what each layer cannot catch | [`TESTING.md`](TESTING.md) |
-| What an adversarial audit found here, including what is still open | [`docs/AUDIT.md`](docs/AUDIT.md) |
-| Eight things we believed that were wrong, and the measurement that killed each | [`docs/WHAT-WE-GOT-WRONG.md`](docs/WHAT-WE-GOT-WRONG.md) |
-| Every claim the demo video makes, with the command that re-derives it | [`docs/video-claims.json`](docs/video-claims.json) |
-| Ten verified defects found in the HOST this runs on, all reported upstream | [`docs/HOST-SECURITY-AUDIT.md`](docs/HOST-SECURITY-AUDIT.md) |
-| The agent refusing an attack, verbatim | [`docs/transcripts/`](docs/transcripts/) |
-| To poke the sanitizer yourself, no build needed | [the live microworld](https://belumume.github.io/zeroclaw-solana/sanitizer-microworld/) |
 
 ## Custody
 
