@@ -242,6 +242,14 @@ for _u in (
 # NETWORK-DEPENDENT by nature. A resolver that cannot reach a verdict returns None, so if `gh`
 # is absent or unauthenticated these report NOT-RUN rather than failing the suite -- a missing
 # tool is not evidence about the code.
+# SNAPSHOT THE OFFLINE COUNT HERE, before a single network case runs. Asserting the floor against
+# the COMBINED total was a real hole, reproduced by review: with auth the total is 39 against a
+# floor of 30, so nine offline cases could be deleted and the suite still exited 0. The floor only
+# bit when auth was ABSENT -- which is precisely the configuration CI no longer has, since this
+# change added the token. A floor measured on one population and asserted against another is not
+# a floor.
+OFFLINE_SCORED = passed + failed
+
 print("\ngithub API resolvers")
 
 _probe = cdl._github_api_verdict(
@@ -334,11 +342,25 @@ print(f"\n{passed} passed, {failed} failed, {notrun} not run")
 # THE FLOOR. Without this, a whole block short-circuiting to NOT RUN is indistinguishable from a
 # clean pass, and that is not hypothetical: with auth cleared this printed exactly the pre-PR count.
 # The github block is allowed to be unavailable; the OFFLINE cases are not allowed to vanish.
-if passed + failed < MIN_CASES_OFFLINE:
+if OFFLINE_SCORED < MIN_CASES_OFFLINE:
     print(
-        f"\nFAIL  only {passed + failed} case(s) were scored, below the floor of "
+        f"\nFAIL  only {OFFLINE_SCORED} OFFLINE case(s) were scored, below the floor of "
         f"{MIN_CASES_OFFLINE}. A suite that quietly stops running cases reports the same exit "
         f"code as one that passes them, so the count is asserted rather than trusted."
+    )
+    sys.exit(1)
+
+# A NOT-RUN CEILING, because the per-case NOT-RUN branch reopened defect 1 one layer in. `notrun`
+# was printed and asserted against nothing, so every resolver could be disabled while the suite
+# stayed green -- reproduced by review: 34 passed, 5 not run, exit 0, with all three CONTROLS
+# among the skipped. The discriminator is the PROBE: it runs the same resolver these cases use, so
+# if the probe reached a verdict, auth is working and a per-case None is evidence of a DEFECT
+# rather than of a throttle. Only when the probe itself could not answer is NOT-RUN legitimate.
+if _probe is not None and notrun:
+    print(
+        f"\nFAIL  the auth probe SUCCEEDED but {notrun} case(s) still reported no verdict. With "
+        "auth working, a resolver returning None is a defect in the resolver, not an unavailable "
+        "tool. Silently skipping here is how the controls stop controlling anything."
     )
     sys.exit(1)
 

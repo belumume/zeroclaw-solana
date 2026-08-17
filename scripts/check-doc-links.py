@@ -227,7 +227,14 @@ def _github_blob_verdict(url):
     ref = ref.split("#", 1)[0].split("?", 1)[0]
     # Quote the path so a space or other reserved character cannot inject further URL structure.
     # `safe="/"` keeps directory separators, which the contents API needs verbatim.
-    quoted = urllib.parse.quote(path, safe="/")
+    # UNQUOTE FIRST, or this double-encodes and produces a TRUSTED FALSE FAIL. GitHub renders a
+    # blob URL for a file with a space as `%20`, so a bare quote() turns `Sample%20Sublease` into
+    # `Sample%2520Sublease`, the contents API 404s, and because the ref is unambiguous that 404 is
+    # BELIEVED -- no fallback to the web path. Measured on a real public file: the API returns
+    # size 4290060 for the `%20` form and HTTP 404 for the `%2520` form. `+` mangles the same way.
+    # This was introduced by the very commit that fixed the query-string bug, which is the third
+    # time in this file that a fix has carried the defect it was written to remove.
+    quoted = urllib.parse.quote(urllib.parse.unquote(path), safe="/")
     p = _gh(
         ["api", f"repos/{owner}/{repo}/contents/{quoted}?ref={ref}", "--jq", ".size"]
     )
