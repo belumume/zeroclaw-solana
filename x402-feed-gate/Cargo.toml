@@ -5,6 +5,11 @@ edition = "2021"
 license = "MIT"
 description = "An x402 machine-paywall that lets a ZeroClaw DePIN node SELL its device-signed on-chain feed per request: HTTP 402 + a price menu, payment verified purely over Solana JSON-RPC (no facilitator, no key custody), a per-payer daily cap enforced in code."
 publish = false
+# Declared rather than left to autodiscovery. Cargo picks up a root `build.rs`
+# either way, so this buys nothing at build time and everything at reading time:
+# the manifest is where someone looks to find out whether a crate has a build
+# step, and this one bakes the commit that `/health` and `/selfcheck` publish.
+build = "build.rs"
 
 [[bin]]
 name = "x402-feed-gate"

@@ -42,6 +42,27 @@ use x402_feed_gate::{
     VerifiedPayment,
 };
 
+/// The commit THIS BINARY was compiled from, baked in by `build.rs`.
+///
+/// Distinct from `/selfcheck`'s `deployed_sha`, and the distinction is the whole
+/// point of the field. `deployed_sha` is the WORKSPACE deploy: the commit the
+/// shop's config, skills and SOPs were generated from. This is the process that
+/// is answering you. They move independently, because the workspace is synced by
+/// a file map this compiled binary is deliberately not part of, so the two can be
+/// far apart with nothing wrong and nothing to show it.
+///
+/// `env!` rather than `option_env!`: `build.rs` emits this unconditionally, down
+/// to the literal `unknown`, so an absent variable is a broken build script and
+/// not a build without git. Failing to compile is the right answer to that;
+/// silently serving nothing is not.
+const BUILD_COMMIT: &str = env!("X402_GATE_BUILD_COMMIT");
+
+/// Where `BUILD_COMMIT` came from: `git`, `git-dirty`, `env` or `unavailable`.
+/// Published beside the value because a commit read from the repository and one
+/// asserted by a build-time override are different kinds of claim, and a reader
+/// cannot tell them apart from the sha. `build.rs` documents the ladder.
+const BUILD_COMMIT_SOURCE: &str = env!("X402_GATE_BUILD_COMMIT_SOURCE");
+
 /// Native RPC transport: POST the JSON-RPC body to the configured endpoint over
 /// HTTPS. The wasm plugins use `WakiTransport`; this host-side bin uses `ureq`.
 struct UreqTransport {
@@ -445,7 +466,14 @@ fn handle_health(
     let receipts = receipts_json(read_announce_log(), now, RECEIPT_FRESH_SECS);
 
     let body = serde_json::json!({
-        "gate": "ok",
+        // An object rather than a constant "ok". A constant here draws the same
+        // criticism the docstring above makes of the old `{"ok":true}` body: it
+        // cannot fail, so it asserts nothing the 200 has not already carried.
+        // This block holds the one thing this process alone knows about itself.
+        "gate": {
+            "build_commit": BUILD_COMMIT,
+            "build_commit_source": BUILD_COMMIT_SOURCE,
+        },
         "shop": {
             "unit": unit,
             "active": active,
@@ -455,7 +483,23 @@ fn handle_health(
         "receipts": receipts,
         "ledger": ledger_json,
         "proves": "this gate answered, plus the shop unit's state and when it last \
-                   handled traffic. The ledger block is the per-payer daily cap made \
+                   handled traffic. gate.build_commit is the commit THIS PROCESS was \
+                   compiled from, which is a different question from /selfcheck's \
+                   deployed_sha: that one names the commit the workspace deploy was \
+                   generated from, the config and skills and SOPs, and this binary is \
+                   not in that file map. The two move independently, so a difference \
+                   between them is ordinary rather than a fault, and only reading both \
+                   tells you which half is behind. Read build_commit_source before \
+                   comparing anything: `git` means it was read from the repository, \
+                   `git-dirty` means something this binary compiles was uncommitted, so \
+                   the commit does not name the code that was built and the value \
+                   carries a -dirty suffix, \
+                   `env` means a build-time override asserted it rather than it being \
+                   observed, and `unavailable` means the build had no repository at all \
+                   and the commit is the literal string unknown. It proves what this \
+                   binary was built from. It does not prove that this is the newest \
+                   build, that anything was deployed, or that the two commits ought to \
+                   agree. The ledger block is the per-payer daily cap made \
                    externally checkable: a non-zero restored_sales_at_startup is this \
                    process having rebuilt spend and redeemed nonces from the earnings \
                    log rather than handing every payer a fresh allowance, which is what \
@@ -935,8 +979,12 @@ struct RestoreStats {
 /// the verdict was computed and then stayed on the disk that produced it.
 ///
 /// This handler only publishes. It does not run the check, judge it, or
-/// summarise it: the verdict object is served as written, with two server-added
-/// fields, so a change to what the checker asserts needs no change here.
+/// summarise it: the verdict object is served as written, with a few
+/// server-added fields, so a change to what the checker asserts needs no change
+/// here. The added fields are the two the writer cannot know (how old its own
+/// file is, and when it was served) plus the `gate_build_*` trio, which the
+/// writer cannot know either: it describes the binary serving the verdict rather
+/// than the workspace the verdict is about.
 fn handle_selfcheck() -> (u16, String, Option<String>) {
     let zeroclaw_home = std::env::var("ZEROCLAW_HOME").ok();
     let home = std::env::var("HOME").ok();
@@ -1043,9 +1091,50 @@ fn render_selfcheck(
                 .as_secs();
             obj.insert("age_seconds".to_string(), serde_json::json!(age));
             obj.insert("served_at".to_string(), serde_json::json!(rfc3339_utc(now)));
+
+            // The gate's own build, which has to sit right beside
+            // `deployed_sha` to be read correctly. The verdict is written
+            // by `deploy/box_selfcheck.py`, which knows the WORKSPACE vintage
+            // and cannot know what the binary serving it was built from. Before
+            // this, no field in this payload described the process answering the
+            // request, so a reader comparing `deployed_sha` against a repository
+            // was checking the deploy while believing they were checking the
+            // gate.
+            //
+            // `gate_` prefixed, and inserted after the merge so it wins: the
+            // verdict is served verbatim and a future key of the same name in it
+            // would otherwise silently publish the writer's guess about this
+            // process instead of this process's own answer.
+            obj.insert(
+                "gate_build_commit".to_string(),
+                serde_json::json!(BUILD_COMMIT),
+            );
+            obj.insert(
+                "gate_build_commit_source".to_string(),
+                serde_json::json!(BUILD_COMMIT_SOURCE),
+            );
+            obj.insert(
+                "gate_build_proves".to_string(),
+                serde_json::json!(
+                    "gate_build_commit is the commit the x402 gate binary serving this \
+                     response was compiled from. deployed_sha above is a different fact: \
+                     the commit the workspace deploy was generated from, covering the \
+                     files in deploy/deploy-targets.json. This binary is not one of them, \
+                     so the two move independently and a difference between them is \
+                     ordinary rather than a fault. Read gate_build_commit_source before \
+                     comparing: `git` means it was read from the repository, `git-dirty` \
+                     means something this binary compiles was uncommitted so the commit \
+                     does not name the code that was built and the value carries a \
+                     -dirty suffix, `env` means \
+                     a build-time override asserted it rather than it being observed, and \
+                     `unavailable` means the build had no repository and the commit is the \
+                     literal string unknown. It says what this binary was built from, \
+                     never that it is the newest build or that anything was deployed."
+                ),
+            );
         }
         // A bare scalar or an array parses as JSON and still cannot receive the
-        // two fields. Serving it unmerged would hand the fetcher a 200 with no
+        // added fields. Serving it unmerged would hand the fetcher a 200 with no
         // age, which is the one thing a staleness check needs.
         None => return selfcheck_unavailable("verdict is not a JSON object"),
     }
@@ -1314,7 +1403,10 @@ mod health_tests {
         // scheduled checker, so "looks structurally plausible" is not the bar.
         let v: serde_json::Value =
             serde_json::from_str(&body).unwrap_or_else(|e| panic!("invalid JSON ({e}): {body}"));
-        assert_eq!(v["gate"], "ok");
+        assert!(
+            v["gate"]["build_commit"].is_string(),
+            "the gate block must name the build it is serving from: {v}"
+        );
         assert!(v["shop"]["unit"].is_string());
         assert!(v["shop"]["active"].is_boolean());
         assert!(v["shop"]["state"].is_string());
@@ -1839,6 +1931,38 @@ mod health_tests {
             "a machine with no announcer reported a delivery: {body}"
         );
     }
+
+    /// The gate block names the build it is serving from, and says so in the
+    /// `proves` clause as well.
+    ///
+    /// The two halves are one case. The field alone is a string a reader can find
+    /// and still misread as the deploy vintage, which is the confusion that made
+    /// it worth adding: `/selfcheck` publishes `deployed_sha` and nothing
+    /// anywhere told a reader that the two answer different questions.
+    #[test]
+    fn the_gate_block_names_the_build_and_distinguishes_it_from_the_deploy() {
+        let (_, body, _) = health_empty();
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        let gate = &v["gate"];
+        assert!(gate.is_object(), "the gate block is not an object: {body}");
+        assert_eq!(gate["build_commit"], BUILD_COMMIT);
+        assert_eq!(gate["build_commit_source"], BUILD_COMMIT_SOURCE);
+
+        let proves = v["proves"].as_str().expect("proves must be a string");
+        assert!(
+            proves.contains("gate.build_commit"),
+            "the clause does not name the field it explains: {proves}"
+        );
+        assert!(
+            proves.contains("deployed_sha"),
+            "the clause does not name the value it must not be confused with: {proves}"
+        );
+        assert!(
+            proves.contains("build_commit_source"),
+            "the clause does not tell a reader to check the source first: {proves}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2148,5 +2272,261 @@ mod selfcheck_tests {
         );
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["served_at"], "2025-01-01T00:00:00Z");
+    }
+
+    /// The gate's own build travels beside the workspace's deploy, and the two
+    /// are asserted TOGETHER because either alone is the bug this route had.
+    /// `deployed_sha` on its own is what a reader was already comparing against a
+    /// repository while believing it described the process answering them.
+    #[test]
+    fn the_gate_publishes_its_own_build_beside_the_workspace_deploy() {
+        let (status, body, _) = render_selfcheck(
+            Ok((verdict_bytes(FIXED_NOW_EPOCH), at(FIXED_NOW_EPOCH))),
+            at(FIXED_NOW_EPOCH),
+        );
+        assert_eq!(status, 200);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        // The verdict's field, untouched. A change here that overwrote it would
+        // be worse than the gap it closes.
+        assert_eq!(v["deployed_sha"], "68d83ded97bf0c58");
+
+        assert_eq!(v["gate_build_commit"], BUILD_COMMIT);
+        assert_eq!(v["gate_build_commit_source"], BUILD_COMMIT_SOURCE);
+        assert_ne!(
+            v["gate_build_commit"], v["deployed_sha"],
+            "the fixture's deploy sha and this build's commit collided, so this \
+             case can no longer tell the two fields apart"
+        );
+
+        // The distinction stated in the payload rather than only in a doc a
+        // reader of the endpoint never sees. Both names are required: prose
+        // mentioning one of them cannot tell a reader they are different things.
+        let note = v["gate_build_proves"]
+            .as_str()
+            .expect("note must be present");
+        assert!(note.contains("gate_build_commit"), "{note}");
+        assert!(note.contains("deployed_sha"), "{note}");
+    }
+
+    /// The server-added fields WIN a name collision with the verdict's own keys.
+    ///
+    /// The verdict is written by another program and served verbatim, so nothing
+    /// stops it growing a `gate_build_commit` of its own. If the writer's guess
+    /// survived, this endpoint would publish a second-hand claim about this
+    /// process under a name that promises a first-hand one, which is a worse
+    /// failure than the missing field was.
+    #[test]
+    fn a_verdict_cannot_impersonate_the_gate_own_build_fields() {
+        let planted = serde_json::json!({
+            "deployed_sha": "68d83ded97bf0c58",
+            "gate_build_commit": "0000000000000000000000000000000000000000",
+            "gate_build_commit_source": "git",
+            "gate_build_proves": "written by the verdict, not by the gate",
+            "ok": true,
+        })
+        .to_string()
+        .into_bytes();
+
+        let (status, body, _) =
+            render_selfcheck(Ok((planted, at(FIXED_NOW_EPOCH))), at(FIXED_NOW_EPOCH));
+        assert_eq!(status, 200);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(v["gate_build_commit"], BUILD_COMMIT);
+        assert_ne!(
+            v["gate_build_commit"], "0000000000000000000000000000000000000000",
+            "the verdict's planted value survived the merge"
+        );
+        assert_ne!(
+            v["gate_build_proves"], "written by the verdict, not by the gate",
+            "the verdict's planted note survived the merge"
+        );
+    }
+}
+
+/// What `build.rs` bakes in, checked as a value rather than trusted as a string.
+///
+/// These run against whatever the CURRENT build produced, so they cannot pin one
+/// commit. What they can pin is the contract every branch of the ladder has to
+/// keep, which is the half a consumer depends on: the value is never empty, the
+/// source is one of four known labels, and the two agree with each other. A build
+/// script that silently emitted nothing would satisfy neither.
+#[cfg(test)]
+mod build_provenance_tests {
+    use super::*;
+
+    /// Never empty, never whitespace, never a value that reads as absent.
+    ///
+    /// This is the specific shape the ladder exists to avoid. An empty string
+    /// serialises to `""`, which a consumer reads as present-and-fine and a human
+    /// reads as absent, so the two disagree about the same byte.
+    #[test]
+    fn the_commit_is_never_an_empty_or_blank_value() {
+        assert!(
+            !BUILD_COMMIT.trim().is_empty(),
+            "build.rs emitted a blank commit"
+        );
+        assert_eq!(
+            BUILD_COMMIT,
+            BUILD_COMMIT.trim(),
+            "the value carries surrounding whitespace: {BUILD_COMMIT:?}"
+        );
+        assert!(
+            !BUILD_COMMIT_SOURCE.trim().is_empty(),
+            "build.rs emitted a blank source label"
+        );
+    }
+
+    /// The source is one of the four the ladder can produce. A fifth label means
+    /// `build.rs` grew a branch this contract does not describe, and every
+    /// consumer reading the label would be reading something undocumented.
+    #[test]
+    fn the_source_is_one_of_the_four_documented_labels() {
+        assert!(
+            matches!(
+                BUILD_COMMIT_SOURCE,
+                "git" | "git-dirty" | "env" | "unavailable"
+            ),
+            "unknown provenance source {BUILD_COMMIT_SOURCE:?}"
+        );
+    }
+
+    /// The label and the value cannot disagree.
+    ///
+    /// Each branch is checked rather than only the one this build happened to
+    /// take, so the case that fires is whichever the build environment produced
+    /// and the others stay written down. The pairing is the point: a `git` label
+    /// on a `-dirty` value, or an `unavailable` label on something that looks like
+    /// a commit, is the field lying about its own provenance.
+    #[test]
+    fn the_label_and_the_value_agree() {
+        match BUILD_COMMIT_SOURCE {
+            "unavailable" => assert_eq!(
+                BUILD_COMMIT, "unknown",
+                "an unavailable build must say so in the literal sentinel"
+            ),
+            "git-dirty" => assert!(
+                BUILD_COMMIT.ends_with("-dirty"),
+                "a dirty build must not publish a bare sha: {BUILD_COMMIT:?}"
+            ),
+            "git" => {
+                assert!(
+                    !BUILD_COMMIT.ends_with("-dirty"),
+                    "a clean build must not carry the dirty suffix: {BUILD_COMMIT:?}"
+                );
+                assert_eq!(
+                    BUILD_COMMIT.len(),
+                    40,
+                    "expected a full sha: {BUILD_COMMIT:?}"
+                );
+                assert!(
+                    BUILD_COMMIT.chars().all(|c| c.is_ascii_hexdigit()),
+                    "a git-sourced commit must be hex: {BUILD_COMMIT:?}"
+                );
+            }
+            // Verbatim by design, so its shape is the builder's to choose. The
+            // one thing it may not be is the sentinel, which would label an
+            // asserted value as an absent one.
+            "env" => assert_ne!(
+                BUILD_COMMIT, "unknown",
+                "an override that asserts the sentinel is indistinguishable from no override"
+            ),
+            other => panic!("unknown provenance source {other:?}"),
+        }
+    }
+
+    /// `build.rs` scopes its dirty check to this crate and `solana-core`, so a
+    /// THIRD path dependency would compile into the binary while sitting outside
+    /// the check, and an uncommitted change to it would report `git`. That is a
+    /// false clean, the one direction this flag must never fail in.
+    ///
+    /// The lockfile is the instrument because it needs no subprocess: a path
+    /// dependency is exactly a package with no `source`, and `--locked` already
+    /// guarantees the lockfile matches the manifest. Cross-checked once against
+    /// `cargo metadata`, which reported the same two local packages out of the
+    /// same 129, so this is not one parser agreeing with itself.
+    ///
+    /// This is a scope guard rather than a style rule. If it goes red, widen
+    /// `compiled_sources()` in `build.rs` to cover the new dependency, then
+    /// update the expectation here.
+    #[test]
+    fn the_dirty_check_covers_every_path_dependency() {
+        let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.lock"))
+            .expect("the crate ships its own lockfile");
+        let (local, total) = local_packages(&lock);
+
+        // The denominator travels with the count, so a parse that read nothing
+        // cannot pass as a clean result. An empty lockfile yields an empty
+        // `local` AND a zero total, and only the second distinguishes it from a
+        // real answer.
+        assert!(total > 1, "the lockfile parsed to {total} packages");
+        assert_eq!(
+            local,
+            vec!["solana-core", "x402-feed-gate"],
+            "path dependencies changed ({} of {total} packages are local). build.rs \
+             scopes its dirty check to a fixed set, so anything new here is compiled \
+             in while sitting outside that check.",
+            local.len()
+        );
+    }
+
+    /// The control for the case above, and it is not optional.
+    ///
+    /// Written as a planted string rather than by editing the real lockfile,
+    /// because editing it does not work: cargo re-resolves an inconsistent
+    /// lockfile and rewrites it before the test ever opens it, so a mutation
+    /// there passes GREEN while proving nothing. That was measured, not assumed.
+    ///
+    /// The planted shape is not invented either. It is what the two real path
+    /// dependencies look like in this crate's own lockfile: a `[[package]]` block
+    /// with a name and a version and no `source`.
+    #[test]
+    fn a_third_path_dependency_would_be_noticed() {
+        let planted = "\
+[[package]]\nname = \"x402-feed-gate\"\nversion = \"0.1.0\"\n
+[[package]]\nname = \"solana-core\"\nversion = \"0.1.0\"\n
+[[package]]\nname = \"serde\"\nversion = \"1.0.0\"\nsource = \"registry+https://x\"\n
+[[package]]\nname = \"a-new-local-crate\"\nversion = \"0.1.0\"\n";
+
+        let (local, total) = local_packages(planted);
+        assert_eq!(total, 4);
+        assert_eq!(
+            local,
+            vec!["a-new-local-crate", "solana-core", "x402-feed-gate"],
+            "a package with no source was not counted as local, so the case above \
+             would stay green while a new path dependency sat outside the scope"
+        );
+
+        // And the registry package must NOT be counted, or every build would look
+        // like it had a hundred path dependencies and the check would be useless
+        // in the opposite direction.
+        assert!(!local.contains(&"serde"));
+    }
+
+    /// Package names in a lockfile, split into the ones with no `source` (which
+    /// is exactly what a path dependency is) and the total parsed.
+    fn local_packages(lock: &str) -> (Vec<&str>, usize) {
+        let blocks: Vec<&str> = lock.split("[[package]]").skip(1).collect();
+        let mut local: Vec<&str> = blocks
+            .iter()
+            .filter(|b| !b.lines().any(|l| l.trim_start().starts_with("source = ")))
+            .filter_map(|b| {
+                b.lines()
+                    .find_map(|l| l.trim().strip_prefix("name = "))
+                    .map(|v| v.trim_matches('"'))
+            })
+            .collect();
+        local.sort_unstable();
+        (local, blocks.len())
+    }
+
+    /// The sentinel cannot be mistaken for a commit by a reader or by a
+    /// comparison. This is what makes "unknown" the right absent value and `""`
+    /// the wrong one.
+    #[test]
+    fn the_absent_sentinel_is_not_shaped_like_a_commit() {
+        assert_ne!("unknown".len(), 40);
+        assert!(!"unknown".chars().all(|c| c.is_ascii_hexdigit()));
     }
 }
