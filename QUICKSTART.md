@@ -115,10 +115,10 @@ build section below reads as though they do:
 
 ```
 (cd crates/solana-core && cargo test)     # 120 tests, ~30s, no network
-(cd x402-feed-gate && cargo test)         # 26 tests, ~100s, no network
+(cd x402-feed-gate && cargo test)         # 37 tests, ~100s, no network
 ```
 
-146 green, from a clean clone, with Rust and nothing else. Re-derive the counts by summing the
+157 green, from a clean clone, with Rust and nothing else. Re-derive the counts by summing the
 `test result:` lines rather than trusting these figures. The `cd` is required rather than
 stylistic: there is no cargo manifest at the repo root, for the reason given in step 2.
 

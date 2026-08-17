@@ -351,8 +351,8 @@ silently drops unknown extensions. Each refuses to interpret a mutation unless t
 green first, and restores the source on every exit path. A passing suite is then evidence that it
 would catch a regression, rather than an assumption that it would.
 
-Supply chain is gated at 10 of 10 on advisories, licences and sources, with the licence allow
-list derived from the dependency graph rather than guessed. The ten are the `supply-chain`
+Supply chain is gated at 11 of 11 on advisories, licences and sources, with the licence allow
+list derived from the dependency graph rather than guessed. The eleven are the `supply-chain`
 job's matrix in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), so the count is
 whatever that list holds rather than a figure written here:
 `python -c "import yaml;print(len(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']['supply-chain']['strategy']['matrix']['manifest']))"`. Three CI workflows keep this

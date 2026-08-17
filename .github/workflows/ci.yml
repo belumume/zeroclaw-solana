@@ -81,7 +81,7 @@ jobs:
     # that in one command.
     #
     # SCOPE IS DISCOVERED, NOT LISTED. The supply-chain matrix below enumerates its
-    # ten manifests by hand, which is correct there because it deliberately gates
+    # eleven manifests by hand, which is correct there because it deliberately gates
     # only what SHIPS. Formatting has no such boundary: everything tracked is
     # readable by a judge, so this walks git's own index instead. A hand-written
     # list is exactly how the drift above happened, since a crate added later joins

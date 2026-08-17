@@ -23,7 +23,7 @@ code and the expectation.
 about behaviour over time. A KAT is one point.
 
 **Unit tests.** 89 in `solana-core`, plus 19 in `oracle-publish`, 41 in
-`payment-watch`, 26 in `x402-feed-gate`. These cover branches, error variants, and
+`payment-watch`, 37 in `x402-feed-gate`. These cover branches, error variants, and
 the specific adversarial cases we thought of. Every one of these counts drifts as its
 suite grows, and a figure repeated across three surfaces goes stale on whichever one
 nobody re-derived. Each is `grep -c '^\s*#\[test\]'` over that crate's sources, so
@@ -491,7 +491,7 @@ promise actually rests on, and it now rests on a clean runner rather than on thi
 is derived rather than guessed: it is the exact set of distinct licenses in the graph, all
 eleven of them permissive, with no GPL, LGPL, AGPL, MPL or SSPL anywhere. Advisories, licenses
 and sources come back clean across solana-core, all nine components and the x402 gate, and the
-CI matrix now runs all ten graphs rather than a sample. That distinction was worth fixing rather
+CI matrix now runs all eleven graphs rather than a sample. That distinction was worth fixing rather
 than rewording: each plugin is its own workspace with its own dependency graph, and the six that
 were previously ungated are not redundant with the three that were. `token-risk-check` and
 `lending-health` pull HTTP and JSON dependencies the others never touch, which is exactly
@@ -513,7 +513,7 @@ under `onchain/` is a separate graph and is not part of the shipped plugin surfa
 
 If you open this repository's Security tab you will see open Dependabot alerts. That sits badly
 beside a supply-chain gate that comes back clean. The two tools ask different questions.
-`cargo deny` runs against the ten graphs that ship.
+`cargo deny` runs against the eleven graphs that ship.
 Dependabot scans every `Cargo.lock` in the tree, including the ones that exist only to test the
 things that ship.
 
