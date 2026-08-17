@@ -656,8 +656,18 @@ def main():
                 )
             elif status == "failing":
                 where = f" via {chan}" if chan else ""
+                # The attempt age, NOT the success age, which is null here and must stay
+                # null: nothing was delivered. Printing it is the whole point of the
+                # separate field, because a refusal minutes old is a transient the next
+                # tick may clear and one weeks old is an outage nobody noticed.
+                att = d.get("last_attempt_age_seconds")
+                when = (
+                    f" {att / 60:.0f} min ago"
+                    if isinstance(att, (int, float))
+                    else " at an unknown time"
+                )
                 print(
-                    f"INFO  receipt delivery: the newest send FAILED{where} ({basis})"
+                    f"INFO  receipt delivery: the newest send FAILED{where}{when} ({basis})"
                     f"{run_note}. This is positive evidence of a broken send path, but it is "
                     f"live box state, so it is reported and not gated"
                 )

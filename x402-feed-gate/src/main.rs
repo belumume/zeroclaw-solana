@@ -795,6 +795,7 @@ fn receipt_verdict(o: Option<&ReceiptOutcome>, now: u64, stale_after: u64) -> se
         return serde_json::json!({
             "status": "unknown",
             "last_success_age_seconds": null,
+            "last_attempt_age_seconds": null,
             "age_basis": "none",
             "channel": null,
             "detail": "no delivery outcome was found in the window read. A shop that \
@@ -802,24 +803,46 @@ fn receipt_verdict(o: Option<&ReceiptOutcome>, now: u64, stale_after: u64) -> se
                        a fault",
         });
     };
+
+    // TWO AGES, AND THE NAMES ARE LOAD-BEARING. `last_attempt_age_seconds` is how long
+    // ago the newest attempt happened whatever came of it; `last_success_age_seconds` is
+    // populated ONLY when that attempt delivered. Reporting a failure's age under the
+    // success name would tell a consumer a receipt got through when none ever did, which
+    // is the exact class of lie this endpoint exists to avoid, so a failure keeps a null
+    // success age and carries its age in its own field.
+    //
+    // BOTH ARE DERIVED FROM THE PAYMENT'S SETTLEMENT INSTANT, which precedes the attempt,
+    // so both OVER-estimate. On the success path that can only move a verdict toward
+    // `stale`; on the failure path it can only make an outage look older than it is,
+    // never fresher, so neither direction manufactures reassurance.
+    let attempt_age = o.at.map(|at| now.saturating_sub(at));
+    let basis = if attempt_age.is_some() {
+        "settlement_instant"
+    } else {
+        "none"
+    };
+
     if !o.ok {
         return serde_json::json!({
             "status": "failing",
             "last_success_age_seconds": null,
-            "age_basis": "none",
+            "last_attempt_age_seconds": attempt_age,
+            "age_basis": basis,
             "channel": o.channel,
             "detail": "the newest delivery attempt failed and the receipt has not \
-                       reached the customer",
+                       reached the customer. Read last_attempt_age_seconds: a refusal \
+                       minutes old is a transient the next tick may clear, and one \
+                       weeks old is an outage nobody noticed",
         });
     }
-    match o.at {
-        Some(at) => {
-            let age = now.saturating_sub(at);
+    match attempt_age {
+        Some(age) => {
             let fresh = age <= stale_after;
             serde_json::json!({
                 "status": if fresh { "connected" } else { "stale" },
                 "last_success_age_seconds": age,
-                "age_basis": "settlement_instant",
+                "last_attempt_age_seconds": age,
+                "age_basis": basis,
                 "channel": o.channel,
                 "detail": if fresh {
                     "a receipt was delivered for a payment that settled within the \
@@ -833,7 +856,8 @@ fn receipt_verdict(o: Option<&ReceiptOutcome>, now: u64, stale_after: u64) -> se
         None => serde_json::json!({
             "status": "unknown",
             "last_success_age_seconds": null,
-            "age_basis": "none",
+            "last_attempt_age_seconds": null,
+            "age_basis": basis,
             "channel": o.channel,
             "detail": "a delivery is recorded but carries no readable instant, so it \
                        cannot be shown to be recent and is not counted as evidence",
@@ -1552,12 +1576,89 @@ mod health_tests {
         assert_eq!(v["delivery"]["channel"], "whatsapp.shop");
         assert_eq!(v["last_run"]["announced"], 0);
         assert_eq!(v["last_run"]["ledger_committed"], false);
+        // A failure is NOT a success, and the field whose name says success must stay
+        // null however much is known about when the attempt happened. A consumer
+        // reading a number there would conclude a receipt got through.
+        assert_eq!(
+            v["delivery"]["last_success_age_seconds"],
+            serde_json::Value::Null,
+            "a refusal reported an age under the success field: {v}"
+        );
 
         // The control: the same window with the send succeeding instead reads the
         // other way, so the verdict tracks the record rather than the fixture.
         let ok = receipts_json(read(sent_run(SETTLED_AT)), SETTLED_EPOCH + 60, DAY);
         assert_eq!(ok["delivery"]["status"], "connected");
         assert_eq!(ok["last_run"]["ledger_committed"], true);
+    }
+
+    /// A refusal a minute old and a refusal three weeks old are different incidents:
+    /// the first is a transient the next tick may clear, the second is an outage nobody
+    /// noticed. Reporting them identically is a real loss of information, and it is the
+    /// loss that survived a review round precisely because the failure test asserted the
+    /// status and the channel but never the age.
+    ///
+    /// Both directions, plus the naming invariant that made this awkward to fix: the age
+    /// has to travel in a field that cannot be read as a success, so `failing` keeps a
+    /// null `last_success_age_seconds` in both cases while `last_attempt_age_seconds`
+    /// moves.
+    #[test]
+    fn a_fresh_refusal_is_distinguishable_from_an_old_one() {
+        let minute = receipts_json(read(failed_run()), SETTLED_EPOCH + 60, DAY);
+        let weeks = receipts_json(read(failed_run()), SETTLED_EPOCH + (21 * DAY), DAY);
+
+        assert_eq!(minute["delivery"]["last_attempt_age_seconds"], 60);
+        assert_eq!(weeks["delivery"]["last_attempt_age_seconds"], 21 * DAY);
+        assert_ne!(
+            minute["delivery"]["last_attempt_age_seconds"],
+            weeks["delivery"]["last_attempt_age_seconds"],
+            "a minute-old and a three-week-old refusal reported identically"
+        );
+
+        // Both are still failures, and neither may claim a success of any age.
+        for v in [&minute, &weeks] {
+            assert_eq!(v["delivery"]["status"], "failing");
+            assert_eq!(
+                v["delivery"]["last_success_age_seconds"],
+                serde_json::Value::Null
+            );
+            assert_eq!(v["delivery"]["age_basis"], "settlement_instant");
+        }
+
+        // An undatable refusal reports no attempt age rather than a guessed one, and
+        // says so in its basis. This is the control on the two assertions above: without
+        // it, a hardcoded age would satisfy them both.
+        let undatable = "SEND FAILED, will retry next run: payment received: 0.39 USDC \
+                         from D7o5YEE at some point (signature abc)";
+        let u = receipts_json(read(undatable.to_string()), NOW, DAY);
+        assert_eq!(u["delivery"]["status"], "failing");
+        assert_eq!(
+            u["delivery"]["last_attempt_age_seconds"],
+            serde_json::Value::Null
+        );
+        assert_eq!(u["delivery"]["age_basis"], "none");
+    }
+
+    /// On the success path the attempt and the success are one event, so the two ages
+    /// agree. Asserting it pins the schema as uniform: every branch carries both fields,
+    /// and a consumer never has to discover that one of them is missing on some paths.
+    #[test]
+    fn a_delivered_receipt_reports_the_same_age_under_both_names() {
+        let v = receipts_json(read(sent_run(SETTLED_AT)), SETTLED_EPOCH + 300, DAY);
+        assert_eq!(v["delivery"]["last_success_age_seconds"], 300);
+        assert_eq!(v["delivery"]["last_attempt_age_seconds"], 300);
+
+        // And on the paths where nothing is known, both are null rather than one of
+        // them silently defaulting to zero, which would read as "just now".
+        let none = receipts_json(read(quiet_run()), NOW, DAY);
+        assert_eq!(
+            none["delivery"]["last_success_age_seconds"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            none["delivery"]["last_attempt_age_seconds"],
+            serde_json::Value::Null
+        );
     }
 
     /// The journal is append-only, so the last outcome is the newest. A parser that
