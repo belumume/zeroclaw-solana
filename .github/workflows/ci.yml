@@ -687,6 +687,24 @@ jobs:
       - name: that gate's own controls
         run: python3 scripts/check-plugin-count-agreement.py --selftest
 
+      # The same file one step further in: not a number QUICKSTART states, but a COMMAND it tells
+      # a stranger to paste. Followed verbatim, section 2 built every component into the target
+      # directory and then told the reader to install a plugin whose manifest declares a bare
+      # filename, so the host looked beside the manifest and exited `WASM file not found`. A copy
+      # step was missing and nothing anywhere performed it. It survived because eight of the nine
+      # plugin directories had a hand-copied `.wasm` beside the manifest on one machine, and
+      # `*.wasm` is gitignored, so the path was whole there and broken in every fresh clone.
+      #
+      # This EXECUTES the loop parsed out of QUICKSTART, against a stubbed cargo, in a temp tree
+      # built from the real manifests. Offline and sub-second: the defect is where files land, not
+      # whether they compile, and the plugin matrix below already does the real build. Its control
+      # strips the copy step out of the real loop and requires this to go red.
+      - name: QUICKSTART's own build loop leaves the plugins installable
+        run: python3 scripts/check-quickstart-plugin-install.py
+
+      - name: that gate's own controls
+        run: python3 scripts/check-quickstart-plugin-install.py --selftest
+
       # The pay path's own suite, which plants the rate so it neither reaches the network nor
       # rots as the published rate moves.
       - name: pay-link invariants, recipient, mint, amount and rate

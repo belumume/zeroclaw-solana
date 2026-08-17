@@ -248,13 +248,26 @@ format is hand-decoded at all.
 
 From this repo:
 ```
-for d in plugins/*/; do (cd "$d" && cargo build --target wasm32-wasip2 --release) || break; done
+for d in plugins/*/; do (cd "$d" && cargo build --target wasm32-wasip2 --release \
+  && cp target/wasm32-wasip2/release/*.wasm .) || break; done
 zeroclaw plugin install ./plugins/<name>/               # per plugin; repeat as needed
 zeroclaw config set plugins.enabled true
 ```
 Each component lands at `plugins/<name>/target/wasm32-wasip2/release/<name>.wasm` with the
 hyphens in its name turned to underscores, so `payment-watch` produces `payment_watch.wasm`.
 That is the path the `strings <plugin>.wasm` check in step 1 wants.
+
+The `cp` is not tidying, and dropping it is what breaks the next line. Every `manifest.toml`
+declares a BARE FILENAME (`wasm_path = "payment_watch.wasm"`), so `plugin install` looks for the
+component BESIDE the manifest and exits with `WASM file not found` when it is only in the target
+directory. A plugin directory holding its manifest and its component side by side is the unit you
+distribute, which is why the manifest points there rather than into a build layout that belongs to
+whoever compiled it. `scripts/check-quickstart-plugin-install.py` executes the loop above and
+asserts the manifests resolve afterwards, so this paragraph and that command cannot drift apart.
+
+Unset `CARGO_TARGET_DIR` before that loop if you keep it set. Cargo then writes outside `target/`,
+the `cp` finds nothing, `|| break` stops after the first plugin, and the loop still exits 0, so
+you get one built component, none installable, and no failure to go on.
 
 Each plugin dir carries `manifest.toml` (minimal permissions) and a README with its config
 keys, custody tier and threat model. Seven of the nine plugins carry a captured
