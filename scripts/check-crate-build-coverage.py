@@ -78,8 +78,13 @@ CANNOT_CHECK = 2
 
 # Below this the JOB SPLIT is broken rather than the crate walk, and the two fail in opposite
 # directions: a broken crate walk reports everything clean, a broken job split reports every crate
-# uncovered at once. Seventeen simultaneous findings is not a finding, so it is reported as a
-# cannot-check instead. 5 of 15 jobs compiled when this was written.
+# uncovered at once. Every crate failing simultaneously is not a set of findings, so that is
+# reported as a cannot-check instead.
+#
+# NO LIVE TOTALS IN THIS COMMENT, deliberately. The floor is a fixed bar well under the corpus, and
+# the corpus figure belongs in the summary line, which reprints it every run. A comment naming
+# today's counts is the stale denominator this whole file exists to catch, and the one that stood
+# here was written a commit before a compiling job was added, so it shipped already wrong.
 MIN_COMPILING_JOBS = 4
 
 # A job running one of these produces an object file, so a compile error cannot survive it. The
