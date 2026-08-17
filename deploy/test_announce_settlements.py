@@ -20,6 +20,12 @@ FIVE LAYERS, because a control on one proves nothing about the others.
 
   1. RESOLUTION, through --dry-run: which instance, which type, which alias, which recipient,
      which channel-id, and whether a retry id exists at all.
+  1b. RECIPIENT KIND -- which DOMAIN the resolved jid belongs to. The section scoping in 1
+     proves the resolver stays out of a neighbouring alias; it says nothing about picking the
+     wrong kind of address INSIDE the right one. Measured on the box 2026-08-16, the resolver
+     took the section's `allowed_groups` placeholder and reported `recipient resolved: ...@g.us`.
+     Every fixture in 1 carries exactly one jid and it is always a dm, so a resolver that takes
+     the first jid of any domain passed all of them. A group jid must refuse, never send.
   2. SEND, end to end with a fake binary, asserting on the ACTUAL argv it received and on
      whether the ledger was committed.
   3. REFUSAL. The incident's own stderr, verbatim, must fail loud and commit nothing -- and
@@ -142,6 +148,54 @@ allowed_peers = ["{FIXTURE_JID}"]
 CONFIG_NO_PEER = """\
 [channels.whatsapp.shop]
 mode = "personal"
+"""
+
+# THE LIVE BOX SHAPE, and the defect. Byte-faithful to the "live node posture" case in
+# scripts/test_whatsapp_posture_guard.sh: personal mode, group_policy ignore, and a single
+# non-matching `allowed_groups` placeholder that whatsapp_posture_guard.sh REQUIRES to be
+# present and non-empty. There is no direct-chat jid in the section at all -- the dm allowlist
+# lives in `peer_groups.<name>.external_peers`, another table -- so the only jid here is the
+# group placeholder. A resolver that takes the first jid of any domain resolves a GROUP, and
+# measured on the box it did exactly that.
+CONFIG_GROUP_ONLY = f"""\
+[channels.whatsapp.shop]
+mode = "personal"
+dm_policy = "allowlist"
+group_policy = "ignore"
+allowed_groups = ["{DECOY_JID}"]
+"""
+
+# Both domains present, GROUP FIRST. Written in this order deliberately: with the group last,
+# a resolver that simply takes the last match would pass for the wrong reason.
+CONFIG_GROUP_BEFORE_DM = f"""\
+[channels.whatsapp.shop]
+mode = "personal"
+group_policy = "ignore"
+allowed_groups = ["{DECOY_JID}"]
+allowed_peers = ["{FIXTURE_JID}"]
+"""
+
+# The same two, DM first. The pair is what proves order is not the discriminator.
+CONFIG_DM_BEFORE_GROUP = f"""\
+[channels.whatsapp.shop]
+mode = "personal"
+allowed_peers = ["{FIXTURE_JID}"]
+group_policy = "ignore"
+allowed_groups = ["{DECOY_JID}"]
+"""
+
+# The shop section is group-only and the reserved DM sits in a NEIGHBOURING alias. Unmutated
+# this must refuse: there is no direct-chat jid in the right section. It is the fixture for the
+# section-anchor mutation below -- see the comment there for why the anchor control needs a
+# fixture of this shape rather than the plain decoy one.
+CONFIG_GROUP_ONLY_NEIGHBOUR_DM = f"""\
+[channels.whatsapp.other]
+allowed_peers = ["{FIXTURE_JID}"]
+
+[channels.whatsapp.shop]
+mode = "personal"
+group_policy = "ignore"
+allowed_groups = ["{DECOY_JID}"]
 """
 
 # ---------------------------------------------------------------------------
@@ -366,6 +420,19 @@ def mutated_script(anchor: str, replacement: str) -> Path:
     path = Path(tempfile.mkdtemp(prefix="announce-mutant-")) / "announce_settlements.sh"
     path.write_text(src.replace(anchor, replacement, 1), encoding="utf-8", newline="\n")
     path.chmod(0o755)
+    # A mutant that does not PARSE tests nothing while looking like a result. Which way it lies
+    # depends on the case: a must-fire check reads the crash as "did not fire" and goes red,
+    # which is loud, but a must-not-fire check reads the very same crash as the silence it
+    # wanted and goes GREEN. Asserting the anchor was present cannot catch this -- the
+    # substitution applies and the file is then broken, most often on indentation or a quote.
+    # So every mutant is parsed here, once, before any case can be built on it.
+    syntax = subprocess.run(
+        [BASH, "-n", str(path)], capture_output=True, text=True, timeout=60
+    )
+    if syntax.returncode != 0:
+        raise AssertionError(
+            f"mutant does not parse, so it would test nothing: {syntax.stderr.strip()}"
+        )
     return path
 
 
@@ -448,6 +515,99 @@ def test_resolution() -> None:
             "and names the section it looked in",
             "[channels.whatsapp.shop]" in r.stderr,
             r.stderr,
+        )
+    finally:
+        box.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# 1b. RECIPIENT KIND -- a group jid is not a recipient
+# ---------------------------------------------------------------------------
+
+
+def test_recipient_kind() -> None:
+    print("\n1b. RECIPIENT KIND -- a group jid refuses; a dm wins at any position")
+
+    # THE DEFECT, at the live box's own config shape. Not a dry run: the whole point is that
+    # the real send path must never reach the binary with a group as its --recipient.
+    box = Box(CONFIG_GROUP_ONLY, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        r = box.run()
+        check("a group-only section exits 2, never 0", r.returncode == 2, r.stdout)
+        check("and sends NOTHING", box.sends() == [], box.sends())
+        check("and commits nothing", not box.committed())
+        check(
+            "the group jid is never handed to the binary as a recipient",
+            all(DECOY_JID not in s for s in box.sends()),
+            box.sends(),
+        )
+        check(
+            "the message says the section carries a GROUP jid",
+            "GROUP jid" in r.stderr,
+            r.stderr,
+        )
+        check(
+            "and names ZC_RECIPIENT as the remedy",
+            "ZC_RECIPIENT" in r.stderr,
+            r.stderr,
+        )
+        check(
+            "and names the section it looked in",
+            "[channels.whatsapp.shop]" in r.stderr,
+            r.stderr,
+        )
+        # The refusal must not ECHO the jid it rejected. box_selfcheck.py's redactor states as
+        # an invariant that this script carries no jid, and printing the rejected value directly
+        # above "set ZC_RECIPIENT" would hand an operator the wrong string to paste -- into the
+        # one override that is deliberately not domain-checked. Two reasons, same direction.
+        check(
+            "the refusal does not echo the rejected jid anywhere in its output",
+            DECOY_JID not in r.stderr and DECOY_JID not in r.stdout,
+            r.stderr + r.stdout,
+        )
+    finally:
+        box.cleanup()
+
+    # ORDER IS NOT THE DISCRIMINATOR. The group is written FIRST here on purpose: with it last,
+    # a resolver that took the last match would pass this and still be wrong.
+    box = Box(CONFIG_GROUP_BEFORE_DM, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        r = box.run("--dry-run")
+        check("group-first: exits 0", r.returncode == 0, r.stderr)
+        check(
+            "group-first: the DM wins",
+            f"recipient   {FIXTURE_JID}" in r.stdout,
+            r.stdout,
+        )
+        check(
+            "group-first: the group is not taken", DECOY_JID not in r.stdout, r.stdout
+        )
+    finally:
+        box.cleanup()
+
+    box = Box(CONFIG_DM_BEFORE_GROUP, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        r = box.run("--dry-run")
+        check("dm-first: exits 0", r.returncode == 0, r.stderr)
+        check(
+            "dm-first: the DM wins",
+            f"recipient   {FIXTURE_JID}" in r.stdout,
+            r.stdout,
+        )
+        check("dm-first: the group is not taken", DECOY_JID not in r.stdout, r.stdout)
+    finally:
+        box.cleanup()
+
+    # An explicit ZC_RECIPIENT is the documented way out of the refusal, so it has to actually
+    # work from the shape that refuses -- an escape hatch nobody tested is not one.
+    box = Box(CONFIG_GROUP_ONLY, FAKE_ACCEPT, [SEND_LINE_A])
+    try:
+        r = box.run(ZC_RECIPIENT=FIXTURE_JID)
+        check("ZC_RECIPIENT clears the refusal", r.returncode == 0, r.stderr)
+        check(
+            "and is the recipient actually sent to",
+            len(box.sends()) == 1 and f"--recipient {FIXTURE_JID}" in box.sends()[0],
+            box.sends(),
         )
     finally:
         box.cleanup()
@@ -719,18 +879,60 @@ def test_mutations() -> None:
         shutil.rmtree(mutant.parent, ignore_errors=True)
 
     # Loosen the section pattern back to unescaped dots AND drop the anchor, so a neighbouring
-    # alias can be matched. The decoy JID must then win, which is why the section is anchored.
+    # alias can be matched. The anchor is still exactly the guard under test and the decision it
+    # pins is unchanged; only the FIXTURE moved, and it had to.
+    #
+    # This control used to run against CONFIG_SHOP and assert the decoy GROUP jid was taken.
+    # Once the resolver started preferring the direct-chat domain, that observable stopped being
+    # produced -- the loosened range still reaches the neighbour, but the shop's own dm outranks
+    # the neighbour's group, so the control would have gone green on a mutant while proving
+    # nothing. Two guards masking each other, not a reversed decision. CONFIG_GROUP_ONLY_NEIGHBOUR_DM
+    # removes the confound by putting the only dm in the NEIGHBOUR: the domain preference cannot
+    # rescue the section anchor there, so the flip is attributable to the anchor alone.
     mutant = mutated_script(
         """/^\\[channels\\.${SECTION_RE}\\]/,/^\\[/p""",
         """/channels/,/^\\[zzz/p""",
     )
-    box = Box(CONFIG_SHOP, FAKE_ACCEPT, [SEND_LINE_A], script=mutant)
+    box = Box(CONFIG_GROUP_ONLY_NEIGHBOUR_DM, FAKE_ACCEPT, [SEND_LINE_A], script=SCRIPT)
     try:
         r = box.run("--dry-run")
         check(
-            "loosening the section pattern DOES take the decoy alias (anchor is real)",
-            DECOY_JID in r.stdout,
-            r.stdout,
+            "anchored, a neighbour's dm is out of reach so the run refuses",
+            r.returncode == 2,
+            r.stdout + r.stderr,
+        )
+    finally:
+        box.cleanup()
+
+    box = Box(CONFIG_GROUP_ONLY_NEIGHBOUR_DM, FAKE_ACCEPT, [SEND_LINE_A], script=mutant)
+    try:
+        r = box.run("--dry-run")
+        check(
+            "loosening the section pattern DOES reach the neighbour's dm (anchor is real)",
+            r.returncode == 0 and f"recipient   {FIXTURE_JID}" in r.stdout,
+            r.stdout + r.stderr,
+        )
+    finally:
+        box.cleanup()
+        shutil.rmtree(mutant.parent, ignore_errors=True)
+
+    # THE DOMAIN PREFERENCE ITSELF. Restore the old any-domain match and the live box's own
+    # config shape must resolve a GROUP again -- the defect, reproduced on demand. Without this
+    # the preference is a line of code nothing proves is load-bearing.
+    # The anchor is the match EXPRESSION rather than the whole assignment: it is the code path
+    # under test, it is unique in the source, and it carries no leading whitespace, so the
+    # substitution cannot break indentation the way a whole-line anchor can.
+    mutant = mutated_script(
+        r"""grep -oE '[0-9]+@s\.whatsapp\.net'""",
+        r"""grep -oE '[0-9]+@(g\.us|s\.whatsapp\.net)'""",
+    )
+    box = Box(CONFIG_GROUP_ONLY, FAKE_ACCEPT, [SEND_LINE_A], script=mutant)
+    try:
+        r = box.run()
+        check(
+            "removing the dm-domain match DOES send the receipt to a group (preference is real)",
+            len(box.sends()) == 1 and f"--recipient {DECOY_JID}" in box.sends()[0],
+            (r.returncode, box.sends(), r.stderr),
         )
     finally:
         box.cleanup()
@@ -916,6 +1118,7 @@ def main() -> int:
         return 1
     print(f"bash: {BASH}")
     test_resolution()
+    test_recipient_kind()
     test_send()
     test_refusal()
     test_mutations()
