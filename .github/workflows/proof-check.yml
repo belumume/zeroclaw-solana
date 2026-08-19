@@ -46,7 +46,7 @@ jobs:
       # reports it was deployed from, and that commit is weeks behind the tip. On the default
       # depth-1 clone it is absent, and the gate then reports CANNOT VERIFY forever: an honest
       # verdict that answers nothing, and one that looks identical to a healthy quiet check.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
