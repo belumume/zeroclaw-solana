@@ -254,6 +254,37 @@ def serve() -> tuple[socketserver.TCPServer, int]:
     return srv, srv.server_address[1]
 
 
+def breaker(breakage: str | None, calls: dict):
+    """Break an endpoint the way `breakage` says, counting the requests it swallows.
+
+    A FACTORY, NOT DEFAULT ARGUMENTS, and the difference is not style. This was written as
+    `def handler(route, breakage=breakage, calls=calls)`, which does not work: playwright calls a
+    route handler as `handler(route, route.request)`, truncated to the handler's arity, so the
+    Request object landed in `breakage`. It is never equal to "abort", so BOTH abort cases were
+    silently running as 429 cases and this file had two names for one test.
+
+    It went unnoticed because the two breakages are expected to produce the same verdict here --
+    the page reads an aborted fetch and a 429 identically, as "the chain did not answer" -- so the
+    substitution cost coverage rather than correctness, and coverage loss is invisible in a green
+    run. The same defect was hit from scratch while writing verify_reference_required.py, where it
+    DID flip a result, which is the only reason it was found here.
+    """
+
+    def handler(route):
+        calls["n"] += 1
+        if breakage == "abort":
+            route.abort()
+        else:
+            route.fulfill(
+                status=429,
+                content_type="application/json",
+                body='{"jsonrpc":"2.0","error":{"code":429,'
+                '"message":"Too many requests"},"id":1}',
+            )
+
+    return handler
+
+
 PROBE = """() => {
   const card = document.getElementById('card');
   const pay  = document.getElementById('pay');
@@ -359,17 +390,7 @@ def main() -> int:
                 page = browser.new_page(**profile)
                 calls = {"n": 0}
 
-                def handler(route, breakage=breakage, calls=calls):
-                    calls["n"] += 1
-                    if breakage == "abort":
-                        route.abort()
-                    else:
-                        route.fulfill(
-                            status=429,
-                            content_type="application/json",
-                            body='{"jsonrpc":"2.0","error":{"code":429,'
-                            '"message":"Too many requests"},"id":1}',
-                        )
+                handler = breaker(breakage, calls)
 
                 if breakage:
                     # Globs derived from the hosts the page actually names, so a repoint cannot

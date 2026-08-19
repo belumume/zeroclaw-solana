@@ -28,6 +28,9 @@ var STR={pt:{
  refusednet:'Este link usa um token que esta loja não aceita. Nada foi enviado. Peça um link novo à loja.',
  linktoken:'token do link: ',
  refusedpaid:'Este pedido já foi pago. Nada foi enviado. Peça um link novo à loja se precisar pagar de novo.',
+ refusednoref:'Este link não pode ser conferido on-chain, então esta página não vai oferecer um pagamento que não tem como provar ser o primeiro. Nada foi enviado. Peça um link completo à loja.',
+ norefmissing:'este link não traz a referência do pedido',
+ linkref:'referência do link: ',
  paidamt:'pago: ',
  paidtx:'transação: ',
  amtwallet:'(valor definido na sua carteira)',
@@ -171,9 +174,10 @@ function refuse(msg,detail,opts){
   var eh=document.createElement('h1');eh.textContent=opts.heading||T('refused','Refused');c.appendChild(eh);
   if(opts.big){var eb=document.createElement('div');eb.className='paid';eb.textContent=opts.big;c.appendChild(eb);}
   var ep=document.createElement('p');ep.className='msg';ep.textContent=msg;c.appendChild(ep);
-  // opts.wrap adds break opportunities inside an unbreakable run. Only the already-paid card asks
-  // for it, because only it renders an 88-char signature; the two address refusals must keep the
-  // exact layout their plate was measured against.
+  // opts.wrap adds break opportunities inside an unbreakable run. Two callers ask for it: the
+  // already-paid card, which renders an 88-char signature, and the missing-reference refusal,
+  // whose detail line can echo an arbitrary-length run out of a hostile link. The two ADDRESS
+  // refusals must keep the exact layout their plate was measured against, so they do not.
   (Array.isArray(detail)?detail:[detail]).forEach(function(d){
     var ed=document.createElement('div');ed.className=opts.wrap?'recip brk':'recip';ed.textContent=d;c.appendChild(ed);
   });
@@ -198,6 +202,36 @@ else{
     // Pay button, and the customer who clicks it gets an opaque failure deep in the wallet.
     refuse(T('refusednet','This link is for a token this shop cannot accept. Nothing has been sent. Ask the shop for a new link.'),
            T('linktoken','link token: ')+token);
+  }else if(!isPubkey(reference)){
+    // NO REFERENCE, OR ONE THIS PAGE CANNOT LOOK UP. Refused, because the reference is the ONLY
+    // thing that makes the already-paid check possible: it rides the transfer as a read-only
+    // non-signer account, so it is what getSignaturesForAddress is asked about. Without one,
+    // settledSignature() returns null for every link forever, checkAlreadyPaid() reads that null
+    // as "not settled", and the card keeps offering Pay no matter how many times the order has
+    // been paid. Strip `?reference=` from a link and the double-payment guard is silently gone,
+    // which is worse than never having had it: the page looks exactly as protected as it did.
+    //
+    // Refused rather than rendered-with-a-warning, for the same reason the unknown mint is: a
+    // caution sits beside a live Pay button and a customer clicks past it. A page that cannot
+    // verify settlement must not offer a payment it cannot prove is the first one.
+    //
+    // COSTS THE HAPPY PATH NOTHING, which is the check that mattered before shipping it. Every
+    // generator in this repo emits a reference -- skills/solana-pay/scripts/, demo/shoot_links.py,
+    // and the browser harnesses -- so a legitimate link always carries one and this branch is
+    // unreachable for it. Re-derive rather than trusting that sentence:
+    // grep -rn 'reference=' --include=*.py demo/ skills/
+    //
+    // The pubkey gate inside settledSignature() STAYS. It is a second layer, not a duplicate: this
+    // branch keeps a hostile reference off the network by never starting the lookup, and that one
+    // keeps it off the network if any future caller reaches the lookup by another route.
+    var reftail=reference.length>64?reference.slice(0,64)+'…':reference;
+    refuse(T('refusednoref','This link cannot be checked against the chain, so this page will not offer a payment it cannot prove is the first one. Nothing has been sent. Ask the shop for a complete link.'),
+           reference?(T('linkref','link reference: ')+reftail):T('norefmissing','this link carries no order reference'),
+           // Wrapped, unlike the two address refusals. A malformed reference is arbitrary attacker
+           // bytes with no break opportunity in them, so without this a long one widens the card
+           // past the viewport and scrolls the whole page sideways. This card has no measured
+           // plate to preserve, so it can take the rule the two address refusals must not.
+           {wrap:true});
   }else{
   el('label').textContent=label;
   el('amt').textContent=amount?(amount+' '+(token?assetName(token):'SOL')):T('amtwallet','(amount set in your wallet)');
@@ -263,6 +297,11 @@ function rpc(method,params,endpoint){
 function settledSignature(){
   // Validated before the network, as watch.rs validates its address before any RPC call: a
   // reference lifted out of a hostile link never reaches an endpoint unless it is a pubkey.
+  //
+  // DO NOT DELETE THIS AS DEAD CODE. The load path now refuses a non-pubkey reference outright, so
+  // this cannot fire from there -- which is the point. It is the layer that holds if any later
+  // caller reaches the lookup by a route that did not pass the parse-time branch, and a guard that
+  // is only unreachable because something upstream currently covers it is exactly the one to keep.
   if(!isPubkey(reference))return Promise.resolve(null);
   return rpc('getSignaturesForAddress',[reference,{limit:20,commitment:'confirmed'}]).then(function(list){
     var sig=Array.isArray(list)?oldestSettled(list):null;

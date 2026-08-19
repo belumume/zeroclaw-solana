@@ -63,6 +63,23 @@ NON_MAINNET = ("devnet", "testnet", "localhost", "127.0.0.1")
 # still do.
 AMOUNT = "0.25"
 
+# An inert reference: a syntactically valid pubkey with no settlement history on mainnet, shared
+# with verify_no_cdn_dependency.py and verify_qr_scannable.py.
+#
+# WHY IT IS HERE AT ALL, since this harness is about the RECIPIENT and not the reference. Until
+# 2026-08-19 this file composed its link WITHOUT one, and it was the only browser harness that
+# did -- every generator in the repo emits a reference, so the shape being driven here was one no
+# customer could ever receive. The page now refuses a reference-less link outright, because
+# without a reference the already-paid lookup has nothing to ask about and the double-payment
+# guard is silently absent. The payable direction of this harness would have gone red on that,
+# and the red would have been the harness's fixture rather than the page.
+#
+# INERT IS ASSERTED, NOT ASSUMED: verified 0 confirmed signatures on the page's own RPC and on
+# api.mainnet-beta.solana.com, with a known-settled reference returning 5 on the same call as the
+# positive control. A reference that quietly acquired a settlement would make the page refuse
+# here for a reason that has nothing to do with the merchant address.
+REFERENCE = "Ap15VZt5TJPpExnezgTRYkXeTuwfXoYVpK6ZNLi7y4ZM"
+
 # Two rendering profiles, not two code paths. "desktop" is the frozen correctness harness: 2x
 # device scale because the frames feed a 1080p+ timeline, where a 1x capture of small type is
 # exactly the softness this rebuild exists to remove. "phone" is what beats 1 and 2 actually film.
@@ -139,6 +156,7 @@ def pay_url(recipient: str, lang: str = "pt") -> str:
 
     solana = (
         f"solana:{recipient}?amount={AMOUNT}&spl-token={MINT}"
+        f"&reference={REFERENCE}"
         f"&label={quote('Mesa 4')}&message={quote('Pedido 412')}"
     )
     return f"/index.html?lang={lang}&url={quote(solana, safe='')}"
