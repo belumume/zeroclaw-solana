@@ -267,6 +267,13 @@ python demo/verify_paid_link_refused.py   # a reference that already settled is 
 python demo/verify_pay_path_rpc.py        # the desktop path reaches its RPC from a browser
 python demo/verify_settlement_poll.py     # the page polls for settlement, not only on load</code></pre>
 <p>
+  One more covers a different surface. Those checks decode the QR off the <em>page</em>; what a
+  viewer actually scans is a frame of the shipped video, and an h264 encode is precisely what
+  degrades a QR's sharp module boundaries through chroma subsampling and deblocking. A code that
+  decodes off the page can fail off the tape, and only the tape ships:
+</p>
+<pre><code>python demo/verify_qr_in_encoded_cut.py    # the pay QR still decodes after the lossy encode</code></pre>
+<p>
   <strong>Or exercise it yourself, right now, with no wallet and no funds.</strong> These are the
   live checkout page, opened with three different orders. Nothing is sent by loading any of them.
 </p>
