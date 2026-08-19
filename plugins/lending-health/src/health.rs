@@ -314,9 +314,83 @@ fn decimal_str(v: Option<&Value>) -> Option<f64> {
         .filter(|f| f.is_finite())
 }
 
+/// Format the rejected-arguments error the shim hands back to the agent.
+///
+/// serde's invalid_type / missing-field / unknown-field errors embed the
+/// offending value verbatim; cap + strip it so an attacker cannot smuggle an
+/// unbounded or injection-framed string back through the error path. Same cap
+/// and wording as every sibling plugin's `parse_and_validate`.
+///
+/// This lives in the pure core rather than inline in the `component` shim
+/// because the shim is `#[cfg(target_family = "wasm")]` and so is invisible to
+/// host `cargo test` — which is exactly why this was the one arguments-error
+/// site in the suite that never got the sanitizer.
+pub fn invalid_arguments_message(err: &str) -> String {
+    format!("invalid arguments: {}", sanitize_onchain(err, 120).text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// U+E0049, TAG LATIN CAPITAL LETTER I: general category `Cf`, renders as
+    /// nothing, and the Tag block can encode a whole ASCII instruction
+    /// invisibly. `char::is_control()` does NOT cover it; `sanitize_onchain`
+    /// does. Written as a Rust escape so it is visible in source.
+    const TAG_CHAR: char = '\u{E0049}';
+
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ShimArgs {
+        #[allow(dead_code)]
+        wallet: String,
+    }
+
+    #[test]
+    fn hostile_serde_error_value_is_capped_in_the_rejection() {
+        // serde's `Unexpected::Str` embeds the offending value verbatim, so a
+        // type-mismatched field is an unbounded write into the agent's context.
+        // `ShimArgs` mirrors the wasm shim's `ExecuteArgs`, which is behind
+        // `#[cfg(target_family = "wasm")]` and so cannot be reached from a host
+        // test -- the reason this was the one arguments-error site in the suite
+        // that never got the sanitizer.
+        let flood = format!("{}{TAG_CHAR}", "A".repeat(40_000));
+        let err = serde_json::from_str::<ShimArgs>(&format!(r#""{flood}""#))
+            .expect_err("a bare string where the arguments object belongs must be refused");
+
+        let message = invalid_arguments_message(&err.to_string());
+        assert!(
+            message.contains("invalid arguments"),
+            "unexpected message: {message}"
+        );
+        assert!(
+            !message.contains(TAG_CHAR),
+            "an invisible Tag-block character survived into the arguments rejection"
+        );
+        assert!(
+            message.chars().count() <= 160,
+            "the serde error flooded the agent past its 120-char cap: {} chars",
+            message.chars().count()
+        );
+    }
+
+    #[test]
+    fn a_clean_short_arguments_error_is_passed_through_intact() {
+        // Over-correction control: the cap and the strip must not mangle a
+        // normal serde message, or the fix would be indistinguishable from
+        // replacing every arguments error with a constant.
+        let err = serde_json::from_str::<ShimArgs>(r#"{"drain_to":"x"}"#)
+            .expect_err("an unknown field must be refused");
+        let message = invalid_arguments_message(&err.to_string());
+        assert!(
+            message.contains("drain_to"),
+            "the real cause was lost: {message}"
+        );
+        assert!(
+            message.contains("unknown field"),
+            "the real cause was lost: {message}"
+        );
+    }
 
     // One healthy borrow position, one at-risk position, one no-debt deposit.
     const SAMPLE: &str = r#"{

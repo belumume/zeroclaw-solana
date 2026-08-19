@@ -88,7 +88,11 @@ mod component {
         fn execute(args: String) -> Result<ToolResult, String> {
             let parsed: ExecuteArgs = match serde_json::from_str(&args) {
                 Ok(a) => a,
-                Err(e) => return Ok(fail(format!("invalid arguments: {e}"))),
+                Err(e) => {
+                    return Ok(fail(crate::health::invalid_arguments_message(
+                        &e.to_string(),
+                    )))
+                }
             };
 
             // Validate the wallet is a real base58 pubkey BEFORE any network
