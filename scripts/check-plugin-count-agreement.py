@@ -121,6 +121,13 @@ ALWAYS_LOADED_ENTRY = "CLAUDE.local.md"
 # name. Discovered from the filesystem, absent in every clone. See the docstring.
 OPERATIONAL_DIR = "notes"
 OPERATIONAL_SUFFIXES = (".md", ".html")
+# Gitignored operational files that do NOT live under OPERATIONAL_DIR. Named explicitly
+# rather than globbed, because a wildcard over docs/ would pull in the tracked judge-facing
+# documents that the always-loaded and tracked scopes already cover, and double-counting a
+# claim is its own defect. Each entry earns its place by being gitignored AND carrying a
+# count claim: COMPLIANCE-DETAIL.md is the spoke split out of the @-imported hub on
+# 2026-08-19, and the split moved four claims out of every scope until it was listed here.
+OPERATIONAL_EXTRA = ("docs/COMPLIANCE-DETAIL.md",)
 
 # A history marker exempts an ALWAYS-LOADED claim on the same line, never a tracked one. The
 # tracked scope's behaviour is deliberately unchanged by this widening: loosening it would be a
@@ -299,8 +306,12 @@ def operational(root: Path) -> tuple[list[Path], bool]:
     same way an absent one does -- with its denominator, so the zero is visible either way.
     """
     d = root / OPERATIONAL_DIR
+    extra = [root / rel for rel in OPERATIONAL_EXTRA if (root / rel).is_file()]
     if not d.is_dir():
-        return [], False
+        # The DIRECTORY is absent, which is what the second element reports. The extras are not
+        # under it, so they are still returned: dropping them here would make a checkout without
+        # notes/ silently stop scanning a file that is sitting right there.
+        return extra, False
     found = sorted(
         (
             p
@@ -310,6 +321,7 @@ def operational(root: Path) -> tuple[list[Path], bool]:
         ),
         key=lambda p: p.name,
     )
+    found += [root / rel for rel in OPERATIONAL_EXTRA if (root / rel).is_file()]
     return found, True
 
 
@@ -437,17 +449,24 @@ def check(root: Path) -> tuple[int, list[str]]:
             f"always-loaded tier is absent here (it is gitignored, so a clone, a runner and an "
             f"agent worktree all lack it). The verdict below covers the tracked surfaces only."
         )
-    if op_present:
+    # BRANCH ON WHAT WAS SCANNED, not on whether the directory exists. Those were the same
+    # question until OPERATIONAL_EXTRA arrived, and they are not any more: a checkout with no
+    # notes/ can still carry an extra. Keying on op_present printed "0 ... were scanned" directly
+    # above a finding for the very file it had just scanned, which is the misleading zero this
+    # scope exists to prevent, reproduced by its own summary line.
+    if op_paths:
+        where = f"{OPERATIONAL_DIR}/" if op_present else f"no {OPERATIONAL_DIR}/ here"
         lines.append(
-            f"operational: {op_total} claim(s) across {len(op_paths)} gitignored file(s) under "
-            f"{OPERATIONAL_DIR}/, which git ls-files cannot name, "
-            f"{len(op_exempt)} exempt as dated record(s)"
+            f"operational: {op_total} claim(s) across {len(op_paths)} gitignored file(s) "
+            f"({where} plus {len(OPERATIONAL_EXTRA)} named path(s)), which git ls-files cannot "
+            f"name, {len(op_exempt)} exempt as dated record(s)"
         )
         lines.extend(op_exempt)
     else:
         lines.append(
-            f"operational: NOT CHECKED. No {OPERATIONAL_DIR}/ in this checkout, so 0 gitignored "
-            f"operational file(s) were scanned. Expected in a clone, a runner and a worktree."
+            f"operational: NOT CHECKED. No {OPERATIONAL_DIR}/ in this checkout and none of the "
+            f"{len(OPERATIONAL_EXTRA)} named path(s) present, so 0 gitignored operational file(s) "
+            f"were scanned. Expected in a clone, a runner and a worktree."
         )
     if bad:
         lines.append(f"{len(bad)} claim(s) disagree with the tree:")
@@ -834,6 +853,44 @@ def selftest() -> int:
         report(
             "an unmarked operational claim one line down still fires",
             check(tmp)[0] == 1,
+        )
+
+        # OPERATIONAL_EXTRA: a gitignored file that does NOT live under OPERATIONAL_DIR. This
+        # exists because splitting the @-imported compliance hub into a spoke on 2026-08-19 moved
+        # four count claims into a file no scope covered, and the gate's total silently fell from
+        # 7 to 6 while still reporting "agree". A named-path list is the fix; these cases are what
+        # make it load-bearing rather than decorative.
+        runbook.write_text("The demo shows all one plugins.\n", encoding="utf-8")
+        extra = tmp / OPERATIONAL_EXTRA[0]
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("The suite ships all 8 plugins.\n", encoding="utf-8")
+        rc, out = check(tmp)
+        report("a wrong claim in an OPERATIONAL_EXTRA path fires", rc == 1)
+        report(
+            "and the finding names that path rather than the directory",
+            any(OPERATIONAL_EXTRA[0] in ln for ln in out),
+        )
+        extra.write_text("The suite ships all one plugins.\n", encoding="utf-8")
+        report("correcting it restores the pass", check(tmp)[0] == 0)
+
+        # AND IT SURVIVES THE DIRECTORY BEING ABSENT, which is the state of every clone: the extra
+        # is not under notes/, so returning [] on a missing directory would silently drop it.
+        import shutil as _sh
+
+        _sh.rmtree(tmp / OPERATIONAL_DIR)
+        extra.write_text("The suite ships all 8 plugins.\n", encoding="utf-8")
+        rc, out = check(tmp)
+        report("an extra is still scanned when notes/ is absent", rc == 1)
+        op_line = next((ln for ln in out if ln.startswith("operational:")), "")
+        report(
+            # The case above passed on a build whose summary said "0 ... were scanned" directly
+            # above the finding for that same file, because it only ever checked the exit code.
+            "and the summary does not claim zero were scanned",
+            "0 gitignored operational file(s) were scanned" not in op_line,
+        )
+        report(
+            "and it says the directory is absent rather than implying it is present",
+            f"no {OPERATIONAL_DIR}/ here" in op_line,
         )
 
     for f in failures:
