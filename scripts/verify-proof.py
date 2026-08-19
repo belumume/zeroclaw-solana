@@ -917,15 +917,36 @@ def main():
             selfcheck_gates = True
             fails += 1
         else:
+            # ANY OTHER STATUS IS THE SERVER DECLINING TO ANSWER, so it is classified by the
+            # same predicate every other caller uses rather than by this block's own opinion.
+            # Until 2026-08-19 it was not, and this was the only gating block in the file that
+            # never touched `transport_fails`: a 500, 502, 504 or 429 in front of the box
+            # counted as a claim that stopped holding, so the run exited 1, proof-check.yml
+            # printed "A published claim stopped holding" and refused to retry, and the alarm
+            # named a claim that was fine. `is_transport_error` already calls those transport
+            # and `test_verify_proof_transport.py` pins it; the defect was a caller
+            # contradicting the predicate its own file defines.
             print(f"FAIL  box self-check returned HTTP {e.code}")
             selfcheck_gates = True
             fails += 1
+            if is_transport_error(e):
+                transport_fails += 1
+        # NOTE THE TWO BRANCHES ABOVE THAT DELIBERATELY DO NOT CONSULT THE PREDICATE, because
+        # this endpoint gives 404 and 503 an application meaning the generic classifier cannot
+        # know. `is_transport_error` calls 503 transport, and here it is the box saying the
+        # route is live with no verdict on disk -- the timer stopped, which is a finding and
+        # must never be retried into looking healthy. 404 is the pre-deploy state and gates
+        # nothing. Both are intercepted before reaching the `else`, so the predicate's own
+        # verdict on 503 never applies at this call site. That is intentional; do not "fix" it.
     except Exception as e:
         # Distinct from the two above: this is transport, not a verdict. It still gates, because a
-        # node nobody can reach is a real problem, but the message must not read as drift.
+        # node nobody can reach is a real problem, but the message must not read as drift -- and it
+        # must not be COUNTED as drift either, which is what the classification below records.
         print(f"FAIL  box self-check unreachable: {e}")
         selfcheck_gates = True
         fails += 1
+        if is_transport_error(e):
+            transport_fails += 1
 
     # WHICH COMMIT THE BINARY ANSWERING YOU WAS BUILT FROM.
     #

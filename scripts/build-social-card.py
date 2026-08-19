@@ -151,26 +151,55 @@ def rpc(method, params):
         data=body,
         headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
     )
-    return json.loads(urllib.request.urlopen(req, timeout=30).read())
+    out = json.loads(urllib.request.urlopen(req, timeout=30).read())
+    # A JSON-RPC ERROR ARRIVES WITH HTTP 200, so urlopen raises nothing and the body simply has
+    # no `result`. Every caller below then reads an ERROR as an EMPTY ANSWER -- `.get("result")
+    # or []` turns it into a page of no signatures -- which is precisely how a failed read
+    # becomes a measured zero. Raise, so a read that did not happen can never be counted as a
+    # count of nothing.
+    if "error" in out:
+        raise RuntimeError(f"{method} returned a JSON-RPC error: {out['error']}")
+    return out
 
 
 def refresh():
-    """Re-measure from chain. Positive control first, or a clean scan proves nothing."""
-    ctl = rpc("getAccountInfo", [ORACLE, {"encoding": "base64"}])["result"]["value"]
+    """Re-measure from chain. Positive control first, or a clean scan proves nothing.
+
+    EVERY EXIT FROM HERE IS EITHER A MEASUREMENT OR A REFUSAL. There is no third path where
+    the walk half-worked and the figures get written anyway, because the stamp this generator
+    adds is a freshness badge: a zero or a short count carrying today's date is a false claim
+    that looks more trustworthy than an old true one. The refusals below all print what was
+    actually reached, so a genuine zero and a read that failed are never the same output.
+    """
+    try:
+        ctl = rpc("getAccountInfo", [ORACLE, {"encoding": "base64"}])["result"]["value"]
+    except Exception as e:
+        sys.exit(
+            f"CONTROL FAILED: could not read the oracle program ({e}); refusing to render"
+        )
     if not (ctl and ctl.get("executable")):
         sys.exit(
             "CONTROL FAILED: the oracle program did not come back executable; refusing to trust a scan"
         )
     print("  control: oracle program executable=True")
 
-    total = failed = 0
+    total = failed = pages = 0
     before = None
     oldest = newest = None
     while True:
         p = {"limit": 1000}
         if before:
             p["before"] = before
-        res = rpc("getSignaturesForAddress", [FEED_PDA, p]).get("result") or []
+        try:
+            res = rpc("getSignaturesForAddress", [FEED_PDA, p]).get("result") or []
+        except Exception as e:
+            # A page that never arrived is not a page that was empty. Before this, a mid-walk
+            # failure broke the loop and rendered the partial count as the whole truth.
+            sys.exit(
+                f"MEASUREMENT ABANDONED after {pages} page(s) and {total:,} signature(s): {e}. "
+                "Refusing to render rather than stamp a short count with today's date."
+            )
+        pages += 1
         if not res:
             break
         for s in res:
@@ -185,12 +214,29 @@ def refresh():
             break
         time.sleep(0.35)
 
-    days = int((newest - oldest) / 86400) if (oldest and newest) else 0
+    # THE DENOMINATOR IS THE POINT. "0" alone is equally consistent with a feed that never
+    # published and a query that answered nothing, and the card cannot tell a reader which.
+    if total == 0:
+        sys.exit(
+            f"MEASURED ZERO signatures for {FEED_PDA} across {pages} page(s) fetched. "
+            "That is either a feed that has never published or a read that failed, and this "
+            "generator cannot tell them apart. Refusing to render: '0 on-chain publishes' "
+            "beside today's verification date is a false claim wearing a freshness badge."
+        )
+    if oldest is None or newest is None:
+        sys.exit(
+            f"MEASURED {total:,} signature(s) across {pages} page(s) but no usable blockTime, "
+            "so the span would render as '0 days' beside a non-zero count. Refusing to render."
+        )
+
+    days = int((newest - oldest) / 86400)
     FIGURES["publishes"] = f"{total:,}"
     FIGURES["failed"] = str(failed)
     FIGURES["span"] = f"{days} days"
     FIGURES["stamp"] = f"figures verified {time.strftime('%Y-%m-%d', time.gmtime())}"
-    print(f"  measured: {total:,} signatures, {failed} failed, {days} days")
+    print(
+        f"  measured: {total:,} signatures over {pages} page(s), {failed} failed, {days} days"
+    )
     if failed:
         print(
             "  NOTE: failures are non-zero, so the card no longer reads '0 failed'. That is the point."
