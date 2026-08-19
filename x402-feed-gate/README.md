@@ -14,7 +14,7 @@ buyer can consume with no human in the loop, and no trusted intermediary.
 
 ```
 GET /reading                       -> 402 + { x402Version: 2, resource: {...},
-                                              accepts: [1 reading, day pass] }
+                                              accepts: [1 reading] }
                                         + header PAYMENT-REQUIRED: <base64 of that body>
 GET /reading  (PAYMENT-SIGNATURE: <signed>) -> 200 + { paid, settlement: <sig>, reading: {...} }
                                         + headers PAYMENT-RESPONSE / X-Payment-Response
@@ -60,7 +60,7 @@ Read `build_commit_source` before comparing anything:
 A missing git never fails the build, and the value is never an empty string: `""` reads as
 present-and-fine to a consumer and as absent to a human, so the two would disagree about one byte.
 
-The `accepts` array is the x402 tiered price menu, a single reading and a day-pass, in one round trip. Each row's `extra.memo` nonce must be echoed by the payment as a Memo
+The `accepts` array is the x402 price menu. It offers ONE tier, a single reading. A day-pass tier was withdrawn because nothing ever granted it: the flag was recorded and logged, no code path read it, and the nonce burns on the first request, so a buyer paid five times the price for identical service. `verify_x_payment` still ACCEPTS the day-pass amount so a client holding a cached challenge is served rather than refused; it simply buys what the single read buys. Each row's `extra.memo` nonce must be echoed by the payment as a Memo
 instruction, binding it to this exact challenge.
 
 ### Spec conformance, and the one place we knowingly diverge
@@ -132,7 +132,7 @@ into losing money because it cannot send money.
 ## Live devnet proof
 
 Run end-to-end against devnet with a real token transfer:
-- 402 challenge issued with a two-tier menu and a fresh nonce.
+- 402 challenge issued with a single-tier menu and a fresh nonce.
 - A reference client (`examples/pay_client.rs`) builds + signs a `TransferChecked` + Memo
   paying the gate.
 - The gate verified the bytes, simulated, broadcast, and **confirmed on-chain**, then served
@@ -186,7 +186,10 @@ X402_RESOURCE_URL    absolute URL of the resource sold, for the required
                      proxy the gate cannot see its own public origin.
 X402_PORT            listen port (default 4577)
 X402_PRICE_SINGLE    atomic units for one reading (default 1000000 = 1 USDC)
-X402_PRICE_DAYPASS   atomic units for a day pass (default 5000000)
+X402_PRICE_DAYPASS   accepted-for-cached-clients only (default 5000000). Read and honoured by
+                     verify_x_payment, but NOT advertised in the menu, because the tier it named
+                     was never granted. Setting it changes what an old client may pay, not what
+                     any client is offered.
 X402_DAILY_CAP       per-payer atomic-unit daily cap (default 20000000)
 ```
 

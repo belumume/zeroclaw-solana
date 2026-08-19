@@ -33,6 +33,14 @@ pub struct FoundPayment {
     pub decimals: u8,
     /// Index of the matching instruction within the message.
     pub instruction_index: usize,
+    /// The account that AUTHORISED the transfer: TransferChecked's account index 3, verified above
+    /// to be in the message's signer set.
+    ///
+    /// This is the party whose tokens actually move, and it is independent of the fee payer in
+    /// SVM. A caller metering a per-buyer quota must key on THIS, not on `account_keys[0]`, or a
+    /// buyer behind rotating fee sponsors spends past their own ceiling while every individual
+    /// payment looks correct.
+    pub authority: Pubkey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +137,7 @@ pub fn find_payment(
                 amount,
                 decimals,
                 instruction_index: i,
+                authority: *authority,
             });
         }
         // Track the closest underpayment so the error is informative.

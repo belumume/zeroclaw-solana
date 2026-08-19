@@ -248,7 +248,12 @@ pub enum Reject {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedPayment {
     pub raw_tx: Vec<u8>,
+    /// The TOKEN AUTHORITY: the account whose tokens moved, verified to be a signer. This is what
+    /// the daily cap meters, because it is the identity a quota is about.
     pub payer: Pubkey,
+    /// The fee payer, `account_keys[0]`. Kept for the receipt and the log only. It is INDEPENDENT
+    /// of `payer` in SVM, which is the whole reason the cap no longer keys on it.
+    pub fee_payer: Pubkey,
     pub amount: u64,
     pub is_day_pass: bool,
 }
@@ -313,8 +318,22 @@ pub fn verify_x_payment(
         return Err(Reject::PriceMismatch { paid: found.amount });
     }
 
-    // 6. Fee payer = account_keys[0] = the payer we meter against the cap.
-    let payer = *decoded
+    // 6. The daily cap meters the TOKEN AUTHORITY, not the fee payer.
+    //
+    // It used to meter `account_keys[0]`. In SVM the fee payer and the account whose tokens move
+    // are independent, and the x402 SVM scheme defines sponsorship through `extra.feePayer`
+    // explicitly, so a buyer behind rotating fee sponsors could spend past their own ceiling while
+    // every individual payment verified correctly. It stayed latent only because this gate
+    // declines to advertise a feePayer, so honest clients self-pay -- which is a property of our
+    // menu rather than of the check, and menus change.
+    //
+    // `find_payment` returns the authority already verified to be in the signer set, so this is
+    // the party who actually authorised the spend.
+    let payer = found.authority;
+
+    // Kept for the receipt and the log: traceability of WHO paid the fee is still useful, it is
+    // just not the identity a quota should key on.
+    let fee_payer = *decoded
         .message
         .account_keys
         .first()
@@ -323,6 +342,7 @@ pub fn verify_x_payment(
     Ok(VerifiedPayment {
         raw_tx,
         payer,
+        fee_payer,
         amount: found.amount,
         is_day_pass,
     })
@@ -646,6 +666,100 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["x402Version"], 2);
         assert!(v["resource"]["url"].is_string());
+    }
+
+    /// A SPONSORED payment: the fee payer and the token authority are DIFFERENT accounts, both
+    /// signing. This is the shape the x402 SVM scheme defines via `extra.feePayer`.
+    ///
+    /// It exists because every other fixture here has payer == authority, so the whole suite went
+    /// green both before and after the cap was re-keyed. A change nothing can distinguish is a
+    /// change nothing is testing.
+    fn build_sponsored_header(
+        cfg: &GateConfig,
+        sponsor_seed: u8,
+        authority_seed: u8,
+        amount: u64,
+        nonce: &str,
+    ) -> String {
+        let (sponsor_seed, authority_seed) = ([sponsor_seed; 32], [authority_seed; 32]);
+        let sponsor = Pubkey::new(pubkey_from_seed(&sponsor_seed));
+        let authority = Pubkey::new(pubkey_from_seed(&authority_seed));
+        let our_ata =
+            Pubkey::associated_token_address(&cfg.seller_wallet, &cfg.mint, &token_program());
+        let src_ata = Pubkey::associated_token_address(&authority, &cfg.mint, &token_program());
+
+        let mut data = vec![TRANSFER_CHECKED_TAG];
+        data.extend_from_slice(&amount.to_le_bytes());
+        data.push(6);
+        let transfer = Instruction {
+            program_id: token_program(),
+            accounts: vec![
+                AccountMeta::writable(src_ata, false),
+                AccountMeta::readonly(cfg.mint, false),
+                AccountMeta::writable(our_ata, false),
+                AccountMeta::readonly(authority, true), // signs, but is NOT the fee payer
+            ],
+            data,
+        };
+        let memo = memo_ix(&sponsor, nonce.as_bytes());
+        // Fee payer is the SPONSOR, so it lands at account_keys[0].
+        let msg = compile(&sponsor, &[transfer, memo], &[9u8; 32]).unwrap();
+        let body = msg.serialize_legacy();
+
+        // Two required signers now, so two signatures, in signer-prefix order rather than assumed.
+        let n = msg.num_required_signatures as usize;
+        assert_eq!(n, 2, "fixture expects sponsor + authority to both sign");
+        let sigs: Vec<[u8; 64]> = msg.account_keys[..n]
+            .iter()
+            .map(|k| {
+                let seed = if *k == sponsor {
+                    sponsor_seed
+                } else if *k == authority {
+                    authority_seed
+                } else {
+                    panic!("unexpected signer in the prefix")
+                };
+                sign_message(&seed, &body)
+            })
+            .collect();
+        let raw_tx = serialize_transaction(&sigs, &body);
+        let tx_b64 = base64::engine::general_purpose::STANDARD.encode(&raw_tx);
+        base64::engine::general_purpose::STANDARD.encode(
+            serde_json::json!({"x402Version": 2, "payload": {"transaction": tx_b64}}).to_string(),
+        )
+    }
+
+    /// THE CAP METERS THE TOKEN AUTHORITY, NOT THE FEE PAYER. Keyed on the fee payer, a buyer
+    /// behind rotating sponsors spends past their own ceiling while every payment verifies.
+    #[test]
+    fn the_cap_meters_the_token_authority_not_the_fee_payer() {
+        let cfg = cfg();
+        let sponsor = Pubkey::new(pubkey_from_seed(&[41u8; 32]));
+        let authority = Pubkey::new(pubkey_from_seed(&[42u8; 32]));
+        let header = build_sponsored_header(&cfg, 41, 42, cfg.price_single, "sp1");
+        let v = verify_x_payment(&cfg, &header, "sp1").expect("a sponsored payment is valid");
+
+        assert_ne!(sponsor, authority, "fixture must use two distinct accounts");
+        assert_eq!(
+            v.payer, authority,
+            "the cap identity must be the token authority whose USDC moved"
+        );
+        assert_eq!(
+            v.fee_payer, sponsor,
+            "the fee payer is still recorded, just not metered"
+        );
+    }
+
+    /// CONTROL: with no sponsor the two collapse to one account, which is the ordinary case and
+    /// must be unaffected. Without this, the test above is equally consistent with the cap having
+    /// been re-keyed to something arbitrary.
+    #[test]
+    fn without_a_sponsor_the_authority_and_fee_payer_are_the_same_account() {
+        let cfg = cfg();
+        let header = build_header(&cfg, 7, cfg.price_single, "sp2");
+        let v = verify_x_payment(&cfg, &header, "sp2").unwrap();
+        assert_eq!(v.payer, v.fee_payer, "self-paid: one account in both roles");
+        assert_eq!(v.payer, Pubkey::new(pubkey_from_seed(&[7; 32])));
     }
 
     /// The menu must NOT advertise an entitlement the gate does not grant. It offered a day pass
