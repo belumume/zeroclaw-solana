@@ -397,7 +397,7 @@ def check(root: Path) -> tuple[int, list[str]]:
     gitignored = [(p, "always-loaded") for p in al_paths]
     gitignored += [(p, "operational") for p in op_paths]
 
-    al_total, op_total, al_exempt = 0, 0, []
+    al_total, op_total, al_exempt, op_exempt = 0, 0, [], []
     for p, scope in gitignored:
         rel = p.relative_to(root).as_posix()
         try:
@@ -412,7 +412,10 @@ def check(root: Path) -> tuple[int, list[str]]:
                 op_total += 1
             marker = HISTORY_MARKER.search(re.sub(r"\s+", " ", src[ln - 1]))
             if marker is not None:
-                al_exempt.append(
+                # Keyed by SCOPE, not by which loop pass produced it. Pooling them made the
+                # always-loaded summary claim every exemption and left the operational line
+                # reporting none, which is a zero that does not mean what it looks like.
+                (al_exempt if scope == "always-loaded" else op_exempt).append(
                     f"  {rel}:{ln}  {matched!r} says {n}; not gated, the line calls itself a "
                     f"record ({marker.group(0).lower()!r})"
                 )
@@ -437,8 +440,10 @@ def check(root: Path) -> tuple[int, list[str]]:
     if op_present:
         lines.append(
             f"operational: {op_total} claim(s) across {len(op_paths)} gitignored file(s) under "
-            f"{OPERATIONAL_DIR}/, which git ls-files cannot name"
+            f"{OPERATIONAL_DIR}/, which git ls-files cannot name, "
+            f"{len(op_exempt)} exempt as dated record(s)"
         )
+        lines.extend(op_exempt)
     else:
         lines.append(
             f"operational: NOT CHECKED. No {OPERATIONAL_DIR}/ in this checkout, so 0 gitignored "
@@ -453,7 +458,7 @@ def check(root: Path) -> tuple[int, list[str]]:
             "states the right one."
         )
         return 1, lines
-    gated = total + al_total + op_total - len(al_exempt)
+    gated = total + al_total + op_total - len(al_exempt) - len(op_exempt)
     lines.append(f"all {gated} gated claim(s) agree")
     return 0, lines
 
@@ -798,6 +803,27 @@ def selftest() -> int:
             "and it is reported rather than silently skipped",
             any("exempt" in ln for ln in out)
             and any("DEMO-RUNBOOK.md:1" in ln for ln in out),
+        )
+        # AND IT IS ATTRIBUTED TO THE RIGHT SCOPE. The assertion above passes on a build that
+        # pools both scopes' exemptions into the always-loaded list, because it only asks whether
+        # the substring "exempt" appears SOMEWHERE. That pooling made the operational summary
+        # report zero exemptions while an operational file had one, which is a zero that does not
+        # mean what it reads as -- the exact failure this whole gate exists to prevent. So key on
+        # the HEADER, not on the word.
+        op_line = next((ln for ln in out if ln.startswith("operational:")), "")
+        al_line = next((ln for ln in out if ln.startswith("always-loaded:")), "")
+        report(
+            "the operational summary counts its OWN exemption",
+            "1 exempt" in op_line,
+        )
+        report(
+            # HONEST BOUND: this one does NOT discriminate in this fixture. There is no
+            # always-loaded file here, so the summary is the NOT CHECKED variant and carries no
+            # count either way -- measured, it passes against the pooled mutant. The assertion
+            # above is the load-bearing one (mutant: 66/68, failing exactly that case). This is
+            # kept as a guard for the both-scopes-present case rather than as a second control.
+            "and the always-loaded summary does not claim it",
+            "1 exempt" not in al_line,
         )
 
         # AND IT IS NOT A BLANKET HERE EITHER.
