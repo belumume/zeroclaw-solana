@@ -64,6 +64,37 @@ const ALLOWED_METHODS = new Set(["getSignaturesForAddress", "getTransaction"]);
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/;
 
+/// Canonical, collision-free tag for the second JSON-RPC parameter, or null to refuse.
+///
+/// This exists so the KV key cannot be poisoned: two requests whose answers differ in SHAPE must
+/// never share a key. Only the shapes the pay page actually sends are recognised; anything else is
+/// refused rather than folded into an existing key.
+export function secondParamShape(method, p) {
+  if (p === undefined || p === null) return "d"; // default
+  if (typeof p !== "object" || Array.isArray(p)) return null;
+  const keys = Object.keys(p).sort();
+  if (method === "getSignaturesForAddress") {
+    // page sends {limit, commitment}
+    if (keys.some((k) => !["limit", "commitment"].includes(k))) return null;
+    const lim = p.limit === undefined ? "d" : p.limit;
+    if (lim !== "d" && (!Number.isInteger(lim) || lim < 1 || lim > 1000)) return null;
+    const com = p.commitment === undefined ? "d" : p.commitment;
+    if (com !== "d" && !["processed", "confirmed", "finalized"].includes(com)) return null;
+    return `l${lim}c${com}`;
+  }
+  // getTransaction: the encoding is what actually changes the answer's shape.
+  if (keys.some((k) => !["encoding", "commitment", "maxSupportedTransactionVersion"].includes(k))) {
+    return null;
+  }
+  const enc = p.encoding === undefined ? "d" : p.encoding;
+  if (enc !== "d" && !["json", "jsonParsed", "base64", "base58"].includes(enc)) return null;
+  const com = p.commitment === undefined ? "d" : p.commitment;
+  if (com !== "d" && !["processed", "confirmed", "finalized"].includes(com)) return null;
+  const mv = p.maxSupportedTransactionVersion === undefined ? "d" : p.maxSupportedTransactionVersion;
+  if (mv !== "d" && !Number.isInteger(mv)) return null;
+  return `e${enc}c${com}v${mv}`;
+}
+
 function cors(origin, allowed) {
   const h = {
     "content-type": "application/json",
@@ -71,6 +102,12 @@ function cors(origin, allowed) {
     "access-control-allow-headers": "content-type",
     "access-control-max-age": "86400",
     "cache-control": "no-store",
+    // Without this the x-zc-* diagnostics below are invisible to the caller they were added for.
+    // CORS exposes only a short safelist to script, so `r.headers.get('x-zc-deep')` returned null
+    // in every browser and the debugging channel worked for curl alone -- absent exactly where the
+    // page's behaviour would need explaining.
+    "access-control-expose-headers":
+      "x-zc-fast, x-zc-deep, x-zc-deep-status, x-zc-origin-seen, x-zc-allowed-count, x-zc-allowed-0",
   };
   // Prefix match rather than exact equality, because the harness serves the built page on an
   // EPHEMERAL PORT: the browser then sends `http://127.0.0.1:53219`, which no fixed string can
@@ -109,7 +146,15 @@ async function upstream(url, body) {
     if (!r.ok) return { __status: r.status };
     return await r.json();
   } catch (e) {
-    return { __status: `threw:${String(e).slice(0, 40)}` };
+    // NEVER propagate the caught text. `__status` is echoed to every caller in the public
+    // x-zc-deep-status header, and the deep URL carries the API key in its query string.
+    // Runtimes commonly embed the requested URL in a fetch error, so the only thing that kept
+    // the key out of a public header was a 40-character slice landing just short of it -- a
+    // six-character margin against a message string we do not control and that can change
+    // with no code change here and no signal. A fixed literal cannot leak; the detail goes to
+    // the log, which is not attacker-readable.
+    console.error("deep upstream threw:", e);
+    return { __status: "threw" };
   }
 }
 
@@ -145,7 +190,22 @@ export default {
       return err(id, -32602, "first param must be a base58 pubkey or signature", headers);
     }
 
-    const cacheKey = `${method}:${first}`;
+    // The SHAPE of the answer depends on params[1], not just on params[0], so the key must
+    // include it. Keying on the pubkey alone let anyone POST `getTransaction` with
+    // `{encoding:"base64"}`, get that stored PERMANENTLY under the bare key, and have the page's
+    // later `jsonParsed` request served the base64 blob from cache -- after which merchantCredit()
+    // cannot read the amount and a settled link renders forever without its figure. CORS restricts
+    // browsers, not a plain curl with no Origin, so this endpoint is writable by anyone.
+    //
+    // Rather than hash an arbitrary object, pin the ONE second-param shape each method is allowed
+    // to carry. An unrecognised shape is refused rather than cached under a colliding key, which
+    // also keeps the key space enumerable.
+    const second = Array.isArray(params) ? params[1] : undefined;
+    const shape = secondParamShape(method, second);
+    if (shape === null) {
+      return err(id, -32602, "unsupported second parameter for this method", headers);
+    }
+    const cacheKey = `${method}:${first}:${shape}`;
 
     // 1. A recorded settlement is permanent and outlives any upstream's retention.
     if (env.SETTLEMENTS) {
@@ -165,6 +225,7 @@ export default {
     let deepTried = false;
     let deepResult = null;
     let deepStatus = "n/a";
+    let deepAnswered = false;
 
     // 3. Escalate ONLY on an empty answer. An empty list is the ambiguous case -- pruned or never
     //    paid -- and the deep endpoint is the only thing that can tell them apart.
@@ -173,27 +234,41 @@ export default {
     // ran, so a payment that lands during the quiet window is still seen on the next poll.
     const negRecent = empty && env.SETTLEMENTS ? await env.SETTLEMENTS.get(`neg:${cacheKey}`) : null;
     if (empty && !negRecent) {
-      deepTried = true;
       const deepUrl = deepEndpoint(env);
-      const deep = deepUrl
-        ? await upstream(deepUrl, { jsonrpc: "2.0", id: 1, method, params })
-        : null;
-      deepResult = deep && !deep.error && deep.__status === undefined ? deep.result : null;
-      if (deep && deep.__status !== undefined) deepStatus = String(deep.__status);
-      if (deepResult != null) result = deepResult;
+      // deepTried means "an escalation actually happened". It used to be set before this check,
+      // so a Worker with no HELIUS_API_KEY reported x-zc-deep="null" -- which the comment below
+      // documents as "the deep endpoint refused this Worker" -- and wrote a negative marker for a
+      // request that never left the building. An operator would go looking at the upstream for a
+      // missing secret.
+      if (deepUrl) {
+        deepTried = true;
+        const deep = await upstream(deepUrl, { jsonrpc: "2.0", id: 1, method, params });
+        deepResult = deep && !deep.error && deep.__status === undefined ? deep.result : null;
+        if (deep && deep.__status !== undefined) deepStatus = String(deep.__status);
+        // Only an AUTHORITATIVE empty answer justifies suppressing the next escalation.
+        deepAnswered = deep != null && deep.__status === undefined && !deep.error;
+        if (deepResult != null) result = deepResult;
+      } else {
+        deepStatus = "unconfigured";
+      }
     }
-
-    if (result == null) return err(id, -32603, "no upstream could answer", headers);
 
     // Diagnostics on the response itself rather than in a log, so a caller can see WHICH upstream
     // answered without needing `wrangler tail`. Cheap, and it makes a silent escalation failure
     // visible: an empty result with deep="null" means the deep endpoint refused this Worker.
+    //
+    // Set BEFORE the both-upstreams-down return below, not after. They used to be attached only on
+    // the success path, so the one response that most needs explaining -- "no upstream could
+    // answer" -- carried no explanation at all. A control asserting the status header is populated
+    // on a thrown deep fetch is what surfaced that.
     headers["x-zc-fast"] = String(Array.isArray(fastResult) ? fastResult.length : fastResult == null ? "null" : "obj");
     headers["x-zc-deep"] = deepTried
       ? String(Array.isArray(deepResult) ? deepResult.length : deepResult == null ? "null" : "obj")
       : "skipped";
     headers["x-zc-deep-status"] = deepStatus;
     headers["x-zc-allowed-0"] = JSON.stringify(allowed[0] || "");
+
+    if (result == null) return err(id, -32603, "no upstream could answer", headers);
 
     // 4. Record a settlement PERMANENTLY. Never record an empty answer at the same key: that would
     //    freeze "not paid" forever and recreate the double-payment bug with a longer memory.
@@ -219,7 +294,14 @@ export default {
     //
     //     The key is namespaced apart from the settlement key so a negative can NEVER be mistaken
     //     for a settlement, and the read path above only consults it to skip the escalation.
-    if (env.SETTLEMENTS && !settled && deepTried) {
+    //     AND only when the deep endpoint actually ANSWERED. `!settled` conflates two
+    //     situations the marker must treat differently: an authoritative empty list, and an
+    //     upstream that could not answer (429/401/5xx, or a thrown fetch). Marking on the second
+    //     suppressed the escalation for 60s after a transient failure, which is precisely when a
+    //     settled-but-pruned reference reads as unpaid and the pay card stays payable on an
+    //     already-paid order. Inducing one Helius 429 was enough to open that window for any
+    //     victim reloading in the next minute.
+    if (env.SETTLEMENTS && !settled && deepTried && deepAnswered) {
       await env.SETTLEMENTS.put(`neg:${cacheKey}`, "1", { expirationTtl: 60 });
     }
 
