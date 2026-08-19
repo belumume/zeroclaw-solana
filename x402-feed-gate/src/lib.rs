@@ -539,11 +539,17 @@ impl DailyLedger {
     /// process does is not the per-day cap the brief asks for, and nothing in the
     /// output would have shown it.
     ///
-    /// SCOPE. This replays what actually SETTLED, because that is what the earnings
-    /// ledger records, and the live ledger now holds exactly the same set: a payment
-    /// whose broadcast fails has its reservation released, so it consumes nothing in
-    /// either place. The two agreeing is the point. They did not before, when a failed
-    /// broadcast left spend behind in memory that no restart could reproduce.
+    /// SCOPE, and it has one honest gap. This replays what actually SETTLED, because that
+    /// is what the earnings ledger records. A payment whose broadcast is DEFINITELY refused
+    /// has its reservation released and so consumes nothing in either place, which is the
+    /// agreement that matters and did not hold before.
+    ///
+    /// The gap is the UNKNOWN outcome: a broadcast the node accepted whose confirmation
+    /// never arrived. The gate holds that spend in memory, because the transaction may still
+    /// land, and does not write it here, because it is not known to be revenue. So a restart
+    /// reopens that one payment's cap room. That is a strictly smaller leniency than
+    /// releasing it outright, which would reopen the room immediately and let a payer with a
+    /// slow endpoint exceed their cap on every request rather than only after a restart.
     ///
     /// Returns the number of records applied, so the caller can say so at startup
     /// instead of leaving a silent no-op indistinguishable from an empty ledger.

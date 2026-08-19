@@ -118,8 +118,11 @@ anything. Its entire job is to **recognise** a payment the client already signed
    cannot both be told there is room while a settlement sits between the check and the write.
 6. Simulate, broadcast, and confirm via Solana RPC.
 7. **Confirm the reservation only once settlement succeeded**, and **release** it if the
-   broadcast failed. The ledger records money that moved, never money that was attempted;
-   only then is the reading served.
+   broadcast was DEFINITELY refused. The ledger records money that moved, never money that
+   was merely attempted; only then is the reading served. A third outcome exists and is
+   treated as its own case: a broadcast the node accepted whose confirmation never arrived
+   is UNKNOWN, and the hold stands, because the transaction may still land and releasing it
+   would let a payer with a slow endpoint exceed their cap on every request.
 
 Because the client is the fee payer and signs their own transfer, **no facilitator is
 required** (contrast the gasless x402 SVM scheme, where a facilitator co-signs). Verification
@@ -136,7 +139,8 @@ is pure HTTP plus Solana JSON-RPC.
 | Drain via many small buys | per-payer per-day cap enforced in code, independent of the protocol |
 | Restart the gate to reset the cap | the ledger is rebuilt at startup from the earnings log, so spend and redeemed nonces survive a restart. This one mattered: the unit is `Restart=always`, so before the rebuild a crash loop handed every payer a fresh full allowance and nothing in the output would have shown it. Scope: the rebuild replays what SETTLED, and so does the live ledger, because a payment that fails to broadcast has its reservation released. The two hold the same set, which is what makes the restart a rebuild rather than an approximation. Checkable without shell access: `/health` serves `ledger.restored_sales_at_startup`, so a non-zero value on a node that has sold something is this process having rebuilt the ledger rather than reopened every allowance. Counts and sums only, never payers or nonces, since that endpoint is public |
 | Forge a payment "from" someone else, to burn their daily cap | every declared signature is verified against the message bytes before anything else reads the message, so naming a victim in the signer prefix costs an attacker their key rather than 64 arbitrary bytes. Refused `BadSignature`, before any broadcast |
-| Exhaust a stranger's cap with payments that never settle | the ledger is written in two phases: a reservation held across settlement, confirmed on success and released on failure. A payment that does not settle consumes no cap, burns no nonce, and adds nothing to the total `/health` publishes |
+| Exhaust a stranger's cap with payments that never settle | the ledger is written in two phases: a reservation held across settlement, confirmed on success and released on a definite refusal. A payment the network refuses consumes no cap, burns no nonce, and adds nothing to the total `/health` publishes |
+| Exceed your own cap by settling slowly | a broadcast the node accepted whose confirmation never arrives is UNKNOWN rather than failed, and its hold STANDS, so a payer whose confirmations lag cannot recover the room and pay again. Honest gap: that hold is in memory and is not written to the earnings log, since it is not known to be revenue, so a restart reopens that one payment's room. Strictly smaller than releasing it, which reopens the room on every such request with no restart needed |
 | Malformed / adversarial `X-PAYMENT` bytes | every decode path is bounds-checked and fails closed (no panics); `tx_decode` rejects truncation, trailing bytes, oversized counts, and v0 address-table lookups |
 | Prompt-inject the agent into paying out | **not applicable**: the gate has no key and no spend path; it is receive-only |
 | A lying or compromised RPC endpoint | **Not defended. Stated because it is the one trust this gate does not remove.** Every check above reads the CONTENTS of a transaction while trusting that the endpoint describes the chain at all. The gate talks to ONE RPC (`X402_RPC_URL`) to simulate, broadcast and confirm, so an endpoint that fabricates a confirmation gets the reading served and a sale written to the earnings ledger for a payment that never landed. `payment-watch` closes this same shape with an optional `corroborating_rpc_urls` that makes an independent endpoint re-derive the payment from its own copy of the chain; the gate has no equivalent, so choosing the endpoint is the operator's judgement and not something this code can check. What bounds the damage is what the gate can lose: it holds no key, so the worst case is a reading served free and a wrong ledger line, never funds leaving |

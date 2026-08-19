@@ -1260,9 +1260,17 @@ fn handle_reading<T: RpcTransport, S: RpcTransport>(
     };
 
     // Simulate, then broadcast, then confirm.
-    match settle(settle_rpc, &verified) {
+    let outcome = settle(settle_rpc, &verified, CONFIRM_ATTEMPTS);
+
+    // Resolve the hold in ONE place, before building any response, so the ledger cannot end up
+    // depending on which branch of the response happened to remember to do it.
+    match resolution_for(&outcome) {
+        Resolution::Confirm => ledger.lock().unwrap().confirm(reservation),
+        Resolution::Release => ledger.lock().unwrap().release(reservation),
+    }
+
+    match outcome {
         Ok(signature) => {
-            ledger.lock().unwrap().confirm(reservation);
             // Append to the earnings ledger (JSON-lines) so the ZeroClaw agent can
             // report "sold N readings, earned X" to the owner's channel. Best-effort:
             // a log-write failure never withholds a paid response.
@@ -1278,30 +1286,107 @@ fn handle_reading<T: RpcTransport, S: RpcTransport>(
             let hdr = settlement_header(&signature, &cfg.network, &verified.payer);
             (200, body, Some(hdr))
         }
-        Err(e) => {
-            // No money moved, so the ledger must not say any did: give the cap room back and
-            // un-burn the nonce. The buyer is free to retry the same signed transaction,
-            // which is the right outcome for a failure that was ours or the cluster's. A
-            // payment that DID settle keeps its nonce, so replay protection is unaffected.
-            ledger.lock().unwrap().release(reservation);
+        Err(SettleFailure::Definite(e)) => {
+            // The hold was released above. The buyer is free to retry the same signed
+            // transaction, which is the right outcome for a failure that was ours or the
+            // cluster's; a payment that DID settle keeps its nonce, so replay protection is
+            // unaffected.
             (
                 502,
                 serde_json::json!({ "paid": false, "error": e }).to_string(),
                 None,
             )
         }
+        Err(SettleFailure::Unknown(e)) => {
+            // The hold STANDS, per `resolution_for`, because the transaction may still land.
+            (
+                502,
+                serde_json::json!({
+                    "paid": false,
+                    "error": e,
+                    // Named so a client can tell "this failed, retry" from "we do not know,
+                    // go look at the chain before you pay again". A bare 502 cannot.
+                    "outcome": "unknown",
+                    "cap_consumed": true,
+                })
+                .to_string(),
+                None,
+            )
+        }
     }
 }
 
+/// How many times to poll for confirmation before giving up on knowing the outcome.
+const CONFIRM_ATTEMPTS: u32 = 30;
+
+/// What the ledger must do with a held reservation once settlement has answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Resolution {
+    /// The spend stands.
+    Confirm,
+    /// Give the cap room back and un-burn the nonce.
+    Release,
+}
+
+/// The mapping from a settlement outcome to what the ledger does about it.
+///
+/// This is the entire security property of the two-phase write, so it is a named function with
+/// its own test rather than three lines inside a match that nothing can reach without a network
+/// and a thirty-second wait.
+fn resolution_for(outcome: &Result<String, SettleFailure>) -> Resolution {
+    match outcome {
+        // It confirmed. Real money moved.
+        Ok(_) => Resolution::Confirm,
+        // The network refused it, or it executed and failed. Nothing moved and nothing will, so
+        // the ledger must not say otherwise: this is the defect the two-phase write exists for.
+        Err(SettleFailure::Definite(_)) => Resolution::Release,
+        // The broadcast was ACCEPTED and we stopped waiting. Releasing here would be that same
+        // defect pointed the other way: the transaction can still land, and freeing the room
+        // would let a payer whose confirmations are merely SLOW spend past their daily cap every
+        // time, without forging anything. The conservative direction is to charge a payment that
+        // may have moved rather than to un-charge one that did, and the cost of being wrong is
+        // bounded and self-inflicted, because the cap belongs to the account that actually
+        // signed and step 2b of verification proved it did.
+        Err(SettleFailure::Unknown(_)) => Resolution::Confirm,
+    }
+}
+
+/// Why a settlement did not produce a confirmed signature.
+///
+/// The distinction is the whole point of the type. Collapsing these into one error made the
+/// caller treat "the network refused this" and "we stopped waiting" identically, and only one
+/// of them means no money moved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SettleFailure {
+    /// The transaction will not land: simulation refused it, the broadcast was rejected, or it
+    /// executed on chain and failed. Nothing moved and nothing will.
+    Definite(String),
+    /// The broadcast was ACCEPTED and confirmation polling ran out. The transaction may still
+    /// land. The gate does not know, and must not act as though it does.
+    Unknown(String),
+}
+
 /// Simulate then broadcast then confirm the client's payment transaction.
-fn settle<T: RpcTransport>(rpc: &SolanaRpc<T>, v: &VerifiedPayment) -> Result<String, String> {
+///
+/// `attempts` bounds the confirmation polling. It is a parameter rather than a constant so a
+/// test can exercise the timeout branch without waiting half a minute for it; production passes
+/// [`CONFIRM_ATTEMPTS`].
+fn settle<T: RpcTransport>(
+    rpc: &SolanaRpc<T>,
+    v: &VerifiedPayment,
+    attempts: u32,
+) -> Result<String, SettleFailure> {
     // Match the Err arm EXPLICITLY rather than letting `if let Ok(..)` swallow it. The old form
     // discarded a transport failure, so an RPC hiccup skipped the simulation gate entirely and the
     // transaction went straight to send. Send-preflight still catches it, which is why this was
     // defense-in-depth rather than a hole, but a gate that silently does not run on a bad day is
     // the shape this repo keeps finding: it reads as coverage and is not.
     match rpc.simulate_transaction(&v.raw_tx) {
-        Ok(Some(sim_err)) => return Err(format!("simulation failed: {sim_err}")),
+        Ok(Some(sim_err)) => {
+            return Err(SettleFailure::Definite(format!(
+                "simulation failed: {sim_err}"
+            )))
+        }
         Ok(None) => {}
         // Not fatal: preflight on send re-runs the same check against the same node, so refusing
         // here would turn a transient RPC blip into a refused payment the buyer already made.
@@ -1310,20 +1395,33 @@ fn settle<T: RpcTransport>(rpc: &SolanaRpc<T>, v: &VerifiedPayment) -> Result<St
     }
     let sig = rpc
         .send_transaction(&v.raw_tx)
-        .map_err(|e| format!("send failed: {e:?}"))?;
-    // Poll to at least `confirmed`.
-    for _ in 0..30 {
+        .map_err(|e| SettleFailure::Definite(format!("send failed: {e:?}")))?;
+    // Poll to at least `confirmed`. From here the transaction is out of our hands, so every
+    // exit below has to say whether it KNOWS the outcome.
+    for attempt in 0..attempts {
         if let Ok(Some(status)) = rpc.get_signature_status(&sig) {
             if let Some(err) = &status.err {
-                return Err(format!("transaction failed on-chain: {err}"));
+                // It landed and the runtime rejected it. Definite: no tokens moved.
+                return Err(SettleFailure::Definite(format!(
+                    "transaction failed on-chain: {err}"
+                )));
             }
             if status.is_settled() {
                 return Ok(sig);
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        // Sleep BETWEEN attempts, never after the last one, which previously burned a second
+        // doing nothing before giving up.
+        if attempt + 1 < attempts {
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+        }
     }
-    Err("payment did not confirm within timeout".into())
+    // NOT a failure, an absence of knowledge. The node accepted the broadcast; congestion or a
+    // slow endpoint can push confirmation past this window and the transaction still lands.
+    Err(SettleFailure::Unknown(format!(
+        "broadcast accepted as {sig} but it did not confirm within the polling window; \
+         it may still land, so this payment is recorded as spent"
+    )))
 }
 
 /// Recover the memo string from an X-PAYMENT header by decoding the transaction
@@ -2909,6 +3007,154 @@ mod settlement_ordering_tests {
             "an over-cap payment must never reach the network"
         );
         assert_eq!(out.settled_total, CAP, "the preloaded spend must be intact");
+    }
+
+    /// A broadcast the node ACCEPTED, whose confirmation never arrives within the window.
+    /// Simulate clean, send returns a signature, and every status poll reports the signature
+    /// as unknown to the cluster.
+    fn settle_never_confirms() -> MockTransport {
+        MockTransport::new([
+            r#"{"jsonrpc":"2.0","id":1,"result":{"value":{"err":null}}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"result":"5FakeSettlementSignature"}"#,
+            r#"{"jsonrpc":"2.0","id":3,"result":{"value":[null]}}"#,
+        ])
+    }
+
+    /// `settle` must say WHICH kind of failure it had, because the caller's two responses are
+    /// opposite. Driven directly rather than through `handle_reading` so the timeout branch
+    /// does not wait for the production attempt count.
+    #[test]
+    fn settle_distinguishes_a_definite_refusal_from_an_unknown_outcome() {
+        let cfg = cfg();
+        let header = honest_header(&cfg, 11, PRICE, "kinds");
+        let verified = verify_x_payment(&cfg, &header, "kinds").expect("the fixture verifies");
+
+        let refused = SolanaRpc::new(settle_send_fails());
+        assert!(
+            matches!(
+                settle(&refused, &verified, 1),
+                Err(SettleFailure::Definite(_))
+            ),
+            "a rejected broadcast is a definite failure"
+        );
+
+        let silent = SolanaRpc::new(settle_never_confirms());
+        match settle(&silent, &verified, 1) {
+            // The reason has to name the signature, or the buyer cannot go and look.
+            Err(SettleFailure::Unknown(reason)) => assert!(
+                reason.contains("5FakeSettlementSignature"),
+                "an unknown outcome must name the broadcast signature: {reason}"
+            ),
+            other => {
+                panic!("an accepted broadcast that never confirms is not a refusal: {other:?}")
+            }
+        }
+
+        // CONTROL: the happy path is still Ok, so this is not reporting failure for everything.
+        let good = SolanaRpc::new(settles_ok());
+        assert_eq!(
+            settle(&good, &verified, 1),
+            Ok("5FakeSettlementSignature".to_string())
+        );
+    }
+
+    /// AN UNKNOWN OUTCOME MUST HOLD THE RESERVATION, not release it.
+    ///
+    /// Releasing on a confirmation timeout is this PR's own defect pointed the other way: the
+    /// broadcast was accepted, the transaction can still land, and freeing the room would let a
+    /// payer whose confirmations are merely slow spend past their daily cap every time, with no
+    /// forgery involved. The hold is the conservative direction, and the cap belongs to the
+    /// account that actually signed.
+    #[test]
+    fn an_unknown_outcome_holds_the_cap_rather_than_freeing_it() {
+        let cfg = cfg();
+        let payer = key(11);
+        let header = honest_header(&cfg, 11, PRICE, "unknown-outcome");
+        let verified = verify_x_payment(&cfg, &header, "unknown-outcome").unwrap();
+
+        let mut ledger = DailyLedger::new();
+        let day = utc_day_now();
+        let reservation = ledger
+            .reserve(&payer, "unknown-outcome", day, PRICE, CAP)
+            .unwrap();
+        let ledger = Mutex::new(ledger);
+
+        let rpc = SolanaRpc::new(settle_never_confirms());
+        let outcome = settle(&rpc, &verified, 1);
+        assert!(
+            matches!(outcome, Err(SettleFailure::Unknown(_))),
+            "fixture must produce an unknown outcome, got {outcome:?}"
+        );
+        // The GATE's own decision, not the test's. Hand-calling `confirm` here would assert
+        // only that the ledger obeys a confirm, and would stay green if the gate released.
+        match resolution_for(&outcome) {
+            Resolution::Confirm => ledger.lock().unwrap().confirm(reservation),
+            Resolution::Release => ledger.lock().unwrap().release(reservation),
+        }
+
+        let l = ledger.lock().unwrap();
+        assert_eq!(
+            l.total_settled(),
+            PRICE,
+            "the hold was released for a payment that may still land"
+        );
+        assert_eq!(
+            l.redeemed_nonce_count(),
+            1,
+            "the nonce came back, so the same payment could be presented again"
+        );
+        assert!(
+            !l.within_cap(&payer, day, CAP, CAP),
+            "the payer got their whole day back on a payment that may have moved"
+        );
+    }
+
+    /// The mapping itself, all three outcomes in one place. This is what `handle_reading`
+    /// consults, so it is where a wrong choice would live.
+    #[test]
+    fn the_resolution_follows_the_settlement_outcome_in_all_three_directions() {
+        assert_eq!(
+            resolution_for(&Ok("sig".to_string())),
+            Resolution::Confirm,
+            "a confirmed payment is real money and must stand"
+        );
+        assert_eq!(
+            resolution_for(&Err(SettleFailure::Definite("refused".into()))),
+            Resolution::Release,
+            "nothing moved and nothing will, so the room must come back"
+        );
+        assert_eq!(
+            resolution_for(&Err(SettleFailure::Unknown("no answer".into()))),
+            Resolution::Confirm,
+            "an accepted broadcast may still land; releasing lets a slow payer exceed their cap"
+        );
+    }
+
+    /// CONTROL for the case above, and the one that keeps it honest: a DEFINITE failure still
+    /// releases. Without this, holding on every failure would satisfy the assertions above
+    /// while reintroducing the exact defect this PR removes.
+    #[test]
+    fn a_definite_failure_still_releases_where_an_unknown_one_holds() {
+        let cfg = cfg();
+        let payer = key(11);
+        let out = request(
+            &cfg,
+            &honest_header(&cfg, 11, PRICE, "definite"),
+            settle_send_fails(),
+            &payer,
+            |_| {},
+        );
+        assert_eq!(out.status, 502);
+        assert_eq!(
+            out.settled_total, 0,
+            "a definite refusal must free the room"
+        );
+        assert_eq!(out.redeemed_nonces, 0);
+        assert!(
+            !out.body.contains("unknown"),
+            "a definite refusal must not be reported as an unknown outcome: {}",
+            out.body
+        );
     }
 
     /// CONTROL: a settled payment's nonce stays burned, so replaying the identical signed
