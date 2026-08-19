@@ -82,6 +82,22 @@ MUTANTS = [
         "selftest",
     ),
     (
+        "currency header lookup is case-sensitive again",
+        '        got_hdr = _hdr(w.headers, "access-control-expose-headers")',
+        '        got_hdr = w.headers.get("access-control-expose-headers")',
+        "a title-cased header would read ABSENT on a current Worker, so the "
+        "title-case case must go red",
+        "selftest",
+    ),
+    (
+        "currency baseline searches the whole file",
+        "    body = text[start : end if end != -1 else len(text)]",
+        "    body = text",
+        "a decoy literal above cors() would become the baseline, so the decoy case "
+        "must go red",
+        "selftest",
+    ),
+    (
         "currency by header presence",
         "            mine, theirs = _hdr_tokens(got_hdr), _hdr_tokens(want_hdr)",
         "            mine, theirs = _hdr_tokens(got_hdr), _hdr_tokens(got_hdr)",

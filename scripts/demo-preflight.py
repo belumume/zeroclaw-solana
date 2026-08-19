@@ -371,16 +371,41 @@ def _eol_digest(b):
     return hashlib.sha256(b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")).hexdigest()
 
 
+def _hdr(headers, name):
+    """A case-insensitive header lookup over the plain dict `fetch_once` returns.
+
+    `fetch_once` hands back `dict(r.headers)`, and that conversion DROPS the case-insensitivity
+    `http.client.HTTPMessage` provides: the keys become whatever casing the wire used, so a
+    lookup for a lowercase name misses a title-cased header entirely. Header names are
+    case-insensitive per RFC 9110, so any proxy is free to re-case them, and the result here
+    would be a confident DIFFERS about a surface that is current.
+    """
+    target = name.lower()
+    return next((v for k, v in headers.items() if k.lower() == target), None)
+
+
 def _expose_at_main(src):
     """The access-control-expose-headers value cors() ships at origin/main, or None.
 
     Parsed from source rather than pinned as a constant here, so the baseline moves when cors()
     moves. A constant would have to be edited in lockstep with the Worker, and the failure of
     that lockstep is the drift this whole function exists to detect.
+
+    SCOPED TO cors() rather than searched over the whole file, because the first match anywhere
+    wins and the real literal already has a four-line comment sitting directly above it. A
+    header name quoted in a comment, a test fixture or a second block would silently become the
+    baseline, and a wrong baseline reports drift with the same confidence as a right one.
     """
+    text = src.decode("utf-8", "replace")
+    start = text.find("function cors(")
+    if start == -1:
+        return None
+    end = text.find("\n}", start)
+    body = text[start : end if end != -1 else len(text)]
     m = re.search(
         r'["\']access-control-expose-headers["\']\s*:\s*["\']([^"\']*)["\']',
-        src.decode("utf-8", "replace"),
+        body,
+        re.IGNORECASE,
     )
     return m.group(1) if m else None
 
@@ -473,7 +498,7 @@ def currency_report():
             )
         )
     else:
-        got_hdr = w.headers.get("access-control-expose-headers")
+        got_hdr = _hdr(w.headers, "access-control-expose-headers")
         if got_hdr is None:
             rows.append(
                 (
@@ -529,7 +554,9 @@ def selftest_currency():
 
     page = b"<html>\n<body>commitment:'confirmed'</body>\n</html>\n"
     full = "x-zc-fast, x-zc-deep, x-zc-allowed-0"
-    src = f'  "access-control-expose-headers":\n    "{full}",\n'.encode()
+    # Shaped like the real cors(), because the baseline parser is scoped to that function and a
+    # fixture that omits it would exercise a code path the Worker never takes.
+    src = f'function cors(origin, allowed) {{\n  "access-control-expose-headers":\n    "{full}",\n}}\n'.encode()
     bodies = {
         "exact": page,
         "crlf": page.replace(b"\n", b"\r\n"),
@@ -537,7 +564,12 @@ def selftest_currency():
         # opposite in meaning. This is the edit the old delta==0 check reported as CURRENT.
         "samelen": page.replace(b"confirmed", b"processed"),
     }
-    hdrs = {"full": full, "stale": "x-zc-fast, x-zc-deep", "none": None}
+    hdrs = {
+        "full": full,
+        "stale": "x-zc-fast, x-zc-deep",
+        "none": None,
+        "titlecase": full,
+    }
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -558,9 +590,18 @@ def selftest_currency():
 
         def do_OPTIONS(self):
             self.send_response(204)
-            v = hdrs.get(self.path.rsplit("/", 1)[-1])
+            key = self.path.rsplit("/", 1)[-1]
+            v = hdrs.get(key)
             if v is not None:
-                self.send_header("access-control-expose-headers", v)
+                # TITLE-CASED on purpose for one route. Header names are case-insensitive per
+                # RFC 9110 and any proxy may re-case them, and a stub that only ever emits
+                # lowercase cannot see a lookup that depends on the casing.
+                name = (
+                    "Access-Control-Expose-Headers"
+                    if key == "titlecase"
+                    else "access-control-expose-headers"
+                )
+                self.send_header(name, v)
             self.end_headers()
 
     srv = HTTPServer(("127.0.0.1", 0), H)
@@ -594,7 +635,7 @@ def selftest_currency():
         )
 
     base = f"http://127.0.0.1:{port}"
-    real_git_show = _git_show
+    real_git_show, real_pay, real_proxy = _git_show, PAY_URL, PROXY_URL
     try:
         pay, wk = row(f"{base}/pay/exact", f"{base}/proxy/full")
         report("exact bytes read CURRENT", "CURRENT" in pay)
@@ -632,8 +673,30 @@ def selftest_currency():
             f"{base}/pay/exact", f"{base}/proxy/full", worker=b"function cors(){}"
         )
         report("an unparseable cors() reads COULD NOT CHECK", "COULD NOT CHECK" in wk)
+
+        # HEADER NAMES ARE CASE-INSENSITIVE and the dict `fetch_once` returns is not. Without
+        # this case a title-casing proxy makes a CURRENT Worker read DIFFERS, and nothing here
+        # would notice, because every other route in this stub emits lowercase.
+        _, wk = row(f"{base}/pay/exact", f"{base}/proxy/titlecase")
+        report("a title-cased expose-header still reads CURRENT", "CURRENT" in wk)
+
+        # THE BASELINE MUST COME FROM cors(), not from the first quoted literal in the file. A
+        # decoy above the function is the shape that actually occurs: the real literal already
+        # has a comment block sitting directly above it.
+        decoy = (
+            b'// "access-control-expose-headers": "x-decoy"\n'
+            b"function cors(){\n"
+            b'  "access-control-expose-headers": "' + full.encode() + b'",\n}\n'
+        )
+        _, wk = row(f"{base}/pay/exact", f"{base}/proxy/full", worker=decoy)
+        report(
+            "a decoy literal above cors() is not used as the baseline", "CURRENT" in wk
+        )
     finally:
         _git_show = real_git_show
+        # RESTORE THE URLS TOO. Leaving them pointed at a dead ephemeral port makes any real
+        # probe in the same process silently read COULD NOT CHECK against localhost.
+        PAY_URL, PROXY_URL = real_pay, real_proxy
         srv.shutdown()
 
     # The read-only guard, asserted rather than trusted: OPTIONS is the method the worker half
