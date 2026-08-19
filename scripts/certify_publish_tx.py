@@ -20,7 +20,7 @@ the tx never broadcasts. This is a deterministic, host-side check that does not
 trust the LLM, the plugin, or the wire; it re-derives intent from the bytes.
 
 Pure stdlib. Import `certify_publish_tx` from the broadcaster, or run this file
-directly to execute the self-test (good tx passes; five injection shapes refused).
+directly to execute the self-test (good tx passes; seven injection shapes refused).
 """
 
 from __future__ import annotations
@@ -183,7 +183,7 @@ def certify_publish_tx(
 
 
 # ---------------------------------------------------------------------------
-# Self-test: build a minimal good tx + five injection shapes, assert behaviour.
+# Self-test: build a minimal good tx + seven injection shapes, assert behaviour.
 # ---------------------------------------------------------------------------
 def _shortvec(n: int) -> bytes:
     out = bytearray()

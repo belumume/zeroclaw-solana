@@ -52,7 +52,7 @@ serves them. Among them you can read the durable-nonce replay guard on every pub
 over-cap transfer the on-chain allowance program refused, on both chains.
 
 **`certify_publish_tx.py` drives the fail-closed action certifier** over one good publish
-transaction and five injected shapes, and prints `6/6 cases correct`. The five refusals are
+transaction and seven injected shapes, and prints `8/8 cases correct`. The seven refusals are
 an injected third-instruction SOL transfer, a token-program instruction swapped in for the
 publish, a plain System transfer where the nonce advance belongs, a publish aimed at a
 spoofed feed account, and a versioned (v0) message, which this path does not emit and which

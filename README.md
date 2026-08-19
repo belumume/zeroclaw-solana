@@ -14,7 +14,7 @@ opens with them.
 
 ```bash
 python3 scripts/verify_proof_offline.py     # re-verifies the captured transactions from bytes, no network
-python3 scripts/certify_publish_tx.py       # drives five injection shapes at the certifier, no network
+python3 scripts/certify_publish_tx.py       # drives seven injection shapes at the certifier, no network
 python3 scripts/verify-proof.py             # re-checks every published claim against devnet
 ```
 
@@ -233,7 +233,7 @@ Human approval is a weak boundary on its own, because the sentence the human rea
 model wrote. So the paths with a fixed intent never ask: `scripts/broadcast_certified.py`
 re-derives the intent from the exact serialized bytes and refuses an appended transfer, a
 swapped program or a spoofed feed. Run that check as a self-test with
-`python3 scripts/certify_publish_tx.py`, which puts five injection shapes through it, and
+`python3 scripts/certify_publish_tx.py`, which puts seven injection shapes through it, and
 CI runs it on every push. Stated precisely, because this project's own argument is that a
 control which is claimed and enforced by no runtime path is worse than an absent one: what
 this repo proves is the MECHANISM, not the wiring. The scheduler driving the live node is
