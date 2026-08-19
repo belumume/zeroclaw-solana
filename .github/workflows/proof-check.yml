@@ -106,6 +106,20 @@ jobs:
           python3 scripts/verify_proof_ledger_control.py
           python3 scripts/verify_proof_selfcheck_control.py
 
+      # WIRED 2026-08-19, having run nowhere since it was written. Same argument as the
+      # step above, applied to the shop-liveness claim: a green "3/3 live" shows the check
+      # can AGREE with a healthy endpoint and says nothing about whether it can DISAGREE,
+      # and the two answers a broken shop would give -- systemd reporting the unit
+      # inactive, and a 200 that stops mentioning the shop at all -- have never been put
+      # to it. It serves both from a loopback fixture.
+      #
+      # HERE rather than in ci.yml because its BASELINE run drives verify-proof.py against
+      # the real node: it returns 2 and refuses to interpret anything when the shop is
+      # down, which on a pull-request runner would be a red with no finding behind it.
+      # This workflow already depends on that box, so it adds no new flakiness class.
+      - name: the shop-liveness check can actually go red
+        run: python3 scripts/mutation-check-shop-liveness.py
+
       # IS THE BOX RUNNING THE CODE THIS REPO DESCRIBES. Nothing above answers that. The box's
       # own self-check compares it to the commit it was DEPLOYED FROM, so a box months behind
       # reports a green manifest, honestly, because it does match that snapshot. Measured on

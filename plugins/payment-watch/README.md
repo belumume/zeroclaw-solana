@@ -107,7 +107,7 @@ These are the plugin's own host tests, with no wasm toolchain and no network (th
 mocked transport). Run them with `cargo test --lib`:
 
 ```
-running 41 tests
+running 44 tests
 test watch::tests::a_contradicting_second_endpoint_downgrades_the_payment_to_disputed ... ok
 test watch::tests::a_full_page_never_advances_the_cursor_past_unscanned_history ... ok
 test watch::tests::a_partial_scan_says_so_in_the_report ... ok
