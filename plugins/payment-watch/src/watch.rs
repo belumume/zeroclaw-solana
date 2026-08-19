@@ -74,6 +74,45 @@ const LABEL_MAX_BYTES: usize = 64;
 /// A base58 tx signature is 64 bytes -> <=88 chars. Reject anything longer
 /// before a base58 decode is even attempted.
 const SIGNATURE_STR_MAX: usize = 90;
+
+// --- error-path echo budgets -----------------------------------------------
+//
+// The REPORT path is byte-bounded (`MEMO_MAX_BYTES`, `LABEL_MAX_BYTES`, and `clamp`, which
+// counts bytes). The ERROR path was not: a rejection echoes the offending value back so the
+// caller can see what was refused, that string lands in `ToolResult::error` and therefore in the
+// agent's context, and it was capped on CHARACTERS only. Four bytes per codepoint means an
+// astral-plane payload overshot every one of these caps roughly fourfold.
+//
+// PROVENANCE IS WHAT DECIDES, not uniformity. These budgets are applied to the strings an
+// attacker can actually reach — the tool arguments, which on the error branch are by definition
+// NOT shape-constrained (the branch fires precisely because the base58 check failed), and the
+// remote node's own error text. They are deliberately NOT applied to the operator's `__config`
+// endpoints; see `sanitize_onchain` at the `rpc_url` / `corroborating_rpc_urls` sites.
+//
+// Each byte budget reuses its character cap, this repo's established convention
+// (`MEMO_MAX_BYTES`, `LABEL_MAX_BYTES`, `DEVICE_ID_MAX_BYTES`, `ECHO_MAX_BYTES`): a real value is
+// ASCII and untouched, so only the multibyte case that was never bounded changes.
+
+/// CHARACTER cap for the serde error echoed by a malformed-arguments rejection.
+const ARG_ERROR_MAX: usize = 120;
+/// BYTE cap for the same. serde embeds the offending value verbatim, so this echoes attacker text.
+const ARG_ERROR_MAX_BYTES: usize = 120;
+/// CHARACTER cap for a rejected argument echoed back in its own rejection (address, mint,
+/// reference).
+const ECHO_MAX: usize = 64;
+/// BYTE cap for the same.
+const ECHO_MAX_BYTES: usize = 64;
+/// BYTE cap for a rejected `since_signature` echo. `is_valid_signature` already measures its
+/// input in BYTES (`s.len() > SIGNATURE_STR_MAX`), so the echo is bounded in the same unit the
+/// validator refused it in.
+const SIGNATURE_ECHO_MAX_BYTES: usize = SIGNATURE_STR_MAX;
+/// CHARACTER cap for a JSON-RPC `error.message` from the node.
+const RPC_ERROR_MAX: usize = 200;
+/// BYTE cap for the same. This is the most remote of these strings: it is chosen by whoever
+/// answers the endpoint, and the shim renders it into the agent's context as `rpc error: {e:?}`
+/// with no further bound.
+const RPC_ERROR_MAX_BYTES: usize = 200;
+
 /// Upper bound on a UI amount, and on decimals, so the fixed-point conversion
 /// can never overflow or be fed an absurd magnitude.
 const MAX_UI_AMOUNT: f64 = 1e15;
@@ -157,7 +196,7 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
         // an unbounded or injection-framed string back through the error path.
         format!(
             "invalid arguments: {}",
-            sanitize_onchain(&e.to_string(), 120).text
+            sanitize_onchain_bounded(&e.to_string(), ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES).text
         )
     })?;
 
@@ -167,7 +206,7 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
     let address = Pubkey::from_base58(&address_b58).map_err(|_| {
         format!(
             "not a valid base58 address: {}",
-            sanitize_onchain(&address_b58, 64).text
+            sanitize_onchain_bounded(&address_b58, ECHO_MAX, ECHO_MAX_BYTES).text
         )
     })?;
 
@@ -189,7 +228,7 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
         Some(s) => Asset::Spl(Pubkey::from_base58(s).map_err(|_| {
             format!(
                 "not a valid base58 mint (or the sentinel \"SOL\"/\"native\"): {}",
-                sanitize_onchain(s, 64).text
+                sanitize_onchain_bounded(s, ECHO_MAX, ECHO_MAX_BYTES).text
             )
         })?),
     };
@@ -200,7 +239,7 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
         Some(s) => Some(Pubkey::from_base58(s).map_err(|_| {
             format!(
                 "not a valid base58 reference pubkey: {}",
-                sanitize_onchain(s, 64).text
+                sanitize_onchain_bounded(s, ECHO_MAX, ECHO_MAX_BYTES).text
             )
         })?),
     };
@@ -223,7 +262,7 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
         Some(s) => {
             return Err(format!(
                 "since_signature is not a valid base58 transaction signature: {}",
-                sanitize_onchain(s, SIGNATURE_STR_MAX).text
+                sanitize_onchain_bounded(s, SIGNATURE_STR_MAX, SIGNATURE_ECHO_MAX_BYTES).text
             ))
         }
     };
@@ -231,13 +270,24 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
     // RPC endpoints: https-only when overridden. The primary produces the
     // candidate verdict; corroborating endpoints must independently re-derive it
     // before a payment is reported as confirmed.
+    //
+    // DELIBERATELY CHAR-CAPPED ONLY, here and at every `corroborating_rpc_urls` echo below.
+    // `__config` is injected by the host, which strips any caller-supplied section before
+    // inserting the operator's, so these strings are the OPERATOR's and not a path an attacker
+    // reaches. A byte cap would buy nothing against anyone and would cost the operator the `…`
+    // marker on a diagnostic they are the sole reader of — the one signal telling them their own
+    // pasted URL was truncated rather than mangled. The echo is bounded either way: the char cap
+    // fires first and this is the operator's own text, not a codepoint flood.
+    //
+    // Not an oversight and not an inconsistency to sweep: the attacker-reachable echoes in this
+    // function use `sanitize_onchain_bounded`, and the difference in function name is the signal.
     let cfg = args.config.unwrap_or_default();
     let rpc_url = match cfg.rpc_url {
         Some(url) => {
             if !url.starts_with("https://") {
                 return Err(format!(
                     "rpc_url must be https, got: {}",
-                    sanitize_onchain(&url, 64).text
+                    sanitize_onchain(&url, ECHO_MAX).text
                 ));
             }
             url
@@ -289,6 +339,8 @@ fn validate_corroborating(list: Option<Vec<String>>, primary: &str) -> Result<Ve
             list.len()
         ));
     }
+    // Every echo below is char-capped only, on purpose. See the note at the `rpc_url` site in
+    // `parse_and_validate`: this list is operator-owned `__config`, not an attacker-reachable path.
     let primary_host = endpoint_host(primary);
     let mut out: Vec<String> = Vec::new();
     let mut seen: Vec<String> = vec![primary_host.clone()];
@@ -296,22 +348,22 @@ fn validate_corroborating(list: Option<Vec<String>>, primary: &str) -> Result<Ve
         if !url.starts_with("https://") {
             return Err(format!(
                 "corroborating_rpc_urls must be https, got: {}",
-                sanitize_onchain(&url, 64).text
+                sanitize_onchain(&url, ECHO_MAX).text
             ));
         }
         let host = endpoint_host(&url);
         if host.is_empty() {
             return Err(format!(
                 "corroborating_rpc_urls entry has no host: {}",
-                sanitize_onchain(&url, 64).text
+                sanitize_onchain(&url, ECHO_MAX).text
             ));
         }
         if host == primary_host {
             return Err(format!(
                 "corroborating_rpc_urls entry {} shares the primary's host {}; \
                  the same party answering twice is not corroboration",
-                sanitize_onchain(&url, 64).text,
-                sanitize_onchain(&primary_host, 64).text
+                sanitize_onchain(&url, ECHO_MAX).text,
+                sanitize_onchain(&primary_host, ECHO_MAX).text
             ));
         }
         if seen.contains(&host) {
@@ -479,12 +531,19 @@ fn rpc_call<T: RpcTransport>(
             code: err.get("code").and_then(Value::as_i64).unwrap_or(0),
             // The node's own error text is untrusted response-path data (a
             // compromised/hostile RPC can inject unbounded or hidden framing
-            // here); strip control/zero-width/bidi and cap it.
-            message: sanitize_onchain(
+            // here); strip control/zero-width/bidi and cap it on BOTH axes.
+            //
+            // Bytes matter more here than anywhere else in this file. `short_detail` bounds this
+            // string when it reaches the REPORT via a corroboration detail, but the shim's own
+            // failure path renders it as `rpc error: {e:?}` with no bound at all, so the char cap
+            // was the only thing standing between a hostile endpoint and 800 bytes of agent
+            // context.
+            message: sanitize_onchain_bounded(
                 err.get("message")
                     .and_then(Value::as_str)
                     .unwrap_or_default(),
-                200,
+                RPC_ERROR_MAX,
+                RPC_ERROR_MAX_BYTES,
             )
             .text,
         });
@@ -897,6 +956,20 @@ fn to_base_units(ui: f64, decimals: u32) -> Option<i128> {
 /// Re-validate an owner/sender pubkey string from the RPC before display: a
 /// crafted `from` can never panic a byte-slice and, if malformed, is sanitized
 /// rather than reflected raw.
+///
+/// DELIBERATELY NOT BYTE-CAPPED, and it does not need to be. `short_pubkey` bounds its output to
+/// 17 CHARACTERS on both branches — it returns the input whole only when that input is already
+/// <=17 chars, and otherwise renders 8 + `…` + 8. Seventeen codepoints is at most 68 UTF-8 bytes,
+/// so this function is byte-bounded BY CONSTRUCTION even though nothing here counts bytes, and
+/// that ceiling sits well inside the report bound the multibyte flood test already asserts.
+/// `report_sender_is_byte_bounded_by_short_pubkey_without_a_byte_cap` measures it rather than
+/// leaving it as an argument.
+///
+/// Byte-capping the RESULT would be actively wrong: it would eat into the 8-character tail, and
+/// `short_pubkey`'s own docstring gives that width as the anti-vanity-grind property (8 base58
+/// chars is ~47 bits and grindable; 16 is ~94 and is not). Byte-capping the INPUT would save at
+/// most 24 bytes on a field already bounded, and would change nothing for a real base58 pubkey,
+/// which is ASCII.
 fn safe_short_pubkey(s: &str) -> String {
     match Pubkey::from_base58(s) {
         Ok(pk) => short_pubkey(&pk.to_base58()),
@@ -2102,6 +2175,301 @@ mod tests {
             ),
             other => panic!("expected PAID, got {other:?}"),
         }
+    }
+
+    // ---- error-path echo budgets ------------------------------------------
+    //
+    // The report path is byte-bounded and its ceilings are measured above. These cover the OTHER
+    // path into the agent's context: a rejection that echoes the value it refused. That string
+    // becomes `ToolResult::error`, never passes through `compose_report`, and so is bounded by
+    // nothing but its own cap.
+
+    /// One astral-plane codepoint is 4 UTF-8 bytes, so a CHARACTER cap of `n` admits `4n` bytes.
+    /// Used to build a payload that satisfies every character cap in this file while blowing
+    /// through the byte budget the cap is published in.
+    const ASTRAL: &str = "\u{1F600}";
+
+    /// Build the arguments JSON that drives one field's rejection branch. `address` is the first
+    /// thing validated, so every other case needs a real one ahead of it.
+    fn json_with(field: &str, val: &str) -> String {
+        if field == "address" {
+            format!(r#"{{"address":"{val}","expected_amount":1}}"#)
+        } else {
+            format!(r#"{{"address":"{WALLET}","expected_amount":1,"{field}":"{val}"}}"#)
+        }
+    }
+
+    /// Every argument rejection echoes the value it refused, and each echo was capped on
+    /// CHARACTERS while the budget it satisfies is stated in BYTES.
+    ///
+    /// Note what these branches are: each fires precisely BECAUSE the base58 (or signature) shape
+    /// check failed, so the value on the error path is arbitrary by definition. "It is a pubkey,
+    /// so it is ASCII" is true on the success path and exactly inverted here.
+    ///
+    /// The fixed prose of each message is DERIVED, by driving the same branch with a one-byte
+    /// value, rather than pinned — rewording a message cannot silently loosen the bound.
+    #[test]
+    fn every_argument_error_echo_is_byte_bounded_not_just_char_bounded() {
+        let flood = ASTRAL.repeat(2000);
+
+        // (field, the branch's own prose, char cap, byte budget)
+        let cases: [(&str, &str, usize, usize); 4] = [
+            (
+                "address",
+                "not a valid base58 address",
+                ECHO_MAX,
+                ECHO_MAX_BYTES,
+            ),
+            ("mint", "not a valid base58 mint", ECHO_MAX, ECHO_MAX_BYTES),
+            (
+                "reference",
+                "not a valid base58 reference pubkey",
+                ECHO_MAX,
+                ECHO_MAX_BYTES,
+            ),
+            (
+                "since_signature",
+                "is not a valid base58 transaction signature",
+                SIGNATURE_STR_MAX,
+                SIGNATURE_ECHO_MAX_BYTES,
+            ),
+        ];
+
+        let mut checked = 0usize;
+        for (field, prose, char_cap, budget) in cases {
+            // Derive this branch's fixed prefix from the branch itself. `!` is outside the base58
+            // alphabet, so it reaches the same rejection, and it is one byte.
+            let short = parse_and_validate(&json_with(field, "!")).unwrap_err();
+            assert!(
+                short.contains(prose),
+                "{field}: the intended branch was not taken, so the bound below measures some \
+                 other rejection. Got: {short}"
+            );
+            assert!(
+                short.ends_with('!'),
+                "{field}: the refused value never reached the echo, so this case is vacuous. \
+                 Got: {short}"
+            );
+            let prefix = short.len() - 1;
+
+            let err = parse_and_validate(&json_with(field, &flood)).unwrap_err();
+            assert!(
+                err.contains(prose),
+                "{field}: the flood took a different branch. Got: {err}"
+            );
+            let echoed = err.len() - prefix;
+            assert!(
+                echoed > 0,
+                "{field}: the echo capped away to nothing, so the byte bound proves nothing"
+            );
+            assert!(
+                echoed <= budget,
+                "{field}: echoed {echoed} bytes, over the {budget}-byte budget"
+            );
+
+            // BEFORE/AFTER CONTROL: what the CHARACTER cap alone admitted. Without this, the
+            // bound above is equally consistent with a budget loose enough for either form.
+            let char_only = sanitize_onchain(&flood, char_cap).text.len();
+            assert!(
+                char_only > budget,
+                "{field}: the char cap alone yields {char_only} bytes, already inside the \
+                 {budget}-byte budget, so the byte cap is not what holds it"
+            );
+
+            eprintln!(
+                "MEASURED payment-watch {field} error echo: {echoed} B (char-capped only: \
+                 {char_only} B, budget {budget} B)"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 4, "a case was skipped");
+    }
+
+    /// The malformed-arguments branch is the same class with a different source: serde embeds the
+    /// offending value VERBATIM in `invalid type` / unknown-field errors, so an attacker chooses
+    /// most of that string.
+    #[test]
+    fn the_malformed_arguments_echo_is_byte_bounded() {
+        let flood = ASTRAL.repeat(2000);
+        // A string where a number belongs: serde's `invalid type` message quotes the value back.
+        let json = format!(r#"{{"address":"{WALLET}","expected_amount":"{flood}"}}"#);
+
+        const PREFIX: &str = "invalid arguments: ";
+        let err = parse_and_validate(&json).unwrap_err();
+        assert!(
+            err.starts_with(PREFIX),
+            "the message no longer opens with the prose this bound subtracts. Got: {err}"
+        );
+        let echoed = err.len() - PREFIX.len();
+        assert!(
+            echoed > 0,
+            "the serde error capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            echoed <= ARG_ERROR_MAX_BYTES,
+            "echoed {echoed} bytes, over the {ARG_ERROR_MAX_BYTES}-byte budget"
+        );
+
+        // CONTROL, measured against what serde actually produced rather than an assumed shape:
+        // if the flood never reached the error text, the bound above is satisfied trivially.
+        let raw = serde_json::from_str::<ExecuteArgs>(&json)
+            .expect_err("the fixture parsed, so there is no error to bound")
+            .to_string();
+        assert!(
+            raw.len() > 4 * ARG_ERROR_MAX_BYTES,
+            "serde no longer embeds the offending value ({} bytes), so this test is measuring a \
+             fixed message rather than an attacker-chosen one",
+            raw.len()
+        );
+        let char_only = sanitize_onchain(&raw, ARG_ERROR_MAX).text.len();
+        assert!(
+            char_only > ARG_ERROR_MAX_BYTES,
+            "the char cap alone yields {char_only} bytes, already inside the budget, so the byte \
+             cap is not what holds it"
+        );
+        eprintln!(
+            "MEASURED payment-watch invalid-arguments echo: {echoed} B (raw serde: {} B, \
+             char-capped only: {char_only} B, budget {ARG_ERROR_MAX_BYTES} B)",
+            raw.len()
+        );
+    }
+
+    /// The most remote of these strings: a JSON-RPC `error.message` is chosen by whoever answers
+    /// the endpoint. `short_detail` bounds it when it reaches the report as a corroboration
+    /// detail, but the shim's own failure path renders it as `rpc error: {e:?}` with no bound, so
+    /// the cap on this field is the only thing between a hostile node and the agent's context.
+    #[test]
+    fn a_hostile_rpc_error_message_is_byte_bounded() {
+        let flood = ASTRAL.repeat(2000);
+        let mock = MockTransport::single(
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": { "code": -32000, "message": flood }
+            })
+            .to_string(),
+        );
+        let v = args(None, 25.0);
+
+        match find_payment(&mock, &v) {
+            Err(RpcError::Rpc { code, message }) => {
+                assert_eq!(code, -32000, "a different error path was taken");
+                assert!(
+                    !message.is_empty(),
+                    "the message capped away to nothing, so the bound below proves nothing"
+                );
+                assert!(
+                    message.len() <= RPC_ERROR_MAX_BYTES,
+                    "rpc error message is {} bytes, over the {RPC_ERROR_MAX_BYTES}-byte budget",
+                    message.len()
+                );
+                let char_only = sanitize_onchain(&flood, RPC_ERROR_MAX).text.len();
+                assert!(
+                    char_only > RPC_ERROR_MAX_BYTES,
+                    "the char cap alone yields {char_only} bytes, already inside the budget, so \
+                     the byte cap is not what holds it"
+                );
+                eprintln!(
+                    "MEASURED payment-watch rpc error message: {} B (char-capped only: \
+                     {char_only} B, budget {RPC_ERROR_MAX_BYTES} B)",
+                    message.len()
+                );
+            }
+            other => panic!("expected an Rpc error, got {other:?}"),
+        }
+    }
+
+    /// The other half of the control: these caps narrow HOSTILE input only. An ordinary short
+    /// ASCII typo is under every cap on both axes and must be echoed back byte for byte, or the
+    /// operator debugging a mistyped address is shown a mangled one.
+    #[test]
+    fn the_error_echo_byte_caps_leave_an_ordinary_ascii_rejection_untouched() {
+        // Outside the base58 alphabet on several counts (`-`, `0`, `O`, `I`, `l`), so every
+        // branch below refuses it, and 15 bytes is under every cap here.
+        const ORDINARY: &str = "not-base58-0OIl";
+        let mut checked = 0usize;
+        for field in ["address", "mint", "reference", "since_signature"] {
+            let err = parse_and_validate(&json_with(field, ORDINARY)).unwrap_err();
+            assert!(
+                err.ends_with(ORDINARY),
+                "{field}: an ordinary ASCII value was altered by the byte cap. Got: {err}"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 4, "a case was skipped");
+
+        // Same for the RPC path: a real node's error text is short prose and must survive whole.
+        const NODE_ERROR: &str = "Transaction simulation failed: insufficient funds";
+        let mock = MockTransport::single(
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": { "code": -32002, "message": NODE_ERROR }
+            })
+            .to_string(),
+        );
+        match find_payment(&mock, &args(None, 25.0)) {
+            Err(RpcError::Rpc { message, .. }) => assert_eq!(
+                message, NODE_ERROR,
+                "an ordinary node error was altered by the byte cap"
+            ),
+            other => panic!("expected an Rpc error, got {other:?}"),
+        }
+    }
+
+    /// `safe_short_pubkey` is the one attacker-reachable sanitize site in this file left
+    /// char-capped ON PURPOSE, so the reason is measured here rather than argued in a comment.
+    ///
+    /// `short_pubkey` bounds its output to 17 CHARACTERS on both branches, which is at most 68
+    /// UTF-8 bytes — the field is byte-bounded by construction even though nothing counts bytes.
+    /// Capping the RESULT would eat the 8-character tail that is the anti-vanity-grind property;
+    /// capping the INPUT would save at most 24 bytes on a field already inside the report ceiling
+    /// the multibyte flood test asserts.
+    #[test]
+    fn report_sender_is_byte_bounded_by_short_pubkey_without_a_byte_cap() {
+        // The worst case is the pass-through branch: exactly 17 astral codepoints, which
+        // `short_pubkey` returns whole because it is already short enough to shorten.
+        let seventeen = ASTRAL.repeat(17);
+        let out = safe_short_pubkey(&seventeen);
+        assert_eq!(
+            out.chars().count(),
+            17,
+            "the pass-through branch was not taken"
+        );
+        assert_eq!(out.len(), 68, "17 codepoints at 4 bytes is the worst case");
+
+        // The shortening branch is strictly smaller, and a 4 KB flood cannot escape either.
+        let flood = ASTRAL.repeat(2000);
+        let shortened = safe_short_pubkey(&flood);
+        assert!(
+            !shortened.is_empty(),
+            "the sender capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            shortened.chars().count() <= 17,
+            "short_pubkey no longer bounds to 17 chars, so this field needs a byte cap after all: \
+             {} chars",
+            shortened.chars().count()
+        );
+        assert!(
+            shortened.len() <= 68,
+            "sender rendered {} bytes, over the 68-byte structural ceiling",
+            shortened.len()
+        );
+        eprintln!(
+            "MEASURED payment-watch sender ceiling: pass-through {} B, shortened {} B",
+            out.len(),
+            shortened.len()
+        );
+
+        // And the property a byte cap on the RESULT would have destroyed: a real pubkey keeps its
+        // full 8-character tail.
+        let real = safe_short_pubkey(SENDER);
+        assert_eq!(real, short_pubkey(SENDER));
+        assert!(
+            real.ends_with(&SENDER[SENDER.len() - 8..]),
+            "the 8-char tail was truncated; that width is the anti-grind property"
+        );
     }
 
     #[test]
