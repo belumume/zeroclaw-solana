@@ -73,6 +73,9 @@ SELFCHECK_URL = os.environ.get(
 )
 HEALTH_URL = os.environ.get("SHOP_HEALTH_URL", "https://x402.perfpilot.dev/health")
 PAY_URL = os.environ.get("SHOP_PAY_URL", "https://zeroclaw-shop-pay.pages.dev/")
+PROXY_URL = os.environ.get(
+    "SETTLEMENT_PROXY_URL", "https://zeroclaw-rpc-proxy.cf-eeyw6.workers.dev"
+)
 PAGES_URL = os.environ.get(
     "PAGES_ROOT_URL", "https://belumume.github.io/zeroclaw-solana/"
 )
@@ -322,6 +325,116 @@ def capture_price(result, outdir):
     return path
 
 
+def currency_report():
+    """Is each deployed surface CURRENT? A different question from whether it is UP.
+
+    Every other check here is liveness: a status code, a content type, a body that exists. None can
+    tell a fresh deploy from one months behind, because a stale artifact answers 200 exactly like a
+    current one. Measured 2026-08-19: this pre-flight returned GO with 10 green while the pay page
+    was missing the entire double-payment fix and the settlement Worker was a commit behind, and
+    neither appeared anywhere in the table.
+
+    STRICTLY ADVISORY. It never touches the exit code, and its caller wraps it, because a deploy one
+    commit behind is worth knowing on the morning of a demo and is not a reason to refuse to run
+    one. Drift is a decision, not a failure.
+
+    Compared against origin/main rather than the working tree ON PURPOSE: a branch checkout is ahead
+    of every deploy by construction, so comparing against HEAD would report drift on every ordinary
+    working day, and a check that is always red gets ignored.
+
+    CONTROLS, because a checker that can only report one verdict is decorative. The pay-page half is
+    proven in BOTH directions: against the Cloudflare deploy it reads BEHIND with delta +2,617 and
+    the fix ABSENT, and against the GitHub Pages copy, which matches main exactly, it reads CURRENT
+    with delta +0 and the fix present. Point SHOP_PAY_URL at either to re-run that.
+
+    THE WORKER HALF HAS NO POSITIVE CONTROL YET, stated rather than glossed: no deployment carrying
+    that header exists, so it has only ever been observed returning BEHIND, and a bug that made it
+    ALWAYS say BEHIND would be indistinguishable today. It earns its control the moment the Worker
+    is deployed. Both halves are proven on the transport path: an unresolvable host yields COULD NOT
+    CHECK rather than a false BEHIND, which is the failure that would otherwise read as drift.
+    """
+    import subprocess
+
+    rows = []
+    blob = subprocess.run(
+        ["git", "show", "origin/main:webshop-pay/index.html"],
+        capture_output=True,
+        cwd=str(ROOT),
+    ).stdout
+    try:
+        _, _, body = fetch_once(PAY_URL, "GET", True)
+    except OSError as e:
+        rows.append(
+            ("pay page", "COULD NOT CHECK", type(e).__name__ + ", nothing compared")
+        )
+    else:
+        if not blob:
+            rows.append(
+                (
+                    "pay page",
+                    "COULD NOT CHECK",
+                    "origin/main blob unreadable; git fetch",
+                )
+            )
+        else:
+            fix = b"SETTLEMENT_PROXY" in body
+            delta = len(blob) - len(body)
+            rows.append(
+                (
+                    "pay page",
+                    "CURRENT" if (fix and delta == 0) else "BEHIND main",
+                    f"served {len(body):,} B vs main {len(blob):,} B (delta {delta:+,}); "
+                    f"double-payment fix {'present' if fix else 'ABSENT'}",
+                )
+            )
+    try:
+        req = urllib.request.Request(
+            PROXY_URL,
+            data=b'{"jsonrpc":"2.0","id":1,"method":"getSignaturesForAddress",'
+            b'"params":["11111111111111111111111111111112",{"limit":1}]}',
+            method="POST",
+            headers={"Content-Type": "application/json", "User-Agent": UA},
+        )
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            hdrs = r.headers
+    except OSError as e:
+        rows.append(("settlement worker", "COULD NOT CHECK", type(e).__name__))
+    else:
+        # Unconditional in the current cors(), so its absence dates the deploy rather than depending
+        # on which path served the request. x-zc-origin-seen is NOT a discriminator: it predates
+        # this and ships on main too, so a check keyed on it reads CURRENT against a stale Worker.
+        has = hdrs.get("access-control-expose-headers") is not None
+        rows.append(
+            (
+                "settlement worker",
+                "CURRENT" if has else "BEHIND",
+                "access-control-expose-headers "
+                + (
+                    "present"
+                    if has
+                    else "ABSENT, so the deploy predates the five-defect fix"
+                ),
+            )
+        )
+
+    width = max(len(n) for n, _, _ in rows)
+    print("\ncurrency (advisory, never gates):")
+    for name, state, note in rows:
+        print(f"  {name:<{width}}  {state:<16} {note}")
+    # The denominator is the CHECKED count, not the row count. "0 of 2 behind" printed when both
+    # rows are COULD NOT CHECK is a reassuring zero from a check that never ran, which is precisely
+    # the failure this block exists to catch, so it must not be reproduced by the block itself.
+    behind = [n for n, st, _ in rows if st.startswith("BEHIND")]
+    unknown = [n for n, st, _ in rows if st.startswith("COULD NOT")]
+    checked = len(rows) - len(unknown)
+    summary = f"  {len(behind)} of {checked} CHECKED surface(s) behind main"
+    if behind:
+        summary += ": " + ", ".join(behind)
+    if unknown:
+        summary += f"; {len(unknown)} NOT MEASURED ({', '.join(unknown)}) -- not the same as current"
+    print(summary)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Pre-flight for the live demo.")
     ap.add_argument(
@@ -430,6 +543,12 @@ def main():
     total = sum(r.seconds for r in results)
     print("-" * (width + 60))
     print(f"{'total':<{width}}  {'':<14} {total:6.1f}s")
+
+    # Advisory only, and defended so a bug in it can never change a go/no-go answer.
+    try:
+        currency_report()
+    except Exception as exc:  # noqa: BLE001 - advisory must never gate the verdict
+        print(f"\ncurrency: COULD NOT CHECK ({type(exc).__name__}: {exc})")
 
     print(f"\ncapture: {capture_note}")
     for name, why in sorted(NOT_RUN.items()):
