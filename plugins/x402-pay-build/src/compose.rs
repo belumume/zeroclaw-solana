@@ -25,7 +25,38 @@
 //! other side converts back and refuses anything not exactly representable, so the round trip is
 //! checked at both ends.
 
-use crate::pay::AuthorisedPayment;
+use crate::pay::{AuthorisedPayment, DESCRIPTION_TOTAL_MAX, MEMO_MAX_BYTES};
+
+/// Longest UI amount `atomic_to_ui` can emit: `u64::MAX` (20 digits) plus a decimal point.
+const AMOUNT_MAX: usize = 21;
+/// Longest atomic amount the summary quotes: `u64::MAX`.
+const ATOMIC_MAX: usize = 20;
+/// `usize::MAX` on a 64-bit target.
+const TIER_INDEX_MAX: usize = 20;
+/// `atomic_to_ui` refuses above 18, so two digits.
+const DECIMALS_MAX: usize = 2;
+/// A 32-byte pubkey base58-encodes to at most 44 characters, all ASCII.
+const BASE58_PUBKEY_MAX: usize = 44;
+/// The literal prose and JSON scaffolding in [`render_output`], every interpolated field
+/// removed. Pinned by `the_published_ceiling_is_derived_from_the_prose_it_describes`, so a
+/// reworded summary fails that test rather than silently invalidating the ceiling below.
+const OUTPUT_FIXED: usize = 613;
+
+/// The published BYTE ceiling for the whole tool output.
+///
+/// Derived from its parts rather than read off one fixture. The addresses appear five times
+/// between the summary and the JSON, the memo and the UI amount twice each, and the seller's
+/// description once. A number measured from an ASCII fixture is a ceiling for the single
+/// encoding that cannot exceed it, which is why every attacker-influenced field above is capped
+/// in BYTES at its source.
+pub const OUTPUT_MAX: usize = OUTPUT_FIXED
+    + TIER_INDEX_MAX
+    + AMOUNT_MAX * 2
+    + ATOMIC_MAX
+    + DECIMALS_MAX
+    + BASE58_PUBKEY_MAX * 5
+    + MEMO_MAX_BYTES * 2
+    + DESCRIPTION_TOTAL_MAX;
 
 /// The exact argument object for the `allowance_spend_build` tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,14 +291,58 @@ mod tests {
         };
         let a = compose(&p, 0).unwrap();
         let out = render_output(&p, &a, 0);
-        // Measured at 1280 bytes. The ceiling is set from that measurement with headroom for a
-        // wording change, not the other way round: a bound picked first and measured second is a
-        // bound that was never tested against the real output.
+        // This fixture CONSTRUCTS its payment, so `check_tier` — the only place the description
+        // cap runs — never executes here and this test cannot detect a weakened cap. Its ASCII
+        // description is also a worst case for the 1-byte encoding only.
+        // `pay::tests::the_worst_case_output_is_bounded_under_multibyte_codepoints` is the
+        // sibling that drives the real cap with 4-byte codepoints; this one keeps the
+        // control-character assertion and the config-derived ceilings.
         println!("MEASURED worst-case output: {} bytes", out.len());
-        assert!(out.len() < 1400, "{} bytes", out.len());
+        assert!(
+            out.len() <= OUTPUT_MAX,
+            "{} bytes, over the published {OUTPUT_MAX}-byte ceiling",
+            out.len()
+        );
         assert!(
             !out.chars().any(|c| c.is_control() && c != '\n'),
             "control character in output"
+        );
+    }
+
+    /// The control on [`OUTPUT_MAX`]'s derivation. The constant is a sum of parts and one part
+    /// is prose a reword would change, so the prose is measured here: a reworded summary fails
+    /// THIS test, which names the cause, instead of leaving a published ceiling quietly wrong.
+    #[test]
+    fn the_published_ceiling_is_derived_from_the_prose_it_describes() {
+        let p = AuthorisedPayment {
+            amount: 1,
+            receiver: "R".repeat(7),
+            mint: "N".repeat(11),
+            delegation: "D".repeat(13),
+            memo: "m".repeat(17),
+            tier_index: 3,
+            description: "d".repeat(19),
+        };
+        let decimals = 0u8;
+        let a = compose(&p, decimals).unwrap();
+        let out = render_output(&p, &a, decimals);
+        // Read off the values rather than restated as literals, so a fixture edit cannot leave
+        // the arithmetic describing a payment that is no longer there.
+        let interpolated = p.tier_index.to_string().len()
+            + a.amount.len() * 2 // the UI amount: in the summary, and again in the JSON
+            + p.amount.to_string().len()
+            + decimals.to_string().len()
+            + a.receiver.len() * 2
+            + p.mint.len()
+            + a.delegation.len() * 2
+            + a.memo.len() * 2
+            + p.description.len();
+        assert_eq!(
+            out.len() - interpolated,
+            OUTPUT_FIXED,
+            "render_output's fixed prose and JSON scaffolding is {} bytes, not the \
+             {OUTPUT_FIXED} OUTPUT_MAX is derived from; update OUTPUT_FIXED",
+            out.len() - interpolated
         );
     }
 
