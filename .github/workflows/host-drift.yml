@@ -15,6 +15,14 @@ name: host-drift
 # Separate from ci.yml on purpose: a red here means the OUTSIDE WORLD moved, not that
 # our code broke, and those two signals should never share a badge.
 
+# Least privilege, declared here rather than inherited. Without this block the token's scope comes
+# from the repo-level "default workflow permissions" setting, which is currently read -- so this was
+# safe by a checkbox rather than by anything in the file. Flipping that default to read-and-write
+# would silently hand a write token to a workflow that runs third-party actions, and nothing in the
+# diff would show it. Declaring it makes the grant reviewable.
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: "41 5 * * *"
@@ -32,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # HEAD, not the pinned commit. Pinning is what QUICKSTART documents for
       # reproduction; the point here is to notice the day upstream moves.
@@ -44,7 +52,7 @@ jobs:
       - name: Install the wasm target
         run: rustup target add wasm32-wasip2
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       # The check refuses a COMPATIBLE verdict while any plugin is unbuilt, so every one
       # must exist before it can say anything meaningful.
@@ -78,6 +86,36 @@ jobs:
         env:
           ZC_SKIP_HOST_BINARY: "1"
         run: ./scripts/check-host-compat.sh /tmp/zeroclaw-host
+
+      # A SECOND upstream dependency, and unlike the WIT it is a SECURITY one.
+      #
+      # Every funds-touching plugin here reads its receiver, mint and spend cap from `__config`
+      # and cross-checks a remote 402 challenge against them. `__config` is a normal serde field,
+      # so `deny_unknown_fields` admits it rather than excluding it: if a model could supply that
+      # section, it would be checking a challenge against values it chose itself, and the payee
+      # binding would be decorative. An audit rated exactly that a HIGH.
+      #
+      # It does not hold, because the HOST strips a caller-supplied section before injecting the
+      # operator's. That is upstream code we do not control, it is the sole thing standing between
+      # a prompt-injected agent and an arbitrary payee, and no plugin can defend itself against
+      # its removal. The WIT arrived out of parity three times; this is the same class with a
+      # worse blast radius, so it gets watched rather than trusted.
+      - name: The host still strips a caller-supplied __config
+        run: |
+          set -euo pipefail
+          F=/tmp/zeroclaw-host/crates/zeroclaw-plugins/src/runtime.rs
+          test -f "$F" || { echo "::error::$F is gone; the injection point moved and this check is blind"; exit 1; }
+          # Assert on the CODE, not the comment beside it: a docstring can keep promising this
+          # after the line is deleted.
+          grep -q 'obj\.remove("__config")' "$F" || {
+            echo "::error::upstream no longer strips a caller-supplied __config in inject_config."
+            echo "::error::A model that can set that section chooses its own payee. Read $F before shipping anything that pays."
+            exit 1
+          }
+          # CONTROL: prove the grep can miss, or a pass says only that the file exists.
+          grep -q 'obj\.remove("__definitely_not_a_real_key")' "$F" \
+            && { echo "::error::control matched an absent string; this grep proves nothing"; exit 1; } || true
+          echo "ok    upstream still strips caller-supplied __config (control fired correctly)"
 
       # The HEAD check above answers "did upstream move." It does NOT answer "does the
       # reproduction we published still work," and those come apart precisely here: the

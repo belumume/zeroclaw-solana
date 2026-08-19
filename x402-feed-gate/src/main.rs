@@ -25,7 +25,10 @@
 //!                        `resource` object (default http://localhost:$PORT/reading)
 //!   X402_PORT            listen port (default 4577)
 //!   X402_PRICE_SINGLE    atomic units for one reading (default 1000000 = 1 USDC)
-//!   X402_PRICE_DAYPASS   atomic units for a day pass (default 5000000)
+//!   X402_PRICE_DAYPASS   accepted-for-cached-clients only (default 5000000). Read and
+//!                        honoured by verify_x_payment, but NOT advertised in the menu,
+//!                        because the tier it named was never granted. Setting it changes
+//!                        what an old client may pay, not what any client is offered.
 //!   X402_DAILY_CAP       per-payer atomic-unit daily cap (default 20000000)
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1277,8 +1280,18 @@ fn handle_reading<T: RpcTransport, S: RpcTransport>(
 
 /// Simulate then broadcast then confirm the client's payment transaction.
 fn settle<T: RpcTransport>(rpc: &SolanaRpc<T>, v: &VerifiedPayment) -> Result<String, String> {
-    if let Ok(Some(sim_err)) = rpc.simulate_transaction(&v.raw_tx) {
-        return Err(format!("simulation failed: {sim_err}"));
+    // Match the Err arm EXPLICITLY rather than letting `if let Ok(..)` swallow it. The old form
+    // discarded a transport failure, so an RPC hiccup skipped the simulation gate entirely and the
+    // transaction went straight to send. Send-preflight still catches it, which is why this was
+    // defense-in-depth rather than a hole, but a gate that silently does not run on a bad day is
+    // the shape this repo keeps finding: it reads as coverage and is not.
+    match rpc.simulate_transaction(&v.raw_tx) {
+        Ok(Some(sim_err)) => return Err(format!("simulation failed: {sim_err}")),
+        Ok(None) => {}
+        // Not fatal: preflight on send re-runs the same check against the same node, so refusing
+        // here would turn a transient RPC blip into a refused payment the buyer already made.
+        // Logged rather than dropped, so a run where the gate did not execute is legible.
+        Err(e) => eprintln!("  simulate unavailable ({e:?}); relying on send-preflight"),
     }
     let sig = rpc
         .send_transaction(&v.raw_tx)

@@ -34,6 +34,13 @@ pub enum DecodeError {
     AddressTableLookupsUnsupported,
     /// Trailing bytes remained after a complete parse.
     TrailingBytes(usize),
+    /// The three message-header bytes disagree with the rest of the message.
+    ///
+    /// Solana's own `Message::sanitize()` enforces these, and a decoder that does
+    /// not is unsound for any caller asking "did this key sign?": the header is
+    /// what defines the signer prefix of `account_keys`, so an unvalidated header
+    /// lets crafted bytes claim signers whose signatures are not present.
+    MalformedHeader(&'static str),
 }
 
 struct Cursor<'a> {
@@ -151,6 +158,39 @@ pub fn decode_transaction(bytes: &[u8]) -> Result<DecodedTransaction, DecodeErro
         return Err(DecodeError::TrailingBytes(c.remaining()));
     }
 
+    // Header invariants, mirroring solana-sdk's `Message::sanitize()`. Until these hold, the
+    // signer prefix of `account_keys` is not backed by the signature vector, so ANY signer
+    // question answered from this message is answerable with attacker-chosen bytes. The
+    // signer check in `token::find_payment` depends on this running first.
+    let req = num_required_signatures as usize;
+    if signatures.len() != req {
+        return Err(DecodeError::MalformedHeader(
+            "signature count does not equal num_required_signatures",
+        ));
+    }
+    if req > account_keys.len() {
+        return Err(DecodeError::MalformedHeader(
+            "num_required_signatures exceeds the account-key count",
+        ));
+    }
+    // No `num_required_signatures != 0` carve-out. Real Solana rejects a zero here outright,
+    // because the fee payer is always a required signer, and the plain `>=` gives that for free:
+    // 0 >= 0 refuses. An earlier draft added the exception defensively and it was a DEVIATION from
+    // the parity this function claims, which review caught. Not exploitable either way -- with
+    // zero required signatures `is_signer` slices `account_keys[..0]` and nothing can be reported
+    // as a signer, so `find_payment` would refuse every transfer rather than be fooled -- but a
+    // docstring claiming `Message::sanitize` parity should not have a silent exception in it.
+    if num_readonly_signed >= num_required_signatures {
+        return Err(DecodeError::MalformedHeader(
+            "num_readonly_signed is not less than num_required_signatures, or no signer is required",
+        ));
+    }
+    if req + num_readonly_unsigned as usize > account_keys.len() {
+        return Err(DecodeError::MalformedHeader(
+            "signed plus readonly-unsigned exceeds the account-key count",
+        ));
+    }
+
     Ok(DecodedTransaction {
         signatures,
         message: CompiledMessage {
@@ -175,6 +215,25 @@ impl DecodedTransaction {
     pub fn account_of(&self, ix: &CompiledInstruction, n: usize) -> Option<&Pubkey> {
         let idx = *ix.account_indexes.get(n)? as usize;
         self.message.account_keys.get(idx)
+    }
+
+    /// Whether `key` is in the message's signer prefix.
+    ///
+    /// Solana puts every required signer first in `account_keys`, so membership in the
+    /// first `num_required_signatures` entries IS the signer set. This is only sound
+    /// because `decode_transaction` refuses a message whose header disagrees with its
+    /// signature vector; without that check a crafted message could name any key as a
+    /// signer while supplying no signature for it.
+    ///
+    /// Note this answers "the message DECLARES this key as a signer", which is the right
+    /// question for a payment verifier: the runtime will reject the transaction outright
+    /// if a declared signature is absent or invalid.
+    pub fn is_signer(&self, key: &Pubkey) -> bool {
+        let n = self.message.num_required_signatures as usize;
+        self.message
+            .account_keys
+            .get(..n)
+            .is_some_and(|signers| signers.contains(key))
     }
 }
 
@@ -308,6 +367,80 @@ mod tests {
         assert!(matches!(
             decode_transaction(&bytes),
             Err(DecodeError::BadLength) | Err(DecodeError::Truncated)
+        ));
+    }
+
+    /// Build a valid legacy tx, then hand-edit ONE header byte. The header sits at a fixed
+    /// offset: 1 shortvec byte for the signature count, 64 signature bytes, then the three
+    /// header bytes. Editing bytes rather than using `compile` is the point -- `compile`
+    /// cannot produce these, and an attacker is not using `compile`.
+    fn tx_with_header_byte(index: usize, value: u8) -> Vec<u8> {
+        let (payer_seed, payer) = kp(11);
+        let (_, dest) = kp(12);
+        let msg = compile(&payer, &[system_transfer(&payer, &dest, 1)], &[3u8; 32]).unwrap();
+        let body = msg.serialize_legacy();
+        let sig = sign_message(&payer_seed, &body);
+        let mut tx = serialize_transaction(&[sig], &body);
+        tx[1 + 64 + index] = value;
+        tx
+    }
+
+    /// CONTROL. The untouched fixture must still decode, or the three must-fire cases below
+    /// prove only that the builder is broken.
+    #[test]
+    fn well_formed_header_still_decodes() {
+        let (payer_seed, payer) = kp(11);
+        let (_, dest) = kp(12);
+        let msg = compile(&payer, &[system_transfer(&payer, &dest, 1)], &[3u8; 32]).unwrap();
+        let body = msg.serialize_legacy();
+        let sig = sign_message(&payer_seed, &body);
+        let tx = serialize_transaction(&[sig], &body);
+        assert!(decode_transaction(&tx).is_ok());
+    }
+
+    /// Claiming more signers than there are signatures is how a crafted message names a
+    /// victim as a signer without producing their signature. `is_signer` is unsound until
+    /// this is refused, so this case guards the token authority check too.
+    #[test]
+    fn header_claiming_more_signers_than_signatures_is_refused() {
+        // 5 required signatures, 1 supplied. Stay under 0x80 or the v0 sniff eats it first.
+        let tx = tx_with_header_byte(0, 5);
+        assert!(matches!(
+            decode_transaction(&tx),
+            Err(DecodeError::MalformedHeader(_))
+        ));
+    }
+
+    /// num_readonly_signed must be strictly less than num_required_signatures; otherwise the
+    /// writable-signer set is empty or negative-sized and the fee payer is not writable.
+    #[test]
+    fn header_readonly_signed_not_less_than_required_is_refused() {
+        let tx = tx_with_header_byte(1, 9);
+        assert!(matches!(
+            decode_transaction(&tx),
+            Err(DecodeError::MalformedHeader(_))
+        ));
+    }
+
+    /// Signed plus readonly-unsigned must fit inside the account-key vector.
+    #[test]
+    fn header_readonly_unsigned_overrunning_keys_is_refused() {
+        let tx = tx_with_header_byte(2, 120);
+        assert!(matches!(
+            decode_transaction(&tx),
+            Err(DecodeError::MalformedHeader(_))
+        ));
+    }
+
+    /// A header claiming ZERO required signatures is refused, matching Solana: the fee payer is
+    /// always a required signer, so there is no valid transaction with none. Added because review
+    /// found an explicit carve-out here that deviated from this decoder's stated parity claim.
+    #[test]
+    fn header_requiring_no_signatures_at_all_is_refused() {
+        let tx = tx_with_header_byte(0, 0);
+        assert!(matches!(
+            decode_transaction(&tx),
+            Err(DecodeError::MalformedHeader(_))
         ));
     }
 }

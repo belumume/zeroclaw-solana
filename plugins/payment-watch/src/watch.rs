@@ -139,8 +139,15 @@ pub struct ValidatedArgs {
 /// Parse + validate the raw args JSON. Every rejection happens here, before the
 /// shim opens any connection.
 pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
-    let args: ExecuteArgs =
-        serde_json::from_str(args_json).map_err(|e| format!("invalid arguments: {e}"))?;
+    let args: ExecuteArgs = serde_json::from_str(args_json).map_err(|e| {
+        // serde's invalid_type / missing-field / unknown-field errors embed the
+        // offending value verbatim; cap + strip it so an attacker cannot smuggle
+        // an unbounded or injection-framed string back through the error path.
+        format!(
+            "invalid arguments: {}",
+            sanitize_onchain(&e.to_string(), 120).text
+        )
+    })?;
 
     // Watched address: a real base58 pubkey, or reject with a sanitized echo so
     // a prompt-injected value cannot reflect hidden framing / a flood back out.
@@ -213,7 +220,10 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
     let rpc_url = match cfg.rpc_url {
         Some(url) => {
             if !url.starts_with("https://") {
-                return Err(format!("rpc_url must be https, got: {url}"));
+                return Err(format!(
+                    "rpc_url must be https, got: {}",
+                    sanitize_onchain(&url, 64).text
+                ));
             }
             url
         }
@@ -269,16 +279,24 @@ fn validate_corroborating(list: Option<Vec<String>>, primary: &str) -> Result<Ve
     let mut seen: Vec<String> = vec![primary_host.clone()];
     for url in list {
         if !url.starts_with("https://") {
-            return Err(format!("corroborating_rpc_urls must be https, got: {url}"));
+            return Err(format!(
+                "corroborating_rpc_urls must be https, got: {}",
+                sanitize_onchain(&url, 64).text
+            ));
         }
         let host = endpoint_host(&url);
         if host.is_empty() {
-            return Err(format!("corroborating_rpc_urls entry has no host: {url}"));
+            return Err(format!(
+                "corroborating_rpc_urls entry has no host: {}",
+                sanitize_onchain(&url, 64).text
+            ));
         }
         if host == primary_host {
             return Err(format!(
-                "corroborating_rpc_urls entry {url} shares the primary's host {primary_host}; \
-                 the same party answering twice is not corroboration"
+                "corroborating_rpc_urls entry {} shares the primary's host {}; \
+                 the same party answering twice is not corroboration",
+                sanitize_onchain(&url, 64).text,
+                sanitize_onchain(&primary_host, 64).text
             ));
         }
         if seen.contains(&host) {
@@ -1209,6 +1227,104 @@ mod tests {
         ))
         .unwrap_err();
         assert!(e.contains("must be https"));
+    }
+
+    /// U+E0049, TAG LATIN CAPITAL LETTER I: general category `Cf`, renders as
+    /// nothing, and the Tag block can encode a whole ASCII instruction
+    /// invisibly. `char::is_control()` does NOT cover it; `sanitize_onchain`
+    /// does. Written as a Rust escape so it is visible in source.
+    const TAG_CHAR: char = '\u{E0049}';
+
+    #[test]
+    fn hostile_rpc_url_is_sanitized_out_of_its_own_rejection() {
+        // The https check rejects the override -- and the rejection ECHOES it,
+        // so the error string is itself a response path into the agent's
+        // context. Neither the invisible Tag character nor the 4 KB flood
+        // behind it may survive that echo.
+        let hostile = format!("http://evil.example/{}{TAG_CHAR}", "A".repeat(4096));
+        let e = parse_and_validate(&format!(
+            r#"{{"address":"{WALLET}","expected_amount":1,"__config":{{"rpc_url":"{hostile}"}}}}"#
+        ))
+        .expect_err("a non-https rpc_url must be refused");
+        assert!(e.contains("must be https"), "unexpected error: {e}");
+        assert!(
+            !e.contains(TAG_CHAR),
+            "an invisible Tag-block character survived into the rpc_url rejection"
+        );
+        assert!(
+            e.chars().count() <= 128,
+            "the 4 KB rpc_url reached the agent past its 64-char cap: {} chars",
+            e.chars().count()
+        );
+    }
+
+    #[test]
+    fn hostile_corroborating_url_is_sanitized_out_of_its_own_rejection() {
+        // Same echo, three more rejection paths in `validate_corroborating`:
+        // non-https, no host, and same-host-as-primary. All three name the URL.
+        let hostile = format!("http://evil.example/{}{TAG_CHAR}", "A".repeat(4096));
+        let e = args_with_corroborators(1.0, &[hostile.as_str()])
+            .expect_err("a non-https corroborating endpoint must be refused");
+        assert!(e.contains("must be https"), "unexpected error: {e}");
+        assert!(
+            !e.contains(TAG_CHAR),
+            "an invisible Tag-block character survived into the corroborator rejection"
+        );
+        assert!(
+            e.chars().count() <= 128,
+            "the 4 KB corroborating url flooded the agent: {} chars",
+            e.chars().count()
+        );
+
+        // The no-host branch: https scheme, nothing after it but the payload.
+        let hostless = format!("https:///{}{TAG_CHAR}", "A".repeat(4096));
+        let e = args_with_corroborators(1.0, &[hostless.as_str()])
+            .expect_err("a corroborating endpoint with no host must be refused");
+        assert!(e.contains("no host"), "unexpected error: {e}");
+        assert!(
+            !e.contains(TAG_CHAR),
+            "Tag character survived the no-host echo"
+        );
+        assert!(
+            e.chars().count() <= 128,
+            "the 4 KB hostless url flooded the agent: {} chars",
+            e.chars().count()
+        );
+
+        // The same-host branch echoes the corroborator AND the primary's host,
+        // and the primary is only https-checked, never sanitized -- so a Tag
+        // character in the AUTHORITY reaches this error through `primary_host`.
+        let host = format!("evil{TAG_CHAR}.example");
+        let e = parse_and_validate(&format!(
+            r#"{{"address":"{WALLET}","expected_amount":1,"__config":{{"rpc_url":"https://{host}/a","corroborating_rpc_urls":["https://{host}/b"]}}}}"#
+        ))
+        .expect_err("a corroborator sharing the primary's host must be refused");
+        assert!(
+            e.contains("shares the primary's host"),
+            "unexpected error: {e}"
+        );
+        assert!(
+            !e.contains(TAG_CHAR),
+            "a Tag-block character survived into the same-host rejection"
+        );
+    }
+
+    #[test]
+    fn hostile_serde_error_value_is_capped_in_the_rejection() {
+        // serde's `Unexpected::Str` embeds the offending value verbatim, so a
+        // type-mismatched field is an unbounded write into the agent's context.
+        // `__config` is typed as a struct; hand it a 40 KB string instead.
+        let flood = "A".repeat(40_000);
+        let e = parse_and_validate(&format!(
+            r#"{{"address":"{WALLET}","expected_amount":1,"__config":"{flood}"}}"#
+        ))
+        .expect_err("a non-object __config must be refused");
+        assert!(e.contains("invalid arguments"), "unexpected error: {e}");
+        assert!(
+            e.chars().count() <= 160,
+            "the 40 KB serde value flooded the agent past its 120-char cap: {} chars",
+            e.chars().count()
+        );
     }
 
     #[test]

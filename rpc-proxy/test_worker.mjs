@@ -15,12 +15,12 @@
 //
 // Run: node rpc-proxy/test_worker.mjs
 
-import worker from "./src/index.js";
+import worker, { secondParamShape } from "./src/index.js";
 
 const REF_SETTLED = "9TNKoCvVow1ktRgMMapJ9d9GWhgTYCA9i3r3MZ71FUT2"; // settled, pruned on the fast endpoint
 const REF_UNPAID = "5Zzguz4NsSRFxGkHfM4KmJTNVPMJ2P3jFa2y8bTHY4kW"; // valid pubkey, zero history
 const ORIGIN = "https://belumume.github.io";
-const MIN_OFFLINE = 10; // measured; raise when an offline case is added or this under-asserts
+const MIN_OFFLINE = 14; // measured; raise when an offline case is added or this under-asserts
 
 let pass = 0,
   fail = 0,
@@ -79,6 +79,13 @@ const ask = (e, body, origin = ORIGIN) =>
 
 const sigsReq = (ref) => ({ jsonrpc: "2.0", id: 1, method: "getSignaturesForAddress", params: [ref] });
 
+// The cache key is derived by the WORKER, not restated here. Four keys in this suite were written
+// out by hand; when the key gained a shape suffix to stop cross-encoding poisoning, every one of
+// them silently stopped matching, and `!store.has(staleKey)` reads as PASS. A test that asserts on
+// a key it computes independently will always eventually assert on the wrong key.
+const cacheKey = (method, ref, second) => `${method}:${ref}:${secondParamShape(method, second)}`;
+const sigsKey = (ref) => cacheKey("getSignaturesForAddress", ref, undefined);
+
 console.log("rpc-proxy controls\n");
 
 // ---------- OFFLINE: no network needed, these are the floor ----------------------------------
@@ -101,7 +108,7 @@ console.log("rpc-proxy controls\n");
 
   // A recorded settlement answers with the network hard-broken, which is the durability claim.
   const e4 = env();
-  await e4.SETTLEMENTS.put(`getSignaturesForAddress:${REF_SETTLED}`, JSON.stringify([{ signature: "abc", err: null }]));
+  await e4.SETTLEMENTS.put(sigsKey(REF_SETTLED), JSON.stringify([{ signature: "abc", err: null }]));
   const r4 = await ask(e4, sigsReq(REF_SETTLED));
   check("4  a recorded settlement is served with the network unavailable", r4.json.result?.length === 1);
   offlineScored++;
@@ -110,7 +117,7 @@ console.log("rpc-proxy controls\n");
   // fall through to the network, which is what the throwing stub above caught on the first run.
   const seed = async () => {
     const e = env();
-    await e.SETTLEMENTS.put(`getSignaturesForAddress:${REF_SETTLED}`, JSON.stringify([{ signature: "abc", err: null }]));
+    await e.SETTLEMENTS.put(sigsKey(REF_SETTLED), JSON.stringify([{ signature: "abc", err: null }]));
     return e;
   };
   const r5 = await ask(await seed(), sigsReq(REF_SETTLED), ORIGIN);
@@ -130,6 +137,40 @@ console.log("rpc-proxy controls\n");
   check("6b a REJECTING fetch degrades to an error response rather than crashing", r6b.json.error?.code === -32603);
   offlineScored++;
 
+  // 6e. A REJECTING fetch must NOT put the caught text in a public header. The deep URL carries
+  // the API key in its query string and runtimes commonly echo the URL in a fetch error, so the
+  // only thing that ever kept the key out of x-zc-deep-status was a 40-char slice landing short
+  // of it. Assert a fixed literal, and assert the key itself is absent from every header.
+  globalThis.fetch = async () => {
+    throw new Error("GET https://h/?api-key=SUPERSECRETKEY123 failed");
+  };
+  const r6e = await ask({ ...env(), HELIUS_API_KEY: "SUPERSECRETKEY123" }, sigsReq(REF_UNPAID));
+  const hdrBlob = [...r6e.headers.entries()].map(([k, v]) => `${k}:${v}`).join(" ");
+  check("6e a thrown deep fetch never leaks the caught text into a response header",
+        !hdrBlob.includes("SUPERSECRETKEY123") && !hdrBlob.includes("api-key"), hdrBlob.slice(0, 200));
+  offlineScored++;
+
+  // 6f. CONTROL for 6e: the header must still CARRY a status, or 6e passes on a header that was
+  // simply removed, which would prove nothing.
+  check("6f CONTROL: x-zc-deep-status is still populated, so 6e is not passing on an absent header",
+        (r6e.headers.get("x-zc-deep-status") || "").length > 0, r6e.headers.get("x-zc-deep-status"));
+  offlineScored++;
+
+  // 6g. CACHE POISONING. Two requests whose answers differ in SHAPE must not share a key. Before
+  // the shape suffix, anyone could POST getTransaction with encoding base64, have it stored
+  // permanently under the bare key, and the page's later jsonParsed request would be served the
+  // base64 blob from cache.
+  const b64 = secondParamShape("getTransaction", { encoding: "base64" });
+  const jsp = secondParamShape("getTransaction", { encoding: "jsonParsed" });
+  check("6g two encodings of getTransaction derive DIFFERENT cache keys", b64 !== null && jsp !== null && b64 !== jsp, `${b64} vs ${jsp}`);
+  offlineScored++;
+
+  // 6h. And an unrecognised second-param shape is REFUSED rather than folded into an existing key.
+  const r6h = await ask(env(), { jsonrpc: "2.0", id: 1, method: "getTransaction", params: [REF_SETTLED, { bogusField: 1 }] });
+  check("6h an unrecognised second parameter is refused, not cached under a colliding key",
+        r6h.json.error?.code === -32602, JSON.stringify(r6h.json).slice(0, 140));
+  offlineScored++;
+
   // 6c/6d. THE NEGATIVE MARKER MUST NOT BE REFRESHED ON A SKIPPED ESCALATION. This is the bug the
   // last commit fixed, and review pointed out that nothing would have caught it or a regression
   // back to it -- on a branch whose whole thesis is "make the controls actually run". The KV mock
@@ -144,7 +185,7 @@ console.log("rpc-proxy controls\n");
       return { ok: true, json: async () => ({ jsonrpc: "2.0", id: 1, result: [] }) };
     };
     const e = { ...env(), HELIUS_API_KEY: "test-key-not-a-real-credential" };
-    const negKey = `neg:getSignaturesForAddress:${REF_UNPAID}`;
+    const negKey = `neg:${sigsKey(REF_UNPAID)}`;
 
     await ask(e, sigsReq(REF_UNPAID)); // escalates, writes the marker
     const afterFirst = e.SETTLEMENTS.store.get(negKey);
@@ -196,7 +237,13 @@ if (!reachable || !HELIUS_API_KEY) {
   const r = await ask(e, sigsReq(REF_SETTLED));
   const found = Array.isArray(r.json.result) && r.json.result.length > 0;
   check("8  LIVE: the settlement is found even though the fast endpoint pruned it", found, JSON.stringify(r.json).slice(0, 160));
-  check("9  LIVE: and it was recorded, so it now survives any future pruning", e.SETTLEMENTS.store.size === 1);
+  // Asserts the SETTLEMENT KEY, not the store's size -- the same correction check 10 already
+  // carries. A 60s `neg:` marker also makes size 1, so the size form reported PASS on a run where
+  // nothing durable was recorded and the durability claim was false. The lesson was one line away
+  // and had not been carried back.
+  check("9  LIVE: and it was recorded under the settlement key, so it survives future pruning",
+        e.SETTLEMENTS.store.has(sigsKey(REF_SETTLED)),
+        `keys: ${[...e.SETTLEMENTS.store.keys()].join(", ")}`);
 
   // CONTROL against the same real network: a genuinely unpaid reference must stay unpaid, or the
   // page would refuse a payable link -- the opposite failure, equally bad.
@@ -208,7 +255,7 @@ if (!reachable || !HELIUS_API_KEY) {
   // metered upstream on all ~200 polls of a 20-minute window. A namespaced `neg:` key with a TTL
   // is not a settlement; what must never happen is an empty answer being recorded UNDER THE
   // SETTLEMENT KEY, because that would serve "not paid" forever and rebuild the double-payment bug.
-  const settlementKey = `getSignaturesForAddress:${REF_UNPAID}`;
+  const settlementKey = sigsKey(REF_UNPAID);
   const noSettlementRecorded = !e2.SETTLEMENTS.store.has(settlementKey);
   // And it must STILL read empty on a second call rather than serving anything from the marker.
   const r2b = await ask(e2, sigsReq(REF_UNPAID));

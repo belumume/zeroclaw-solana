@@ -33,6 +33,14 @@ pub struct FoundPayment {
     pub decimals: u8,
     /// Index of the matching instruction within the message.
     pub instruction_index: usize,
+    /// The account that AUTHORISED the transfer: TransferChecked's account index 3, verified above
+    /// to be in the message's signer set.
+    ///
+    /// This is the party whose tokens actually move, and it is independent of the fee payer in
+    /// SVM. A caller metering a per-buyer quota must key on THIS, not on `account_keys[0]`, or a
+    /// buyer behind rotating fee sponsors spends past their own ceiling while every individual
+    /// payment looks correct.
+    pub authority: Pubkey,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +50,14 @@ pub enum PaymentError {
     NoMatchingTransfer,
     /// A matching transfer was found but its amount is below the quote.
     Underpaid { found: u64, required: u64 },
+    /// A transfer of the right mint, destination and amount was found, but the
+    /// account authorising it is not in the message's signer set.
+    ///
+    /// This transaction can never execute — SPL Token requires the authority's
+    /// signature — but a verifier that grants service at VERIFY time, before the
+    /// chain ever sees it, would hand over the goods for free. Reported distinctly
+    /// from `NoMatchingTransfer` so the refusal is legible.
+    AuthorityNotSigner,
 }
 
 /// Parse a single instruction as a `TransferChecked` if it is one, returning
@@ -75,7 +91,16 @@ pub fn parse_transfer_checked(
 /// The caller is responsible for having already verified (a) the transaction's
 /// signatures cover the message, and (b) the fee payer / other instructions are
 /// acceptable. This function makes exactly one claim: "a valid payment of the
-/// right mint, to the right account, of at least the right amount, is present."
+/// right mint, to the right account, of at least the right amount, is present,
+/// authorised by a key this message declares as a signer."
+///
+/// That last clause was ADDED after an audit: the original contract assigned the
+/// caller two duties and the attack satisfied both. A payload moving a VICTIM's
+/// USDC into the merchant ATA, with the victim present as a non-signer and the
+/// attacker signing only as fee payer, was accepted here. It can never execute on
+/// chain, so nobody is robbed — but an x402 facilitator that verifies then settles
+/// grants the resource at verify time, so the attacker gets the data for free. The
+/// discriminating field was decoded and simply never read.
 pub fn find_payment(
     tx: &DecodedTransaction,
     mint: &Pubkey,
@@ -83,15 +108,26 @@ pub fn find_payment(
     min_amount: u64,
 ) -> Result<FoundPayment, PaymentError> {
     let mut best_underpaid: Option<u64> = None;
+    let mut saw_unsigned_authority = false;
 
     for (i, ix) in tx.message.instructions.iter().enumerate() {
         let Some((amount, decimals)) = parse_transfer_checked(tx, ix) else {
             continue;
         };
-        // account[1] = mint, account[2] = destination
+        // account[1] = mint, account[2] = destination, account[3] = authority
         let ix_mint = tx.account_of(ix, 1);
         let ix_dest = tx.account_of(ix, 2);
         if ix_mint != Some(mint) || ix_dest != Some(expected_destination) {
+            continue;
+        }
+        // The authority is the account whose tokens actually move. SPL Token will not
+        // execute without its signature, so a transfer it did not authorise is worthless
+        // on chain and must not be accepted here either.
+        let Some(authority) = tx.account_of(ix, 3) else {
+            continue;
+        };
+        if !tx.is_signer(authority) {
+            saw_unsigned_authority = true;
             continue;
         }
         if amount >= min_amount {
@@ -101,6 +137,7 @@ pub fn find_payment(
                 amount,
                 decimals,
                 instruction_index: i,
+                authority: *authority,
             });
         }
         // Track the closest underpayment so the error is informative.
@@ -112,6 +149,10 @@ pub fn find_payment(
             found,
             required: min_amount,
         }),
+        // Ordered so the more specific refusal wins: an otherwise-perfect transfer whose
+        // authority never signed reports as such rather than as "no transfer found",
+        // which would send an operator looking for the wrong defect.
+        None if saw_unsigned_authority => Err(PaymentError::AuthorityNotSigner),
         None => Err(PaymentError::NoMatchingTransfer),
     }
 }
@@ -288,5 +329,95 @@ mod tests {
         assert!(has_memo(&decoded, &memo_prog, nonce));
         assert!(!has_memo(&decoded, &memo_prog, b"different-nonce"));
         assert!(!has_memo(&decoded, &pk(21), nonce)); // wrong memo program
+    }
+
+    /// Same as `transfer_checked` but the authority is NOT marked as a signer. This is
+    /// the shape an attacker submits: a real-looking transfer of somebody else's tokens.
+    fn transfer_checked_unsigned_authority(
+        source: &Pubkey,
+        mint: &Pubkey,
+        dest: &Pubkey,
+        owner: &Pubkey,
+        amount: u64,
+        decimals: u8,
+    ) -> Instruction {
+        let mut data = vec![TRANSFER_CHECKED_TAG];
+        data.extend_from_slice(&amount.to_le_bytes());
+        data.push(decimals);
+        Instruction {
+            program_id: token_program(),
+            accounts: vec![
+                AccountMeta::writable(*source, false),
+                AccountMeta::readonly(*mint, false),
+                AccountMeta::writable(*dest, false),
+                AccountMeta::readonly(*owner, false), // <- the whole attack
+            ],
+            data,
+        }
+    }
+
+    /// THE ATTACK. An attacker builds a payment moving a VICTIM's USDC to the merchant,
+    /// with the victim present as a non-signer, and signs only as fee payer. The amount,
+    /// mint and destination are all correct. Before the authority check this returned Ok
+    /// and an x402 facilitator would have served the resource for free.
+    #[test]
+    fn authority_that_never_signed_is_refused() {
+        let attacker_seed = [7u8; 32];
+        let attacker = pk(7);
+        let (mint, dest, victim_ata, victim) = (pk(2), pk(3), pk(4), pk(9));
+        let ix =
+            transfer_checked_unsigned_authority(&victim_ata, &mint, &dest, &victim, 5_000_000, 6);
+        let tx = build_tx(&[ix], &attacker_seed, &attacker);
+        let decoded = decode_transaction(&tx).unwrap();
+
+        assert!(
+            !decoded.is_signer(&victim),
+            "fixture is wrong: the victim must NOT be a signer or this proves nothing"
+        );
+        assert_eq!(
+            find_payment(&decoded, &mint, &dest, 5_000_000),
+            Err(PaymentError::AuthorityNotSigner)
+        );
+    }
+
+    /// OVER-CORRECTION CONTROL. A third party CAN legitimately authorise a payment while
+    /// somebody else pays the fee — that is sponsorship, and it must still be accepted.
+    /// Without this case the fix above is indistinguishable from "refuse any authority
+    /// that is not the fee payer", which would break every sponsored payment.
+    #[test]
+    fn third_party_authority_that_signed_is_accepted() {
+        let payer_seed = [1u8; 32];
+        let owner_seed = [5u8; 32];
+        let payer = pk(1);
+        let (mint, dest, src, owner) = (pk(2), pk(3), pk(4), pk(5));
+        // owner marked as a signer, so `compile` puts it in the signer prefix
+        let ix = transfer_checked(&src, &mint, &dest, &owner, 5_000_000, 6);
+        let msg = compile(&payer, &[ix], &[1u8; 32]).unwrap();
+        let body = msg.serialize_legacy();
+
+        // TWO signers now, so TWO signatures. Supplying one is exactly what the new header
+        // check rejects, which is how this fixture failed on its first run: the code was
+        // right and the fixture was malformed. Sign in signer-prefix order rather than
+        // assuming it, so a change in `compile`'s ordering fails loudly here.
+        let n = msg.num_required_signatures as usize;
+        assert_eq!(n, 2, "fixture expects payer + owner as signers");
+        let sigs: Vec<[u8; 64]> = msg.account_keys[..n]
+            .iter()
+            .map(|k| {
+                let seed = if *k == payer {
+                    payer_seed
+                } else if *k == owner {
+                    owner_seed
+                } else {
+                    panic!("unexpected signer in the prefix")
+                };
+                sign_message(&seed, &body)
+            })
+            .collect();
+        let tx = serialize_transaction(&sigs, &body);
+        let decoded = decode_transaction(&tx).unwrap();
+
+        assert!(decoded.is_signer(&owner), "control fixture lost its signer");
+        assert!(find_payment(&decoded, &mint, &dest, 5_000_000).is_ok());
     }
 }

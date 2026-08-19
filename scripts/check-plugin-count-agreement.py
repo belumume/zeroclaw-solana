@@ -51,6 +51,32 @@ earned it, so a claim silenced by a stray word is a claim someone can see was si
 ceiling: in a hard-wrapped document a marker on the neighbouring line does not count, and the
 remedy is to write it in the same sentence, which is the same convention TOTALITY already imposes.
 
+THE OPERATIONAL SCOPE IS THE THIRD, and it closes the same structural hole the always-loaded
+scope closed, in the other direction. That scope reached the gitignored files a SESSION loads;
+this one reaches the gitignored files a HUMAN reads. `notes/` holds the live-demo runbook, read
+aloud off a screen, and `git ls-files` cannot name it, so no derivation built on git could ever
+have included it -- the omission was structural, not an oversight. Measured 2026-08-19: a sweep
+corrected the certifier score across eight surfaces and left that runbook quoting a stale one,
+which is the second occurrence of this shape in this repo (PR #66 was the first).
+
+It is DISCOVERED by glob rather than declared, for the reason the always-loaded scope is derived
+rather than listed: there is no `git ls-files` here to keep a declared list honest, so an omission
+would be invisible in exactly the way the original defect was.
+
+ABSENT IS NOT BROKEN, exactly as for the always-loaded tier. Every clone, CI runner and agent
+worktree lacks `notes/`, so an empty glob reports NOT CHECKED with its denominator and does not
+gate. Returning 2 there would paint every non-operator checkout permanently red, and an always-red
+gate is one people learn to skip.
+
+IT RIDES THE SAME HISTORY-MARKER EXEMPTION as the always-loaded files, and for the same reason: a
+runbook is a dated operational log that preserves superseded and branch-dependent values on
+purpose (its own text already records what `origin/main` prints as against this branch). Gating it
+strictly would eventually redden a TRUE sentence whose only remedy is deleting a true record,
+which is how a gate gets routed around. Stated honestly: no `notes/` claim is exempt today,
+because `notes/` carries no count claim at all right now -- the exemption is reached by the
+always-loaded files, which is where its control lives. The TRACKED scope's strictness is
+unchanged.
+
 Exit 0 they agree, 1 a claim disagrees, 2 could not check. A could-not-check is NOT a pass: a
 pattern that stopped matching, or a surface list that resolved to nothing, would otherwise report
 agreement over an empty scan, which is this repo's most-repeated instrument failure.
@@ -90,6 +116,11 @@ HISTORICAL = {"docs/WHAT-WE-GOT-WRONG.md"}
 # The always-loaded tier's entry point. Everything else in that scope is read out of this file's
 # own `@`-imports, so the scope is a fact about the tree rather than a claim in this script.
 ALWAYS_LOADED_ENTRY = "CLAUDE.local.md"
+
+# The gitignored OPERATIONAL scope: files a human reads, that `git ls-files` structurally cannot
+# name. Discovered from the filesystem, absent in every clone. See the docstring.
+OPERATIONAL_DIR = "notes"
+OPERATIONAL_SUFFIXES = (".md", ".html")
 
 # A history marker exempts an ALWAYS-LOADED claim on the same line, never a tracked one. The
 # tracked scope's behaviour is deliberately unchanged by this widening: loosening it would be a
@@ -259,6 +290,29 @@ def always_loaded(root: Path) -> tuple[list[Path], list[str], bool]:
     return found, problems, True
 
 
+def operational(root: Path) -> tuple[list[Path], bool]:
+    """(paths, directory present) for the gitignored operational scope.
+
+    No "problems" channel, unlike `always_loaded`: there is nothing here that can be declared and
+    then go missing, because the scope IS whatever the glob finds. A present-but-empty directory
+    is therefore not a broken derivation, just a directory with no prose in it, and it reports the
+    same way an absent one does -- with its denominator, so the zero is visible either way.
+    """
+    d = root / OPERATIONAL_DIR
+    if not d.is_dir():
+        return [], False
+    found = sorted(
+        (
+            p
+            for suffix in OPERATIONAL_SUFFIXES
+            for p in d.glob(f"*{suffix}")
+            if p.is_file()
+        ),
+        key=lambda p: p.name,
+    )
+    return found, True
+
+
 def claims_in(text: str) -> list[tuple[int, str, int]]:
     """(line number, matched text, asserted count) for every count claim.
 
@@ -294,6 +348,7 @@ def check(root: Path) -> tuple[int, list[str]]:
     if problems:
         return 2, ["cannot check:"] + [f"  - {p}" for p in problems]
 
+    op_paths, op_present = operational(root)
     al_paths, al_problems, al_present = always_loaded(root)
     if al_problems:
         return (
@@ -335,19 +390,32 @@ def check(root: Path) -> tuple[int, list[str]]:
             "pattern has stopped matching. Reporting agreement over nothing would be a false green."
         ]
 
-    al_total, al_exempt = 0, []
-    for p in al_paths:
+    # ONE loop over both gitignored scopes, deliberately. A second copy of the exemption logic
+    # would duplicate the `if marker is not None:` line that the sibling mutation control anchors
+    # on, and a `replace(..., 1)` against a duplicated anchor mutates one copy while certifying
+    # both. Same reason the scope label is a loop variable rather than two near-identical blocks.
+    gitignored = [(p, "always-loaded") for p in al_paths]
+    gitignored += [(p, "operational") for p in op_paths]
+
+    al_total, op_total, al_exempt, op_exempt = 0, 0, [], []
+    for p, scope in gitignored:
         rel = p.relative_to(root).as_posix()
         try:
             text = p.read_text(encoding="utf-8")
         except Exception as exc:
-            return 2, [f"cannot check: always-loaded {rel} is unreadable ({exc})"]
+            return 2, [f"cannot check: {scope} {rel} is unreadable ({exc})"]
         src = text.splitlines()
         for ln, matched, n in claims_in(text):
-            al_total += 1
+            if scope == "always-loaded":
+                al_total += 1
+            else:
+                op_total += 1
             marker = HISTORY_MARKER.search(re.sub(r"\s+", " ", src[ln - 1]))
             if marker is not None:
-                al_exempt.append(
+                # Keyed by SCOPE, not by which loop pass produced it. Pooling them made the
+                # always-loaded summary claim every exemption and left the operational line
+                # reporting none, which is a zero that does not mean what it looks like.
+                (al_exempt if scope == "always-loaded" else op_exempt).append(
                     f"  {rel}:{ln}  {matched!r} says {n}; not gated, the line calls itself a "
                     f"record ({marker.group(0).lower()!r})"
                 )
@@ -369,6 +437,18 @@ def check(root: Path) -> tuple[int, list[str]]:
             f"always-loaded tier is absent here (it is gitignored, so a clone, a runner and an "
             f"agent worktree all lack it). The verdict below covers the tracked surfaces only."
         )
+    if op_present:
+        lines.append(
+            f"operational: {op_total} claim(s) across {len(op_paths)} gitignored file(s) under "
+            f"{OPERATIONAL_DIR}/, which git ls-files cannot name, "
+            f"{len(op_exempt)} exempt as dated record(s)"
+        )
+        lines.extend(op_exempt)
+    else:
+        lines.append(
+            f"operational: NOT CHECKED. No {OPERATIONAL_DIR}/ in this checkout, so 0 gitignored "
+            f"operational file(s) were scanned. Expected in a clone, a runner and a worktree."
+        )
     if bad:
         lines.append(f"{len(bad)} claim(s) disagree with the tree:")
         lines.extend(bad)
@@ -378,7 +458,7 @@ def check(root: Path) -> tuple[int, list[str]]:
             "states the right one."
         )
         return 1, lines
-    gated = total + al_total - len(al_exempt)
+    gated = total + al_total + op_total - len(al_exempt) - len(op_exempt)
     lines.append(f"all {gated} gated claim(s) agree")
     return 0, lines
 
@@ -657,6 +737,102 @@ def selftest() -> int:
         )
         report(
             "a marker on a DIFFERENT line does not exempt the claim",
+            check(tmp)[0] == 1,
+        )
+
+        # ---- THE GITIGNORED OPERATIONAL SCOPE -------------------------------------------------
+        # Restore the always-loaded half to green so every verdict below is attributable to the
+        # operational scope alone.
+        notes.write_text("CI runs all one components in a matrix.\n", encoding="utf-8")
+        report(
+            "baseline restored to green before the operational cases",
+            check(tmp)[0] == 0,
+        )
+
+        # ABSENT is the state of every clone and runner. It must be reported, not gated.
+        report("no notes/ dir: the scope is absent", operational(tmp) == ([], False))
+        rc, out = check(tmp)
+        report("and the verdict still passes", rc == 0)
+        report(
+            "and it says operational was NOT CHECKED",
+            any("operational: NOT CHECKED" in ln for ln in out),
+        )
+
+        # PRESENT and discovered from the filesystem, by suffix.
+        runbook = tmp / OPERATIONAL_DIR / "DEMO-RUNBOOK.md"
+        runbook.parent.mkdir(parents=True, exist_ok=True)
+        runbook.write_text("nothing to count here\n", encoding="utf-8")
+        (tmp / OPERATIONAL_DIR / "scratch.txt").write_text(
+            "all 8 plugins\n", encoding="utf-8"
+        )
+        found, present = operational(tmp)
+        report(
+            "a present notes/ is discovered, matching suffixes only",
+            present and [p.name for p in found] == ["DEMO-RUNBOOK.md"],
+        )
+        report("a claimless operational file is not a failure", check(tmp)[0] == 0)
+
+        # THE CONTROL THIS SCOPE EXISTS FOR. Every tracked surface correct, the always-loaded
+        # tier correct, and a wrong count in the GITIGNORED runbook. Before this scope the same
+        # tree printed agreement, because git ls-files never names the file that is wrong.
+        runbook.write_text("The demo shows all 8 plugins loaded.\n", encoding="utf-8")
+        rc, out = check(tmp)
+        report("a wrong count in a gitignored operational file FAILS", rc == 1)
+        report(
+            "and the failure names that file, its line and both numbers",
+            any(
+                "DEMO-RUNBOOK.md:1" in ln and "8 plugins" in ln and "tracks 1" in ln
+                for ln in out
+            ),
+        )
+
+        # RESTORE: correcting that one claim is green again, so the red came from the claim and
+        # not from the file's mere presence.
+        runbook.write_text("The demo shows all one plugins loaded.\n", encoding="utf-8")
+        report("correcting the operational claim restores the pass", check(tmp)[0] == 0)
+
+        # THE EXEMPTION REACHES THIS SCOPE TOO, since a runbook records superseded and
+        # branch-dependent values on purpose. It must be PRINTED as exempt, never dropped.
+        runbook.write_text(
+            "SUPERSEDED, kept as provenance: the demo showed all 8 plugins.\n",
+            encoding="utf-8",
+        )
+        rc, out = check(tmp)
+        report("a marked record in notes/ does not gate", rc == 0)
+        report(
+            "and it is reported rather than silently skipped",
+            any("exempt" in ln for ln in out)
+            and any("DEMO-RUNBOOK.md:1" in ln for ln in out),
+        )
+        # AND IT IS ATTRIBUTED TO THE RIGHT SCOPE. The assertion above passes on a build that
+        # pools both scopes' exemptions into the always-loaded list, because it only asks whether
+        # the substring "exempt" appears SOMEWHERE. That pooling made the operational summary
+        # report zero exemptions while an operational file had one, which is a zero that does not
+        # mean what it reads as -- the exact failure this whole gate exists to prevent. So key on
+        # the HEADER, not on the word.
+        op_line = next((ln for ln in out if ln.startswith("operational:")), "")
+        al_line = next((ln for ln in out if ln.startswith("always-loaded:")), "")
+        report(
+            "the operational summary counts its OWN exemption",
+            "1 exempt" in op_line,
+        )
+        report(
+            # BOTH SCOPES ARE PRESENT HERE, so this discriminates too. `entry` is written earlier
+            # in the fixture and never removed, so al_present is True and the real line reads
+            # "always-loaded: 1 claim(s) across 3 file(s) ... 0 exempt as dated record(s)".
+            # Pooling makes that same line read "1 exempt", so this assertion flips. Measured on
+            # the mutant that restores the pooled append: 66/68, and BOTH new cases fail.
+            "and the always-loaded summary does not claim it",
+            "1 exempt" not in al_line,
+        )
+
+        # AND IT IS NOT A BLANKET HERE EITHER.
+        runbook.write_text(
+            "SUPERSEDED note above.\nThe demo shows all 8 plugins today.\n",
+            encoding="utf-8",
+        )
+        report(
+            "an unmarked operational claim one line down still fires",
             check(tmp)[0] == 1,
         )
 

@@ -20,7 +20,7 @@ the tx never broadcasts. This is a deterministic, host-side check that does not
 trust the LLM, the plugin, or the wire; it re-derives intent from the bytes.
 
 Pure stdlib. Import `certify_publish_tx` from the broadcaster, or run this file
-directly to execute the self-test (good tx passes; five injection shapes refused).
+directly to execute the self-test (good tx passes; seven injection shapes refused).
 """
 
 from __future__ import annotations
@@ -149,9 +149,22 @@ def certify_publish_tx(
     # ix1: our oracle program, publishing to OUR feed PDA.
     if ixs[1]["program"] != oracle:
         raise CertificationError("ix1 must be our oracle program (publish_reading)")
-    if feed not in ixs[1]["accounts"]:
+    # POSITIONAL, not membership. Anchor binds accounts BY POSITION and tolerates extras as
+    # `remaining_accounts`, so "our feed appears somewhere in the list" is not the question.
+    # An injected agent could emit accounts [attacker_feed, attacker_device, our_feed]: Anchor
+    # seats feed=accounts[0] and device=accounts[1], the seeds constraint validates against the
+    # ATTACKER's device and passes on chain, our feed rides along ignored -- and this certifier
+    # returned certified=True claiming a publish to our feed. The operator would have paid the
+    # fees for attacker-chosen oracle writes while the central control reported success.
+    accts = ixs[1]["accounts"]
+    if len(accts) != 2:
         raise CertificationError(
-            "ix1 does not touch our feed PDA (wrong/spoofed feed?)"
+            f"ix1 carries {len(accts)} accounts, expected exactly 2 "
+            "(extras are seated as remaining_accounts and change what Anchor binds)"
+        )
+    if accts[0] != feed:
+        raise CertificationError(
+            "ix1 account 0 is not our feed PDA (wrong/spoofed feed?)"
         )
 
     # No instruction may invoke ANY program outside the allowed set (blocks token/SOL transfers, CPIs).
@@ -170,7 +183,7 @@ def certify_publish_tx(
 
 
 # ---------------------------------------------------------------------------
-# Self-test: build a minimal good tx + five injection shapes, assert behaviour.
+# Self-test: build a minimal good tx + seven injection shapes, assert behaviour.
 # ---------------------------------------------------------------------------
 def _shortvec(n: int) -> bytes:
     out = bytearray()
@@ -209,7 +222,16 @@ def _self_test() -> int:
     keys = [payer_b, nonce_b, feed_b, SYSTEM_PROGRAM, oracle_b, token_b]
     SYS_IDX, ORACLE_IDX, TOKEN_IDX = 3, 4, 5
     advance = (SYS_IDX, [1], _ADVANCE_NONCE)  # touches nonce (idx1)
-    publish = (ORACLE_IDX, [2, 1, 0], b"\x00" * 8 + b"payload")  # touches feed (idx2)
+    # The REAL layout, matching plugins/oracle-publish/src/publish.rs:386-389 and the Anchor
+    # context: exactly [feed (writable), device (readonly signer)]. This fixture used to be
+    # [2, 1, 0] -- three accounts with the feed third -- which no builder has ever emitted. It was
+    # shaped to satisfy the old "feed appears somewhere" check, so the suite could not have caught
+    # the positional flaw: its own good case was the wrong shape.
+    publish = (
+        ORACLE_IDX,
+        [2, 0],
+        b"\x00" * 8 + b"payload",
+    )  # feed=keys[2], device=keys[0]
 
     def raw(msg):
         return bytes([1]) + b"\x00" * 64 + msg  # 1 empty sig + message
@@ -254,7 +276,7 @@ def _self_test() -> int:
     # 5. publish targets a DIFFERENT (spoofed) feed -> refused.
     spoof_feed = bytes([8]) * 32
     keys2 = [payer_b, nonce_b, spoof_feed, SYSTEM_PROGRAM, oracle_b]
-    publish2 = (4, [2, 1, 0], b"\x00" * 8)
+    publish2 = (4, [2, 0], b"\x00" * 8)  # keys2[2] is the SPOOF feed
     advance2 = (3, [1], _ADVANCE_NONCE)
     check(
         "publish to a spoofed feed PDA", _build_msg(keys2, [advance2, publish2]), False
@@ -264,6 +286,33 @@ def _self_test() -> int:
     #    control is case 1 above: the same body without the version byte still certifies.
     good = _build_msg(keys, [advance, publish])
     check("a versioned (v0) message", b"\x80" + good, False)
+
+    # 7/8. THE POSITIONAL ATTACK. Anchor binds accounts BY POSITION and seats extras as
+    #      `remaining_accounts`, so "our feed is somewhere in the list" is not the question. An
+    #      injected agent puts ITS feed and device first and lets ours ride along: Anchor validates
+    #      the seeds against the ATTACKER's device, the write lands on the ATTACKER's feed, and the
+    #      old membership check certified it as a publish to ours while the operator paid the fees.
+    attacker_feed = bytes([11]) * 32
+    attacker_dev = bytes([12]) * 32
+    keys3 = [
+        payer_b,
+        nonce_b,
+        feed_b,
+        SYSTEM_PROGRAM,
+        oracle_b,
+        attacker_feed,
+        attacker_dev,
+    ]
+    check(
+        "our feed present but seated THIRD behind an attacker's feed and device",
+        _build_msg(keys3, [advance, (4, [5, 6, 2], b"\x00" * 8)]),
+        False,
+    )
+    check(
+        "our feed present but seated SECOND, so Anchor binds the other account as the feed",
+        _build_msg(keys3, [advance, (4, [5, 2], b"\x00" * 8)]),
+        False,
+    )
 
     passed = sum(results)
     print(f"\n{passed}/{len(results)} cases correct")

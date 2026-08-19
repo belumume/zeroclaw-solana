@@ -198,6 +198,22 @@ _GH_BLOB = re.compile(
 _UNAMBIGUOUS_REF = re.compile(r"[0-9a-fA-F]{7,40}|main|master|HEAD")
 
 
+def _is_404(stderr: str) -> bool:
+    """Did gh report a genuine 404, as opposed to any other failure?
+
+    THE URL MUST BE STRIPPED FIRST. gh echoes the REQUESTED url in its stderr, so a bare
+    `"404" in err` reads the digits out of the path we just asked about. A doc linking
+    `http-404-notes.md`, or an issue-numbered path, turns an unrelated 403 rate limit or a network
+    error into a TRUSTED dead-link verdict on a live file. That is the false FAIL this module's own
+    docstring calls strictly worse than the throttle the API routing replaced.
+
+    Matching gh's own status text rather than a bare number: `(HTTP 404)` carries a space, which a
+    path cannot.
+    """
+    clean = re.sub(r"https?://\S+", "<url>", stderr or "").lower()
+    return "not found" in clean or "http 404" in clean
+
+
 def _github_blob_verdict(url):
     """(ok, detail) for a github.com /blob/<ref>/<path> link, via the authenticated contents API.
 
@@ -245,8 +261,7 @@ def _github_blob_verdict(url):
         # A SUCCESS is self-validating: the ref resolved and the path existed under it, so the
         # URL was split correctly. No guard needed on this branch.
         return True, f"API ok ({size} B at {ref[:12]})"
-    err = (p.stderr or "").lower()
-    if "not found" in err or "404" in err:
+    if _is_404(p.stderr or ""):
         # A 404 is NOT self-validating, and that asymmetry is the whole point. A branch name
         # may contain slashes, but _GH_BLOB captures `[^/]+`, so `blob/feature/my-branch/x.md`
         # arrives here as ref=`feature`, path=`my-branch/x.md` -- and the slash is already gone,
@@ -256,10 +271,37 @@ def _github_blob_verdict(url):
         # So trust a 404 only from a ref that CANNOT be the head of a longer branch name -- a
         # commit sha or a conventional single-segment name. Otherwise defer to the web path,
         # which never had to split anything. Refusing to answer beats answering wrong.
-        if _UNAMBIGUOUS_REF.fullmatch(ref):
-            return False, "API 404 (path genuinely absent at that ref)"
-        return None
+        #
+        # AND THE HEX ALTERNATIVE CARRIED THE SAME ASSUMPTION THE `v[0-9]` ONE DID. Git permits a
+        # branch whose first segment is hex, so `blob/abc1234/feature/docs/x.md` on a real branch
+        # named `abc1234/feature` splits to ref=`abc1234`, 404s, matches the hex alternative, and
+        # is believed: a dead-link verdict on a live file. `v2` was removed for exactly that
+        # reasoning while the hex branch was left asserting impossibility rather than unlikelihood.
+        #
+        # THE DISCRIMINATOR IS THE PATH, NOT THE REF, which is both cheaper and sharper than
+        # inspecting the ref at all. A slash-bearing branch can only produce a mis-split by EATING
+        # a leading path segment, so it needs one to spare: with a single-segment path there is
+        # nothing for it to eat and the split is unambiguous whatever the ref looks like. With two
+        # or more, the ambiguity is real, and we ask whether the ref resolves as a commit rather
+        # than assuming it. One extra call, only on the 404 path, which is rare by construction.
+        if not _UNAMBIGUOUS_REF.fullmatch(ref):
+            return None
+        multi_segment = "/" in path.strip("/")
+        if multi_segment and not _ref_is_a_real_commit(owner, repo, ref):
+            return None  # cannot confirm the ref; the split may be wrong. Defer to the web path.
+        return False, "API 404 (path genuinely absent at that ref)"
     return None
+
+
+def _ref_is_a_real_commit(owner: str, repo: str, ref: str) -> bool:
+    """Does `ref` resolve to a commit in this repo?
+
+    Returns False on ANY doubt, including a transport failure, because the caller uses this to
+    decide whether to TRUST a 404. Answering "yes" on a failed lookup would reintroduce the false
+    FAIL; answering "no" only costs a fallback to the web path.
+    """
+    p = _gh(["api", f"repos/{owner}/{repo}/commits/{ref}", "--jq", ".sha"])
+    return p is not None and p.returncode == 0 and bool((p.stdout or "").strip())
 
 
 def _gh(args, attempts=3):
@@ -297,7 +339,7 @@ def _gh(args, attempts=3):
         if p.returncode == 0:
             return p
         err = (p.stderr or "").lower()
-        if "not found" in err or "404" in err:
+        if _is_404(p.stderr or ""):
             return p  # a real verdict; do not retry it
         last = err
     # SAY SO rather than degrading quietly. Returning None sends the caller to the web path,
@@ -344,8 +386,7 @@ def _github_api_verdict(url):
     state = (p.stdout or "").strip()
     if p.returncode == 0 and state:
         return True, f"API ok ({kind} is {state})"
-    err = (p.stderr or "").lower()
-    if "not found" in err or "404" in err:
+    if _is_404(p.stderr or ""):
         return False, "API 404 (genuinely absent)"
     return None  # auth failure, network, rate limit -> could-not-check, fall back
 

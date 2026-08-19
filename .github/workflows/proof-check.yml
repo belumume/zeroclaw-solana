@@ -11,6 +11,14 @@ name: proof-check
 # A genuine failure here is the alarm we want: it means the feed went stale or a
 # published claim stopped holding.
 
+# Least privilege, declared here rather than inherited. Without this block the token's scope comes
+# from the repo-level "default workflow permissions" setting, which is currently read -- so this was
+# safe by a checkbox rather than by anything in the file. Flipping that default to read-and-write
+# would silently hand a write token to a workflow that runs third-party actions, and nothing in the
+# diff would show it. Declaring it makes the grant reviewable.
+permissions:
+  contents: read
+
 on:
   schedule:
     # Twice daily. The feed publishes every 20 minutes from the ARM node, so a
@@ -38,7 +46,7 @@ jobs:
       # reports it was deployed from, and that commit is weeks behind the tip. On the default
       # depth-1 clone it is absent, and the gate then reports CANNOT VERIFY forever: an honest
       # verdict that answers nothing, and one that looks identical to a healthy quiet check.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
