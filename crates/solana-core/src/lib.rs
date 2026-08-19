@@ -44,7 +44,10 @@ pub use pubkey::{Pubkey, PubkeyError};
 pub use rpc::{
     AccountInfo, Commitment, MockTransport, RpcError, RpcTransport, SignatureStatus, SolanaRpc,
 };
-pub use sanitize::{label_untrusted, sanitize_onchain, Sanitized, DEFAULT_LABEL_MAX};
+pub use sanitize::{
+    label_untrusted, sanitize_onchain, sanitize_onchain_bounded, truncate_to_byte_budget,
+    Sanitized, DEFAULT_LABEL_MAX,
+};
 pub use signing::{
     pubkey_from_seed, serialize_transaction, sign_message, verify_signature, SigningError,
 };

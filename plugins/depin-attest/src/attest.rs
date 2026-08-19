@@ -29,7 +29,7 @@
 //!   in a host log or error path cannot leak the key.
 
 use serde::Deserialize;
-use solana_core::{sanitize_onchain, Pubkey};
+use solana_core::{sanitize_onchain, truncate_to_byte_budget, Pubkey};
 
 /// Max bytes of the on-chain memo. SPL Memo tolerates more, but a DePIN
 /// attestation is tiny and a cap keeps fees + context bounded.
@@ -246,27 +246,6 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedAttestation, Strin
         rpc_url,
         signer_seed,
     })
-}
-
-/// Truncate `s` to the largest char boundary at or under `max_bytes`.
-///
-/// `String::truncate` PANICS on an index that is not a char boundary, and a panic inside the
-/// wasm component traps the tool call — a fail-OPEN crash in the highest-custody path this
-/// crate has. So the boundary is walked down rather than assumed, exactly as the seed decoder
-/// above refuses to slice blind.
-///
-/// A partial codepoint is dropped whole rather than emitted as replacement bytes, which is why
-/// this can remove more than the arithmetic suggests: the sanitizer's own `…` marker is 3 bytes
-/// and disappears entirely if the cut lands inside it.
-fn truncate_to_byte_budget(s: &mut String, max_bytes: usize) {
-    if s.len() <= max_bytes {
-        return;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s.truncate(end);
 }
 
 fn parse_seed_hex(s: &str) -> Result<[u8; 32], String> {

@@ -14,7 +14,7 @@
 
 use serde::Deserialize;
 use solana_core::mint::{DecodedMint, EXT_MINT_CLOSE_AUTHORITY, EXT_PAUSABLE};
-use solana_core::{label_untrusted, sanitize_onchain, Pubkey, DEFAULT_LABEL_MAX};
+use solana_core::{label_untrusted, sanitize_onchain_bounded, Pubkey, DEFAULT_LABEL_MAX};
 
 pub const DEFAULT_RPC: &str = "https://api.mainnet-beta.solana.com";
 
@@ -61,38 +61,21 @@ const ARG_ERROR_MAX: usize = 120;
 /// The same cap in bytes.
 const ARG_ERROR_MAX_BYTES: usize = 120;
 
-/// Truncate `s` to the largest char boundary at or under `max_bytes`.
-///
-/// `String::truncate` PANICS on an index that is not a char boundary, and a panic inside the
-/// wasm component traps the tool call, so the boundary is walked down rather than assumed. A
-/// partial codepoint is dropped whole, which is why this can remove more than the arithmetic
-/// suggests: the sanitizer's own `…` marker is 3 bytes and disappears entirely if the cut lands
-/// inside it.
-fn truncate_to_byte_budget(s: &mut String, max_bytes: usize) {
-    if s.len() <= max_bytes {
-        return;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s.truncate(end);
-}
-
 /// Sanitize an untrusted field and bound it on BOTH axes: characters, then bytes.
+///
+/// The byte walk itself lives in `solana_core::sanitize_onchain_bounded`. It was four
+/// near-identical private copies across this repo's plugins until the shared form landed; the
+/// duplication was the root cause of the char-cap-vs-byte-ceiling class, since a crate that
+/// re-derived the helper could just as easily not re-derive it.
 fn sanitize_to_bytes(raw: &str, max_chars: usize, max_bytes: usize) -> String {
-    let mut text = sanitize_onchain(raw, max_chars).text;
-    truncate_to_byte_budget(&mut text, max_bytes);
-    text
+    sanitize_onchain_bounded(raw, max_chars, max_bytes).text
 }
 
 /// Sanitize, byte-cap, then label. The order matters: the label is this crate's own fixed prose
 /// and must survive intact, so the truncation applies to the UNTRUSTED text and never to the
 /// warning attached to it.
 fn sanitize_labelled(raw: &str, max_chars: usize, max_bytes: usize) -> String {
-    let mut san = sanitize_onchain(raw, max_chars);
-    truncate_to_byte_budget(&mut san.text, max_bytes);
-    label_untrusted(&san)
+    label_untrusted(&sanitize_onchain_bounded(raw, max_chars, max_bytes))
 }
 
 /// Parse + validate the raw args JSON. Every rejection happens here, before
@@ -349,9 +332,14 @@ pub fn compose_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `sanitize_onchain` is the CHAR-ONLY form. The lib no longer calls it: every
+    // production path goes through the bounded form. It survives here because the
+    // controls below reconstruct the pre-fix behaviour with it, which is what proves
+    // the byte cap is load-bearing rather than decorative.
     use solana_core::mint::{
         RawExtension, EXT_PERMANENT_DELEGATE, EXT_TRANSFER_FEE_CONFIG, EXT_TRANSFER_HOOK,
     };
+    use solana_core::sanitize_onchain;
 
     const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 

@@ -18,7 +18,7 @@
 //! intent from the serialized bytes (`scripts/pay_x402_certified.py`) before it signs.
 
 use serde::Deserialize;
-use solana_core::{label_untrusted, sanitize_onchain};
+use solana_core::{label_untrusted, sanitize_onchain_bounded};
 
 /// x402 v2 `PaymentRequirements`. Field names and their `serde` spellings come from
 /// `x402-feed-gate/src/lib.rs`, which is this repo's own gate serving the other side of the
@@ -110,30 +110,20 @@ pub const DESCRIPTION_TOTAL_MAX: usize = DESCRIPTION_MAX_BYTES + UNTRUSTED_LABEL
 /// far below anything that could pad a transaction.
 pub const MEMO_MAX_BYTES: usize = 96;
 
-/// Truncate `s` to the largest char boundary at or under `max_bytes`.
-///
-/// `String::truncate` PANICS on an index that is not a char boundary, and a panic inside the wasm
-/// component traps the tool call, so the boundary is walked down rather than assumed. A partial
-/// codepoint is dropped whole, which is why this can remove more than the arithmetic suggests:
-/// the sanitizer's own `…` marker is 3 bytes and disappears entirely if the cut lands inside it.
-fn truncate_to_byte_budget(s: &mut String, max_bytes: usize) {
-    if s.len() <= max_bytes {
-        return;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s.truncate(end);
-}
-
 /// Sanitize, byte-cap, then label. The order matters: the label is this tool's own fixed prose
 /// and must survive intact, so the truncation applies to the SELLER's text and never to the
 /// warning attached to it.
+///
+/// The byte walk itself lives in `solana_core::sanitize_onchain_bounded`. It was four
+/// near-identical private copies across this repo's plugins until the shared form landed; the
+/// duplication was the root cause of the char-cap-vs-byte-ceiling class, since a crate that
+/// re-derived the helper could just as easily not re-derive it.
 fn sanitize_description(raw: &str) -> String {
-    let mut s = sanitize_onchain(raw, DESCRIPTION_MAX_CHARS);
-    truncate_to_byte_budget(&mut s.text, DESCRIPTION_MAX_BYTES);
-    label_untrusted(&s)
+    label_untrusted(&sanitize_onchain_bounded(
+        raw,
+        DESCRIPTION_MAX_CHARS,
+        DESCRIPTION_MAX_BYTES,
+    ))
 }
 
 fn memo_is_safe(memo: &str) -> bool {
@@ -278,6 +268,11 @@ fn check_tier(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `sanitize_onchain` is the CHAR-ONLY form. The lib no longer calls it: every
+    // production path goes through the bounded form. It survives here because the
+    // controls below reconstruct the pre-fix behaviour with it, which is what proves
+    // the byte cap is load-bearing rather than decorative.
+    use solana_core::sanitize_onchain;
 
     /// `solana_core::label_untrusted`'s marker, quoted once so the two tests that assert on it
     /// cannot drift apart from each other.

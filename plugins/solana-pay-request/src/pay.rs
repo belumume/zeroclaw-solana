@@ -30,7 +30,7 @@
 //! structure is fully controlled by this module, never by attacker free-text.
 
 use serde::Deserialize;
-use solana_core::{label_untrusted, sanitize_onchain, short_pubkey, Pubkey, Sanitized};
+use solana_core::{label_untrusted, sanitize_onchain_bounded, short_pubkey, Pubkey, Sanitized};
 
 /// The Solana Pay URI scheme prefix.
 pub const SOLANA_SCHEME: &str = "solana:";
@@ -342,29 +342,14 @@ fn reference_value_to_pubkeys(v: &serde_json::Value) -> Result<Vec<Pubkey>, Stri
     Ok(keys)
 }
 
-/// Truncate `s` to the largest char boundary at or under `max_bytes`.
-///
-/// `String::truncate` PANICS on an index that is not a char boundary, and a panic inside the
-/// wasm component traps the tool call, so the boundary is walked down rather than assumed. A
-/// partial codepoint is dropped whole, which is why this can remove more than the arithmetic
-/// suggests: the sanitizer's own `…` marker is 3 bytes and disappears entirely if the cut lands
-/// inside it.
-fn truncate_to_byte_budget(s: &mut String, max_bytes: usize) {
-    if s.len() <= max_bytes {
-        return;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s.truncate(end);
-}
-
 /// Sanitize an untrusted field and bound it on BOTH axes: characters, then bytes.
+///
+/// The byte walk itself lives in `solana_core::sanitize_onchain_bounded`. It was four
+/// near-identical private copies across this repo's plugins until the shared form landed; the
+/// duplication was the root cause of the char-cap-vs-byte-ceiling class, since a crate that
+/// re-derived the helper could just as easily not re-derive it.
 fn sanitize_to_bytes(raw: &str, max_chars: usize, max_bytes: usize) -> String {
-    let mut text = sanitize_onchain(raw, max_chars).text;
-    truncate_to_byte_budget(&mut text, max_bytes);
-    text
+    sanitize_onchain_bounded(raw, max_chars, max_bytes).text
 }
 
 /// Sanitize + cap a free-text field; drop it if nothing survives (an all-hidden
@@ -379,8 +364,7 @@ fn sanitize_to_bytes(raw: &str, max_chars: usize, max_bytes: usize) -> String {
 /// exceeds the budget would otherwise pass the non-empty check and then truncate to nothing,
 /// putting an empty `label=` or `memo=` into the URL rather than omitting it.
 fn cap_field(s: &str, max_chars: usize, max_bytes: usize) -> Option<Sanitized> {
-    let mut san = sanitize_onchain(s, max_chars);
-    truncate_to_byte_budget(&mut san.text, max_bytes);
+    let san = sanitize_onchain_bounded(s, max_chars, max_bytes);
     if san.text.is_empty() {
         None
     } else {
@@ -511,6 +495,11 @@ pub fn render_output(v: &ValidatedRequest) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `sanitize_onchain` is the CHAR-ONLY form. The lib no longer calls it: every
+    // production path goes through the bounded form. It survives here because the
+    // controls below reconstruct the pre-fix behaviour with it, which is what proves
+    // the byte cap is load-bearing rather than decorative.
+    use solana_core::sanitize_onchain;
 
     // Michael Vines' address, used verbatim by the Solana Pay spec examples.
     const RECIPIENT: &str = "mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN";

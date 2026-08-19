@@ -15,7 +15,7 @@
 //! needs; no financial arithmetic is done in float.
 
 use serde_json::Value;
-use solana_core::sanitize::{label_untrusted, sanitize_onchain};
+use solana_core::sanitize::{label_untrusted, sanitize_onchain_bounded};
 use solana_core::short_pubkey;
 
 /// Symbols are short; cap hard so a hostile token cannot flood context.
@@ -40,24 +40,6 @@ const MARKET_MAX: usize = 44;
 /// base58 address renders as 19.
 const MARKET_MAX_BYTES: usize = 44;
 
-/// Truncate `s` to the largest char boundary at or under `max_bytes`.
-///
-/// `String::truncate` PANICS on an index that is not a char boundary, and a panic inside the
-/// wasm component traps the tool call, so the boundary is walked down rather than assumed. A
-/// partial codepoint is dropped whole, which is why this can remove more than the arithmetic
-/// suggests: the sanitizer's own `…` marker is 3 bytes and disappears entirely if the cut lands
-/// inside it.
-fn truncate_to_byte_budget(s: &mut String, max_bytes: usize) {
-    if s.len() <= max_bytes {
-        return;
-    }
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    s.truncate(end);
-}
-
 /// The character cap on a value echoed back through an error string.
 pub const ECHO_MAX: usize = 64;
 /// The same cap in bytes, so a rejected multibyte payload cannot reflect four times its
@@ -74,10 +56,13 @@ pub const BODY_SNIPPET_MAX: usize = 200;
 pub const BODY_SNIPPET_MAX_BYTES: usize = 200;
 
 /// Sanitize an untrusted field and bound it on BOTH axes: characters, then bytes.
+///
+/// The byte walk itself lives in `solana_core::sanitize_onchain_bounded`. It was four
+/// near-identical private copies across this repo's plugins until the shared form landed; the
+/// duplication was the root cause of the char-cap-vs-byte-ceiling class, since a crate that
+/// re-derived the helper could just as easily not re-derive it.
 pub fn sanitize_to_bytes(raw: &str, max_chars: usize, max_bytes: usize) -> String {
-    let mut text = sanitize_onchain(raw, max_chars).text;
-    truncate_to_byte_budget(&mut text, max_bytes);
-    text
+    sanitize_onchain_bounded(raw, max_chars, max_bytes).text
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -345,9 +330,11 @@ fn parse_position(item: &Value) -> PositionHealth {
         .map(|s| {
             // Byte-cap the SELLER's text, then label. The label is this crate's own fixed prose
             // and must survive intact, so the truncation never applies to the warning.
-            let mut san = sanitize_onchain(s, NET_VALUE_MAX);
-            truncate_to_byte_budget(&mut san.text, NET_VALUE_MAX_BYTES);
-            label_untrusted(&san)
+            label_untrusted(&sanitize_onchain_bounded(
+                s,
+                NET_VALUE_MAX,
+                NET_VALUE_MAX_BYTES,
+            ))
         })
         .unwrap_or_else(|| "?".into());
     let market = item
@@ -400,6 +387,11 @@ pub fn invalid_arguments_message(err: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // `sanitize_onchain` is the CHAR-ONLY form. The lib no longer calls it: every
+    // production path goes through the bounded form. It survives here because the
+    // controls below reconstruct the pre-fix behaviour with it, which is what proves
+    // the byte cap is load-bearing rather than decorative.
+    use solana_core::sanitize_onchain;
 
     /// U+E0049, TAG LATIN CAPITAL LETTER I: general category `Cf`, renders as
     /// nothing, and the Tag block can encode a whole ASCII instruction
