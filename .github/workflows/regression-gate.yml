@@ -234,7 +234,7 @@ jobs:
       # harness on the hosts the page itself names, so it reaches no third party and no pruning
       # window or rate limit can turn it red. It also carries its own mutation control -- the same
       # page with that one branch neutralised, which must render the reference-less link payable
-      # again. If the control stops firing, the six cases above are measuring something else.
+      # again. If the control stops firing, the cases above are measuring something else.
       - name: a link the page cannot check for settlement is refused, and a good one is not
         run: python3 demo/verify_reference_required.py
 

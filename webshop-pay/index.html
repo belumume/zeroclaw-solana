@@ -2611,7 +2611,13 @@ else{
     // The pubkey gate inside settledSignature() STAYS. It is a second layer, not a duplicate: this
     // branch keeps a hostile reference off the network by never starting the lookup, and that one
     // keeps it off the network if any future caller reaches the lookup by another route.
-    var reftail=reference.length>64?reference.slice(0,64)+'…':reference;
+    // Sliced by CODEPOINT, not by UTF-16 code unit. `reference` here is arbitrary bytes out of a
+    // hostile link -- the branch is only reached because isPubkey() already refused it -- so a
+    // surrogate pair straddling the cap would be cut in half by String.slice and render as a
+    // replacement glyph on the card. textContent keeps that from being anything worse than ugly,
+    // but ugly on a refusal card is the customer's only evidence of which link is wrong.
+    var refchars=Array.from(reference);
+    var reftail=refchars.length>64?refchars.slice(0,64).join('')+'…':reference;
     refuse(T('refusednoref','This link cannot be checked against the chain, so this page will not offer a payment it cannot prove is the first one. Nothing has been sent. Ask the shop for a complete link.'),
            reference?(T('linkref','link reference: ')+reftail):T('norefmissing','this link carries no order reference'),
            // Wrapped, unlike the two address refusals. A malformed reference is arbitrary attacker

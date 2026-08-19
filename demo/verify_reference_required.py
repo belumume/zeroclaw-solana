@@ -14,7 +14,7 @@ recipient is pinned in the page, so no third party profits and nobody is robbed 
 simply pays the legitimate merchant a second time, which the shop then owes back.
 
 A REFUSAL ALONE PROVES NOTHING, and this file exists mostly to say what the refusal must NOT eat.
-A page that refused everything would pass the first four cases below and be worthless. So the two
+A page that refused everything would pass every refusal case below and be worthless. So the two
 control cases drive links the page MUST still honour: an unsettled reference stays fully payable
 with its Pay button and QR, and a settled one still lands on the existing already-paid card with
 the figure the CHAIN recorded. If either of those stops holding, the fix has done more damage than
@@ -25,10 +25,11 @@ page itself names, so nothing here reaches a live third party and no rate limit,
 devnet outage can turn it red. That also makes the settled case deterministic rather than dependent
 on a mainnet transaction still being visible from whichever endpoint the page is pinned to today.
 
-THE REQUEST COUNTER IS CALIBRATED. Cases 1-4 assert ZERO requests reach the RPC hosts, which is the
-claim that a hostile reference never touches an endpoint. A zero from a counter that can only ever
-read zero is worth nothing, so cases 5 and 6 assert the same counter reads at least one on the same
-run. Without that pair, a broken glob and a working guard are the same number.
+THE REQUEST COUNTER IS CALIBRATED. Every refusal case asserts ZERO requests reach the RPC hosts,
+which is the claim that a hostile reference never touches an endpoint. A zero from a counter that
+can only ever read zero is worth nothing, so the two control cases assert the SAME counter reads at
+least one on the same run. Without that pair, a broken glob and a working guard are the same
+number.
 
 Run it:  python demo/verify_reference_required.py [--viewport desktop|phone] [--shots DIR]
 
@@ -78,6 +79,16 @@ MALFORMED_CHARS = "not-a-pubkey"
 MALFORMED_LONG = "z" * 150
 # The refusal caps what it echoes, so a hostile reference cannot grow the card without bound.
 ECHO_CAP = 64
+
+# A surrogate pair sitting exactly ON the cap. 63 ASCII characters then one astral codepoint, so
+# the emoji occupies UTF-16 indices 63 and 64: a cap applied with String.slice cuts between them
+# and leaves a lone high surrogate, which renders as a replacement glyph. A cap applied by
+# CODEPOINT keeps the emoji whole, because it is the 64th codepoint and the cap is 64.
+#
+# The assertion below is the whole emoji's presence rather than the absence of a broken glyph,
+# because absence is the harder thing to observe through a JSON round trip and presence
+# discriminates the two implementations exactly as well.
+MALFORMED_SURROGATE = "z" * 63 + "\U0001f600" + "z" * 90
 
 # The exact source of the branch under test, used by the mutation control at the end of the run.
 # Asserted to appear EXACTLY ONCE in the built page before it is substituted: a control keyed to a
@@ -290,6 +301,14 @@ CASES = [
         ["conferido on-chain", MALFORMED_CHARS],
     ),
     ("malformed-long", MALFORMED_LONG, "pt", False, False, ["conferido on-chain"]),
+    (
+        "malformed-surrogate",
+        MALFORMED_SURROGATE,
+        "pt",
+        False,
+        False,
+        ["conferido on-chain", "z" * 63 + "\U0001f600"],
+    ),
     ("valid-unpaid", VALID_REFERENCE, "pt", False, True, ["Mesa 4"]),
     (
         "valid-settled",
@@ -393,7 +412,11 @@ def main() -> int:
 
                 # The reference cases must never touch an endpoint; the control cases must. Both
                 # halves are asserted, because one without the other is not a measurement.
-                if reference is None or reference in (MALFORMED_CHARS, MALFORMED_LONG):
+                if reference is None or reference in (
+                    MALFORMED_CHARS,
+                    MALFORMED_LONG,
+                    MALFORMED_SURROGATE,
+                ):
                     if calls["n"] != 0:
                         failures.append(
                             f"{name}: {calls['n']} request(s) reached an RPC host; a reference "
@@ -470,7 +493,7 @@ def main() -> int:
             if not c["payable"]:
                 failures.append(
                     "control: a reference-less link is STILL refused with the branch removed, so "
-                    "the refusal the six cases above observed is not coming from the branch this "
+                    "the refusal the cases above observed is not coming from the branch this "
                     "file exists to test"
                 )
             page.close()
