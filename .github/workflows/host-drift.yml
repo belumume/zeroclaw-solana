@@ -52,7 +52,7 @@ jobs:
       - name: Install the wasm target
         run: rustup target add wasm32-wasip2
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       # The check refuses a COMPATIBLE verdict while any plugin is unbuilt, so every one
       # must exist before it can say anything meaningful.

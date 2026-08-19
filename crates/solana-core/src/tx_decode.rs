@@ -173,9 +173,16 @@ pub fn decode_transaction(bytes: &[u8]) -> Result<DecodedTransaction, DecodeErro
             "num_required_signatures exceeds the account-key count",
         ));
     }
-    if num_readonly_signed >= num_required_signatures && num_required_signatures != 0 {
+    // No `num_required_signatures != 0` carve-out. Real Solana rejects a zero here outright,
+    // because the fee payer is always a required signer, and the plain `>=` gives that for free:
+    // 0 >= 0 refuses. An earlier draft added the exception defensively and it was a DEVIATION from
+    // the parity this function claims, which review caught. Not exploitable either way -- with
+    // zero required signatures `is_signer` slices `account_keys[..0]` and nothing can be reported
+    // as a signer, so `find_payment` would refuse every transfer rather than be fooled -- but a
+    // docstring claiming `Message::sanitize` parity should not have a silent exception in it.
+    if num_readonly_signed >= num_required_signatures {
         return Err(DecodeError::MalformedHeader(
-            "num_readonly_signed is not less than num_required_signatures",
+            "num_readonly_signed is not less than num_required_signatures, or no signer is required",
         ));
     }
     if req + num_readonly_unsigned as usize > account_keys.len() {
@@ -419,6 +426,18 @@ mod tests {
     #[test]
     fn header_readonly_unsigned_overrunning_keys_is_refused() {
         let tx = tx_with_header_byte(2, 120);
+        assert!(matches!(
+            decode_transaction(&tx),
+            Err(DecodeError::MalformedHeader(_))
+        ));
+    }
+
+    /// A header claiming ZERO required signatures is refused, matching Solana: the fee payer is
+    /// always a required signer, so there is no valid transaction with none. Added because review
+    /// found an explicit carve-out here that deviated from this decoder's stated parity claim.
+    #[test]
+    fn header_requiring_no_signatures_at_all_is_refused() {
+        let tx = tx_with_header_byte(0, 0);
         assert!(matches!(
             decode_transaction(&tx),
             Err(DecodeError::MalformedHeader(_))
