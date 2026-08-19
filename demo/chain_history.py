@@ -11,7 +11,9 @@ demo/ because scripts/ belongs to the build session and demo/ ships in the same 
 
 Two figures on this line move (the count, and the span implied by "since"); everything printed is
 derived from the RPC response at run time, never hardcoded, so the line cannot go stale — it can
-only go honest-red by the RPC refusing, which prints UNREACHABLE rather than a wrong number.
+only go honest-red, and there are exactly two ways to do that. The RPC refusing prints UNREACHABLE
+rather than a wrong number, and a walk that stopped before the account ran out appends CAPPED
+rather than passing a partial count off as a total.
 
 The largest gap is printed unconditionally. A judge running this command finds it anyway, and a
 disclosed outlier is evidence the number was measured; a discovered one discredits everything
@@ -34,6 +36,16 @@ import urllib.request
 FEED = os.environ.get("FEED_PDA", "JEtuZkcRzePbbLo8oiM26aqpbt1zJyLP4snvQCjVveg")
 RPC = os.environ.get("RPC_URL", "https://api.devnet.solana.com")
 ATTEMPTS = 3
+
+# PAGE is the protocol ceiling, not a choice: getSignaturesForAddress refuses limit=1001 with
+# -32602 "Invalid limit; max 1000", so one page can never cover this account and the `before`
+# walk below is mandatory rather than defensive. MAX_PAGES is ours, and because it is ours it is
+# announced on the output line whenever it binds -- see the `capped` suffix in main(). Without
+# that suffix a capped run prints a smaller count, a smaller largest-gap and a later "since" date
+# with nothing to distinguish it from a complete one, which is the single way this line could go
+# quietly wrong rather than honest-red.
+PAGE = 1000
+MAX_PAGES = 20
 
 
 # Same transport boundary as verify-proof.py and feed_heartbeat.py, mirrored a third time on
@@ -72,14 +84,17 @@ def _rpc(method, params):
 def main():
     sigs = []
     before = None
-    for _ in range(20):  # 20 pages x 1000 = far above any plausible feed size
-        params = [FEED, {"limit": 1000, **({"before": before} if before else {})}]
+    exhausted = False
+    for _ in range(MAX_PAGES):
+        params = [FEED, {"limit": PAGE, **({"before": before} if before else {})}]
         batch = _rpc("getSignaturesForAddress", params).get("result") or []
         if not batch:
+            exhausted = True
             break
         sigs.extend(batch)
         before = batch[-1]["signature"]
-        if len(batch) < 1000:
+        if len(batch) < PAGE:
+            exhausted = True
             break
 
     if not sigs:
@@ -90,9 +105,17 @@ def main():
     failed = sum(1 for x in sigs if x.get("err"))
     gaps = [(times[i + 1] - times[i]) / 60 for i in range(len(times) - 1)]
     first = datetime.datetime.fromtimestamp(times[0], datetime.timezone.utc)
+    # Silent on the exhausted path so the filmed line stays exactly what beats 11 and 13 rehearsed;
+    # the suffix appears only when the walk stopped early, where a bare line would be a wrong number
+    # wearing a complete one's clothes.
+    capped = (
+        ""
+        if exhausted
+        else f" | CAPPED at {MAX_PAGES} pages, tx older than this are NOT counted"
+    )
     print(
         f"{len(sigs)} tx | {failed} failed | median gap {statistics.median(gaps):.1f} min | "
-        f"largest gap {max(gaps):.1f} min | since {first:%Y-%m-%d}"
+        f"largest gap {max(gaps):.1f} min | since {first:%Y-%m-%d}{capped}"
     )
     return 0
 
