@@ -19,6 +19,24 @@ use serde::Deserialize;
 use crate::pay::PayConfig;
 
 /// The operator's settings, injected by the host under `__config`. Never agent-supplied.
+///
+/// THAT CLAIM IS HOST-ENFORCED AND WAS VERIFIED AGAINST UPSTREAM SOURCE, not assumed. An audit
+/// rated it a HIGH on the reasoning that `__config` is a normal serde field, so `deny_unknown_fields`
+/// ADMITS it rather than excluding it: if a model could supply the section, the payee cross-check
+/// below would compare a challenge against values the same model chose, and the strongest
+/// money-binding control in the suite would be self-referential.
+///
+/// It does not hold. `inject_config` in the host's `crates/zeroclaw-plugins/src/runtime.rs` calls
+/// `obj.remove("__config")` on the caller's args BEFORE inserting the resolved operator config, so
+/// a forged section is stripped unconditionally rather than merged. Its own doc comment says
+/// "stripping any caller-supplied `__config` so the section cannot be spoofed", and two of its
+/// tests pin both directions. Where the operator has no config section for a plugin the key is
+/// absent entirely, which `parse` below refuses; that is fail-closed, not a gap.
+///
+/// This is an UPSTREAM guarantee, so it can drift the way the vendored WIT did. If that stripping
+/// is ever weakened, no plugin can defend itself against a forged config and every payee check
+/// here becomes decorative. `host-drift.yml` already clones upstream daily for interface parity
+/// and is the natural place to assert this too.
 #[derive(Debug, Clone, Deserialize)]
 struct InjectedConfig {
     receiver: Option<String>,

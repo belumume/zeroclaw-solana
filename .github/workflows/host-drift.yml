@@ -87,6 +87,36 @@ jobs:
           ZC_SKIP_HOST_BINARY: "1"
         run: ./scripts/check-host-compat.sh /tmp/zeroclaw-host
 
+      # A SECOND upstream dependency, and unlike the WIT it is a SECURITY one.
+      #
+      # Every funds-touching plugin here reads its receiver, mint and spend cap from `__config`
+      # and cross-checks a remote 402 challenge against them. `__config` is a normal serde field,
+      # so `deny_unknown_fields` admits it rather than excluding it: if a model could supply that
+      # section, it would be checking a challenge against values it chose itself, and the payee
+      # binding would be decorative. An audit rated exactly that a HIGH.
+      #
+      # It does not hold, because the HOST strips a caller-supplied section before injecting the
+      # operator's. That is upstream code we do not control, it is the sole thing standing between
+      # a prompt-injected agent and an arbitrary payee, and no plugin can defend itself against
+      # its removal. The WIT arrived out of parity three times; this is the same class with a
+      # worse blast radius, so it gets watched rather than trusted.
+      - name: The host still strips a caller-supplied __config
+        run: |
+          set -euo pipefail
+          F=/tmp/zeroclaw-host/crates/zeroclaw-plugins/src/runtime.rs
+          test -f "$F" || { echo "::error::$F is gone; the injection point moved and this check is blind"; exit 1; }
+          # Assert on the CODE, not the comment beside it: a docstring can keep promising this
+          # after the line is deleted.
+          grep -q 'obj\.remove("__config")' "$F" || {
+            echo "::error::upstream no longer strips a caller-supplied __config in inject_config."
+            echo "::error::A model that can set that section chooses its own payee. Read $F before shipping anything that pays."
+            exit 1
+          }
+          # CONTROL: prove the grep can miss, or a pass says only that the file exists.
+          grep -q 'obj\.remove("__definitely_not_a_real_key")' "$F" \
+            && { echo "::error::control matched an absent string; this grep proves nothing"; exit 1; } || true
+          echo "ok    upstream still strips caller-supplied __config (control fired correctly)"
+
       # The HEAD check above answers "did upstream move." It does NOT answer "does the
       # reproduction we published still work," and those come apart precisely here: the
       # pinned commit is known to be out of parity, which is why QUICKSTART instructs two
