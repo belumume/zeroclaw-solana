@@ -139,7 +139,9 @@ pub struct GateConfig {
     pub resource_url: String,
     /// Price of a single reading, atomic base units.
     pub price_single: u64,
-    /// Price of a day-pass (unlimited reads that UTC day), atomic base units.
+    /// The amount a cached client may still pay, atomic base units. It buys exactly one
+    /// read, the same as `price_single`: the tier this named was withdrawn from the menu
+    /// because nothing in the gate ever granted the second read it advertised.
     pub price_day_pass: u64,
     /// Per-payer per-day spend cap, atomic base units. A hard, in-code ceiling
     /// (the brief mandates a code-enforced cap in either commerce direction).

@@ -25,7 +25,10 @@
 //!                        `resource` object (default http://localhost:$PORT/reading)
 //!   X402_PORT            listen port (default 4577)
 //!   X402_PRICE_SINGLE    atomic units for one reading (default 1000000 = 1 USDC)
-//!   X402_PRICE_DAYPASS   atomic units for a day pass (default 5000000)
+//!   X402_PRICE_DAYPASS   accepted-for-cached-clients only (default 5000000). Read and
+//!                        honoured by verify_x_payment, but NOT advertised in the menu,
+//!                        because the tier it named was never granted. Setting it changes
+//!                        what an old client may pay, not what any client is offered.
 //!   X402_DAILY_CAP       per-payer atomic-unit daily cap (default 20000000)
 
 use std::sync::atomic::{AtomicU64, Ordering};
