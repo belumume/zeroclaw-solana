@@ -58,8 +58,8 @@ use solana_core::instruction::advance_nonce_account;
 use solana_core::instruction::memo as memo_instruction;
 use solana_core::{
     compile, decode_mint, decode_nonce_account, label_untrusted, pubkey, sanitize_onchain,
-    serialize_transaction, short_pubkey, AccountMeta, Instruction, Pubkey, RpcTransport, Sanitized,
-    SolanaRpc,
+    sanitize_onchain_bounded, serialize_transaction, short_pubkey, AccountMeta, Instruction,
+    Pubkey, RpcTransport, Sanitized, SolanaRpc,
 };
 
 // --- Program constants, every one cited to its source in the audited repo ------
@@ -134,8 +134,19 @@ const IX_CREATE_IDEMPOTENT: u8 = 1;
 /// overrides this via `__config.rpc_url` (e.g. a devnet URL for the demo).
 pub const DEFAULT_RPC: &str = "https://api.mainnet-beta.solana.com";
 
-/// Byte cap for the optional on-chain `memo`.
+/// CHARACTER cap for the optional on-chain `memo`.
+///
+/// This constant's doc read "Byte cap" until the byte axis was actually bounded, and the label
+/// was the defect in miniature: the value is passed to `sanitize_onchain` as `max_chars`, which
+/// counts codepoints, so 120 astral-plane characters were 480 bytes in both the on-chain memo
+/// instruction and the `summary` field the ceiling test bounds. See [`MEMO_MAX_BYTES`].
 pub const MEMO_MAX: usize = 120;
+/// BYTE cap for the same memo, applied after the character cap.
+///
+/// The character cap reused as a byte cap, so every real memo — ASCII, already under both — is
+/// untouched, and only the multibyte case that was never bounded changes. This bounds the memo
+/// on the two paths it reaches: the on-chain memo instruction, and the agent-facing `summary`.
+pub const MEMO_MAX_BYTES: usize = 120;
 /// Parse-time cap on the integer part of `amount` (u64::MAX is 20 digits).
 pub const AMOUNT_MAX_INT_DIGITS: usize = 20;
 /// Parse-time cap on the fractional part of `amount`.
@@ -331,7 +342,10 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedSpend, String> {
         )
     })?;
 
-    let memo = args.memo.as_deref().and_then(|s| cap_memo(s, MEMO_MAX));
+    let memo = args
+        .memo
+        .as_deref()
+        .and_then(|s| cap_memo(s, MEMO_MAX, MEMO_MAX_BYTES));
 
     let cfg = args.config.unwrap_or_default();
 
@@ -483,8 +497,14 @@ pub fn to_base_units(amount: &str, decimals: u8) -> Result<u64, String> {
     Ok(value as u64)
 }
 
-fn cap_memo(s: &str, max_chars: usize) -> Option<Sanitized> {
-    let san = sanitize_onchain(s, max_chars);
+/// Sanitize a memo and bound it on BOTH axes: characters, then bytes.
+///
+/// Emptiness is checked AFTER truncation, not before. A memo whose first codepoint alone
+/// exceeds the byte budget would otherwise pass a non-empty check and then truncate to nothing,
+/// putting an empty `memo:` in the summary and a zero-length memo instruction on chain rather
+/// than omitting both.
+fn cap_memo(s: &str, max_chars: usize, max_bytes: usize) -> Option<Sanitized> {
+    let san = sanitize_onchain_bounded(s, max_chars, max_bytes);
     if san.text.is_empty() {
         None
     } else {
@@ -1822,6 +1842,123 @@ mod tests {
         assert!(envelope < 1160, "envelope (minus tx) is {envelope} bytes");
     }
 
+    /// The fixture above carries NO memo at all, so the 1160 ceiling was measured with the one
+    /// attacker-controlled field that reaches the summary absent. This drives the same real
+    /// pipeline with the memo present and floods it with 4-byte codepoints.
+    ///
+    /// U+1F600 is the point. Every flood fixture in this crate was ASCII, which makes a
+    /// character cap and a byte ceiling indistinguishable: `MEMO_MAX` counts codepoints, so 120
+    /// astral-plane characters were 480 bytes in a field the ceiling budgeted 120 for.
+    #[test]
+    fn the_envelope_holds_under_a_multibyte_memo_flood() {
+        let flood = "\u{1F600}".repeat(500);
+        let a = format!(
+            r#"{{"delegation":"{DELEGATION}","amount":"25","receiver":"{RECEIVER}","memo":"{flood}",{}}}"#,
+            cfg("")
+        );
+        let v = parse_and_validate(&a).unwrap();
+
+        // FIXTURE CONTROLS. A memo that was rejected, or capped away to nothing, would make
+        // every size assertion below pass vacuously.
+        let m = v
+            .memo
+            .as_ref()
+            .expect("the flood memo was dropped entirely, so this measures no memo at all");
+        assert!(!m.text.is_empty(), "the memo capped away to nothing");
+        assert!(
+            m.text.len() <= MEMO_MAX_BYTES,
+            "memo is {} bytes, over the {MEMO_MAX_BYTES}-byte budget",
+            m.text.len()
+        );
+
+        let rpc = SolanaRpc::new(MockTransport::new([
+            fixed_deleg_resp(975_000_000, AGENT),
+            account_resp(&pubkey::token_program().to_base58(), &legacy_mint_6dec()),
+            null_resp(),
+            blockhash_resp(USDC),
+        ]));
+        let (tx, meta) = build_spend(&rpc, &v).unwrap();
+        let out = render_output(&v, &tx, &meta);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let summary = parsed["summary"].as_str().unwrap();
+
+        // The memo must actually REACH the summary, or the envelope below is measuring the
+        // memo-less case again under a different name.
+        assert!(
+            summary.contains("memo:"),
+            "the memo never reached the summary: {summary}"
+        );
+
+        let b64_len = parsed["transaction"].as_str().unwrap().len();
+        let envelope = out.len() - b64_len;
+
+        // 1280, not the memo-less test's 1160. That number was derived from a fixture carrying
+        // NO memo, so it never budgeted for the one attacker-controlled field that reaches the
+        // summary; it is correct for its own fixture and was never a whole-crate ceiling.
+        // Measured at 1250 with the memo present and byte-capped, and the bound sits just above
+        // it so it still bites. The control below shows what this same envelope was before the
+        // byte cap existed.
+        assert!(envelope < 1280, "envelope (minus tx) is {envelope} bytes");
+
+        // THE BEFORE/AFTER CONTROL, in one run so the two numbers cannot drift apart. Re-render
+        // the identical request with the memo capped on CHARACTERS only — exactly what this
+        // crate emitted before `MEMO_MAX_BYTES` — and confirm the byte cap is what brought the
+        // envelope under the bound, rather than the bound being loose enough to hold either way.
+        let mut v_char_only = parse_and_validate(&a).unwrap();
+        v_char_only.memo = Some(sanitize_onchain(&flood, MEMO_MAX));
+        let out_before = render_output(&v_char_only, &tx, &meta);
+        let before_parsed: serde_json::Value = serde_json::from_str(&out_before).unwrap();
+        let envelope_before =
+            out_before.len() - before_parsed["transaction"].as_str().unwrap().len();
+        assert!(
+            envelope_before > 1280,
+            "the char-only path yielded {envelope_before} bytes, inside the bound, so the byte \
+             cap is not what is holding this ceiling and this test proves nothing"
+        );
+        assert!(
+            envelope_before > envelope,
+            "byte cap did not narrow the envelope: {envelope_before} vs {envelope}"
+        );
+        eprintln!(
+            "multibyte memo flood: envelope {envelope} B byte-capped, \
+             {envelope_before} B char-capped only (memo-less baseline is 1121 B)"
+        );
+    }
+
+    /// The control on the test above: the byte cap narrows HOSTILE input only.
+    ///
+    /// An ordinary ASCII memo is under both caps, so it must survive byte-for-byte. Without
+    /// this, "the memo is bounded" is equally consistent with a cap that truncates every real
+    /// invoice reference.
+    #[test]
+    fn the_byte_cap_leaves_an_ordinary_ascii_memo_untouched() {
+        let ordinary = "inv:2026-07-22:po-1099";
+        let a = format!(
+            r#"{{"delegation":"{DELEGATION}","amount":"25","receiver":"{RECEIVER}","memo":"{ordinary}",{}}}"#,
+            cfg("")
+        );
+        let v = parse_and_validate(&a).unwrap();
+        let m = v.memo.as_ref().expect("an ordinary memo was dropped");
+        assert_eq!(m.text, ordinary, "an ordinary ASCII memo was altered");
+        assert!(!m.truncated, "an ordinary ASCII memo was truncated");
+    }
+
+    /// The char cap ALONE does not bound this field, which is what makes the byte cap
+    /// load-bearing rather than belt-and-braces. If this ever stops overshooting, the fixture
+    /// has drifted and the test above proves less than it appears to.
+    #[test]
+    fn the_char_cap_alone_would_blow_the_memo_budget() {
+        let flood = "\u{1F600}".repeat(500);
+        let char_only = sanitize_onchain(&flood, MEMO_MAX).text;
+        assert_eq!(char_only.chars().count(), MEMO_MAX);
+        assert!(
+            char_only.len() > MEMO_MAX_BYTES,
+            "the char cap alone yielded {} bytes, which is inside the {MEMO_MAX_BYTES}-byte \
+             budget, so this fixture no longer exercises the byte axis",
+            char_only.len()
+        );
+    }
+
     // --- memo sanitization: hostile framing labelled untrusted, RLO stripped ---
 
     #[test]
@@ -1834,13 +1971,18 @@ mod tests {
         // pure invisibles must yield NO memo instruction, not a memo
         // instruction carrying an empty payload.
         assert_eq!(
-            cap_memo("\u{202E}\u{200B}\u{0000}\u{FEFF}\u{2069}", MEMO_MAX),
+            cap_memo(
+                "\u{202E}\u{200B}\u{0000}\u{FEFF}\u{2069}",
+                MEMO_MAX,
+                MEMO_MAX_BYTES
+            ),
             None
         );
-        assert_eq!(cap_memo("", MEMO_MAX), None);
+        assert_eq!(cap_memo("", MEMO_MAX, MEMO_MAX_BYTES), None);
 
         // Control: a memo with any surviving visible content is still kept.
-        let kept = cap_memo("invoice #412", MEMO_MAX).expect("visible memo survives");
+        let kept =
+            cap_memo("invoice #412", MEMO_MAX, MEMO_MAX_BYTES).expect("visible memo survives");
         assert_eq!(kept.text, "invoice #412");
     }
 

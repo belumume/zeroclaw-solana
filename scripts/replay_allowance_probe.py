@@ -22,9 +22,13 @@ REFUSED and at least one to be ACCEPTED, and exits non-zero otherwise. A program
 stopped working would refuse everything; a check that had stopped checking would accept
 everything. Either one fails here rather than printing a clean result over nothing.
 
+A bundle may record more than one refused capture, from more than one delegation. Replaying
+the wrong one measures a real boundary belonging to a different cap, so the choice is never
+guessed: pass --signature to name which, and the error lists the candidates when it matters.
+
 Usage:
     python3 scripts/replay_allowance_probe.py
-    python3 scripts/replay_allowance_probe.py --bundle docs/proof-bundle/devnet-transactions.json
+    python3 scripts/replay_allowance_probe.py --bundle docs/proof-bundle/devnet-transactions.json --signature 3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps
 """
 
 import argparse
@@ -126,6 +130,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bundle", default="docs/proof-bundle/mainnet-transactions.json")
     ap.add_argument("--rpc", default=None)
+    ap.add_argument(
+        "--signature",
+        default=None,
+        help="which refused capture to replay, when a bundle records more than one "
+        "(a unique prefix is enough)",
+    )
     args = ap.parse_args()
 
     bundle = json.load(open(args.bundle, encoding="utf-8"))
@@ -133,15 +143,35 @@ def main():
     url = args.rpc or DEFAULT_RPC.get(cluster, DEFAULT_RPC["mainnet"])
 
     # The refused transfer is the one the bundle recorded as failing with 300.
+    #
+    # A BUNDLE MAY RECORD SEVERAL, and until 2026-08-19 that was fatal rather than selectable.
+    # Refusing to guess is right and stays: two captures come from two different delegations
+    # with different caps, so replaying the wrong one measures a boundary the surrounding prose
+    # is not describing. What was missing is a way to SAY which, and a message naming the
+    # candidates so a reader who hits this has somewhere to go. Without that, adding a second
+    # capture to a bundle silently breaks every documented command pointing at it, and nothing
+    # about the failure suggests the one-word fix.
     refused = [
         (sig, t)
         for sig, t in bundle["transactions"].items()
         if custom_code(t.get("err")) == 300
     ]
+    total = len(bundle.get("transactions", {}))
+    if args.signature:
+        picked = [(s, t) for s, t in refused if s.startswith(args.signature)]
+        if len(picked) != 1:
+            raise SystemExit(
+                f"--signature {args.signature!r} selects {len(picked)} of the "
+                f"{len(refused)} transaction(s) refused with custom error 300 in "
+                f"{args.bundle}; it must select exactly one."
+            )
+        refused = picked
     if len(refused) != 1:
+        listing = "".join(f"\n  {s}" for s, _ in refused) or "\n  (none)"
         raise SystemExit(
             f"expected exactly one transaction refused with custom error 300 in {args.bundle}, "
-            f"found {len(refused)}; refusing to guess which message to replay."
+            f"found {len(refused)} of {total} captured transaction(s); refusing to guess which "
+            f"message to replay. Re-run with --signature naming one of:{listing}"
         )
     sig, tx = refused[0]
     raw = bytearray(base64.b64decode(tx["raw_base64"]))

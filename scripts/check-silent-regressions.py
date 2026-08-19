@@ -100,11 +100,16 @@ def main() -> int:
     print(f"scope: {' '.join(args.paths)}   max-commits: {args.max_commits}")
 
     # 1. every identifier ever DECLARED, with the commit that introduced it
+    # SCOPED TO HEAD, NOT --all. The born-set has to come from the same history the working
+    # tree does, or the gate compares two different worlds: `--all` walks every fetched ref, so
+    # an identifier declared and dropped on somebody else's unmerged branch reads as a
+    # regression on a main that never contained it. That made the verdict depend on which
+    # branches a clone happened to fetch, and CI fetches them all (fetch-depth: 0).
     log = sh(
         [
             "git",
             "log",
-            "--all",
+            "HEAD",
             f"-n{args.max_commits}",
             "-p",
             "--unified=0",
@@ -168,13 +173,19 @@ def main() -> int:
     silent: list[tuple[str, str, str, str]] = []
     for name, (bsha, bsubj) in sorted(vanished.items()):
         out = sh(
-            ["git", "log", "--all", "-n1", "--format=%h|%s", "-S", name, "--"]
+            ["git", "log", "HEAD", "-n1", "--format=%h|%s", "-S", name, "--"]
             + args.paths,
             timeout=60,
         ).strip()
         if not out:
             continue
         rsha, _, rsubj = out.partition("|")
+        if bsha.startswith(rsha):
+            # DECLARED AND SUPERSEDED INSIDE ONE COMMIT, so the identifier never existed in any
+            # committed state and nothing regressed. Reporting it sends a reader to a diff where
+            # the name is added and removed in the same breath, which reads as a tooling fault
+            # and is the kind of finding that teaches people to skim this gate's output.
+            continue
         if name.lower() not in rsubj.lower():
             silent.append((name, bsha[:7], bsubj, f"{rsha} {rsubj}"))
 

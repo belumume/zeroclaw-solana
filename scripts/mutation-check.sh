@@ -68,17 +68,33 @@ PY
 echo
 echo "=== the suite MUST fail now ==="
 set +e
-cargo test --test properties --locked 2>&1 | tail -14
-MUTANT_RC=${PIPESTATUS[0]}
+MUTANT_OUT="$(cargo test --test properties --locked 2>&1)"
+MUTANT_RC=$?
 set -e
+printf '%s\n' "$MUTANT_OUT" | tail -14
 
 cp "$BACKUP" "$TARGET"
 echo
 echo "=== reverted; the clean run must pass again ==="
 set +e
-cargo test --test properties --locked 2>&1 | tail -4
-CLEAN_RC=${PIPESTATUS[0]}
+CLEAN_OUT="$(cargo test --test properties --locked 2>&1)"
+CLEAN_RC=$?
 set -e
+printf '%s\n' "$CLEAN_OUT" | tail -4
+
+# A NON-ZERO EXIT IS NOT A CAUGHT MUTANT, and conflating the two is how a control
+# silently stops working. A mutation that fails to COMPILE also exits non-zero -- 101,
+# with the test harness never running at all -- and so does a cargo that cannot resolve
+# the lockfile, or a missing toolchain. Read as "caught", every one of those makes this
+# script report "the suite discriminates" on a day the suite never ran, which is the
+# exact false green it exists to prevent. So require the harness to have RUN and
+# REPORTED: cargo prints "test result: FAILED" only when tests executed and failed.
+mutant_reported_failures() {
+  printf '%s' "$MUTANT_OUT" | grep -qE '^test result: FAILED'
+}
+clean_reported_pass() {
+  printf '%s' "$CLEAN_OUT" | grep -qE '^test result: ok'
+}
 
 echo
 if [ "$MUTANT_RC" -eq 0 ]; then
@@ -86,10 +102,17 @@ if [ "$MUTANT_RC" -eq 0 ]; then
   echo "The suite is decorative. Its green result means nothing until this fails."
   exit 1
 fi
-if [ "$CLEAN_RC" -ne 0 ]; then
+if ! mutant_reported_failures; then
+  echo "VERDICT: INCONCLUSIVE. The mutant run exited $MUTANT_RC but never printed a"
+  echo "'test result: FAILED' line, so the test harness did not run to a verdict."
+  echo "That is a CRASH (most likely the mutated source did not compile), not a catch."
+  printf '%s\n' "$MUTANT_OUT" | grep -E '^error(\[|:)' | head -3 | sed 's/^/  /'
+  exit 2
+fi
+if [ "$CLEAN_RC" -ne 0 ] || ! clean_reported_pass; then
   echo "VERDICT: the suite fails even on clean source (exit $CLEAN_RC)."
   echo "The mutation result proves nothing, because the baseline is already red."
   exit 1
 fi
-echo "VERDICT: properties CAUGHT the injected defect (exit $MUTANT_RC) and pass clean."
-echo "The suite discriminates. Its green result carries information."
+echo "VERDICT: properties CAUGHT the injected defect (exit $MUTANT_RC, harness reported"
+echo "FAILED) and pass clean. The suite discriminates; its green carries information."

@@ -3,10 +3,18 @@
 # WHY THIS EXISTS
 # The submission is filed and the judging window runs to 2026-08-21 with no stated
 # judging date, so the repo is pushed to while it is being read. Today a push to a
-# non-main branch runs NOTHING (ci.yml's push trigger is `branches: [main]`), `main`
-# carries no branch protection at all, and the five hermetic browser checks that prove
-# the pay path still works have never run on a runner. This job is the floor that stops
-# a working thing from silently stopping working.
+# non-main branch runs NOTHING (ci.yml's push trigger is `branches: [main]`), and the
+# five hermetic browser checks that prove the pay path still works have never run on a
+# runner. This job is the floor that stops a working thing from silently stopping working.
+#
+# WHAT PROTECTION ACTUALLY ENFORCES, because the scope of this job's authority decides how
+# much the rest of CI can be relied on. Re-derive rather than trusting this comment:
+#   gh api repos/<owner>/<repo>/branches/main/protection \
+#     --jq '{c:.required_status_checks.contexts, strict:.required_status_checks.strict}'
+# It returns exactly one context, this job's, with strict false and enforce_admins false.
+# So NONE of ci.yml's jobs is required: the slop, custody, identifier-leak and
+# supply-chain checks are all advisory, and a red one does not hold the merge button.
+# That is the reason this job's check-run name is load-bearing and must not be renamed.
 #
 # EVERY CHECK BELOW WAS RUN LOCALLY WITH ALL EXTERNAL NETWORK BLOCKED (dead proxy on
 # 127.0.0.1:9, localhost exempted) and exited 0. Nothing here touches a live third

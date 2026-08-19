@@ -49,7 +49,7 @@ plugin's own test suite, which is a different and weaker kind of evidence.
 Host tests, no wasm toolchain, no network. Run with `cargo test --lib`:
 
 ```
-test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 The load-bearing cases:
@@ -95,6 +95,16 @@ MIT. See `LICENSE`.
 
 ## Output size (context-flooding defence)
 
-The brief's trap #3 warns "judges will call execute and count tokens." RugCheck metadata is attacker-influenceable, so it passes the response-path sanitizer, is capped at 96 chars per field, and only the top 3 risks (by score) plus 6 on-chain reasons reach the agent. Measured worst case (a 200-entry RugCheck flood of max-length injection strings, ~240 KB raw): the agent-facing report is **1,355 bytes**, hard-bounded and control-char-free (test `worst_case_output_is_bounded_under_hostile_metadata_flood`). A typical response
-targets well under ~200 tokens, which is a design goal rather than a measured figure; the number
-above is the adversarial ceiling, not the common case.
+The brief's trap #3 warns "judges will call execute and count tokens." RugCheck metadata is attacker-influenceable, so it passes the response-path sanitizer, is capped at 96 chars per field, and only the top 3 risks (by score) plus 6 on-chain reasons reach the agent. Measured worst case (a 200-entry RugCheck flood of max-length injection strings, ~240 KB raw): the agent-facing report is **1,337 bytes** all-ASCII (`worst_case_output_is_bounded_under_hostile_metadata_flood`) and **1,334 bytes** when every hostile field is filled with 4-byte codepoints (`worst_case_output_is_bounded_under_multibyte_codepoints`), hard-bounded and control-char-free in both encodings. A typical response
+targets well under ~200 tokens, which is a design goal rather than a measured figure; the numbers
+above are the adversarial ceiling, not the common case.
+
+Both figures are printed by the tests that assert them, so re-derive them instead of trusting this
+line:
+
+```
+cargo test --locked -- --nocapture --test-threads=1 2>&1 | grep MEASURED
+```
+
+`--test-threads=1` is load-bearing. The default parallel harness interleaves stdout and tears
+these lines, and a torn parse under-reports, which reads as agreement.

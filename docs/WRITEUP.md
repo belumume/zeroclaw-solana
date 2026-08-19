@@ -68,7 +68,7 @@ blast radius of a hacked agent capped by on-chain math.
   instructions are checked rather than asserted.
 
 ## What we had to build (and what fought us)
-**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (RPC settlement verification conjoining amount, mint, destination and reference, through the OWASP-LLM01 response sanitizer, with optional independent-endpoint corroboration so one compromised RPC cannot fabricate a settled payment), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 120 host tests across four suites including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
+**Plugins the two use cases run on (Tier 3, each genuinely bounded code):** oracle-publish (device-key ed25519 signing, durable nonce, range/kind/sequence fail-closed gates), payment-watch (RPC settlement verification conjoining amount, mint, destination and reference, through the OWASP-LLM01 response sanitizer, with optional independent-endpoint corroboration so one compromised RPC cannot fabricate a settled payment), spl-transfer-build (unsigned transfers surviving approval queues via durable nonces), and allowance-spend-build (spends bounded by the audited SF Allowances program, whose over-cap rejection is proven on-chain in DEVNET-PROOF). `solana-pay-request` was built as a plugin then demoted to a skill (see Correct layering); it stays in the tree only as evidence of that reasoning. Plus `solana-core`, a wasm32-wasip2 core crate (legacy + v0 tx, durable nonce, PDA/ATA, Anchor discriminators, Token-2022 decode, two-signer partial signing, byte-validated against solana-sdk fixtures, now 127 host tests across four suites including a verifier-side transaction decoder and TransferChecked introspection) proven by every plugin.
 
 **The x402 earning-node (`x402-feed-gate`).** The DePIN node does not just
 publish its feed, it SELLS it. A client asks for a reading; the node answers HTTP 402 with a
@@ -355,7 +355,7 @@ Supply chain is gated at 11 of 11 on advisories, licences and sources, with the 
 list derived from the dependency graph rather than guessed. The eleven are the `supply-chain`
 job's matrix in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), so the count is
 whatever that list holds rather than a figure written here:
-`python -c "import yaml;print(len(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']['supply-chain']['strategy']['matrix']['manifest']))"`. Three CI workflows keep this
+`python -c "import yaml;print(len(yaml.safe_load(open('.github/workflows/ci.yml'))['jobs']['supply-chain']['strategy']['matrix']['manifest']))"`. Four CI workflows keep this
 honest on a machine that is not ours, deliberately separate so a red badge says which thing
 broke.
 
@@ -900,7 +900,7 @@ every confirmation until nine in the evening.
 worked example of the layering argument above: it is a skill rather than a plugin because the
 tier test said so.
 
-**Code.** [`crates/solana-core`](../crates/solana-core) is the pure core with the 120 host
+**Code.** [`crates/solana-core`](../crates/solana-core) is the pure core with the 127 host
 tests. [`plugins/`](../plugins) holds all nine components. [`x402-feed-gate`](../x402-feed-gate)
 is the earning node.
 
