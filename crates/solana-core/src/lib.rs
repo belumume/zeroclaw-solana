@@ -57,13 +57,21 @@ pub use tx_decode::{decode_transaction, DecodeError, DecodedTransaction};
 /// bytes, so an untrusted non-ASCII input (a Kamino `market` label read straight
 /// from an HTTP response — NOT a validated pubkey) can never panic on a
 /// non-char-boundary byte slice. The three plugins share this one copy.
+/// 8+8 RATHER THAN 4+4, which an audit flagged. Eight base58 characters is roughly 47 bits, so a
+/// GPU can grind a vanity address matching both ends of a 4+4 rendering and show a human a
+/// recipient that looks like the one they expect. Sixteen characters is roughly 94 bits, which is
+/// not grindable, and the string is still short enough to read in a chat line.
+///
+/// This is defence for the DISPLAY paths. A field that actually decides where money goes should
+/// not be truncated at all: see `build_summary` in allowance-spend-build, which renders the
+/// recipient in full for exactly that reason.
 pub fn short_pubkey(pk: &str) -> String {
     let n = pk.chars().count();
-    if n <= 9 {
+    if n <= 17 {
         pk.to_string()
     } else {
-        let head: String = pk.chars().take(4).collect();
-        let tail: String = pk.chars().skip(n - 4).collect();
+        let head: String = pk.chars().take(8).collect();
+        let tail: String = pk.chars().skip(n - 8).collect();
         format!("{head}\u{2026}{tail}")
     }
 }
@@ -74,9 +82,11 @@ mod short_pubkey_tests {
 
     #[test]
     fn shortens_a_long_base58() {
+        // 8+8, not 4+4: eight base58 characters is roughly 47 bits, and a GPU can grind a vanity
+        // address matching both ends of a 4+4 rendering to show a human the recipient they expect.
         assert_eq!(
             short_pubkey("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
-            "EPjF…Dt1v"
+            "EPjFWdd5…ZwyTDt1v"
         );
     }
 
@@ -87,12 +97,17 @@ mod short_pubkey_tests {
 
     #[test]
     fn non_ascii_input_does_not_panic() {
-        // A non-base58 `market` label of 12 multibyte chars (>9): the old
-        // byte-slicing `&pk[..4]` panicked mid-codepoint here; char-based does not.
-        let m = "\u{4e2d}".repeat(12);
-        assert_eq!(
-            short_pubkey(&m),
-            "\u{4e2d}\u{4e2d}\u{4e2d}\u{4e2d}\u{2026}\u{4e2d}\u{4e2d}\u{4e2d}\u{4e2d}"
+        // 24 multibyte chars, NOT the 12 this used to use. Twelve was chosen to clear the old
+        // 9-char passthrough; against the 17-char threshold it would pass through UNCHANGED, so
+        // this test would stop exercising truncation entirely while still reporting green. The
+        // point of the test is that truncating multibyte input does not panic the way the old
+        // byte-slicing `&pk[..4]` did, which requires the fixture to actually BE truncated.
+        let m = "\u{4e2d}".repeat(24);
+        let out = short_pubkey(&m);
+        assert!(
+            out.contains('\u{2026}'),
+            "the fixture no longer truncates, so this asserts nothing about panicking"
         );
+        assert_eq!(out.chars().count(), 17, "8 head + ellipsis + 8 tail");
     }
 }

@@ -352,7 +352,10 @@ fn percent_encode_into(out: &mut String, s: &str) {
 /// through `label_untrusted`, so on-chain-sourced framing is marked untrusted
 /// rather than re-entering the agent's context as if it were an instruction.
 fn build_summary(v: &ValidatedRequest) -> String {
-    let recip = short_pubkey(&v.recipient.to_base58());
+    // FULL, not truncated, matching the other two builders. This names where a payer's money
+    // goes, and a truncated rendering invites a vanity address matching both visible ends. The
+    // mint below stays shortened: it identifies an asset rather than a destination.
+    let recip = v.recipient.to_base58();
     let asset = match &v.spl_token {
         Some(m) => format!("SPL mint {}", short_pubkey(&m.to_base58())),
         None => "SOL".to_string(),

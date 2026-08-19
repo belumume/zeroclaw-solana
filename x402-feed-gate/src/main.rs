@@ -1277,8 +1277,18 @@ fn handle_reading<T: RpcTransport, S: RpcTransport>(
 
 /// Simulate then broadcast then confirm the client's payment transaction.
 fn settle<T: RpcTransport>(rpc: &SolanaRpc<T>, v: &VerifiedPayment) -> Result<String, String> {
-    if let Ok(Some(sim_err)) = rpc.simulate_transaction(&v.raw_tx) {
-        return Err(format!("simulation failed: {sim_err}"));
+    // Match the Err arm EXPLICITLY rather than letting `if let Ok(..)` swallow it. The old form
+    // discarded a transport failure, so an RPC hiccup skipped the simulation gate entirely and the
+    // transaction went straight to send. Send-preflight still catches it, which is why this was
+    // defense-in-depth rather than a hole, but a gate that silently does not run on a bad day is
+    // the shape this repo keeps finding: it reads as coverage and is not.
+    match rpc.simulate_transaction(&v.raw_tx) {
+        Ok(Some(sim_err)) => return Err(format!("simulation failed: {sim_err}")),
+        Ok(None) => {}
+        // Not fatal: preflight on send re-runs the same check against the same node, so refusing
+        // here would turn a transient RPC blip into a refused payment the buyer already made.
+        // Logged rather than dropped, so a run where the gate did not execute is legible.
+        Err(e) => eprintln!("  simulate unavailable ({e:?}); relying on send-preflight"),
     }
     let sig = rpc
         .send_transaction(&v.raw_tx)

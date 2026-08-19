@@ -727,7 +727,11 @@ pub fn render_output(v: &ValidatedTransfer, tx: &UnsignedTx, meta: &OutputMeta) 
 /// is marked untrusted rather than re-entering the agent's context as if it were
 /// an instruction.
 fn build_summary(v: &ValidatedTransfer, meta: &OutputMeta) -> String {
-    let recip = short_pubkey(&v.recipient.to_base58());
+    // FULL, not truncated, matching build_summary in allowance-spend-build. This is the field
+    // that decides where the money goes and this line is what a human reads before approving.
+    // An 8+8 rendering is fine for context; for a destination it still invites a vanity address
+    // that matches both visible ends. The mint and fee payer below stay shortened.
+    let recip = v.recipient.to_base58();
     let asset = match v.asset {
         Asset::Sol => "SOL".to_string(),
         Asset::Spl(m) => format!(
@@ -1343,8 +1347,15 @@ mod tests {
         // drift. This is the largest case: durable-nonce + ATA-create + memo.
         let summary_len = parsed["summary"].as_str().unwrap().len();
         assert!(summary_len < 400, "summary is {summary_len} bytes");
+        // RAISED 750 -> 820 when the summary began rendering the recipient in FULL rather than
+        // truncated. Measured at 781, not guessed, and the ceiling sits just above it so the bound
+        // still bites. The trade: 8+8 is roughly 94 bits and fine for context, but a DESTINATION
+        // shown with both ends visible still invites a vanity address that matches them, and this
+        // line is what a human reads before approving. Thirty-one bytes is the right price.
+        //
+        // This is the context-flooding bound. Raising it again needs a reason of the same weight.
         let envelope = out.len() - tx_b64.len();
-        assert!(envelope < 750, "json envelope is {envelope} bytes: {out}");
+        assert!(envelope < 820, "json envelope is {envelope} bytes: {out}");
     }
 
     #[test]

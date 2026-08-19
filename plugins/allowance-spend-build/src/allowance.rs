@@ -900,7 +900,12 @@ fn cap_json(cap: &Cap) -> serde_json::Value {
 /// echoed memo passes through `label_untrusted`, so on-chain-sourced framing is
 /// marked untrusted rather than re-entering the agent's context as an instruction.
 fn build_summary(v: &ValidatedSpend, meta: &OutputMeta) -> String {
-    let recv = short_pubkey(&v.receiver.to_base58());
+    // FULL, not truncated. This is the field that decides where the money goes, and it is the one
+    // line a human reads before approving. Truncation exists to save space; a payment approval is
+    // the last place to economise, and a grindable rendering lets an attacker show a recipient
+    // that looks like the expected one. The other two below stay shortened: they are context, and
+    // `short_pubkey` is now 8+8 rather than 4+4 anyway.
+    let recv = v.receiver.to_base58();
     let deleg = short_pubkey(&v.delegation.to_base58());
     let mint = short_pubkey(&meta.mint.to_base58());
     let cap_note = match meta.cap {
@@ -1802,10 +1807,19 @@ mod tests {
         // The whole JSON envelope minus the base64 transaction stays tight. It is
         // a little larger than the simpler transfer builder's because it also
         // carries the full on-chain cap object and the delegation/enforcement
-        // metadata a custody-aware approval gate needs -- still well under ~1.1 KB.
+        // metadata a custody-aware approval gate needs.
+        //
+        // RAISED 1100 -> 1160 when the summary began rendering the recipient in FULL rather than
+        // truncated. Measured at 1121, not guessed, and the ceiling is set just above it so the
+        // bound still bites: a 4+4 rendering is roughly 47 bits and grindable, so an attacker
+        // could show a human the address they expected. Twenty-seven bytes is the right price for
+        // that on the one line a human reads before approving a payment.
+        //
+        // This is the context-flooding bound, so raising it is a deliberate trade rather than
+        // maintenance. It must not drift upward again without a reason of the same weight.
         let b64_len = parsed["transaction"].as_str().unwrap().len();
         let envelope = out.len() - b64_len;
-        assert!(envelope < 1100, "envelope (minus tx) is {envelope} bytes");
+        assert!(envelope < 1160, "envelope (minus tx) is {envelope} bytes");
     }
 
     // --- memo sanitization: hostile framing labelled untrusted, RLO stripped ---
