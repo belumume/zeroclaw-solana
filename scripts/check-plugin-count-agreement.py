@@ -817,11 +817,11 @@ def selftest() -> int:
             "1 exempt" in op_line,
         )
         report(
-            # HONEST BOUND: this one does NOT discriminate in this fixture. There is no
-            # always-loaded file here, so the summary is the NOT CHECKED variant and carries no
-            # count either way -- measured, it passes against the pooled mutant. The assertion
-            # above is the load-bearing one (mutant: 66/68, failing exactly that case). This is
-            # kept as a guard for the both-scopes-present case rather than as a second control.
+            # BOTH SCOPES ARE PRESENT HERE, so this discriminates too. `entry` is written earlier
+            # in the fixture and never removed, so al_present is True and the real line reads
+            # "always-loaded: 1 claim(s) across 3 file(s) ... 0 exempt as dated record(s)".
+            # Pooling makes that same line read "1 exempt", so this assertion flips. Measured on
+            # the mutant that restores the pooled append: 66/68, and BOTH new cases fail.
             "and the always-loaded summary does not claim it",
             "1 exempt" not in al_line,
         )
