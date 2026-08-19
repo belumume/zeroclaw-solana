@@ -565,7 +565,10 @@ mod tests {
         // Non-EMPTY rather than a fixed count: the loop below is the actual test, and a loop over
         // an empty vector satisfies every assertion inside it vacuously. This guards that, and
         // does not break the next time a tier is added or withdrawn.
-        assert!(!c.accepts.is_empty(), "an empty menu would pass the loop below vacuously");
+        assert!(
+            !c.accepts.is_empty(),
+            "an empty menu would pass the loop below vacuously"
+        );
         for row in &c.accepts {
             assert!(
                 row.network.contains(':'),
@@ -673,7 +676,10 @@ mod tests {
         let v = verify_x_payment(&cfg, &header, "cached")
             .expect("a client on the old menu must still be served, not refused");
         assert_eq!(v.amount, cfg.price_day_pass);
-        assert!(v.is_day_pass, "the receipt still records which amount was paid");
+        assert!(
+            v.is_day_pass,
+            "the receipt still records which amount was paid"
+        );
     }
 
     #[test]

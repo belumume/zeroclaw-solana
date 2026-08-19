@@ -724,6 +724,17 @@ jobs:
       - name: that map's own controls
         run: python3 scripts/check-video-claims.py --selftest
 
+      # The og:image is what renders in every social share of this repo, and its figures are
+      # measured from chain, so they decay. Its generator existed and was invoked by nothing --
+      # which the regression gate caught about THIS gate too, on its first run: a checker that
+      # only runs locally protects nothing during judging. Offline: git log, a 24-byte PNG header
+      # read, and an import check. It does not render, so it needs neither Pillow nor a font.
+      - name: the social card is a valid og:image and has been regenerated recently
+        run: python3 scripts/check-social-card-freshness.py
+
+      - name: that card gate's own controls
+        run: python3 scripts/check-social-card-freshness.py --selftest
+
       # Five judge-facing surfaces quote the certifier's score in prose. When a sixth case was
       # added they all kept saying 5/5, and nothing noticed: the certifier's self-test passes at
       # any N, the step above only reads its exit code, and take.py asserts on "cases correct"
