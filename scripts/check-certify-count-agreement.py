@@ -31,14 +31,39 @@ the time. And it only matches the PHRASINGS below, so a rewording slips past: `S
 not caught. That last constraint is load-bearing rather than laziness, and the comment on REFUSALS
 says which real sentence it protects.
 
-HOW SURFACES MUST BE BUILT. From a grep with NO PATHSPEC. An extension filter such as
-`git grep ... -- '*.md' '*.py' '*.yml'` cannot see `index.html` whatever it holds, and
-`index.html` is one of the submission form's five links, so scoping the search drops a
-judge-facing surface without saying so. A filter that narrows an instrument makes its zero mean
-"I did not look" while it reads as "nothing is there". `check-doc-slop.py` guards the same `.html`
-omission. Re-derive with:
+HOW SURFACES MUST BE BUILT. From TWO greps, because neither tool can see the other's scope.
 
-    git grep -nE '[0-9]+/[0-9]+ cases correct|(four|five|[0-9]+) inject(ion|ed) shapes?'
+  1. THE TRACKED SCOPE, with NO PATHSPEC. An extension filter such as
+     `git grep ... -- '*.md' '*.py' '*.yml'` cannot see `index.html` whatever it holds, and
+     `index.html` is one of the submission form's five links, so scoping the search drops a
+     judge-facing surface without saying so. `check-doc-slop.py` guards the same `.html`
+     omission.
+
+         git grep -nE '[0-9]+/[0-9]+ cases correct|(four|five|[0-9]+) inject(ion|ed) shapes?'
+
+  2. THE GITIGNORED OPERATIONAL SCOPE, which `git grep` CANNOT SEE AT ALL. This half is why the
+     section was rewritten. `git grep` reads the INDEX, so a gitignored file is not filtered out
+     of the results, it is absent from the corpus -- the command above returns a clean zero over
+     it forever, and a filter that narrows an instrument makes its zero mean "I did not look"
+     while it reads as "nothing is there". `notes/` is gitignored and holds the runbook a human
+     reads ALOUD during a live demo. It sat outside every count gate in this repo until
+     2026-08-19, when a sweep corrected this score across eight surfaces and left the runbook
+     quoting a stale one. Reach it with a plain recursive grep, which reads the filesystem
+     rather than the index:
+
+         grep -rnE '[0-9]+/[0-9]+ cases correct|(four|five|[0-9]+) inject(ion|ed) shapes?' notes/
+
+     Step 2 is the only one of the two that resolves `notes/`. Do NOT "simplify" it to
+     `git grep --no-index --exclude-standard`: `--exclude-standard` re-applies .gitignore and
+     hides the exact files step 2 exists to find. Unscoped `git grep --no-index` does work and
+     is unusable here, because it also walks `.compound-tmp/` and other agents' worktrees.
+
+OPTIONAL SURFACES ARE ABSENT EVERYWHERE BUT THE OPERATOR'S TRUNK. `notes/` is gitignored, so a
+clone, a CI runner and an agent worktree all lack it. An empty operational scope is therefore
+reported as NOT CHECKED with its denominator and does NOT gate; a missing REQUIRED surface stays
+a failure, because a tracked doc that vanished means this gate is quietly covering less than it
+says. Returning 2 for the absent case would paint every non-operator checkout permanently red,
+and a gate that is always red is one people learn to skip.
 
 Exit codes follow the house convention: 0 agree, 1 a real disagreement, 2 could not check.
 
@@ -71,6 +96,22 @@ SURFACES = [
     ".github/workflows/ci.yml",
 ]
 
+# THE GITIGNORED OPERATIONAL SCOPE. `notes/` holds the live-demo runbook, which quotes this score
+# three times and is read ALOUD off a screen. It is gitignored, so `git ls-files` and `git grep`
+# cannot see it and the list above could never have been derived to include it -- the omission was
+# structural rather than an oversight, which is why the fix is a second scope and not a ninth entry.
+#
+# DISCOVERED BY GLOB, not declared. A declared entry fixes the one file that bit; a glob covers the
+# next runbook someone writes, and this scope has no `git ls-files` to keep a declared list honest,
+# so a stale omission here would be invisible in exactly the way the original defect was. Today it
+# resolves to three files, of which DEMO-RUNBOOK.md is the one carrying claims.
+#
+# ABSENT IS NOT BROKEN. Every clone, CI runner and agent worktree lacks `notes/` by construction, so
+# an empty glob is reported as NOT CHECKED with its denominator and does not gate. The tracked list
+# above keeps the opposite rule: a REQUIRED surface that vanished is still a failure.
+OPERATIONAL_DIR = "notes"
+OPERATIONAL_GLOB = "*.md"
+
 SCORE = re.compile(r"(\d+)\s*/\s*(\d+)\s+cases correct")
 WORDS = {
     "one": 1,
@@ -100,6 +141,21 @@ CANNOT_CHECK = 2
 def spoken(n: str) -> int | None:
     """A count written as a word or a digit, as an int."""
     return int(n) if n.isdigit() else WORDS.get(n.lower())
+
+
+def operational(root: pathlib.Path) -> list[str]:
+    """Gitignored operational surfaces present in THIS checkout, as repo-relative paths.
+
+    Returns [] when the directory is absent, which is the normal state of every clone and runner.
+    The caller must print that zero rather than swallowing it: an empty scope and a clean scope
+    read identically otherwise, and that is the failure this whole scope exists to answer for.
+    """
+    d = root / OPERATIONAL_DIR
+    if not d.is_dir():
+        return []
+    return sorted(
+        p.relative_to(root).as_posix() for p in d.glob(OPERATIONAL_GLOB) if p.is_file()
+    )
 
 
 def certifier_total(path: pathlib.Path) -> int | None:
@@ -259,11 +315,57 @@ def selftest() -> int:
         (tmp / "docs" / "x.md").write_text("ok\n", encoding="utf-8")
         check("a missing surface is reported", len(scan(tmp, ["docs/gone.md"], 7)), 1)
 
-    # The real tree must agree, which is the case a regression breaks.
+        # ---- THE GITIGNORED OPERATIONAL SCOPE ------------------------------------------------
+        # ABSENT is the normal state of a clone and must yield an empty scope rather than a
+        # problem. Without this case, "the tracked surfaces agree" would be equally true of a
+        # gate that hard-failed every CI run.
+        check("no notes/ dir yields an empty scope", operational(tmp), [])
+
+        (tmp / OPERATIONAL_DIR).mkdir()
+        (tmp / OPERATIONAL_DIR / "DEMO-RUNBOOK.md").write_text(
+            "| `certify_publish_tx.py` | rc 0, **`7/7 cases correct`** | six injection shapes |\n",
+            encoding="utf-8",
+        )
+        (tmp / OPERATIONAL_DIR / "OTHER.md").write_text("no counts\n", encoding="utf-8")
+        (tmp / OPERATIONAL_DIR / "ignored.txt").write_text(
+            "5/5 cases correct\n", encoding="utf-8"
+        )
+        check(
+            "a present notes/ is DISCOVERED by glob, .md only",
+            operational(tmp),
+            ["notes/DEMO-RUNBOOK.md", "notes/OTHER.md"],
+        )
+        check(
+            "an AGREEING operational surface is silent",
+            scan(tmp, operational(tmp), 7),
+            [],
+        )
+
+        # THE CONTROL THIS SCOPE EXISTS FOR. A stale score in a GITIGNORED file, with every
+        # tracked surface correct, must fire and name that file. Before this scope the same tree
+        # printed a clean PASS, because no git-based derivation can name a file git does not track.
+        (tmp / OPERATIONAL_DIR / "DEMO-RUNBOOK.md").write_text(
+            "| `certify_publish_tx.py` | rc 0, **`5/5 cases correct`** | four injection shapes |\n",
+            encoding="utf-8",
+        )
+        got = scan(tmp, operational(tmp), 7)
+        check("a stale score in a gitignored operational file FIRES", len(got), 2)
+        check(
+            "and it names that file",
+            bool(got) and got[0].startswith("notes/DEMO-RUNBOOK.md:1:"),
+            True,
+        )
+
+    # The real tree must agree, which is the case a regression breaks. The operational scope is
+    # included so the runbook is covered here too, and skipped silently where it does not exist.
     total = certifier_total(CERTIFIER)
     check("the real certifier reports a total", total is not None, True)
     if total:
-        check("every real surface agrees", scan(ROOT, SURFACES, total), [])
+        check(
+            "every real surface agrees",
+            scan(ROOT, SURFACES + operational(ROOT), total),
+            [],
+        )
 
     for f in failures:
         print(f"  FAIL  {f}")
@@ -286,13 +388,25 @@ def main() -> int:
         )
         return CANNOT_CHECK
 
-    bad = scan(ROOT, SURFACES, total)
+    ops = operational(ROOT)
+    bad = scan(ROOT, SURFACES + ops, total)
     print(
         f"certifier prints {total}/{total}, so {total - 1} injection shape(s) are refused"
     )
-    for rel in SURFACES:
+    for rel in SURFACES + ops:
         hits = [b for b in bad if b.startswith(rel + ":")]
         print(f"  {'FAIL' if hits else 'ok  '} {rel}")
+    if ops:
+        print(
+            f"  ({len(ops)} of those are gitignored operational surface(s) under "
+            f"{OPERATIONAL_DIR}/, invisible to git grep)"
+        )
+    else:
+        print(
+            f"  NOT CHECKED: no {OPERATIONAL_DIR}/ in this checkout, so 0 gitignored "
+            f"operational surface(s) were scanned. Expected in a clone, a CI runner and an "
+            f"agent worktree, where that directory does not exist."
+        )
     if bad:
         print(
             "\nFAIL  a doc quotes a score the certifier does not print:\n"
@@ -303,7 +417,9 @@ def main() -> int:
         )
         return 1
 
-    print(f"\nPASS  {len(SURFACES)} surface(s) quote the certifier's real score")
+    print(
+        f"\nPASS  {len(SURFACES) + len(ops)} surface(s) quote the certifier's real score"
+    )
     return 0
 
 

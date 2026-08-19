@@ -12,10 +12,35 @@ That asymmetry is the point. The script DERIVES its totals, so they follow the c
 told. The prose is a number someone typed on a day when it was right, and a typed number does not
 know the code moved. Nothing goes red, because nothing was comparing them.
 
-WHAT IT ASSERTS. Every count claim of the form `<N> static` or `<N> live claim(s)` on a tracked
-prose surface must equal the corresponding CEILING derived from `verify-proof.py` itself. Nothing
-else. It does not read the sentence around the number and deliberately cannot tell good prose from
-bad.
+WHAT IT ASSERTS. Every count claim of the form `<N> static` or `<N> live claim(s)` on a prose
+surface must equal the corresponding CEILING derived from `verify-proof.py` itself. Nothing else.
+It does not read the sentence around the number and deliberately cannot tell good prose from bad.
+
+HOW THE SURFACE LIST MUST BE BUILT, and the half that was missing until 2026-08-19. `git ls-files`
+was the whole derivation, and it reads the INDEX, so a GITIGNORED file is not filtered out of the
+results -- it is absent from the corpus, and the scan returns a clean zero over it forever. That is
+the worst shape a zero can take, because it is byte-identical to "nothing is wrong there".
+`notes/` is gitignored and holds the runbook a human reads ALOUD during a live demo; it quotes the
+static count four times and no count gate in this repo could see it. A sweep corrected these counts
+across the tracked surfaces and left the runbook behind, for the second time in this repo's history
+(PR #66 was the first).
+
+So the scope is TWO derivations, because neither tool can see the other's half:
+
+    git grep -nE '[0-9]+ +(static|live claim)'        # tracked; NO extension pathspec
+    grep  -rnE '[0-9]+ +(static|live claim)' notes/   # gitignored; reads the filesystem
+
+Only the second resolves `notes/`. Do NOT reach for
+`git grep --no-index --exclude-standard`: `--exclude-standard` re-applies .gitignore and hides the
+exact files the second command exists to find. Unscoped `git grep --no-index` does work and is
+unusable, because it also walks `.compound-tmp/` and every other agent's worktree.
+
+THE OPERATIONAL SCOPE IS DISCOVERED, NOT DECLARED, and it does not gate when absent. A glob covers
+the next runbook someone writes; a declared list could go stale by omission with no `git ls-files`
+to keep it honest, which is the failure that produced this scope. Every clone, CI runner and agent
+worktree lacks `notes/`, so an empty glob prints NOT CHECKED with its denominator and leaves the
+exit code alone. Returning 2 there would paint every non-operator checkout permanently red, and a
+gate that is always red is a gate people learn to skip.
 
 WHY A CEILING RATHER THAN A CURRENT VALUE. The live total is conditional by construction, and the
 script's own comment explains that a constant there "would either overstate today or need
@@ -104,7 +129,17 @@ PAT_LIVE = re.compile(r"\b" + _NUM + r"\s+live\s+claim", re.I)
 
 # A discovery walk that matches nothing reports a clean sweep. Floor it well below the measured
 # 13 so ordinary editing does not trip it, but high enough that a broken scan cannot pass.
+#
+# KEYED ON THE TRACKED SCOPE ALONE. The operational scope is absent from every clone, so folding it
+# into the floor would turn "this is a CI runner" into "the pattern died", which is a false
+# cannot-check on a healthy tree. The pattern's liveness is proven by the tracked half either way.
 CLAIM_FLOOR = 6
+
+# The gitignored operational scope. See the docstring: `git ls-files` is structurally blind to it,
+# so it is discovered from the filesystem instead. Suffixes mirror the tracked scope's `*.md`
+# `*.html` so the two halves police the same kinds of file.
+OPERATIONAL_DIR = "notes"
+OPERATIONAL_SUFFIXES = (".md", ".html")
 
 
 def _value(token: str) -> int:
@@ -181,6 +216,24 @@ def _surfaces(root: Path) -> list[str]:
     return sorted(p for p in out if p.strip())
 
 
+def _operational(root: Path) -> list[str]:
+    """Gitignored operational prose present in THIS checkout, as repo-relative paths.
+
+    `git ls-files` above cannot return these at all, so without this the runbook a human reads
+    aloud during the demo is outside the gate. Returns [] where the directory is absent, which is
+    the state of every clone and runner; the caller prints that zero rather than swallowing it.
+    """
+    d = root / OPERATIONAL_DIR
+    if not d.is_dir():
+        return []
+    return sorted(
+        p.relative_to(root).as_posix()
+        for suffix in OPERATIONAL_SUFFIXES
+        for p in d.glob(f"*{suffix}")
+        if p.is_file()
+    )
+
+
 def check(root: Path) -> tuple[int, list[str]]:
     lines: list[str] = []
     verifier = root / VERIFIER
@@ -198,9 +251,13 @@ def check(root: Path) -> tuple[int, list[str]]:
         "(the largest total the live expression can reach)"
     )
 
+    tracked = _surfaces(root)
+    ops = _operational(root)
+
     disagree: list[str] = []
     seen = 0
-    for rel in _surfaces(root):
+    tracked_seen = 0
+    for rel in tracked + ops:
         path = root / rel
         try:
             text = path.read_text(encoding="utf-8")
@@ -213,6 +270,8 @@ def check(root: Path) -> tuple[int, list[str]]:
             ):
                 for match in pattern.finditer(line):
                     seen += 1
+                    if rel in tracked:
+                        tracked_seen += 1
                     got = _value(match.group(1))
                     if got != want:
                         disagree.append(
@@ -220,9 +279,10 @@ def check(root: Path) -> tuple[int, list[str]]:
                             f"the script reaches {want}\n      {line.strip()[:110]}"
                         )
 
-    if seen < CLAIM_FLOOR:
+    # The floor reads the TRACKED count only, per the note on CLAIM_FLOOR.
+    if tracked_seen < CLAIM_FLOOR:
         lines.append(
-            f"FAIL  found only {seen} claim(s) across {len(_surfaces(root))} tracked prose "
+            f"FAIL  found only {tracked_seen} claim(s) across {len(tracked)} tracked prose "
             f"file(s), expected at least {CLAIM_FLOOR}."
         )
         lines.append(
@@ -231,8 +291,18 @@ def check(root: Path) -> tuple[int, list[str]]:
         return 2, lines
 
     lines.append(
-        f"scanned {len(_surfaces(root))} tracked prose file(s); {seen} claim(s) checked"
+        f"scanned {len(tracked)} tracked prose file(s); {seen} claim(s) checked"
     )
+    if ops:
+        lines.append(
+            f"plus {len(ops)} gitignored operational file(s) under {OPERATIONAL_DIR}/, "
+            f"carrying {seen - tracked_seen} of those claim(s). git ls-files cannot see these."
+        )
+    else:
+        lines.append(
+            f"NOT CHECKED: no {OPERATIONAL_DIR}/ in this checkout, so 0 gitignored operational "
+            f"file(s) were scanned. Expected in a clone, a CI runner and an agent worktree."
+        )
     if disagree:
         lines.append("\nFAIL  claim(s) disagree with the script:\n")
         lines.extend(disagree)
@@ -260,11 +330,28 @@ def main():
 """
 
 
-def _fixture(tmp: Path, docs: dict[str, str], verifier: str = VERIFIER_FIXTURE) -> None:
+def _fixture(
+    tmp: Path,
+    docs: dict[str, str],
+    verifier: str = VERIFIER_FIXTURE,
+    ignored: dict[str, str] | None = None,
+) -> None:
+    """Build a fixture repo. `ignored` files are written under a real .gitignore entry.
+
+    They must be GENUINELY gitignored rather than merely untracked, or the operational-scope
+    cases below would pass for the wrong reason: `git ls-files` would still miss an untracked
+    file, so the case could not tell a working second scope from an accident of staging.
+    """
     (tmp / "scripts").mkdir(parents=True, exist_ok=True)
     (tmp / VERIFIER).write_text(verifier, encoding="utf-8")
     for name, body in docs.items():
         (tmp / name).write_text(body, encoding="utf-8")
+    if ignored:
+        (tmp / ".gitignore").write_text(f"{OPERATIONAL_DIR}/\n", encoding="utf-8")
+        for name, body in ignored.items():
+            p = tmp / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body, encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
     subprocess.run(["git", "add", "-A"], cwd=tmp, check=True)
 
@@ -437,6 +524,88 @@ def selftest() -> int:
         assert "len(whatever)" in opaque, "case 10c mutation did not apply"
         _fixture(tmp, _agreeing_docs(), verifier=opaque)
         report("an underivable live_total exits 2, not 0", run(tmp)[0] == 2)
+
+    # 10b. THE GITIGNORED OPERATIONAL SCOPE, all four directions.
+    #
+    #      ABSENT is the state of every clone and runner: NOT CHECKED, and it must not gate.
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _fixture(tmp, _agreeing_docs())
+        rc, out = run(tmp)
+        report("no notes/ dir: the operational scope is empty", _operational(tmp) == [])
+        report("and the verdict still passes", rc == 0)
+        report(
+            "and it says NOT CHECKED rather than passing quietly",
+            any("NOT CHECKED" in x for x in out),
+        )
+
+    #      PRESENT and agreeing: discovered, counted, silent. `git ls-files` must still not see
+    #      it, or this case proves nothing about the second scope.
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _fixture(
+            tmp,
+            _agreeing_docs(),
+            ignored={
+                f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md": "rc 0, **10/10 static + 5/5 live**\n",
+                f"{OPERATIONAL_DIR}/OTHER.md": "no counts here\n",
+            },
+        )
+        report(
+            "the fixture's notes/ really is invisible to git ls-files",
+            not any(x.startswith(OPERATIONAL_DIR + "/") for x in _surfaces(tmp)),
+        )
+        report(
+            "and it IS discovered from the filesystem",
+            _operational(tmp)
+            == [
+                f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md",
+                f"{OPERATIONAL_DIR}/OTHER.md",
+            ],
+        )
+        rc, out = run(tmp)
+        report("an agreeing operational file passes", rc == 0)
+        report(
+            "and its claims are reported with a denominator",
+            any(
+                f"2 gitignored operational file(s) under {OPERATIONAL_DIR}/" in x
+                for x in out
+            ),
+        )
+
+    #      THE CONTROL THE SCOPE EXISTS FOR: every TRACKED surface correct, the gitignored one
+    #      wrong. Before this scope that tree printed a clean pass, because no git-based
+    #      derivation can name a file git does not track.
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _fixture(
+            tmp,
+            _agreeing_docs(),
+            ignored={
+                f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md": "rc 0, **9/9 static + 4 live claims**\n"
+            },
+        )
+        rc, out = run(tmp)
+        report("a wrong count in a GITIGNORED operational file FAILS", rc == 1)
+        report(
+            "and the failure names that file and its line",
+            any(f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md:1" in x for x in out),
+        )
+
+    #      AND THE FLOOR DOES NOT COUNT IT. An operational file full of claims must not let a
+    #      dead tracked scan pass the floor, which would hand back the false green.
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _fixture(
+            tmp,
+            {"a.md": "no counts here at all\n"},
+            ignored={
+                f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md": (
+                    "10 static, 10 static, 10 static, 10 static, 10 static, 10 static, 10 static\n"
+                )
+            },
+        )
+        report("operational claims cannot satisfy the tracked floor", run(tmp)[0] == 2)
 
     # 11. MUTATION CONTROL. Disable the comparison in a copy of this file, drive the real gate
     #     at a planted disagreement, and require the verdict to flip. Without this, every case
