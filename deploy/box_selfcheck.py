@@ -597,14 +597,37 @@ ASSIGNMENT_TOKEN_RE = re.compile(r"^([^\s=]+)=(.+)$")
 def scrub_assignment_values(value: str) -> str:
     """Replace the value half of every `key=value` token, keeping the key.
 
-    Whitespace-split rather than shlex-split on purpose. shlex raises on unbalanced quotes and
-    would need a fallback, and it MERGES quoted tokens -- so `"A=x y"` becomes one token whose
-    interior this would then have to reason about. Splitting on whitespace can only ever produce
-    MORE tokens, and more tokens means more redaction, so the conservative direction is the
-    default. The original spacing is not preserved; nothing downstream re-executes this string.
+    SHLEX, NOT WHITESPACE, and this reverses a deliberate earlier choice whose stated reason was
+    measured to be false. That reason was: "splitting on whitespace can only ever produce MORE
+    tokens, and more tokens means more redaction, so the conservative direction is the default."
+    More tokens means LESS redaction, because a fragment carrying no `=` is published VERBATIM.
+
+    Quoted, space-containing values are valid systemd `Exec*` syntax, and on them a whitespace
+    split tears the secret and publishes its tail to an endpoint anyone can fetch:
+
+        ExecStart=/bin/env API_KEY="sk live 9f3a2b" /usr/bin/gate
+        whitespace ->  ExecStart=<redacted> API_KEY=<redacted> live 9f3a2b" /usr/bin/gate
+        shlex      ->  ExecStart=<redacted> API_KEY=<redacted> /usr/bin/gate
+
+    Measured on three shapes before the change, all three leaked. shlex MERGING a quoted token is
+    exactly what fixes it rather than a complication to reason about: `API_KEY="sk live 9f3a2b"`
+    becomes ONE token, which then matches as an assignment and is redacted whole.
+
+    This makes it agree with `environment_names` below, which already used shlex and already
+    carried a comment calling the two "the exact inverse ... worth stating so neither gets made
+    consistent with the other". They now agree because the argument for splitting them was wrong,
+    not because consistency is tidy.
+
+    Unbalanced quoting makes shlex raise, and the answer matches the neighbour's: publish NOTHING
+    from the line rather than guess where a value ends. Original spacing is not preserved and
+    nothing downstream re-executes this string.
     """
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        return "<redacted: unbalanced quoting, whole value withheld>"
     out = []
-    for tok in value.split():
+    for tok in tokens:
         m = ASSIGNMENT_TOKEN_RE.match(tok)
         out.append(f"{m.group(1)}=<redacted>" if m else tok)
     return " ".join(out)
@@ -1770,6 +1793,43 @@ def self_test() -> int:
     report(
         "redaction: build_verdict applies it rather than the caller",
         home not in json.dumps(build_verdict(r)),
+    )
+
+    # A QUOTED, SPACE-CONTAINING VALUE IS VALID `Exec*` SYNTAX AND USED TO LEAK ITS TAIL.
+    # The earlier whitespace split tore `API_KEY="sk live 9f3a2b"` into three tokens, redacted the
+    # first because it carried an `=`, and published `live 9f3a2b"` verbatim to an endpoint anyone
+    # can fetch. Measured on three shapes at the time, all three leaked. These cases exist so the
+    # argument that produced that split ("more tokens means more redaction") cannot come back: it
+    # is false, because a fragment with no `=` is published untouched.
+    for _label, _line, _secrets in (
+        (
+            "space-quoted",
+            'ExecStart=/bin/env API_KEY="sk live 9f3a2b" /usr/bin/g',
+            ("live", "9f3a2b"),
+        ),
+        (
+            "single-quoted",
+            "ExecStart=/usr/bin/p --pass='alpha bravo charlie'",
+            ("alpha", "bravo"),
+        ),
+    ):
+        _out = scrub_assignment_values(_line)
+        _residue = _out.replace("<redacted>", "")
+        report(
+            f"redaction: no fragment of a {_label} value survives",
+            not any(s in _residue for s in _secrets),
+        )
+    # Unbalanced quoting must withhold the whole line rather than guess where the value ends,
+    # matching what environment_names already does on the same input class.
+    report(
+        "redaction: unbalanced quoting withholds the whole value",
+        "oops" not in scrub_assignment_values('ExecStart=/usr/bin/p --k="oops'),
+    )
+    # OVER-CORRECTION CONTROL. Without this, returning a constant would pass every case above.
+    _ok = scrub_assignment_values("ExecStart=/usr/bin/env bash %h/.zeroclaw/bin/run.sh")
+    report(
+        "redaction: a legitimate Exec line still publishes its binary and args",
+        "bash" in _ok and "%h/.zeroclaw/bin/run.sh" in _ok,
     )
 
     print(f"\n{passed} passed, {failed} failed")

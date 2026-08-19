@@ -141,8 +141,23 @@ BOUND_CUE = re.compile(
 # happens to equal some unrelated number the suite printed will pass. The direction of the
 # assertion is what makes that acceptable -- a permissive code side can only ever cause a
 # MISS, never a false failure, and a gate that cries wolf is one people learn to skip.
+# UP TO TWO DESCRIPTIVE WORDS MAY SIT BETWEEN THE FIGURE AND ITS UNIT, and omitting that was a
+# real bug rather than a hypothetical: this pattern's own cited example, "16 detail lines", was
+# NOT excluded by it, because "detail" sits in between. lending-health prints exactly that shape
+# ("... bytes over {} detail lines"), so `16` was read as a byte figure. Measured: the line parsed
+# to {16, 5602} and now parses to {5602}.
+#
+# It matters most on the LEDGER side. There a non-byte quantity leaking in as a byte "claim" is a
+# FALSE FAILURE, which is the direction this whole gate exists to avoid, and it would have blamed
+# a phantom byte mismatch that was really an unrelated line-count drift. Both sides agree today,
+# so nothing was firing; the day the two counts drift independently it would have.
+#
+# Bounded at two words and lowercase-only on purpose, so it cannot run past a sentence into an
+# unrelated unit. Verified against every MEASURED line the suites currently print: the genuine
+# byte figures ("47 bytes", "530 of it fixed prose") all survive.
 NON_BYTE_UNIT_AFTER = re.compile(
-    r"\s*(?:chars?|characters?|lines?|entries|entry|top|codepoints?|%|[KMG]i?B|kB)\b"
+    r"\s*(?:[a-z][a-z-]*\s+){0,2}"
+    r"(?:chars?|characters?|lines?|entries|entry|top|codepoints?|%|[KMG]i?B|kB)\b"
 )
 
 
@@ -464,6 +479,28 @@ def selftest() -> int:
     check(
         "and the tear artifact itself yields nothing",
         parse_measured("bytes") == set(),
+    )
+    # A DESCRIPTIVE WORD BETWEEN A FIGURE AND ITS UNIT. This is the lending-health line verbatim,
+    # and it parsed to {16, 5602} until the exclusion allowed intervening words: `16` is a count of
+    # detail lines, not bytes. It is pinned as the real string rather than a minimised one, because
+    # the shape is what the crate actually prints and a reduced fixture would not have caught it.
+    check(
+        "a figure whose unit sits two words away is not read as bytes",
+        parse_measured(
+            "MEASURED worst-case lending-health report, 4-byte codepoints: "
+            "5602 bytes over 16 detail lines"
+        )
+        == {5602},
+        f"got {sorted(parse_measured('MEASURED x: 5602 bytes over 16 detail lines'))}",
+    )
+    # OVER-CORRECTION CONTROL for the same widening: a genuine byte figure that merely happens to
+    # be followed by other words must still be collected, or the exclusion has eaten real data.
+    check(
+        "widening the exclusion did not swallow real byte figures",
+        parse_measured(
+            "MEASURED oracle-publish report: 1930 bytes total, 530 of it fixed prose around the tx"
+        )
+        == {530, 1930},
     )
     check(
         "non-byte units are not read as byte figures",
