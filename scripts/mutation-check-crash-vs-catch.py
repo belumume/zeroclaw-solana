@@ -41,7 +41,6 @@ Run:  python3 scripts/mutation-check-crash-vs-catch.py
 Exit: 0 all subjects discriminate, 1 at least one cannot, 2 inconclusive (setup failed).
 """
 
-import os
 import shutil
 import subprocess
 import sys

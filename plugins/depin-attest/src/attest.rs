@@ -515,7 +515,9 @@ mod tests {
         let ordinary = "sensor-A7";
         assert_eq!(
             sanitize_onchain(ordinary, DEVICE_ID_MAX_BYTES).text,
-            parse_and_validate(&args("motion_detected", "")).unwrap().device_id,
+            parse_and_validate(&args("motion_detected", ""))
+                .unwrap()
+                .device_id,
             "the byte cap altered a device_id that was already inside every budget"
         );
     }
