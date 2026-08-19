@@ -26,9 +26,15 @@ live agent that moves real money, so every probe here is GET or HEAD against an 
 endpoint, asserted below rather than left to good intentions.
 
 It does not run scripts/verify_proof_ledger_control.py. That control is worth having and
-takes 174.7 seconds measured, with no progress output, which is most of a five-minute
-slot spent on dead air. It is declared here rather than silently omitted, because an
-undocumented omission is indistinguishable from an oversight.
+takes 46.1 seconds measured (2026-08-19, rc 0, six branches reached), with no progress
+output at all. That is roughly three times this entire pre-flight, spent showing nothing,
+which is why it stays out of a go/no-go check that has to answer fast. Re-time it with
+  python -c "import subprocess,sys,time; t=time.time(); r=subprocess.run([sys.executable,'scripts/verify_proof_ledger_control.py']); print(time.time()-t, r.returncode)"
+rather than trusting this number. It drives a decision rather than decorating one: whether
+the control can fit in a slot at all depends on it, so a stale figure silently changes the
+answer without looking wrong.
+It is declared here rather than silently omitted, because an undocumented omission is
+indistinguishable from an oversight.
 
 THE MEASURED BEHAVIOURS THIS ENCODES, each of which cost a rehearsal to learn
 -----------------------------------------------------------------------------
@@ -84,8 +90,10 @@ SLOT_SECONDS = 300
 # Declared, with the reason. The check-all.py pattern: what cannot run says so out loud.
 NOT_RUN = {
     "scripts/verify_proof_ledger_control.py": (
-        "174.7s measured with no progress output. Offline and worth running, but it is "
-        "most of a demo slot. Run it separately, never on the call."
+        "46.1s measured 2026-08-19 (rc 0), with no progress output. Offline and worth "
+        "running, and short enough to run before the call rather than never. Kept out of "
+        "this pre-flight because it is ~3x the whole check and prints nothing while it "
+        "works. Run it separately, not on the call."
     ),
 }
 
