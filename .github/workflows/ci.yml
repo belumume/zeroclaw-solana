@@ -22,17 +22,24 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-# THIRD-PARTY ACTIONS ARE SHA-PINNED, first-party ones are not, and that split is deliberate.
+# EVERY ACTION IS SHA-PINNED except two, and the two exceptions are named below.
 #
 # A mutable tag is a standing grant to whoever controls it: `dtolnay/rust-toolchain@stable` is a
-# BRANCH, and `@v2` can be repointed at any commit at any time. Those four now carry a commit SHA
-# with the tag kept as a trailing comment, so a reader sees what is pinned without resolving a hash
+# BRANCH, and `@v2` can be repointed at any commit at any time. Each pin carries a commit SHA with
+# the version kept as a trailing comment, so a reader sees what is pinned without resolving a hash
 # and a bump shows up as a visible diff rather than happening silently upstream.
 #
-# `actions/checkout` and `actions/setup-python` stay on tags. They are GitHub-owned and run on a
-# GitHub-hosted runner, so the trust boundary they would protect against is one that already
-# contains the whole job; pinning them buys a maintenance cost against a threat model where the
-# pin does not help. Stated as a decision so nobody reads it as the four above being missed.
+# `actions/checkout` and `actions/setup-python` are pinned on the same terms as the rest. Being
+# GitHub-owned buys a smaller blast radius, not a different mechanism: the relevant boundary is
+# who can repoint the ACTION REPO's tag, which is not the same question as who operates the
+# runner, and the 2025 tj-actions compromise was a tag repoint rather than a code change. Pinning
+# also costs nothing here, since these SHAs are exactly what the tags already resolved to.
+#
+# THE TWO EXCEPTIONS, deliberate: `belumume/.github`'s reusable workflows stay on `@main`. They are
+# the same owner as this repo, so a pin defends against nobody, and it would trade away picking up
+# improvements automatically. Whether the repo-level `sha_pinning_required` policy accepts a
+# same-owner reusable workflow is not stated in GitHub's docs, so treat that as unresolved and
+# settle it by enabling the policy and reading one run rather than by assuming either way.
 #
 # Bump a pin by resolving the tag deliberately, never by floating:
 #   gh api repos/<owner>/<repo>/commits/<tag> --jq .sha
