@@ -9,5 +9,12 @@ permissions:
   id-token: write
 jobs:
   claude-review:
+    # Fork PRs receive no secrets from GitHub anyway, so this job could only ever have worked for
+    # branches in this repo. Stating that as a condition rather than leaving it to fail obscurely.
+    if: |
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+        github.event.pull_request.author_association)
     uses: belumume/.github/.github/workflows/claude-review-shared.yml@main
-    secrets: inherit
+    # Explicit rather than `inherit`: the shared workflow declares this one secret and no other.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
