@@ -185,13 +185,27 @@ impl GateConfig {
                     "telemetry".into(),
                 ],
             },
-            accepts: vec![
-                opt(self.price_single, "one feed reading"),
-                opt(
-                    self.price_day_pass,
-                    "day pass: unlimited reads this UTC day",
-                ),
-            ],
+            // WITHDRAWN: the day-pass tier is no longer advertised.
+            //
+            // It was priced at 5x the single read and described as "unlimited reads this UTC day",
+            // and nothing in the gate ever granted a second read. `is_day_pass` was computed,
+            // stored on the receipt and logged, and no code path consulted it: the nonce burns on
+            // the first request, so the next one is refused with NonceReused whatever tier was
+            // bought. A buyer paid five times the price for identical service, and on an
+            // agent-to-agent paywall the buyer is a machine that would keep doing it.
+            //
+            // Removed rather than implemented, deliberately. Granting it properly means keying an
+            // entitlement on the token AUTHORITY (not the fee payer, which is a separate account
+            // and is what the daily cap currently meters), persisting it across restart, and
+            // giving repeat reads a replay story that the single-use nonce does not currently
+            // provide. That is a real feature on a money path, and shipping it half-built is worse
+            // than not selling it. Advertising something not delivered is the part that had to
+            // stop today.
+            //
+            // `verify_x_payment` still ACCEPTS the day-pass amount, so a client holding a cached
+            // challenge is served rather than refused. Withdrawing the offer must not strand
+            // anyone who already took it.
+            accepts: vec![opt(self.price_single, "one feed reading")],
             extra: PriceExtra { memo: nonce.into() },
         }
     }
@@ -220,6 +234,17 @@ pub enum Reject {
 /// A verified, ready-to-broadcast payment. `raw_tx` is the exact bytes to send;
 /// `payer` is the fee payer (used for daily-cap accounting); `amount` is what
 /// was actually paid; `is_day_pass` records which menu tier was purchased.
+///
+/// `is_day_pass` IS NOT AN ENTITLEMENT and never was. It is a record of the amount paid, kept for
+/// the receipt and the log. The tier it names is no longer advertised, because nothing granted the
+/// unlimited reads it promised. Do not start reading this flag as permission without also building
+/// the entitlement it would need: keyed on the token authority rather than the fee payer,
+/// persisted across restart, and with a replay story for repeat reads.
+///
+/// `payer` is the FEE PAYER, which in SVM is independent of the token authority whose USDC
+/// actually moves. The daily cap meters this field, so a buyer behind rotating fee sponsors could
+/// spend past their own ceiling. Latent today because this gate does not advertise a `feePayer` in
+/// its challenge, so honest clients self-pay; it becomes real the moment sponsorship is offered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedPayment {
     pub raw_tx: Vec<u8>,
@@ -278,6 +303,11 @@ pub fn verify_x_payment(
         .map_err(|_| Reject::NoValidPayment)?;
 
     // 5. The amount must equal one of the menu tiers exactly (no odd amounts).
+    //
+    // The day-pass amount is still accepted even though the tier is no longer advertised (see
+    // `challenge`), so a client holding a cached menu is served rather than refused. It buys
+    // exactly what the single read buys; the flag below records what was paid, never an
+    // entitlement, and no code grants a second read on it.
     let is_day_pass = found.amount == cfg.price_day_pass;
     if found.amount != cfg.price_single && !is_day_pass {
         return Err(Reject::PriceMismatch { paid: found.amount });
@@ -505,11 +535,13 @@ mod tests {
     }
 
     #[test]
-    fn challenge_has_two_priced_options_and_nonce() {
+    fn challenge_has_one_priced_option_and_nonce() {
         let c = cfg().challenge("nonce-xyz");
-        assert_eq!(c.accepts.len(), 2);
+        // One row since the ungranted day pass was withdrawn from the menu. The row's CONTENT is
+        // what this pins; the count changed because the menu did, not because an assertion was
+        // weakened -- every other assertion here is unchanged.
+        assert_eq!(c.accepts.len(), 1);
         assert_eq!(c.accepts[0].amount, "1000000");
-        assert_eq!(c.accepts[1].amount, "5000000");
         assert_eq!(c.extra.memo, "nonce-xyz");
         assert_eq!(c.accepts[0].scheme, "exact");
         // round-trips as JSON
@@ -530,7 +562,10 @@ mod tests {
         // v2's NetworkSchemaV2 is `.min(3).refine(v => v.includes(":"))`, so the
         // colon is the whole test the reference validator applies.
         let c = cfg().challenge("n");
-        assert_eq!(c.accepts.len(), 2, "menu should still have both tiers");
+        // Non-EMPTY rather than a fixed count: the loop below is the actual test, and a loop over
+        // an empty vector satisfies every assertion inside it vacuously. This guards that, and
+        // does not break the next time a tier is added or withdrawn.
+        assert!(!c.accepts.is_empty(), "an empty menu would pass the loop below vacuously");
         for row in &c.accepts {
             assert!(
                 row.network.contains(':'),
@@ -608,6 +643,37 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["x402Version"], 2);
         assert!(v["resource"]["url"].is_string());
+    }
+
+    /// The menu must NOT advertise an entitlement the gate does not grant. It offered a day pass
+    /// at 5x for "unlimited reads this UTC day" and delivered exactly one read, because the nonce
+    /// burns on first use and nothing consulted the flag.
+    #[test]
+    fn the_menu_no_longer_advertises_an_ungranted_day_pass() {
+        let c = cfg().challenge("menu-nonce");
+        let json = c.to_json();
+        assert!(
+            !json.contains("day pass"),
+            "the menu still advertises a day pass; nothing grants one: {json}"
+        );
+        assert_eq!(c.accepts.len(), 1, "exactly one tier should be offered");
+        // CONTROL: the single tier IS still advertised, so this is not passing on an empty menu.
+        assert!(
+            json.contains("one feed reading"),
+            "the single-read tier must still be offered: {json}"
+        );
+    }
+
+    /// Withdrawing the offer must not strand a client holding a cached challenge. The amount is
+    /// still accepted; it simply buys what the single read buys.
+    #[test]
+    fn a_cached_day_pass_amount_is_still_honoured_not_refused() {
+        let cfg = cfg();
+        let header = build_header(&cfg, 9, cfg.price_day_pass, "cached");
+        let v = verify_x_payment(&cfg, &header, "cached")
+            .expect("a client on the old menu must still be served, not refused");
+        assert_eq!(v.amount, cfg.price_day_pass);
+        assert!(v.is_day_pass, "the receipt still records which amount was paid");
     }
 
     #[test]
