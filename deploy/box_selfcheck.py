@@ -59,6 +59,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -124,9 +125,18 @@ def load_invariants() -> dict | None:
 class Result:
     def __init__(self) -> None:
         self.checks: list[dict] = []
+        # Structured payload a check wants PUBLISHED alongside its verdict, keyed by name.
+        # A detail line is one string read in a terminal; a unit's definition is a nested
+        # document a reviewer greps. Carrying it here rather than stuffing it into `detail`
+        # keeps `ok` computed from checks alone and keeps redaction in one place
+        # (`build_verdict` walks this too, so nothing reaches disk unredacted).
+        self.data: dict = {}
 
     def add(self, name: str, ok: bool, detail: str) -> None:
         self.checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    def attach(self, name: str, payload: object) -> None:
+        self.data[name] = payload
 
     @property
     def ok(self) -> bool:
@@ -456,6 +466,359 @@ def check_pins(inv: dict, r: Result) -> None:
     )
 
 
+# --------------------------------------------------------------------------------------------
+# UNIT DEFINITIONS. Published so reviewing a unit never requires a shell on the box.
+# --------------------------------------------------------------------------------------------
+#
+# THE GAP THIS CLOSES. `deploy/deploy-targets.json` names six units. Two of them,
+# `zc-announce` and `zc-selfcheck`, are committed here and reviewable by anyone with the repo.
+# The other four are not, and one of those four is `x402-feed-gate.service` -- the unit for the
+# component that takes money. Its ExecStart, the account it runs as, and the environment it
+# loads exist only on the box, so nobody can review them and no gate here can see them drift.
+#
+# THE DIRECTION IS THE SAME INVERSION THIS FILE ALREADY ARGUES FOR. Reading those units means a
+# shell, and every remote-hands route into the node is currently shut: Cloud Shell is over its
+# monthly tenancy limit, outbound 22 is blocked from the operator's network, Bastion rides SSH
+# and lands back on that block, and Run Command is absent from the node's agent plugins. So the
+# box PUBLISHES its own unit definitions through the tunnel it already runs, and review becomes
+# one HTTPS fetch rather than an interactive session nobody can currently open.
+#
+# STRUCTURE IS PUBLISHED AND VALUES ARE NOT, because the verdict is served publicly at
+# `/selfcheck` and a unit file can carry a credential in an `Environment=` line. The split:
+#
+#   published    ExecStart and the other Exec* lines, User, Group, WorkingDirectory, Type,
+#                Restart, the hardening directives, the timer schedule, the ordering deps.
+#   names only   `Environment=` contributes VARIABLE NAMES and never a value.
+#   path only    `EnvironmentFile=` contributes the PATH. Its contents are never read; this
+#                file does not open it, which is stronger than reading and filtering it.
+#   dropped      everything else, counted but not emitted.
+#
+# AN ALLOWLIST RATHER THAN A DENYLIST, and the concrete reason is `SetCredential=name:value`.
+# It carries a secret separated by a COLON, so every value-stripping rule keyed on `=` misses it
+# entirely and a denylist that nobody thought to extend would ship it to a public URL. Under an
+# allowlist an unrecognised directive is invisible by default and the failure is a reviewer
+# asking for one more field, which is recoverable. `LoadCredential=` is left out for the same
+# reason even though it is path-shaped. The cost of this choice is real and stated: a directive
+# worth publishing stays dark until someone adds it here, and the dropped COUNT is what makes
+# that visible rather than silent.
+UNIT_DIRECTIVES_PUBLISHED = frozenset(
+    {
+        # [Unit]
+        "Description",
+        "Documentation",
+        "After",
+        "Before",
+        "Requires",
+        "Wants",
+        "PartOf",
+        "BindsTo",
+        "ConditionPathExists",
+        # [Service] identity and execution -- the custody-relevant half.
+        "Type",
+        "User",
+        "Group",
+        "WorkingDirectory",
+        "ExecStart",
+        "ExecStartPre",
+        "ExecStartPost",
+        "ExecReload",
+        "ExecStop",
+        "ExecStopPost",
+        "Restart",
+        "RestartSec",
+        "TimeoutStartSec",
+        "TimeoutStopSec",
+        "RuntimeMaxSec",
+        "StandardOutput",
+        "StandardError",
+        "SyslogIdentifier",
+        "PassEnvironment",
+        # [Service] hardening. None of these can hold a secret and all of them are exactly
+        # what a security reviewer opens the unit to find out.
+        "NoNewPrivileges",
+        "PrivateTmp",
+        "PrivateDevices",
+        "ProtectSystem",
+        "ProtectHome",
+        "ProtectKernelTunables",
+        "ProtectControlGroups",
+        "ReadWritePaths",
+        "ReadOnlyPaths",
+        "InaccessiblePaths",
+        "CapabilityBoundingSet",
+        "AmbientCapabilities",
+        "RestrictAddressFamilies",
+        "SystemCallFilter",
+        "MemoryMax",
+        "LimitNOFILE",
+        # [Timer]
+        "OnCalendar",
+        "OnBootSec",
+        "OnStartupSec",
+        "OnUnitActiveSec",
+        "OnActiveSec",
+        "AccuracySec",
+        "RandomizedDelaySec",
+        "Persistent",
+        "Unit",
+        # [Install]
+        "WantedBy",
+        "RequiredBy",
+        "Also",
+    }
+)
+
+UNIT_DIRECTIVES_NAMES_ONLY = frozenset({"Environment"})
+UNIT_DIRECTIVES_PATH_ONLY = frozenset({"EnvironmentFile"})
+
+# systemd's own rule for an environment variable name. A token that does not match is not a
+# name, so it is DROPPED rather than published: the alternative is emitting a fragment of a
+# value under the label "name", which is the leak this whole split exists to prevent.
+ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+# Caps, following this file's existing rule for the mint scan: a bounded list ALWAYS reports its
+# true total, because a sample without its denominator reads as complete and is unmeasurable.
+UNIT_DIRECTIVES_SHOWN = 40
+UNIT_ENV_NAMES_SHOWN = 24
+
+# A `key=value` token anywhere inside a published directive value. Deliberately keyed on the
+# `=` alone rather than on a key that looks secret-shaped: a denylist of secret-looking keys
+# fails open on the first name nobody predicted, and `ExecStart` is the one published directive
+# whose value is attacker-shaped in the sense that matters -- it can carry an inline environment
+# assignment (`/usr/bin/env API_TOKEN=... prog`) or a credential flag (`--token=...`).
+#
+# THE COST IS STATED RATHER THAN HIDDEN: a benign `--port=8402` publishes as `--port=<redacted>`,
+# so a reviewer sees which flags exist and not what they are set to. That is a question they can
+# ask; a leaked key is not a question anyone gets to ask afterwards. A value worth reviewing
+# belongs in the write-up or in a positional argument, both of which survive this untouched.
+ASSIGNMENT_TOKEN_RE = re.compile(r"^([^\s=]+)=(.+)$")
+
+
+def scrub_assignment_values(value: str) -> str:
+    """Replace the value half of every `key=value` token, keeping the key.
+
+    SHLEX, NOT WHITESPACE, and this reverses a deliberate earlier choice whose stated reason was
+    measured to be false. That reason was: "splitting on whitespace can only ever produce MORE
+    tokens, and more tokens means more redaction, so the conservative direction is the default."
+    More tokens means LESS redaction, because a fragment carrying no `=` is published VERBATIM.
+
+    Quoted, space-containing values are valid systemd `Exec*` syntax, and on them a whitespace
+    split tears the secret and publishes its tail to an endpoint anyone can fetch:
+
+        ExecStart=/bin/env API_KEY="sk live 9f3a2b" /usr/bin/gate
+        whitespace ->  ExecStart=<redacted> API_KEY=<redacted> live 9f3a2b" /usr/bin/gate
+        shlex      ->  ExecStart=<redacted> API_KEY=<redacted> /usr/bin/gate
+
+    Measured on three shapes before the change, all three leaked. shlex MERGING a quoted token is
+    exactly what fixes it rather than a complication to reason about: `API_KEY="sk live 9f3a2b"`
+    becomes ONE token, which then matches as an assignment and is redacted whole.
+
+    This makes it agree with `environment_names` below, which already used shlex and already
+    carried a comment calling the two "the exact inverse ... worth stating so neither gets made
+    consistent with the other". They now agree because the argument for splitting them was wrong,
+    not because consistency is tidy.
+
+    Unbalanced quoting makes shlex raise, and the answer matches the neighbour's: publish NOTHING
+    from the line rather than guess where a value ends. Original spacing is not preserved and
+    nothing downstream re-executes this string.
+    """
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        return "<redacted: unbalanced quoting, whole value withheld>"
+    out = []
+    for tok in tokens:
+        m = ASSIGNMENT_TOKEN_RE.match(tok)
+        out.append(f"{m.group(1)}=<redacted>" if m else tok)
+    return " ".join(out)
+
+
+def environment_names(value: str) -> tuple[list[str], int]:
+    """Variable NAMES from an `Environment=` value. Returns (names, dropped).
+
+    shlex IS the right splitter here and whitespace is not, which is the exact inverse of
+    `scrub_assignment_values` above and worth stating so neither gets "made consistent" with the
+    other. `Environment="GREETING=hello there" MODE=fast` is two assignments, and a whitespace
+    split would read `there` as a third token whose name half is `there` -- a fragment of a VALUE
+    published under the label "name". shlex keeps the quoted assignment whole.
+
+    Unbalanced quoting makes shlex raise, and the answer to that is to publish NOTHING from the
+    line and count it, never to guess at where the values end.
+    """
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        return [], 1
+    names: list[str] = []
+    dropped = 0
+    for tok in tokens:
+        name = tok.split("=", 1)[0]
+        if ENV_NAME_RE.fullmatch(name):
+            names.append(name)
+        else:
+            dropped += 1
+    return names, dropped
+
+
+def parse_unit_definition(text: str) -> dict:
+    """Parse `systemctl cat` output into the publishable shape. PURE, so the self-test drives it.
+
+    Split out for the same reason `unit_verdict` is: the systemd call cannot run in a synthetic
+    tree, and a redaction rule that is only ever exercised through a subprocess is a rule nobody
+    can prove fails. Every control below drives this function on planted text.
+
+    `systemctl cat` emits `# <absolute path>` before each fragment and before every drop-in, and
+    the drop-ins are exactly where an override hides, so the paths are collected as `sources`.
+    Every other comment line is discarded, which is not incidental: the units in this repo carry
+    long rationale comments, and an allowlist over directives drops all of them for free.
+    """
+    sources: list[str] = []
+    directives: list[str] = []
+    env_names: list[str] = []
+    env_files: list[str] = []
+    dropped = 0
+    section = ""
+    pending = ""
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if pending:
+            line = f"{pending} {line}"
+            pending = ""
+        # A directive may continue onto the next physical line. Joining FIRST means a
+        # continuation of an `Environment=` line is classified as one assignment rather than
+        # arriving as an orphan token whose key half is part of a value.
+        if line.endswith("\\"):
+            pending = line[:-1].rstrip()
+            continue
+        if not line:
+            continue
+        if line.startswith("#") or line.startswith(";"):
+            body = line[1:].strip()
+            if body.startswith("/") and " " not in body:
+                sources.append(body)
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+            continue
+        if "=" not in line:
+            dropped += 1
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if key in UNIT_DIRECTIVES_NAMES_ONLY:
+            names, bad = environment_names(value)
+            env_names.extend(names)
+            dropped += bad
+        elif key in UNIT_DIRECTIVES_PATH_ONLY:
+            env_files.append(value)
+        elif key in UNIT_DIRECTIVES_PUBLISHED:
+            prefix = f"[{section}] " if section else ""
+            directives.append(f"{prefix}{key}={scrub_assignment_values(value)}")
+        else:
+            dropped += 1
+    if pending:
+        # A trailing continuation with nothing after it. Counted rather than parsed.
+        dropped += 1
+
+    unique_names = sorted(set(env_names))
+    return {
+        "sources": sources,
+        "directives": directives[:UNIT_DIRECTIVES_SHOWN],
+        "directives_total": len(directives),
+        "environment_names": unique_names[:UNIT_ENV_NAMES_SHOWN],
+        "environment_names_total": len(unique_names),
+        "environment_files": env_files,
+        "dropped_directives": dropped,
+    }
+
+
+def systemctl_cat(unit: str) -> tuple[bool, str]:
+    """(ok, text-or-reason). Isolated so `collect_unit_definitions` can be driven without systemd."""
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "cat", unit],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+    except Exception as exc:
+        return False, f"error:{exc}"
+    if out.returncode != 0:
+        first = (out.stderr or "").strip().splitlines()
+        return False, first[0] if first else f"rc={out.returncode}"
+    return True, out.stdout or ""
+
+
+def check_unit_definitions(inv: dict, r: Result, reader=None) -> None:
+    """Publish each configured unit's DEFINITION, and report the count with its denominator.
+
+    THE DIVISION OF LABOUR WITH `check_services` IS DELIBERATE, so nobody merges them later.
+    `check_services` owns LIVENESS and fails closed on a unit it cannot read, which is correct:
+    a unit that is missing or dead is already red there. This check owns PUBLICATION, and an
+    individual unreadable unit does not turn it red -- doing so would report the same defect
+    twice under two names while adding nothing a reader can act on. What DOES turn it red is
+    reading none of them, because that is the instrument failing rather than the subject: no
+    systemctl on PATH, the wrong `--user` scope, a container with no session bus. Zero readable
+    out of six and zero configured are different failures and both say so in their own line.
+
+    NOT VERIFIED AGAINST THE REAL BOX. Deploys are frozen until after the live demo on
+    2026-08-20 20:00 EST, so every case below runs against planted `systemctl cat` text and
+    nothing here has met a live unit. On the first deploy after the freeze lifts, check three
+    things against `/selfcheck` before trusting the output:
+      1. the count reads `6 of 6` -- anything less names a unit that is not installed under the
+         `--user` scope, which is a real finding rather than a checker bug;
+      2. `environment_files` lists a path per secret-bearing unit and `environment_names` lists
+         the `X402_*` names, which together are the evidence that the split worked on real input;
+      3. no value appears anywhere in the published payload. Fetch it and grep it for a value you
+         know is set on the box. That grep is the only check that matters, and it cannot be run
+         from here.
+      4. THE PUBLISHED INVARIANT COUNT MOVES, and two surfaces quote it. This adds one row, so
+         `verify-proof.py` starts printing "on all 8 invariants" where it prints 7 today, and
+         `notes/DEMO-RUNBOOK.md` pins the 7 in two places. Neither is wrong now -- 7 is the truth
+         until this reaches the box -- so they are swept AT DEPLOY, not before. The runbook is
+         gitignored, so no gate in this repo can see that drift and nothing but this line will
+         raise it.
+
+    AND ONE THING NOT TO MISREAD ON THAT FIRST FETCH: no unit here will publish a `User=` line,
+    and its absence is the truth rather than a redaction. `User=` is a system-manager directive
+    that the service manager REFUSES inside a user unit, and every unit in this list is a
+    `--user` unit -- `grep -rn 'User=' deploy/*.service` finds none for that reason. The account
+    these run as is fixed by whose session owns the manager, so "what does it run as" is answered
+    by the scope plus the lingering account, never by a directive. `User` stays in the allowlist
+    anyway, because a unit that ever moves to the system manager should publish it immediately.
+    """
+    units = inv.get("units") or []
+    read = reader or systemctl_cat
+    defs: dict = {}
+    unreadable: list[str] = []
+    for unit in units:
+        ok, payload = read(unit)
+        if ok:
+            defs[unit] = parse_unit_definition(payload)
+        else:
+            unreadable.append(f"{unit}: {payload}")
+    r.attach("unit_definitions", defs)
+
+    total = len(units)
+    if total == 0:
+        r.add(
+            "service-definitions",
+            False,
+            "0 of 0 unit(s) readable; no units configured, so nothing was published and "
+            "this is NOT a pass",
+        )
+        return
+    detail = f"{len(defs)} of {total} unit(s) readable"
+    if unreadable:
+        detail += "; not published: " + "; ".join(unreadable)
+    else:
+        detail += "; every definition published"
+    r.add("service-definitions", bool(defs), detail)
+
+
 def unit_verdict(
     unit: str, active_state: str, result: str, utype: str
 ) -> tuple[bool, str]:
@@ -556,6 +919,7 @@ def run_checks() -> Result:
     check_network_prose(inv, r)
     check_pins(inv, r)
     check_services(inv, r)
+    check_unit_definitions(inv, r)
     return r
 
 
@@ -582,6 +946,23 @@ def redact(text: str) -> str:
         if form and form != "/":
             text = text.replace(form, "~")
     return re.sub(r"\b\d+@(?:g\.us|s\.whatsapp\.net)", "<recipient>", text)
+
+
+def redact_tree(obj: object) -> object:
+    """`redact` over a nested payload, so an attached document gets the same treatment as a line.
+
+    Unit definitions arrive as nested lists of strings full of absolute paths -- `systemctl cat`
+    names every fragment by its full path and a `WorkingDirectory` is one by definition. Walking
+    the structure rather than redacting at each producer keeps ONE redaction site, so a future
+    attachment inherits it instead of needing to remember it.
+    """
+    if isinstance(obj, str):
+        return redact(obj)
+    if isinstance(obj, dict):
+        return {k: redact_tree(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [redact_tree(v) for v in obj]
+    return obj
 
 
 def build_verdict(r: Result) -> dict:
@@ -619,6 +1000,10 @@ def build_verdict(r: Result) -> dict:
         # The gate that serves this is a dumb file reader; putting the defense in the writer means
         # a second consumer (a copy, an operator paste, a future endpoint) inherits it too.
         "checks": [dict(c, detail=redact(c["detail"])) for c in r.checks],
+        # WHAT each unit is, beside whether it is running. Structure only: `check_unit_definitions`
+        # publishes variable NAMES and EnvironmentFile PATHS and never a value, and this walk adds
+        # the same home-directory redaction the detail lines get.
+        "unit_definitions": redact_tree(r.data.get("unit_definitions") or {}),
     }
 
 
@@ -972,6 +1357,247 @@ def self_test() -> int:
         got, _why = unit_verdict(unit, state, res, utype)
         report(f"services: {label}", got is want)
 
+    # UNIT DEFINITIONS. The load-bearing case is the FIRST one: this payload is served publicly,
+    # so a unit carrying a credential must publish the variable's NAME and never its value. The
+    # rest of the block exists because that case alone cannot tell a working redactor from a
+    # publisher that emits nothing -- the over-correction control is what separates them.
+    #
+    # Driven on planted `systemctl cat` text rather than through systemd, for the same reason
+    # `unit_verdict` is a pure function: the box is frozen until after the demo, so nothing here
+    # has met a live unit and every case must run in a synthetic tree.
+    tmp = Path(tempfile.mkdtemp(prefix="zc-unitdefs-"))
+    try:
+        # Unmistakably synthetic, and deliberately not shaped like any vendor's real prefix: the
+        # repo's identifier gate scans this tree, and a realistic-looking fixture is a finding
+        # there and rightly so.
+        secret = "SYNTHETIC-NOT-A-REAL-SECRET-0000000000"
+        file_secret = "SYNTHETIC-INSIDE-THE-ENV-FILE-0000000000"
+
+        # A REAL, READABLE file with secrets in it, planted on disk on purpose. A payload that
+        # omits its contents because the path did not resolve proves nothing; this way the
+        # absence is evidence that the file is never opened.
+        envfile = tmp / "gate.env"
+        envfile.write_text(
+            f"X402_SELLER_KEY={file_secret}\nX402_DAILY_CAP=25\n", encoding="utf-8"
+        )
+
+        secretive = (
+            "# /etc/systemd/user/zc-demo-gate.service\n"
+            "# A rationale comment that must not be published.\n"
+            "[Unit]\n"
+            "Description=Demo gate\n"
+            "[Service]\n"
+            "Type=simple\n"
+            "User=svc-demo\n"
+            "WorkingDirectory=/opt/zc-demo\n"
+            f"Environment=X402_SELLER_KEY={secret}\n"
+            'Environment="X402_GREETING=hello there" X402_NETWORK=devnet\n'
+            f"EnvironmentFile={envfile}\n"
+            f"SetCredential=seller:{secret}\n"
+            f"ExecStart=/usr/bin/env X402_INLINE={secret} /opt/zc-demo/gate --port=8402\n"
+        )
+        d = parse_unit_definition(secretive)
+        blob = json.dumps(d)
+
+        report(
+            "unit defs: the Environment variable NAME is published",
+            "X402_SELLER_KEY" in d["environment_names"],
+        )
+        report(
+            "unit defs: the EnvironmentFile PATH is published",
+            any(str(envfile) in p for p in d["environment_files"]),
+        )
+        # THE LOAD-BEARING ASSERTION. Anywhere in the payload, not just in the field the value
+        # came from: a leak that lands in `directives` instead of `environment_names` is the
+        # same leak, and a per-field assertion would miss it.
+        report(
+            "unit defs: the Environment VALUE appears nowhere in the payload",
+            secret not in blob,
+        )
+        report(
+            "unit defs: the EnvironmentFile's CONTENTS appear nowhere (it is never opened)",
+            file_secret not in blob and "X402_DAILY_CAP" not in blob,
+        )
+        report(
+            "unit defs: a quoted assignment yields its NAME, not a fragment of its value",
+            "X402_GREETING" in d["environment_names"] and "there" not in blob,
+        )
+        report(
+            "unit defs: an inline assignment inside ExecStart is scrubbed too",
+            any("X402_INLINE=<redacted>" in x for x in d["directives"]),
+        )
+        report(
+            "unit defs: SetCredential (colon-separated, so no `=` rule can see it) is DROPPED",
+            "seller" not in blob and d["dropped_directives"] >= 1,
+        )
+        report(
+            "unit defs: a rationale comment is not published",
+            "rationale comment" not in blob,
+        )
+        report(
+            "unit defs: the fragment path is published as a source",
+            "/etc/systemd/user/zc-demo-gate.service" in d["sources"],
+        )
+        # A STRUCTURAL invariant rather than a behavioural one, because the behavioural cases
+        # above are protected only by branch ORDER: names-only is tested before the allowlist, so
+        # adding "Environment" to the allowlist leaks nothing TODAY and leaks everything the day
+        # someone reorders the branches. That is a silent regression a fixture cannot see.
+        report(
+            "unit defs: Environment is not in the published allowlist (structural)",
+            "Environment" not in UNIT_DIRECTIVES_PUBLISHED
+            and "EnvironmentFile" not in UNIT_DIRECTIVES_PUBLISHED,
+        )
+        report(
+            "unit defs: the value-bearing directive sets stay disjoint (structural)",
+            not (UNIT_DIRECTIVES_PUBLISHED & UNIT_DIRECTIVES_NAMES_ONLY)
+            and not (UNIT_DIRECTIVES_PUBLISHED & UNIT_DIRECTIVES_PATH_ONLY),
+        )
+        report(
+            "unit defs: SetCredential/LoadCredential stay OUT of the allowlist (structural)",
+            not ({"SetCredential", "LoadCredential"} & UNIT_DIRECTIVES_PUBLISHED),
+        )
+
+        # OVER-CORRECTION CONTROLS. "No secret in the output" is trivially satisfied by an empty
+        # output, so the same fixture must still carry the two fields a custody reviewer opens
+        # the unit for. Without these the redaction could be a `return {}` and every case above
+        # would still pass.
+        report(
+            "unit defs: ExecStart still publishes its binary (over-correction control)",
+            any("/opt/zc-demo/gate" in x for x in d["directives"]),
+        )
+        report(
+            "unit defs: User still publishes (over-correction control)",
+            any(x.endswith("User=svc-demo") for x in d["directives"]),
+        )
+        report(
+            "unit defs: WorkingDirectory still publishes (over-correction control)",
+            any("/opt/zc-demo" in x for x in d["directives"]),
+        )
+        report(
+            "unit defs: the section each directive came from is kept",
+            any(x.startswith("[Service] ") for x in d["directives"]),
+        )
+
+        # A continuation line is joined before classification. Split naively, `MODE=fast` would
+        # arrive as an orphan and the value half of the first assignment could be read as a name.
+        cont = f"[Service]\nEnvironment=X402_A={secret} \\\n    X402_B=fast\n"
+        dc = parse_unit_definition(cont)
+        report(
+            "unit defs: a continued Environment line yields both names and no value",
+            dc["environment_names"] == ["X402_A", "X402_B"]
+            and secret not in json.dumps(dc),
+        )
+
+        # MUTATION CONTROL. With the name-only rule gutted, the load-bearing case must go RED --
+        # that is what proves the green above comes from this rule and not from the fixture
+        # happening to be harmless. The substitution is asserted to have APPLIED first, because a
+        # stale anchor produces a mutant byte-identical to the original that passes while testing
+        # nothing; and the replacement is deliberately a DIFFERENT LENGTH from its anchor, since
+        # CPython keys its bytecode cache on source size and mtime and a same-length edit inside
+        # one clock tick can run the ORIGINAL bytecode.
+        src = Path(__file__).read_text(encoding="utf-8")
+        anchor = (
+            "        if ENV_NAME_RE.fullmatch(name):\n            names.append(name)"
+        )
+        mutant = "        if True:\n            names.append(tok)"
+        report("unit defs mutation: the anchor still exists", anchor in src)
+        report(
+            "unit defs mutation: the mutant differs in LENGTH (bytecode-cache safety)",
+            len(mutant) != len(anchor),
+        )
+        ns: dict = {"__name__": "bsc_unit_mutant", "__file__": __file__}
+        exec(
+            compile(src.replace(anchor, mutant, 1), "bsc_unit_mutant", "exec"),
+            ns,
+        )
+        md = ns["parse_unit_definition"](secretive)
+        report(
+            "unit defs mutation: with the name-only rule gutted the secret LEAKS",
+            secret in json.dumps(md),
+        )
+
+        # THE DENOMINATOR, driven through the check with an injected reader. A bare count cannot
+        # tell "every unit published" from "the reader never reached systemd", which is the whole
+        # reason this file states a total beside every number it prints.
+        inv3 = {"units": ["a.service", "b.service", "c.timer"]}
+
+        def _reader_all(unit: str) -> tuple[bool, str]:
+            return True, f"[Service]\nType=simple\nExecStart=/opt/{unit}\n"
+
+        def _reader_partial(unit: str) -> tuple[bool, str]:
+            if unit == "b.service":
+                return False, "No files found for b.service."
+            return _reader_all(unit)
+
+        def _reader_none(unit: str) -> tuple[bool, str]:
+            return False, "error:[Errno 2] systemctl not found"
+
+        r = Result()
+        check_unit_definitions(inv3, r, reader=_reader_all)
+        report(
+            "unit defs: the count carries its denominator",
+            "3 of 3 unit(s) readable" in r.checks[0]["detail"],
+        )
+        report(
+            "unit defs: all-readable is OK and every definition is attached",
+            r.checks[0]["ok"] is True and len(r.data["unit_definitions"]) == 3,
+        )
+
+        r = Result()
+        check_unit_definitions(inv3, r, reader=_reader_partial)
+        report(
+            "unit defs: a partial read reports N of M and NAMES what it missed",
+            "2 of 3 unit(s) readable" in r.checks[0]["detail"]
+            and "b.service" in r.checks[0]["detail"],
+        )
+        report(
+            "unit defs: a partial read stays OK (liveness is check_services' job, not this one)",
+            r.checks[0]["ok"] is True,
+        )
+
+        r = Result()
+        check_unit_definitions(inv3, r, reader=_reader_none)
+        report(
+            "unit defs: reading NONE of them is the instrument failing, and FAILS",
+            r.checks[0]["ok"] is False
+            and "0 of 3 unit(s) readable" in r.checks[0]["detail"],
+        )
+
+        r = Result()
+        check_unit_definitions({"units": []}, r, reader=_reader_all)
+        report(
+            "unit defs: no units configured FAILS and says nothing was published",
+            r.checks[0]["ok"] is False and "0 of 0" in r.checks[0]["detail"],
+        )
+
+        # THE PUBLISHED PAYLOAD, which is what a remote reviewer actually fetches. The redaction
+        # walk has to reach a nested attachment; a home path surviving inside `unit_definitions`
+        # is the same leak as one in a detail line, and only this case would see it.
+        home = str(Path.home())
+        r = Result()
+        r.attach(
+            "unit_definitions",
+            {
+                "z.service": {
+                    "directives": [f"[Service] WorkingDirectory={home}/.zeroclaw"],
+                    "environment_names": ["X402_NETWORK"],
+                }
+            },
+        )
+        r.add("probe", True, "ok")
+        v = build_verdict(r)
+        published = json.dumps(v["unit_definitions"])
+        report(
+            "unit defs: the attachment reaches the verdict",
+            "X402_NETWORK" in published,
+        )
+        report(
+            "unit defs: redaction reaches INSIDE the attachment",
+            home not in published and "~/.zeroclaw" in published,
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
     # NETWORK PROSE. The over-correction control matters more than the fix here: "the false
     # positive stopped" is equally consistent with having disabled the detector, so a real
     # customer-facing sentence must still fire.
@@ -1167,6 +1793,43 @@ def self_test() -> int:
     report(
         "redaction: build_verdict applies it rather than the caller",
         home not in json.dumps(build_verdict(r)),
+    )
+
+    # A QUOTED, SPACE-CONTAINING VALUE IS VALID `Exec*` SYNTAX AND USED TO LEAK ITS TAIL.
+    # The earlier whitespace split tore `API_KEY="sk live 9f3a2b"` into three tokens, redacted the
+    # first because it carried an `=`, and published `live 9f3a2b"` verbatim to an endpoint anyone
+    # can fetch. Measured on three shapes at the time, all three leaked. These cases exist so the
+    # argument that produced that split ("more tokens means more redaction") cannot come back: it
+    # is false, because a fragment with no `=` is published untouched.
+    for _label, _line, _secrets in (
+        (
+            "space-quoted",
+            'ExecStart=/bin/env API_KEY="sk live 9f3a2b" /usr/bin/g',
+            ("live", "9f3a2b"),
+        ),
+        (
+            "single-quoted",
+            "ExecStart=/usr/bin/p --pass='alpha bravo charlie'",
+            ("alpha", "bravo"),
+        ),
+    ):
+        _out = scrub_assignment_values(_line)
+        _residue = _out.replace("<redacted>", "")
+        report(
+            f"redaction: no fragment of a {_label} value survives",
+            not any(s in _residue for s in _secrets),
+        )
+    # Unbalanced quoting must withhold the whole line rather than guess where the value ends,
+    # matching what environment_names already does on the same input class.
+    report(
+        "redaction: unbalanced quoting withholds the whole value",
+        "oops" not in scrub_assignment_values('ExecStart=/usr/bin/p --k="oops'),
+    )
+    # OVER-CORRECTION CONTROL. Without this, returning a constant would pass every case above.
+    _ok = scrub_assignment_values("ExecStart=/usr/bin/env bash %h/.zeroclaw/bin/run.sh")
+    report(
+        "redaction: a legitimate Exec line still publishes its binary and args",
+        "bash" in _ok and "%h/.zeroclaw/bin/run.sh" in _ok,
     )
 
     print(f"\n{passed} passed, {failed} failed")

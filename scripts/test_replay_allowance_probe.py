@@ -31,6 +31,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE = ROOT / "docs" / "proof-bundle" / "mainnet-transactions.json"
+# The devnet bundle records TWO captures refused with 300, from two different delegations, and
+# that is what cases 9 to 11 are about. It is the real fixture rather than a crafted one because
+# the incident was real: adding the buy-loop capture on 2026-08-16 silently broke the command
+# documented in DEVNET-PROOF.md, which had been correct when it was written.
+DEVNET_BUNDLE = ROOT / "docs" / "proof-bundle" / "devnet-transactions.json"
+# The capture the surrounding prose is about, cited in README, DEVNET-PROOF and verify-proof.py's
+# own transaction list. The other refusal in that bundle belongs to the buy-loop run.
+DEVNET_CANONICAL = "3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps"
+DEVNET_OTHER = "5P9wTdBHPqQASpUycrrkmcxhuRG6Pum76fRQVG3bLmeB2s1DEvkxuF7FYSodsbedtFJcmr9WyNj2774WSJa5sZcq"
 PROBE = ROOT / "scripts" / "replay_allowance_probe.py"
 
 REMAINING = 100_000
@@ -47,14 +56,14 @@ def account_blob(remaining: int) -> str:
     return base64.b64encode(body).decode()
 
 
-def load_probe():
-    mod = runpy.run_path(str(PROBE), run_name="__probe__")
+def load_probe(probe=None):
+    mod = runpy.run_path(str(probe or PROBE), run_name="__probe__")
     return mod
 
 
-def run_case(rpc_impl, argv=None, bundle=None):
+def run_case(rpc_impl, argv=None, bundle=None, probe=None):
     """Execute the probe's main() with a substituted rpc, returning (rc, stdout)."""
-    mod = load_probe()
+    mod = load_probe(probe)
     mod["rpc"] = rpc_impl
     main = mod["main"]
     # main() closes over the module globals dict returned by runpy, so rebinding `rpc`
@@ -179,8 +188,97 @@ def c8():
     return run_case(make_rpc(real_world), bundle=tmp)
 
 
+@case(
+    "9 CONTROL: two refused captures and no --signature is refused, and both are NAMED",
+    "Re-run with --signature naming one of",
+    1,
+)
+def c9():
+    """THE INCIDENT. The devnet bundle really does record two refusals, so the command
+    documented in DEVNET-PROOF.md failed for everyone who ran it. Refusing is correct; the
+    defect was that the message named no way forward, so a reader hitting it had nowhere to
+    go and the doc looked simply wrong."""
+    rc, out = run_case(make_rpc(real_world), bundle=DEVNET_BUNDLE)
+    # Naming the candidates is the whole repair, so assert both are actually listed rather
+    # than trusting the sentence that says they will be.
+    if DEVNET_CANONICAL not in out or DEVNET_OTHER not in out:
+        return rc, out + "\n(BOTH candidate signatures were NOT listed)"
+    return rc, out
+
+
+@case(
+    "10 CONTROL: --signature selects one of the two and the probe runs",
+    "PASS  the refusal boundary",
+    0,
+)
+def c10():
+    """The over-correction control for case 9. Refusing every multi-capture bundle would
+    satisfy case 9 perfectly and leave the documented command just as dead, so this requires
+    that naming one actually gets a reader through."""
+    return run_case(
+        make_rpc(real_world),
+        argv=["--signature", DEVNET_CANONICAL],
+        bundle=DEVNET_BUNDLE,
+    )
+
+
+@case(
+    "11 CONTROL: a --signature matching nothing is refused, not silently ignored",
+    "must select exactly one",
+    1,
+)
+def c11():
+    return run_case(
+        make_rpc(real_world), argv=["--signature", "ZZZnope"], bundle=DEVNET_BUNDLE
+    )
+
+
+def mutation_control():
+    """Revert the selection and require case 10 to go red.
+
+    Cases 9 to 11 all pass against code that never learned to select, because refusing is
+    what two of them expect. Only case 10 distinguishes "names a candidate and proceeds"
+    from "refuses everything", so that is the one driven against the mutant.
+
+    The mutant is written to a fresh temp directory and is a DIFFERENT LENGTH from its
+    anchor, because CPython invalidates a cached .pyc on size and mtime: a same-length edit
+    inside one clock tick would execute the ORIGINAL bytecode and this control would
+    silently test nothing.
+    """
+    import tempfile
+
+    src = PROBE.read_text(encoding="utf-8")
+    anchor, replacement = "if args.signature:", "if False:"
+    if anchor not in src:
+        return (
+            False,
+            f"mutation anchor absent, so this control tested nothing: {anchor!r}",
+        )
+    if len(anchor) == len(replacement):
+        return (
+            False,
+            "mutant is the same length as its anchor; the .pyc cache can mask it",
+        )
+    mutant_src = src.replace(anchor, replacement, 1)
+    if mutant_src == src:
+        return False, "substitution did not apply"
+    mutant = Path(tempfile.mkdtemp()) / "probe_mutant.py"
+    mutant.write_text(mutant_src, encoding="utf-8")
+    compile(mutant_src, str(mutant), "exec")  # a mutant that cannot parse tests nothing
+    rc, out = run_case(
+        make_rpc(real_world),
+        argv=["--signature", DEVNET_CANONICAL],
+        bundle=DEVNET_BUNDLE,
+        probe=mutant,
+    )
+    if rc == 0:
+        return False, "the mutant still ran; case 10 proves nothing"
+    return True, f"selection removed -> the documented command dies again (rc={rc})"
+
+
 def main():
     before = hashlib.sha256(BUNDLE.read_bytes()).hexdigest()
+    devnet_before = hashlib.sha256(DEVNET_BUNDLE.read_bytes()).hexdigest()
     passed = failed = 0
     for name, marker, expect_rc, fn in CASES:
         rc, out = fn()
@@ -195,14 +293,26 @@ def main():
                 f"marker {marker!r} {'present' if marker in out else 'ABSENT'}"
             )
             print("       ---8<--- output\n" + out + "       --->8---")
+
+    print("\nMUTATION CONTROL (remove the selection; case 10 must go red):")
+    mut_ok, mut_why = mutation_control()
+    if mut_ok:
+        passed += 1
+        print(f"  ok   {mut_why}")
+    else:
+        failed += 1
+        print(f"  FAIL {mut_why}")
+
     after = hashlib.sha256(BUNDLE.read_bytes()).hexdigest()
-    if before != after:
+    devnet_after = hashlib.sha256(DEVNET_BUNDLE.read_bytes()).hexdigest()
+    if before != after or devnet_before != devnet_after:
         print(
-            "FAIL: the suite modified the real proof bundle; refusing to report a result."
+            "FAIL: the suite modified a real proof bundle; refusing to report a result."
         )
         return 1
     print(
-        f"\n{passed}/{passed + failed} controls passed (proof bundle unmodified, {before[:12]})"
+        f"\n{passed}/{passed + failed} controls passed (proof bundles unmodified: "
+        f"mainnet {before[:12]}, devnet {devnet_before[:12]})"
     )
     return 0 if failed == 0 else 1
 

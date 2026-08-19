@@ -26,7 +26,7 @@
 
 use serde::Deserialize;
 use solana_core::instruction::{advance_nonce_account, AccountMeta, Instruction};
-use solana_core::{instruction_sighash, sanitize_onchain, Pubkey};
+use solana_core::{instruction_sighash, sanitize_onchain, sanitize_onchain_bounded, Pubkey};
 
 /// Fixed byte width of the on-chain `unit` label (borsh `[u8; 12]`).
 pub const UNIT_LEN: usize = 12;
@@ -275,17 +275,17 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedPublish, String> {
 }
 
 /// Sanitize + byte-pack a unit label into a fixed 12-byte, zero-padded field.
+///
+/// `sanitize_onchain` caps CHARACTERS; `UNIT_LEN` is a BYTE budget, so the bounded form is what
+/// makes a multibyte unit fit the fixed field rather than overflow it. This crate carried its
+/// own copy of the char-boundary walk until the shared form landed in `solana-core`; it was one
+/// of six, and the duplication was the root cause of the char-cap-vs-byte-budget class.
 fn pack_unit(raw: &str) -> [u8; UNIT_LEN] {
-    let clean = sanitize_onchain(raw, UNIT_LEN).text;
+    let clean = sanitize_onchain_bounded(raw, UNIT_LEN, UNIT_LEN).text;
     let bytes = clean.as_bytes();
-    // sanitize caps CHARACTERS; UNIT_LEN is a BYTE budget. Truncate to a char
-    // boundary <= UNIT_LEN so a multibyte unit never overflows the fixed field.
-    let mut end = bytes.len().min(UNIT_LEN);
-    while end > 0 && !clean.is_char_boundary(end) {
-        end -= 1;
-    }
+    debug_assert!(bytes.len() <= UNIT_LEN, "the byte cap did not hold");
     let mut out = [0u8; UNIT_LEN];
-    out[..end].copy_from_slice(&bytes[..end]);
+    out[..bytes.len()].copy_from_slice(bytes);
     out
 }
 
@@ -629,6 +629,64 @@ mod tests {
             "MEASURED oracle-publish report: {} bytes total, {} of it fixed prose around the tx",
             out.len(),
             overhead
+        );
+    }
+
+    /// The same worst case driven with 4-BYTE CODEPOINTS, which is what the ASCII fixture above
+    /// cannot test.
+    ///
+    /// This plugin is the outlier of the set and this test exists to KEEP it that way rather
+    /// than to fix it: `pack_unit` already bounds the unit in BYTES, and `compose_report`
+    /// interpolates no sanitized value at all — only an allowlisted `feed_kind`, a `u64`, three
+    /// base58 pubkeys and the base64 transaction. Two independent reasons the report cannot be
+    /// flooded through the unit, and this pins both, since a future edit that echoed the unit
+    /// into the report would leave the byte cap as the only defence.
+    #[test]
+    fn the_unit_is_byte_packed_and_absent_from_the_report_under_multibyte_codepoints() {
+        let flood = "\u{1F600}".repeat(500);
+        let a = format!(
+            r#"{{"feed_kind":"co2_ppm","value":400,"scale":0,"unit":"{flood}","observed_at":1,"sequence":{},"__config":{{"signer_seed_hex":"{SEED_HEX}","nonce_account":"{NONCE}","oracle_program_id":"{ORACLE}","agent_session_pubkey":"{SESSION}"}}}}"#,
+            u64::MAX
+        );
+        let v = parse_and_validate(&a).expect("the fixture must validate");
+
+        // FIXTURE CONTROL: the char cap alone would overrun the fixed field, which is what makes
+        // the byte pack load-bearing here rather than decorative.
+        let char_only = sanitize_onchain(&flood, UNIT_LEN).text;
+        assert_eq!(char_only.chars().count(), UNIT_LEN);
+        assert!(
+            char_only.len() > UNIT_LEN,
+            "the char cap alone yielded {} bytes, inside the {UNIT_LEN}-byte field, so this \
+             fixture no longer exercises the byte axis",
+            char_only.len()
+        );
+
+        // The field is fixed-width by construction, and the packed prefix must be whole
+        // codepoints rather than a severed one.
+        assert_eq!(v.unit.len(), UNIT_LEN);
+        let packed = String::from_utf8(
+            v.unit
+                .iter()
+                .copied()
+                .take_while(|b| *b != 0)
+                .collect::<Vec<u8>>(),
+        )
+        .expect("the packed unit is not valid UTF-8: a codepoint was severed");
+        assert!(
+            packed.chars().all(|c| c == '\u{1F600}'),
+            "packed unit carries a partial codepoint: {packed:?}"
+        );
+
+        let fat_tx = "A".repeat(1400);
+        let out = compose_report(&v, &fat_tx);
+        assert!(
+            !out.contains('\u{1F600}'),
+            "the unit reached the agent report; it belongs in the transaction only"
+        );
+        let overhead = out.len() - fat_tx.len();
+        assert!(
+            overhead < 600,
+            "fixed prose overhead was {overhead} bytes under a multibyte unit"
         );
     }
 

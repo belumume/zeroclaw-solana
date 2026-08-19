@@ -101,7 +101,11 @@ mod component {
             if solana_core::Pubkey::from_base58(wallet).is_err() {
                 return Ok(fail(format!(
                     "not a valid base58 wallet address: {}",
-                    solana_core::sanitize_onchain(wallet, 64).text
+                    crate::health::sanitize_to_bytes(
+                        wallet,
+                        crate::health::ECHO_MAX,
+                        crate::health::ECHO_MAX_BYTES,
+                    )
                 )));
             }
 
@@ -156,7 +160,13 @@ mod component {
             // An error-response body is untrusted (a WAF/gateway block page can
             // carry control/bidi/zero-width injection framing); strip it before
             // it reaches the agent, matching the on-chain-field treatment.
-            let snippet = solana_core::sanitize_onchain(&raw, 200).text;
+            // Capped on BOTH axes: `.take(200)` above counts CHARACTERS, so 200 astral-plane
+            // codepoints reach this line as 800 bytes.
+            let snippet = crate::health::sanitize_to_bytes(
+                &raw,
+                crate::health::BODY_SNIPPET_MAX,
+                crate::health::BODY_SNIPPET_MAX_BYTES,
+            );
             return Err(format!("HTTP {status}: {snippet}"));
         }
         resp.json::<serde_json::Value>()

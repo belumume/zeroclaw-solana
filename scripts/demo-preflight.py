@@ -52,9 +52,11 @@ measured median 11.9s over 12 runs, worst 66.6s, with 3 of 12 over 30s.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -86,6 +88,10 @@ VIDEO_URL = os.environ.get(
 
 ATTEMPTS = 3
 BACKOFF = (0.5, 1.5)  # seconds before attempt 2 and attempt 3
+# The read-only allowlist, named so `fetch_once` states its rule instead of spelling it. Every
+# member must be SAFE in the RFC 9110 sense; adding a method that can alter state defeats the
+# module docstring's guarantee wherever a caller routes through here.
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 TIMEOUT = 25
 UA = "Mozilla/5.0 (compatible; zeroclaw-demo-preflight)"
 SLOT_SECONDS = 300
@@ -133,8 +139,15 @@ def fetch_once(url, method, want_body):
 
     Read-only by construction rather than by convention: an unexpected method is a
     programming error here, and this script must never write to a live system.
+
+    OPTIONS joins GET and HEAD because it is a SAFE method in the RFC 9110 sense: it asks a
+    server to describe itself and is defined never to alter state. It is here for a concrete
+    reason rather than for completeness. The settlement Worker answers a CORS preflight from
+    its own `cors()` and returns 204 before it parses a body, reaches an upstream, or touches
+    KV, so OPTIONS reads the header that dates the deploy while POSTing a JSON-RPC probe
+    would bill a metered upstream and write a permanent settlement key on every pre-flight.
     """
-    if method not in ("GET", "HEAD"):
+    if method not in SAFE_METHODS:
         raise ValueError(f"demo-preflight is read-only; refusing method {method}")
     req = urllib.request.Request(url, method=method, headers={"User-Agent": UA})
     try:
@@ -325,6 +338,87 @@ def capture_price(result, outdir):
     return path
 
 
+def _git_show(rel):
+    """(bytes, None) for a blob at origin/main, or (None, reason). Never raises.
+
+    The RETURNCODE is read rather than inferred from empty stdout. A renamed path, an unfetched
+    ref and a genuinely empty file all produce zero bytes, and only git's own stderr separates
+    them; the previous form printed "git fetch" for all three, which is advice that is wrong for
+    two of them. `git` missing from PATH is an OSError and is a fact about the workstation rather
+    than about the deploy, so it is reported as unreadable instead of killing the caller.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "show", f"origin/main:{rel}"], capture_output=True, cwd=str(ROOT)
+        )
+    except OSError as e:
+        return None, f"git unavailable ({type(e).__name__})"
+    if r.returncode != 0:
+        why = (r.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+        return None, (why[-1][:70] if why else f"git show rc={r.returncode}")
+    return r.stdout, None
+
+
+def _eol_digest(b):
+    """sha256 over line-ending-normalised bytes.
+
+    Normalising first means a deploy pipeline that re-encodes line endings does not read as drift
+    while the content is identical. This repo pins `* text=auto eol=lf` in .gitattributes, so the
+    blob and a Pages deploy agree today; a deploy taken straight from a Windows working copy under
+    core.autocrlf=true would not, and it would differ by exactly one byte per line while saying
+    the same thing.
+    """
+    return hashlib.sha256(b.replace(b"\r\n", b"\n").replace(b"\r", b"\n")).hexdigest()
+
+
+def _hdr(headers, name):
+    """A case-insensitive header lookup over the plain dict `fetch_once` returns.
+
+    `fetch_once` hands back `dict(r.headers)`, and that conversion DROPS the case-insensitivity
+    `http.client.HTTPMessage` provides: the keys become whatever casing the wire used, so a
+    lookup for a lowercase name misses a title-cased header entirely. Header names are
+    case-insensitive per RFC 9110, so any proxy is free to re-case them, and the result here
+    would be a confident DIFFERS about a surface that is current.
+    """
+    target = name.lower()
+    return next((v for k, v in headers.items() if k.lower() == target), None)
+
+
+def _expose_at_main(src):
+    """The access-control-expose-headers value cors() ships at origin/main, or None.
+
+    Parsed from source rather than pinned as a constant here, so the baseline moves when cors()
+    moves. A constant would have to be edited in lockstep with the Worker, and the failure of
+    that lockstep is the drift this whole function exists to detect.
+
+    SCOPED TO cors() rather than searched over the whole file, because the first match anywhere
+    wins and the real literal already has a four-line comment sitting directly above it. A
+    header name quoted in a comment, a test fixture or a second block would silently become the
+    baseline, and a wrong baseline reports drift with the same confidence as a right one.
+    """
+    text = src.decode("utf-8", "replace")
+    start = text.find("function cors(")
+    if start == -1:
+        return None
+    end = text.find("\n}", start)
+    body = text[start : end if end != -1 else len(text)]
+    m = re.search(
+        r'["\']access-control-expose-headers["\']\s*:\s*["\']([^"\']*)["\']',
+        body,
+        re.IGNORECASE,
+    )
+    return m.group(1) if m else None
+
+
+def _hdr_tokens(value):
+    """A comma-separated header value as a comparable set.
+
+    Order and whitespace carry no meaning in this header, so comparing raw strings would report
+    drift for a reformat. Comparing sets reports it only for a real change in what is exposed.
+    """
+    return frozenset(t.strip().lower() for t in value.split(",") if t.strip())
+
+
 def currency_report():
     """Is each deployed surface CURRENT? A different question from whether it is UP.
 
@@ -342,80 +436,88 @@ def currency_report():
     of every deploy by construction, so comparing against HEAD would report drift on every ordinary
     working day, and a check that is always red gets ignored.
 
-    CONTROLS, because a checker that can only report one verdict is decorative. The pay-page half is
-    proven in BOTH directions: against the Cloudflare deploy it reads BEHIND with delta +2,617 and
-    the fix ABSENT, and against the GitHub Pages copy, which matches main exactly, it reads CURRENT
-    with delta +0 and the fix present. Point SHOP_PAY_URL at either to re-run that.
+    THE VERDICT IS DIFFERS RATHER THAN BEHIND, because a digest mismatch does not carry a
+    direction. A deploy made from a branch is ahead, not stale, and calling that BEHIND sends the
+    reader looking for a redeploy that would move the surface backwards.
 
-    THE WORKER HALF HAS NO POSITIVE CONTROL YET, stated rather than glossed: no deployment carrying
-    that header exists, so it has only ever been observed returning BEHIND, and a bug that made it
-    ALWAYS say BEHIND would be indistinguishable today. It earns its control the moment the Worker
-    is deployed. Both halves are proven on the transport path: an unresolvable host yields COULD NOT
-    CHECK rather than a false BEHIND, which is the failure that would otherwise read as drift.
+    BOTH HALVES COMPARE A VALUE, never a proxy for one. The pay page is compared by sha256 over
+    line-ending-normalised bytes: a byte LENGTH is not a content comparison, and this page carries
+    same-length constants (`commitment:'confirmed'` against `'processed'`) whose meaning changes
+    without changing size, so a length check reports CURRENT over exactly the edit that matters.
+    The Worker is compared on the VALUE of its `access-control-expose-headers`, parsed out of
+    `cors()` at origin/main. Presence alone is a one-shot ratchet: it can only ever prove the
+    deploy is at-or-after the commit that introduced the header, so once that ships it reads
+    CURRENT forever no matter how far the Worker drifts afterwards.
+
+    EVERY REQUEST GOES THROUGH `probe`, which is what buys the retry the module docstring promises
+    and what keeps the read-only guard load-bearing. The Worker is asked with OPTIONS, a CORS
+    preflight it answers from `cors()` at 204 without parsing a body, reaching an upstream, or
+    writing KV.
+
+    CONTROLS, because a checker that can only report one verdict is decorative. `selftest_currency`
+    below drives every branch against a localhost server: CURRENT on exact bytes, CURRENT on the
+    same content re-encoded CRLF, DIFFERS on a same-length edit that a byte count calls identical,
+    DIFFERS on a stale header value, and COULD NOT CHECK on a 404 and on an unresolvable host.
+    Run it with `--selftest`; it opens no socket to the outside world.
     """
-    import subprocess
-
     rows = []
-    blob = subprocess.run(
-        ["git", "show", "origin/main:webshop-pay/index.html"],
-        capture_output=True,
-        cwd=str(ROOT),
-    ).stdout
-    try:
-        _, _, body = fetch_once(PAY_URL, "GET", True)
-    except OSError as e:
+
+    blob, why = _git_show("webshop-pay/index.html")
+    r = probe("pay page", PAY_URL, 200, want_body=True)
+    if r.verdict == RED:
+        rows.append(("pay page", "COULD NOT CHECK", r.note))
+    elif blob is None:
+        rows.append(("pay page", "COULD NOT CHECK", why))
+    else:
+        want, got = _eol_digest(blob), _eol_digest(r.body)
         rows.append(
-            ("pay page", "COULD NOT CHECK", type(e).__name__ + ", nothing compared")
-        )
-    else:
-        if not blob:
-            rows.append(
-                (
-                    "pay page",
-                    "COULD NOT CHECK",
-                    "origin/main blob unreadable; git fetch",
-                )
+            (
+                "pay page",
+                "CURRENT" if want == got else "DIFFERS from main",
+                f"served {len(r.body):,} B sha256 {got[:12]} vs "
+                f"main {len(blob):,} B sha256 {want[:12]}",
             )
-        else:
-            fix = b"SETTLEMENT_PROXY" in body
-            delta = len(blob) - len(body)
-            rows.append(
-                (
-                    "pay page",
-                    "CURRENT" if (fix and delta == 0) else "BEHIND main",
-                    f"served {len(body):,} B vs main {len(blob):,} B (delta {delta:+,}); "
-                    f"double-payment fix {'present' if fix else 'ABSENT'}",
-                )
-            )
-    try:
-        req = urllib.request.Request(
-            PROXY_URL,
-            data=b'{"jsonrpc":"2.0","id":1,"method":"getSignaturesForAddress",'
-            b'"params":["11111111111111111111111111111112",{"limit":1}]}',
-            method="POST",
-            headers={"Content-Type": "application/json", "User-Agent": UA},
         )
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            hdrs = r.headers
-    except OSError as e:
-        rows.append(("settlement worker", "COULD NOT CHECK", type(e).__name__))
-    else:
-        # Unconditional in the current cors(), so its absence dates the deploy rather than depending
-        # on which path served the request. x-zc-origin-seen is NOT a discriminator: it predates
-        # this and ships on main too, so a check keyed on it reads CURRENT against a stale Worker.
-        has = hdrs.get("access-control-expose-headers") is not None
+
+    src, why = _git_show("rpc-proxy/src/index.js")
+    w = probe("settlement worker", PROXY_URL, 204, method="OPTIONS")
+    want_hdr = _expose_at_main(src) if src is not None else None
+    if w.verdict == RED:
+        rows.append(("settlement worker", "COULD NOT CHECK", w.note))
+    elif src is None:
+        rows.append(("settlement worker", "COULD NOT CHECK", why))
+    elif want_hdr is None:
+        # The comparison has no baseline, which is a different state from a stale deploy and must
+        # not borrow its verdict. It fires if cors() is refactored to build the header some other
+        # way, and saying so is what stops a silent fall back to presence-only.
         rows.append(
             (
                 "settlement worker",
-                "CURRENT" if has else "BEHIND",
-                "access-control-expose-headers "
-                + (
-                    "present"
-                    if has
-                    else "ABSENT, so the deploy predates the five-defect fix"
-                ),
+                "COULD NOT CHECK",
+                "no access-control-expose-headers literal in cors() at origin/main",
             )
         )
+    else:
+        got_hdr = _hdr(w.headers, "access-control-expose-headers")
+        if got_hdr is None:
+            rows.append(
+                (
+                    "settlement worker",
+                    "DIFFERS from main",
+                    "access-control-expose-headers ABSENT; the deploy predates it",
+                )
+            )
+        else:
+            mine, theirs = _hdr_tokens(got_hdr), _hdr_tokens(want_hdr)
+            missing = sorted(theirs - mine)
+            rows.append(
+                (
+                    "settlement worker",
+                    "CURRENT" if mine == theirs else "DIFFERS from main",
+                    f"expose-headers {len(mine)} token(s) vs main {len(theirs)}"
+                    + (f"; missing {', '.join(missing)}" if missing else ""),
+                )
+            )
 
     width = max(len(n) for n, _, _ in rows)
     print("\ncurrency (advisory, never gates):")
@@ -424,10 +526,10 @@ def currency_report():
     # The denominator is the CHECKED count, not the row count. "0 of 2 behind" printed when both
     # rows are COULD NOT CHECK is a reassuring zero from a check that never ran, which is precisely
     # the failure this block exists to catch, so it must not be reproduced by the block itself.
-    behind = [n for n, st, _ in rows if st.startswith("BEHIND")]
+    behind = [n for n, st, _ in rows if st.startswith("DIFFERS")]
     unknown = [n for n, st, _ in rows if st.startswith("COULD NOT")]
     checked = len(rows) - len(unknown)
-    summary = f"  {len(behind)} of {checked} CHECKED surface(s) behind main"
+    summary = f"  {len(behind)} of {checked} CHECKED surface(s) differ from main"
     if behind:
         summary += ": " + ", ".join(behind)
     if unknown:
@@ -435,8 +537,198 @@ def currency_report():
     print(summary)
 
 
+def selftest_currency():
+    """Drive every currency verdict against a localhost server. Opens no outside socket.
+
+    The load-bearing case is `same length, different meaning`: it is the one a byte-count check
+    calls CURRENT, so it is what proves the digest comparison is doing work rather than decorating
+    it. The CRLF case is its mirror -- different bytes, same meaning -- and proves the fix did not
+    over-correct into reporting drift for a re-encode.
+    """
+    import contextlib
+    import io
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    global PAY_URL, PROXY_URL, _git_show
+
+    page = b"<html>\n<body>commitment:'confirmed'</body>\n</html>\n"
+    full = "x-zc-fast, x-zc-deep, x-zc-allowed-0"
+    # Shaped like the real cors(), because the baseline parser is scoped to that function and a
+    # fixture that omits it would exercise a code path the Worker never takes.
+    src = f'function cors(origin, allowed) {{\n  "access-control-expose-headers":\n    "{full}",\n}}\n'.encode()
+    bodies = {
+        "exact": page,
+        "crlf": page.replace(b"\n", b"\r\n"),
+        # Byte-identical in LENGTH to `page` ('confirmed' and 'processed' are both 9 chars) and
+        # opposite in meaning. This is the edit the old delta==0 check reported as CURRENT.
+        "samelen": page.replace(b"confirmed", b"processed"),
+    }
+    hdrs = {
+        "full": full,
+        "stale": "x-zc-fast, x-zc-deep",
+        "none": None,
+        "titlecase": full,
+    }
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            key = self.path.rsplit("/", 1)[-1]
+            if key not in bodies:
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(bodies[key])))
+            self.end_headers()
+            self.wfile.write(bodies[key])
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            key = self.path.rsplit("/", 1)[-1]
+            v = hdrs.get(key)
+            if v is not None:
+                # TITLE-CASED on purpose for one route. Header names are case-insensitive per
+                # RFC 9110 and any proxy may re-case them, and a stub that only ever emits
+                # lowercase cannot see a lookup that depends on the casing.
+                name = (
+                    "Access-Control-Expose-Headers"
+                    if key == "titlecase"
+                    else "access-control-expose-headers"
+                )
+                self.send_header(name, v)
+            self.end_headers()
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    cases, failures = 0, []
+
+    def report(name, ok):
+        nonlocal cases
+        cases += 1
+        if not ok:
+            failures.append(name)
+
+    def row(pay, proxy, blob=page, worker=src):
+        global PAY_URL, PROXY_URL, _git_show
+        PAY_URL = pay
+        PROXY_URL = proxy
+
+        def stub(rel):
+            return (blob, None) if rel.endswith("index.html") else (worker, None)
+
+        _git_show = stub
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            currency_report()
+        out = buf.getvalue()
+        return (
+            next(ln for ln in out.splitlines() if "pay page" in ln),
+            next(ln for ln in out.splitlines() if "settlement worker" in ln),
+        )
+
+    base = f"http://127.0.0.1:{port}"
+    real_git_show, real_pay, real_proxy = _git_show, PAY_URL, PROXY_URL
+    try:
+        pay, wk = row(f"{base}/pay/exact", f"{base}/proxy/full")
+        report("exact bytes read CURRENT", "CURRENT" in pay)
+        report("an exact expose-header read CURRENT", "CURRENT" in wk)
+
+        pay, _ = row(f"{base}/pay/crlf", f"{base}/proxy/full")
+        report("the same content re-encoded CRLF still reads CURRENT", "CURRENT" in pay)
+
+        pay, _ = row(f"{base}/pay/samelen", f"{base}/proxy/full")
+        report("a SAME-LENGTH edit reads DIFFERS", "DIFFERS" in pay)
+
+        pay, _ = row(f"{base}/pay/missing", f"{base}/proxy/full")
+        report("a 404 reads COULD NOT CHECK, never DIFFERS", "COULD NOT CHECK" in pay)
+        report("and the 404 is not counted as drift", "DIFFERS" not in pay)
+
+        _, wk = row(f"{base}/pay/exact", f"{base}/proxy/stale")
+        report("a stale expose-header value reads DIFFERS", "DIFFERS" in wk)
+        report("and it names the token that is missing", "x-zc-allowed-0" in wk)
+
+        _, wk = row(f"{base}/pay/exact", f"{base}/proxy/none")
+        report("an absent expose-header reads DIFFERS", "DIFFERS" in wk)
+
+        pay, wk = row(
+            "http://zc-no-such-host.invalid/p", "http://zc-no-such-host.invalid/x"
+        )
+        report(
+            "an unresolvable pay host reads COULD NOT CHECK", "COULD NOT CHECK" in pay
+        )
+        report(
+            "an unresolvable worker host reads COULD NOT CHECK", "COULD NOT CHECK" in wk
+        )
+
+        # No baseline is its OWN verdict, never a borrowed DIFFERS.
+        _, wk = row(
+            f"{base}/pay/exact", f"{base}/proxy/full", worker=b"function cors(){}"
+        )
+        report("an unparseable cors() reads COULD NOT CHECK", "COULD NOT CHECK" in wk)
+
+        # HEADER NAMES ARE CASE-INSENSITIVE and the dict `fetch_once` returns is not. Without
+        # this case a title-casing proxy makes a CURRENT Worker read DIFFERS, and nothing here
+        # would notice, because every other route in this stub emits lowercase.
+        _, wk = row(f"{base}/pay/exact", f"{base}/proxy/titlecase")
+        report("a title-cased expose-header still reads CURRENT", "CURRENT" in wk)
+
+        # THE BASELINE MUST COME FROM cors(), not from the first quoted literal in the file. A
+        # decoy above the function is the shape that actually occurs: the real literal already
+        # has a comment block sitting directly above it.
+        decoy = (
+            b'// "access-control-expose-headers": "x-decoy"\n'
+            b"function cors(){\n"
+            b'  "access-control-expose-headers": "' + full.encode() + b'",\n}\n'
+        )
+        _, wk = row(f"{base}/pay/exact", f"{base}/proxy/full", worker=decoy)
+        report(
+            "a decoy literal above cors() is not used as the baseline", "CURRENT" in wk
+        )
+    finally:
+        _git_show = real_git_show
+        # RESTORE THE URLS TOO. Leaving them pointed at a dead ephemeral port makes any real
+        # probe in the same process silently read COULD NOT CHECK against localhost.
+        PAY_URL, PROXY_URL = real_pay, real_proxy
+        srv.shutdown()
+
+    # The read-only guard, asserted rather than trusted: OPTIONS is the method the worker half
+    # now uses, and a state-changing method must still be refused.
+    try:
+        fetch_once("http://127.0.0.1:1/x", "POST", False)
+        report("fetch_once refuses POST", False)
+    except ValueError:
+        report("fetch_once refuses POST", True)
+    except OSError:
+        report("fetch_once refuses POST", False)
+    report("OPTIONS is on the safe list", "OPTIONS" in SAFE_METHODS)
+    report("POST is not on the safe list", "POST" not in SAFE_METHODS)
+
+    # _git_show reads the RETURNCODE: a path that does not exist is unreadable-with-a-reason,
+    # not empty-and-silent.
+    blob, why = real_git_show("no/such/path/zz.txt")
+    report("_git_show reports a missing path as unreadable", blob is None and bool(why))
+
+    for f in failures:
+        print(f"  FAIL  {f}")
+    print(f"selftest: {cases - len(failures)}/{cases}")
+    return 1 if failures else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description="Pre-flight for the live demo.")
+    ap.add_argument(
+        "--selftest",
+        action="store_true",
+        help="drive currency_report's branches against localhost and exit",
+    )
     ap.add_argument(
         "--capture-dir",
         default=str(ROOT / "preflight-captures"),
@@ -446,6 +738,9 @@ def main():
         "--no-capture", action="store_true", help="probe /price but write no artifact"
     )
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest_currency()
 
     started = datetime.now(timezone.utc)
     print(f"demo preflight  {started.strftime('%Y-%m-%dT%H:%M:%SZ')}")
@@ -542,7 +837,9 @@ def main():
 
     total = sum(r.seconds for r in results)
     print("-" * (width + 60))
-    print(f"{'total':<{width}}  {'':<14} {total:6.1f}s")
+    # Labelled "probes" because the currency block below is not in this sum. Calling it `total`
+    # while more network work follows makes a partial measurement read as the whole run.
+    print(f"{'total (probes)':<{width}}  {'':<14} {total:6.1f}s")
 
     # Advisory only, and defended so a bug in it can never change a go/no-go answer.
     try:

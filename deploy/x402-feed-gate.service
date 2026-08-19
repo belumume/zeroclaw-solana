@@ -1,0 +1,139 @@
+# The machine paywall. A TEMPLATE, and the fields below are marked for what is verified.
+#
+# ================================ READ THIS FIRST ================================
+# UNVERIFIED AGAINST THE BOX. Every field marked `UNVERIFIED` below was derived from this
+# repository, not read off the running node, and it MUST be reconciled on first contact. This
+# uses the same convention `deploy/deploy-targets.json` already uses for a `dst` nobody has
+# confirmed: state the uncertainty in the file rather than shipping a confident guess.
+#
+# WHY IT COULD NOT BE READ. The unit is installed on the node and nothing here can open a shell
+# on it: Cloud Shell is over its monthly tenancy limit, outbound 22 is blocked from the
+# operator's network, Bastion rides SSH and lands back on that block, and Run Command is absent
+# from the node's live agent plugin list. So this file is a proposal for what the unit should
+# be, not a record of what it is.
+#
+# HOW TO RECONCILE IT WITHOUT A SHELL, which is the point of the change that shipped beside it.
+# `deploy/box_selfcheck.py` now publishes every configured unit's DEFINITION -- ExecStart, the
+# execution directives, the EnvironmentFile PATHS and the Environment variable NAMES, with every
+# VALUE withheld -- into the verdict the gate serves at `/selfcheck`. Fetch it, read the entry
+# for this unit, and correct every UNVERIFIED line here from what it reports:
+#
+#     curl -s https://x402.perfpilot.dev/selfcheck | python3 -m json.tool
+#
+# The published payload is deliberately structure-only, so it can name a variable this file is
+# missing and can never hand you its value. A value still has to come off the box by hand.
+# =================================================================================
+#
+# WHY THE SECRETS ARE NOT IN THIS FILE, which is the whole shape of the change. A unit is the
+# natural place to put `Environment=X402_SELLER_KEY=...`, and doing that makes the unit
+# unpublishable and unreviewable at the same time: it cannot be committed here without shipping
+# the key, and it cannot be served at /selfcheck without leaking it. Splitting it means the
+# STRUCTURE lives in git where anyone can review it and the VALUES live in one file on the box
+# that nothing copies, nothing publishes and nothing hashes into the drift manifest.
+#
+# THE SECRETS FILE IS NOT IN THIS REPO AND MUST NEVER BE. Create it on the box:
+#
+#     install -d -m700 %h/.zeroclaw/secrets
+#     install -m600 /dev/null %h/.zeroclaw/secrets/x402-feed-gate.env
+#     # then write one NAME=value per line; no quotes, no export, no comments after a value
+#
+# Mode 600 rather than 644 is load-bearing: `EnvironmentFile=` is read by the service manager as
+# the session user, so nothing else needs to read it.
+#
+# INSTALL, matching how every other unit in QUICKSTART.md installs. A copied unit file is inert
+# until systemd reloads, so the reload is not optional:
+#
+#     cp deploy/x402-feed-gate.service ~/.config/systemd/user/
+#     systemctl --user daemon-reload
+#     systemctl --user enable --now x402-feed-gate.service
+#     systemctl --user cat x402-feed-gate.service    # what /selfcheck will publish, structure only
+#
+# THERE IS NO `User=` HERE AND ITS ABSENCE IS CORRECT, not an omission. `User=` is a system-manager
+# directive; the service manager REFUSES it in a user unit, and every unit this box runs is a
+# `--user` unit. So the account this runs as is decided by whose session the manager belongs to,
+# never by a line in the file, and a reviewer asking "what does it run as" is answered by
+# `systemctl --user` plus the account that owns the lingering session rather than by this file.
+# Expect the published definition to carry no `User=` for the same reason; that is the scope
+# reporting honestly, not the publisher redacting something.
+
+[Unit]
+Description=x402 machine paywall over the device-signed DePIN feed
+Documentation=file:%h/.zeroclaw/bin/x402-feed-gate
+# The gate answers HTTP 402 and settles on chain, so it needs a resolver and a route before it is
+# useful. It stays up without them and returns errors, which is worse than starting late.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# UNVERIFIED: a long-running HTTP server, so `simple` rather than `oneshot`. `deploy/box_selfcheck.py`
+# already treats anything that is not a `.timer` and not a oneshot as a daemon that must be ACTIVE,
+# and `deploy/deploy-targets.json` lists this unit as "the machine paywall ... a judge can exercise",
+# so a daemon is the only reading consistent with both. Confirm against the published `Type=`.
+Type=simple
+
+# UNVERIFIED: the binary's installed path. `%h/.zeroclaw/bin` is where every other component in
+# QUICKSTART.md installs, and it sits OUTSIDE the agent's workspace jail at
+# %h/.zeroclaw/agents/demo/workspace, which is where a money path belongs. The build is a plain
+# `cargo build --release` in x402-feed-gate/, so the artifact is a single static-ish binary.
+#
+# NO FLAGS CARRY VALUES HERE, deliberately. Everything the gate reads it reads from the
+# environment (see the names below), so nothing configurable appears on the command line. That is
+# not only tidiness: the published definition scrubs the value half of any `key=value` token in
+# ExecStart, so a setting passed as `--flag=value` would publish as `--flag=<redacted>` and be
+# invisible to review, while the same setting as an environment NAME publishes its name and keeps
+# its value private. Prefer the environment for anything a reviewer should be able to enumerate.
+ExecStart=%h/.zeroclaw/bin/x402-feed-gate
+
+# UNVERIFIED. The gate resolves its own state directory from ZEROCLAW_HOME or HOME
+# (x402-feed-gate/src/main.rs), so this is belt-and-braces rather than load-bearing; set it so a
+# relative path in a future flag cannot resolve somewhere surprising.
+WorkingDirectory=%h/.zeroclaw
+
+# THE SECRET-BEARING HALF, and the only line in this file that reaches values. The leading `-`
+# makes an absent file non-fatal at start: without it a fresh box fails to start with a message
+# about the unit rather than about the missing secrets, which sends the diagnosis to the wrong
+# place. The gate itself refuses to serve what it cannot configure, so a missing file still fails
+# loudly, just at the layer that can say why.
+EnvironmentFile=-%h/.zeroclaw/secrets/x402-feed-gate.env
+#
+# THE NAMES THAT BELONG IN THAT FILE, enumerated from the crate rather than remembered:
+#
+#     grep -rhoE 'X402_[A-Z0-9_]+' x402-feed-gate/src/ | sort -u
+#
+# which currently yields X402_DAILY_CAP, X402_EARNINGS_LOG, X402_FEED_PDA,
+# X402_GATE_BUILD_COMMIT, X402_GATE_BUILD_COMMIT_SOURCE, X402_MINT, X402_NETWORK, X402_PORT,
+# X402_PRICE_DAYPASS, X402_PRICE_SINGLE, X402_READ_RPC_URL, X402_RESOURCE_URL, X402_RPC_URL,
+# X402_SELLER_WALLET, X402_SETTLE_RPC_URL. The command is written here rather than the list being
+# restated as fact, because a list pasted into a comment is wrong the first time the crate adds a
+# variable and nothing tells you.
+#
+# WHICH OF THOSE ARE ACTUALLY SET ON THE BOX IS UNVERIFIED, and it is exactly the question the
+# published definition answers: `environment_names` in the /selfcheck payload is the set the
+# running unit declares inline, and `environment_files` is where the rest come from.
+#
+# NOT SET INLINE HERE ON PURPOSE. Even the harmless-looking ones (X402_NETWORK, X402_PORT) stay in
+# the secrets file rather than being split across two places, because a variable set in both wins
+# from whichever systemd read last and that ordering is the kind of thing nobody checks. One
+# source, one file, one place to look.
+
+# A paywall that dies must come back; there is no human on the box to restart it.
+Restart=always
+RestartSec=5
+
+# UNVERIFIED hardening. None of these can hold a secret and all of them are what a security
+# reviewer opens the unit to find, so they are stated rather than left to the default. Confirm the
+# gate still starts with them before treating them as shipped -- ProtectSystem in particular will
+# stop a write nobody expected.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+# The gate appends to its earnings log and reads its own state, both under %h/.zeroclaw, so that
+# one subtree has to stay writable under the two Protect* lines above.
+ReadWritePaths=%h/.zeroclaw
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

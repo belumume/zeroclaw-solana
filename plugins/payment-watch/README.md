@@ -62,11 +62,13 @@ OWASP LLM01 on the response path). Both directions are handled fail-closed, in t
    text, and any oversized balance amount are stripped of control / zero-width / bidi characters
    and capped before they enter the report. A sender pubkey is re-validated as base58 before it
    is displayed, so a crafted `from` string can never panic a byte-slice or leak hidden framing.
-7. The report itself is shaped: 1 to 3 lines, measured at 495 bytes worst-case PAID and 556
-   worst-case NOT_YET, versus a raw `getTransaction` of roughly 40 KB. Judges call `execute` and
-   count tokens; this never floods. Both figures are printed by
-   `worst_case_output_is_bounded_on_both_verdict_branches` under `--nocapture`, so a reader can
-   re-derive them instead of trusting this line; the bound is asserted there and in
+7. The report itself is shaped: 1 to 3 lines, measured all-ASCII at 505 bytes worst-case PAID and
+   569 worst-case NOT_YET, and at 504 / 570 when every attacker-reachable field is filled with
+   4-byte codepoints, versus a raw `getTransaction` of roughly 40 KB. Judges call `execute` and
+   count tokens; this never floods. The ASCII pair is printed by
+   `worst_case_output_is_bounded_on_both_verdict_branches` and the multibyte pair by
+   `worst_case_output_is_bounded_under_a_multibyte_flood`, both under `--nocapture`, so a reader
+   can re-derive them instead of trusting this line; the bound is asserted there and in
    `the_corroborated_report_stays_bounded_on_every_branch`.
 8. Every check above verifies the CONTENTS of an RPC response while trusting that the response
    describes the chain at all. That trust is the last unguarded assumption here, and it is the
@@ -104,10 +106,11 @@ plugin's own test suite, which is a different and weaker kind of evidence.
 
 
 These are the plugin's own host tests, with no wasm toolchain and no network (the RPC is a
-mocked transport). Run them with `cargo test --lib`:
+mocked transport). Run them with `cargo test --lib`. 52 tests pass; the listing below is abridged,
+so it shows fewer lines than the run reports:
 
 ```
-running 41 tests
+running 52 tests
 test watch::tests::a_contradicting_second_endpoint_downgrades_the_payment_to_disputed ... ok
 test watch::tests::a_full_page_never_advances_the_cursor_past_unscanned_history ... ok
 test watch::tests::a_partial_scan_says_so_in_the_report ... ok
@@ -150,7 +153,7 @@ test watch::tests::wrong_amount_is_rejected ... ok
 test watch::tests::wrong_mint_is_rejected ... ok
 test watch::tests::wrong_recipient_is_rejected ... ok
 
-test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 What the load-bearing cases prove:
@@ -186,8 +189,19 @@ that scans up to five pages of signatures stays internal; what reaches the agent
 Measured on both branches with every attacker-reachable field driven to its worst case at once,
 a 4 KB invoice label, an oversized injection memo carrying a zero-width split, and an
 unrecognised mint so the asset renders as an address rather than borrowing a symbol from the
-token: **PAID composes to 495 bytes and NOT_YET to 556**, asserted under 2000 in
-`worst_case_output_is_bounded_on_both_verdict_branches`.
+token: **PAID composes to 505 bytes and NOT_YET to 569** all-ASCII, asserted under 2000 in
+`worst_case_output_is_bounded_on_both_verdict_branches`. Refilling the same fields with 4-byte
+codepoints gives **504 and 570** in `worst_case_output_is_bounded_under_a_multibyte_flood`, so
+neither encoding is the loose one and the bound holds on both.
+
+Re-derive both pairs rather than trusting these lines:
+
+```
+cargo test --locked -- --nocapture --test-threads=1 2>&1 | grep MEASURED
+```
+
+`--test-threads=1` is load-bearing. The default parallel harness interleaves stdout and tears
+these lines, and a torn parse under-reports, which reads as agreement.
 
 NOT_YET is the larger of the two because it is the branch with the most optional pieces, adding
 a next cursor, a reference note, and the partial-scan warning that fires when the scan hit its

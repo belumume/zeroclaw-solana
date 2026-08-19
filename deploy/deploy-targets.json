@@ -85,7 +85,9 @@
     },
     {
       "unit": "x402-feed-gate.service",
-      "why": "The machine paywall. Answers HTTP 402 and is the surface a judge can exercise."
+      "why": "The machine paywall. Answers HTTP 402 and is the surface a judge can exercise.",
+      "template": "deploy/x402-feed-gate.service",
+      "template_status": "UNVERIFIED against the box, same convention as an unconfirmed dst. The unit installed on the node was never read from here -- every remote-hands route into it is currently shut -- so the file is a proposal for what it should be rather than a record of what it is. box_selfcheck.py now publishes each unit's definition (structure only, no values) into the /selfcheck verdict; reconcile every UNVERIFIED line in the template against that payload on the first fetch after the deploy freeze lifts."
     },
     {
       "unit": "x402-tunnel.service",

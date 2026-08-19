@@ -84,7 +84,18 @@ PY
     fail=1
     return
   fi
-  echo "PASS  [$label] refused (suite exit $rc)"
+  # A non-zero exit alone cannot tell CAUGHT from CRASHED. The mutation edits Python
+  # source, so a mutant that no longer parses raises SyntaxError, the suite dies before
+  # asserting anything, and a bare `rc != 0` reads that as the cases gating correctly.
+  # The suite prints a "  FAIL" line per red case; require at least one.
+  if ! printf '%s' "$out" | grep -q '^  FAIL'; then
+    echo "FAIL  [$label] suite exited $rc but named no failing case -- that is a CRASH"
+    echo "      (the mutant likely does not import), not a caught mutation."
+    printf '%s\n' "$out" | tail -4 | sed 's/^/        /'
+    fail=1
+    return
+  fi
+  echo "PASS  [$label] refused (suite exit $rc, with a named failing case)"
   printf '%s\n' "$out" | grep '^  FAIL' | sed 's/^  FAIL/        red:/'
   printf '%s\n' "$out" | tail -1 | sed 's/^/        /'
 }

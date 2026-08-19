@@ -325,6 +325,75 @@ def operational(root: Path) -> tuple[list[Path], bool]:
     return found, True
 
 
+def uncovered(root: Path, scanned: set) -> tuple[list[tuple[Path, int]], str | None]:
+    """Gitignored prose carrying a count claim that NO scope reads. [(path, claim count)].
+
+    ADVISORY BY DESIGN, and the reason is not timidity. The files this finds are typically
+    append-only journals whose historical entries are correct AS history, so gating on them
+    would emit findings that are right to ignore, and a gate people learn to ignore is worse
+    than no gate. What it buys instead is a number where there was silence.
+
+    IGNORED-NESS IS ESTABLISHED WITH `git check-ignore`, never inferred from the path. A file
+    can be missing from the index because it is ignored or because someone simply has not added
+    it yet, and only the first is a scope gap; guessing would report a half-written draft as a
+    hole in the gate's coverage.
+
+    Scoped to the repo root and docs/ because that is where this project's prose lives. That
+    bound is a real limit rather than a claim of completeness: a claim in a gitignored file
+    somewhere else is still invisible, and closing that would need a full walk.
+    Returns (findings, reason-it-could-not-check). A reason is NOT an empty finding list:
+    "I looked and found nothing" and "I could not look" are different facts, and collapsing
+    them into [] is the reassuring zero every other scope in this gate refuses to print.
+    """
+    cand = sorted(
+        p
+        for pat in ("*.md", "docs/*.md")
+        for p in root.glob(pat)
+        if p.is_file() and p.resolve() not in {s.resolve() for s in scanned}
+    )
+    if not cand:
+        return [], None
+    rels = [p.relative_to(root).as_posix() for p in cand]
+    try:
+        # -z, so paths come back NUL-separated and VERBATIM. Without it git applies
+        # core.quotePath and emits `"docs/caf\303\251.md"` for anything non-ASCII, which no
+        # longer equals the path that was passed in -- so the file drops out of the comparison
+        # and goes unreported, which is the silent omission this whole check exists to end.
+        # -z REQUIRES --stdin ("fatal: -z only makes sense with --stdin"), so the paths go in on
+        # stdin NUL-separated rather than as argv. That buys a second thing worth having: argv
+        # has a hard length limit, and a repo with many candidates would otherwise fail here.
+        r = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "-z", "--stdin"],
+            input="\0".join(rels),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as e:
+        return [], f"git unavailable ({type(e).__name__})"
+    # 0 = some path is ignored, 1 = none is. Anything else (128 = not a repo, a fatal) means
+    # the question was never answered, and an empty list would read as a clean zero.
+    if r.returncode not in (0, 1):
+        why = (r.stderr or "").strip().splitlines()
+        return [], (why[-1][:70] if why else f"git check-ignore rc={r.returncode}")
+    ignored = {s for s in r.stdout.split("\0") if s}
+    found = []
+    for p, rel in zip(cand, rels):
+        if rel not in ignored:
+            continue
+        try:
+            n = len(claims_in(p.read_text(encoding="utf-8", errors="replace")))
+        except OSError:
+            continue
+        if n:
+            # RELATIVE, like every other path this gate prints. An absolute path here would put
+            # the operator's home directory into the output of a gate whose sibling exists to
+            # keep exactly that out of published surfaces.
+            found.append((Path(rel), n))
+    return found, None
+
+
 def claims_in(text: str) -> list[tuple[int, str, int]]:
     """(line number, matched text, asserted count) for every count claim.
 
@@ -454,19 +523,56 @@ def check(root: Path) -> tuple[int, list[str]]:
     # notes/ can still carry an extra. Keying on op_present printed "0 ... were scanned" directly
     # above a finding for the very file it had just scanned, which is the misleading zero this
     # scope exists to prevent, reproduced by its own summary line.
+    # COUNT WHAT WAS FOUND, never the length of the configured tuple. `operational()` filters
+    # extras by `.is_file()`, so in the state this scope is written for -- a clone, a runner, a
+    # fresh worktree, none of which carry a gitignored file -- the tuple's length asserts a named
+    # path contributed when none did. Reporting a scan that did not happen is the same misleading
+    # denominator as reporting a zero for one that did.
+    n_extra = sum(1 for rel in OPERATIONAL_EXTRA if (root / rel).is_file())
     if op_paths:
         where = f"{OPERATIONAL_DIR}/" if op_present else f"no {OPERATIONAL_DIR}/ here"
         lines.append(
             f"operational: {op_total} claim(s) across {len(op_paths)} gitignored file(s) "
-            f"({where} plus {len(OPERATIONAL_EXTRA)} named path(s)), which git ls-files cannot "
-            f"name, {len(op_exempt)} exempt as dated record(s)"
+            f"({where} plus {n_extra} of {len(OPERATIONAL_EXTRA)} named path(s)), which "
+            f"git ls-files cannot name, {len(op_exempt)} exempt as dated record(s)"
         )
         lines.extend(op_exempt)
     else:
+        # An ABSENT directory and a PRESENT but empty one are different facts, and saying "no
+        # notes/ in this checkout" about a directory sitting right there is the same shape of
+        # false statement this branch exists to avoid on the other side.
+        where = (
+            f"{OPERATIONAL_DIR}/ is present but holds no matching file"
+            if op_present
+            else f"no {OPERATIONAL_DIR}/ in this checkout"
+        )
         lines.append(
-            f"operational: NOT CHECKED. No {OPERATIONAL_DIR}/ in this checkout and none of the "
+            f"operational: NOT CHECKED. {where}, and none of the "
             f"{len(OPERATIONAL_EXTRA)} named path(s) present, so 0 gitignored operational file(s) "
             f"were scanned. Expected in a clone, a runner and a worktree."
+        )
+    # THE DENOMINATOR THE SCOPE WAS MISSING. Everything above reports what it read; nothing
+    # reported what it never looked at, and that is the shape the last split failed in -- claims
+    # moved into a new gitignored file, every scope kept returning a confident total, and the
+    # number just went down. Named paths close whichever file someone remembered; this closes the
+    # class by making the next one visible the day it appears.
+    miss, miss_why = uncovered(root, set(al_paths) | set(op_paths))
+    if miss_why:
+        # SAY SO. Every other scope here distinguishes "clean" from "could not look", and a
+        # denominator that goes quiet on failure is the one thing this block must never be.
+        lines.append(
+            f"UNCOVERED: NOT CHECKED ({miss_why}), so no gitignored file was tested for a "
+            f"claim no scope reads."
+        )
+    elif miss:
+        lines.append(
+            f"UNCOVERED: {len(miss)} gitignored file(s) carry a count claim that no scope reads. "
+            f"Not gated -- these are usually append-only records whose old entries are correct as "
+            f"history -- but a split that lands here is invisible until someone looks:"
+        )
+        lines.extend(
+            f"  {p.as_posix()}  {n} claim(s); add to OPERATIONAL_EXTRA to gate it"
+            for p, n in miss
         )
     if bad:
         lines.append(f"{len(bad)} claim(s) disagree with the tree:")
@@ -892,6 +998,98 @@ def selftest() -> int:
             "and it says the directory is absent rather than implying it is present",
             f"no {OPERATIONAL_DIR}/ here" in op_line,
         )
+
+        # THE SUMMARY COUNTS WHAT IT FOUND, not the length of the tuple. This is the state every
+        # clone, runner and fresh worktree is in -- the gitignored extra simply is not there --
+        # and the old text asserted a named path had been scanned in exactly that state.
+        extra.unlink()
+        (tmp / OPERATIONAL_DIR).mkdir(exist_ok=True)
+        runbook.write_text("The demo shows all one plugins.\n", encoding="utf-8")
+        rc, out = check(tmp)
+        op_line = next((ln for ln in out if ln.startswith("operational:")), "")
+        report(
+            "an absent named path is reported as 0 found",
+            "0 of 1 named path(s)" in op_line,
+        )
+        report("and the run is still green", rc == 0)
+
+        # A PRESENT-BUT-EMPTY directory is a third state, and it used to borrow the absent one's
+        # sentence -- claiming there is no notes/ here while notes/ sits in the tree.
+        runbook.unlink()
+        rc, out = check(tmp)
+        op_line = next((ln for ln in out if ln.startswith("operational:")), "")
+        report(
+            "an empty notes/ is not described as absent",
+            f"no {OPERATIONAL_DIR}/ in this checkout" not in op_line,
+        )
+        report(
+            "and it says so in its own words",
+            "present but holds no matching" in op_line,
+        )
+
+        # THE UNCOVERED DENOMINATOR. A gitignored file carrying a claim that no scope reads is
+        # the shape the last split failed in, and it must be NAMED rather than silently omitted.
+        (tmp / ".gitignore").write_text("docs/JOURNAL.md\n", encoding="utf-8")
+        (tmp / "docs").mkdir(exist_ok=True)
+        (tmp / "docs" / "JOURNAL.md").write_text(
+            "Shipped all 8 plugins today.\n", encoding="utf-8"
+        )
+        rc, out = check(tmp)
+        report(
+            "an uncovered gitignored claim is named",
+            any("docs/JOURNAL.md" in ln for ln in out),
+        )
+        report("and it does NOT gate the run", rc == 0)
+        # OVER-CORRECTION CONTROL: a TRACKED file with the same claim must not be reported as
+        # uncovered, or the denominator becomes noise that gets ignored.
+        (tmp / "docs" / "TRACKED.md").write_text(
+            "Shipped all 8 plugins today.\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "-C", str(tmp), "add", "-A"], capture_output=True)
+        _, out = check(tmp)
+        report(
+            "a tracked file is not reported as uncovered",
+            not any("docs/TRACKED.md" in ln for ln in out),
+        )
+
+        # A NON-ASCII NAME MUST NOT VANISH. git quotes such paths by default
+        # (`"docs/caf\303\251.md"`), which no longer equals the path handed in, so the file drops
+        # out of the comparison and is silently omitted from the very list that exists to stop
+        # things being silently omitted.
+        (tmp / ".gitignore").write_text(
+            "docs/JOURNAL.md\ndocs/café.md\n", encoding="utf-8"
+        )
+        (tmp / "docs" / "café.md").write_text(
+            "Shipped all 8 plugins today.\n", encoding="utf-8"
+        )
+        _, out = check(tmp)
+        report(
+            "a gitignored non-ASCII filename is still named",
+            any("café.md" in ln for ln in out),
+        )
+
+        # COULD NOT LOOK IS NOT FOUND NOTHING. Outside a git repo the question is unanswerable,
+        # and the answer must be a reason rather than an empty list that reads as clean.
+        with tempfile.TemporaryDirectory() as nogit:
+            ng = Path(nogit)
+            (ng / "docs").mkdir()
+            (ng / "docs" / "X.md").write_text("all 8 plugins\n", encoding="utf-8")
+            miss_ng, why_ng = uncovered(ng, set())
+            report("uncovered() outside a repo gives a reason", bool(why_ng))
+            report("and returns no findings alongside it", miss_ng == [])
+
+        # RESTORE, so a case appended after this block inherits a green tree rather than the
+        # wreckage of this one. The block above this one did not, and that is a trap for whoever
+        # writes the next case rather than a property anyone chose.
+        (tmp / "docs" / "café.md").unlink()
+        (tmp / "docs" / "JOURNAL.md").unlink()
+        (tmp / "docs" / "TRACKED.md").unlink()
+        (tmp / ".gitignore").unlink()
+        extra.parent.mkdir(parents=True, exist_ok=True)
+        extra.write_text("The suite ships all one plugins.\n", encoding="utf-8")
+        runbook.write_text("The demo shows all one plugins.\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(tmp), "add", "-A"], capture_output=True)
+        report("the fixture is green again for whatever comes next", check(tmp)[0] == 0)
 
     for f in failures:
         print(f"  FAIL  {f}")
