@@ -254,6 +254,9 @@ pub enum SignatureCheckError {
     /// Signature at `index` is absent, malformed, or does not verify against the
     /// message. The index is into the signer prefix of `account_keys`.
     Invalid { index: usize },
+    /// The message declares no signers at all, so there is nothing to verify. Refused
+    /// rather than passed, because an empty check and a passed check are the same `Ok`.
+    NoDeclaredSigners,
 }
 
 /// Verify every signature the message declares, against the exact bytes they cover.
@@ -301,6 +304,13 @@ pub fn verify_declared_signatures(
         .ok_or(SignatureCheckError::MessageBytesUnrecoverable)?;
     if signers.len() != tx.signatures.len() {
         return Err(SignatureCheckError::MessageBytesUnrecoverable);
+    }
+    // A transaction declaring NO signers would satisfy the loop below vacuously, and an
+    // empty loop returning Ok reads exactly like a verified transaction. `decode_transaction`
+    // refuses that header already, so this is unreachable through the normal path and is
+    // refused here anyway, because this function is public and a caller can build the struct.
+    if signers.is_empty() {
+        return Err(SignatureCheckError::NoDeclaredSigners);
     }
     for (index, (key, sig)) in signers.iter().zip(tx.signatures.iter()).enumerate() {
         // A key that is not a valid ed25519 point lands here too, as an invalid
@@ -413,6 +423,33 @@ mod signature_verification_tests {
         assert_eq!(
             verify_declared_signatures(&[], &tx),
             Err(SignatureCheckError::MessageBytesUnrecoverable)
+        );
+    }
+
+    /// Nothing to verify is not the same as verified. A zero-signer message would run the
+    /// verification loop zero times, and an empty loop returns the same `Ok(())` a genuinely
+    /// checked transaction does.
+    #[test]
+    fn a_message_declaring_no_signers_is_refused_rather_than_passing_vacuously() {
+        let raw = signed_transfer();
+        let mut tx = decode_transaction(&raw).expect("the fixture decodes");
+        // Built by hand, because `decode_transaction` refuses this header outright: the
+        // point is that the struct is public and a caller can reach this state without it.
+        tx.message.num_required_signatures = 0;
+        tx.signatures.clear();
+        assert_eq!(
+            verify_declared_signatures(&raw, &tx),
+            Err(SignatureCheckError::MessageBytesUnrecoverable),
+            "the buffer still carries one signature, so the shapes disagree first"
+        );
+
+        // And with a buffer whose signature count genuinely is zero, the refusal is the
+        // specific one rather than a pass.
+        let body = raw[1 + 64..].to_vec();
+        let empty = serialize_transaction(&[], &body);
+        assert_eq!(
+            verify_declared_signatures(&empty, &tx),
+            Err(SignatureCheckError::NoDeclaredSigners)
         );
     }
 
