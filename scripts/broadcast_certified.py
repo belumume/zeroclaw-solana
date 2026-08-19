@@ -23,8 +23,14 @@ Takes the plugin's base64 partial tx (fee-payer slot 0 EMPTY, device signature a
 signs slot 0 with the agent session keypair, broadcasts, then reads the feed PDA back and
 prints the on-chain sequence.
 
-Usage: python3 scripts/broadcast_certified.py <partial_b64_file> <session_keypair.json>
-Env:   ZC_RPC, ZC_FEED, ZC_ORACLE_PROGRAM override the devnet defaults.
+Usage: ZC_NONCE=<nonce-account-pubkey> python3 scripts/broadcast_certified.py \
+           <partial_b64_file> <session_keypair.json>
+Env:   ZC_NONCE is REQUIRED and binds the certification to THIS durable-nonce account. It used to
+       be omitted at this call site, which left `nonce is not None` false inside the certifier so
+       the nonce check never ran in production -- exercised only by the self-test, which reported
+       a control the shipped path did not execute. Refusing when it is unset is deliberate: an
+       unexercised check is worse than an absent one, because it reads as coverage.
+       ZC_RPC, ZC_FEED, ZC_ORACLE_PROGRAM override the devnet defaults.
 """
 
 import base64
@@ -61,24 +67,46 @@ def rpc(method, params):
     return json.loads(urllib.request.urlopen(req, timeout=30).read())
 
 
+# Fail-closed action certification. Nothing broadcasts unless the exact serialized tx is
+# EXACTLY {advance_nonce, publish_reading -> our feed}.
+# The nonce is passed, not omitted. Without it `nonce is not None` inside the certifier is always
+# false and the nonce-account check never runs on the shipped path -- only in the self-test, so the
+# suite reported a control that production did not execute. Refusing when it is unset is the point:
+# an unexercised check is worse than an absent one, because it reads as coverage.
+NONCE = os.environ.get("ZC_NONCE", "").strip()
+if not NONCE:
+    sys.exit(
+        "REFUSED: set ZC_NONCE to the durable-nonce account pubkey. It binds the certification to "
+        "THIS nonce; without it the certifier silently skips that check."
+    )
+
 raw = base64.b64decode(open(sys.argv[1]).read().strip())
 seed = bytes(json.load(open(sys.argv[2]))[:32])
 
-# Fail-closed action certification. Nothing broadcasts unless the exact serialized tx is
-# EXACTLY {advance_nonce, publish_reading -> our feed}.
+
 try:
-    _intent = certify_publish_tx(raw, ORACLE_PROGRAM, FEED)
+    _intent = certify_publish_tx(raw, ORACLE_PROGRAM, FEED, NONCE)
     print(f"fail-closed certification OK: {_intent['intent']}")
 except CertificationError as e:
     sys.exit(f"REFUSED (fail-closed action certification): {e}")
 
 # legacy tx: shortvec(num_sigs) + sigs*64 + message
+#
+# These are `if/sys.exit`, not `assert`. They are load-bearing refusals on a SIGNING path, and
+# `python3 -O` strips every assert: under that flag the script would have signed a transaction
+# whose fee-payer slot was already populated, with no device signature required. The certification
+# above correctly raises an exception; these three did not match it.
 nsigs = raw[0]
-assert nsigs < 0x80, "shortvec >1 byte unexpected"
+if nsigs >= 0x80:
+    sys.exit("REFUSED: shortvec >1 byte unexpected")
 sigs = [raw[1 + i * 64 : 1 + (i + 1) * 64] for i in range(nsigs)]
 msg = raw[1 + nsigs * 64 :]
-assert sigs[0] == b"\x00" * 64, "fee-payer slot 0 is not empty; refusing"
-assert sigs[1] != b"\x00" * 64, "device sig missing at slot 1"
+if len(sigs) < 2:
+    sys.exit(f"REFUSED: expected at least 2 signature slots, got {len(sigs)}")
+if sigs[0] != b"\x00" * 64:
+    sys.exit("REFUSED: fee-payer slot 0 is not empty")
+if sigs[1] == b"\x00" * 64:
+    sys.exit("REFUSED: device sig missing at slot 1")
 
 sig0 = Ed25519PrivateKey.from_private_bytes(seed).sign(msg)
 out = bytes([nsigs]) + sig0 + b"".join(sigs[1:]) + msg
