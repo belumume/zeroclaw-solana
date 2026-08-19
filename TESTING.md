@@ -23,7 +23,7 @@ code and the expectation.
 about behaviour over time. A KAT is one point.
 
 **Unit tests.** 89 in `solana-core`, plus 19 in `oracle-publish`, 41 in
-`payment-watch`, 37 in `x402-feed-gate`. These cover branches, error variants, and
+`payment-watch`, 61 in `x402-feed-gate` (24 in the lib target, 37 in the bin). These cover branches, error variants, and
 the specific adversarial cases we thought of. Every one of these counts drifts as its
 suite grows, and a figure repeated across three surfaces goes stale on whichever one
 nobody re-derived. Each is `grep -c '^\s*#\[test\]'` over that crate's sources, so
@@ -248,6 +248,8 @@ python3 scripts/check-config-drift.py        # the documented posture is the run
 python3 scripts/check-shadowed-scripts.py    # no ignored copy shadows a tracked script
 python3 scripts/test_check_shadowed_scripts.py  # that gate's controls, in three directions
 ./scripts/mutation-check-shadowed-scripts.sh    # proves those controls can fail
+python3 scripts/mutation-check-crash-vs-catch.py # proves the three mutation harnesses above
+                                             # report a crashed mutant as a crash, not a catch
 python3 scripts/check-repo-paths.py          # every repo path a doc names is itself tracked
 python3 scripts/check-identifier-leaks.py    # no personal identifier on any surface a clone gets
 python3 scripts/test_check_identifier_leaks.py  # that gate's controls, in both directions
@@ -425,10 +427,14 @@ The devnet harnesses need a funded operator keypair and are documented in
 
 ## Continuously, on a machine that is not ours
 
-Three workflows, deliberately separate, because they answer different questions and a
-red badge should tell you which one broke.
+Four workflows, deliberately separate, because they answer different questions and a
+red badge should tell you which one broke: `ci.yml`, `proof-check.yml`, `host-drift.yml`,
+and `regression-gate.yml`, which arrived later and is the only one branch protection
+requires. Re-derive rather than trusting this figure, and note the two `claude*.yml` files
+the same glob returns are review bots rather than gates:
+`git ls-files '.github/workflows/*'`.
 
-Two of the three have now run. This repository gained a git remote on 2026-07-27, and the
+Two of the original three have now run. This repository gained a git remote on 2026-07-27, and the
 first push triggered `ci.yml` and `proof-check.yml` that afternoon. By that evening `ci.yml`
 had run seven times and `proof-check.yml` four, each green on its most recent run, each with
 failures earlier the same day while the offline proof bundle was being built. `host-drift.yml`
@@ -463,7 +469,9 @@ is the whole standard.
 `ci.yml` runs a second documentation gate on every push, `check-doc-slop.py`, and it was applied
 before it was ever recorded. It shipped the same day as the `fmt` job above and had three
 paragraphs there and none here, so a reader of this file would have concluded the repository does
-not check its own prose. It reads every tracked markdown document, currently thirty-one, against
+not check its own prose. It reads every tracked prose document -- the count is printed in its own
+output rather than restated here, because a number repeated on a second surface goes stale on
+whichever one nobody re-derived, which is the failure this whole file argues against -- against
 fourteen patterns: em-dashes, rogue unicode, flagged vocabulary, templated and reflex openers,
 defensive hedging, unverifiable certainty, negative-contrast framing, empty closers, and the
 editorial-bloat classes that leak internal process into a public document, which are decision
@@ -489,7 +497,7 @@ checker, from naming it to say it is there. The way through is to reword the sen
 carve out an exception, since the exception would blind the gate to the real case it exists for.
 
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
-in `crates/solana-core`, which executes all four suites there for 120 tests, clippy with
+in `crates/solana-core`, which executes all four suites there for 127 tests, clippy with
 warnings as errors on both the host and `wasm32-wasip2`, the release build of the shipped
 wasm target, the fail-closed certification self-test, then all nine plugin components in a
 matrix.
@@ -648,10 +656,18 @@ with no imports, which is why compiling it for the browser is possible at all.
 You can also rebuild it rather than trust the committed bytes. `sanitizer-microworld/build.sh`
 runs the host tests first, compiles the crate to `wasm32-unknown-unknown`, inlines the module
 into the page, and structure-checks the result. Regeneration is byte-identical: running it
-against the shipped source reproduces the committed `index.html` exactly, 76,411 bytes, which
-is what lets a reader confirm the wasm embedded in the page is built from the `src/lib.rs`
-sitting next to it rather than from something else. That mattered enough to fix, because a
-self-contained artifact whose generator is missing is one a reader can run and cannot verify.
+against the shipped source reproduces the committed `index.html` exactly, which is what lets a
+reader confirm the wasm embedded in the page is built from the `src/lib.rs` sitting next to it
+rather than from something else. Compare sizes rather than taking a number from this page, since
+the size moves with the source and a stale figure here reads as evidence of tampering:
+
+```bash
+git show HEAD:sanitizer-microworld/index.html | wc -c   # the committed artifact
+wc -c < sanitizer-microworld/index.html                 # what build.sh just produced
+```
+
+That mattered enough to fix, because a self-contained artifact whose generator is missing is one
+a reader can run and cannot verify.
 
 Six presets, because a blank box does not tell a reader which inputs matter: bidirectional
 override, zero-width split, injection framing with nothing to strip, newline smuggling, an

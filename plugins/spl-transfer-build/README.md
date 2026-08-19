@@ -175,10 +175,11 @@ address, though it appears as text inside the memo, never becomes a transaction 
 funds can route to it.
 
 The same guarantees are pinned by the host test suite (`cargo test --lib`, no wasm toolchain,
-no network). 41 tests pass; the load-bearing ones:
+no network). 43 tests pass. The listing below is abridged to the load-bearing ones, so it shows
+fewer lines than the run reports:
 
 ```
-running 41 tests
+running 43 tests
 test transfer::tests::hostile_memo_is_sanitized_in_bytes_and_labeled_in_summary_recipient_unchanged ... ok
 test transfer::tests::pure_hidden_payload_memo_is_dropped ... ok
 test transfer::tests::recipient_injection_string_rejected_before_any_rpc ... ok
@@ -196,7 +197,7 @@ test transfer::tests::build_spl_durable_nonce_verifies_authority_and_uses_stored
 test transfer::tests::unknown_top_level_field_fails_closed ... ok
 test transfer::tests::unknown_config_key_fails_closed ... ok
 ...
-test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 The RPC-dependent orchestration (getAccountInfo on the mint, getAccountInfo on the recipient
@@ -207,11 +208,29 @@ have real coverage with no live network.
 
 ## Output size (judges call execute and count tokens)
 
-The output is compact by design. The one-line `summary` (all the agent needs to read) is under
-~320 bytes; the whole JSON envelope minus the base64 transaction is under 750 bytes (asserted in
-`output_is_compact_and_carries_the_summary`). The base64 transaction itself is the irreducible
-deliverable: ~0.8 KB for a recent-blockhash transfer, ~1 KB for a durable-nonce + ATA-create
-transfer. There is no filler.
+The output is compact by design, and the sizes below are ASSERTED CEILINGS rather than measured
+figures. Unlike the flood tests in `lending-health`, `token-risk-check` and `payment-watch`, this
+crate prints no size line under `--nocapture`, so a run tells you only that the bounds held, never
+what the output actually weighed. Read them as bounds the suite enforces, not as a measurement.
+
+Two pairs, and the wider pair is the one that covers the crate:
+
+- `output_is_compact_and_carries_the_summary` asserts the one-line `summary` under **400 bytes**
+  and the whole JSON envelope minus the base64 transaction under **820 bytes**. Its fixture
+  carries the 12 ASCII bytes `invoice #412`, so this pair holds for a near-minimum memo and is
+  not a whole-crate ceiling.
+- `the_summary_and_envelope_hold_under_a_multibyte_memo_flood` drives the same pipeline with the
+  memo flooded to its byte budget with 4-byte codepoints, and asserts the `summary` under
+  **560 bytes** and the envelope under **1000 bytes**. These are the numbers that bound the
+  crate. It carries fixture controls proving the memo was neither dropped nor capped away, so
+  the assertions cannot pass vacuously.
+
+The base64 transaction itself is the irreducible deliverable: ~0.8 KB for a recent-blockhash
+transfer, ~1 KB for a durable-nonce + ATA-create transfer. There is no filler.
+
+```
+cargo test --locked -- --nocapture --test-threads=1
+```
 
 ## Tool interface
 

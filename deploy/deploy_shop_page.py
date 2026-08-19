@@ -186,5 +186,35 @@ def main() -> int:
     return r.returncode
 
 
+SUPERSEDED_BY = "scripts/deploy-pay-page.py"
+
+
+def _refuse_if_superseded() -> None:
+    """This script no longer deploys anything, and it must not start.
+
+    It is retained rather than deleted because `deploy/make_invariants.py` cites it by file:line as
+    the cautionary example of a defect that once shipped, and deleting the file would turn a live
+    citation into a dead pointer. Nothing invokes it: a sweep of .md, .py and .yml on 2026-08-19
+    found only that citation, a compound note, and a handoff entry derived from a review finding
+    against this file.
+
+    IT IS DISABLED BECAUSE IT IS A TRAP, not because it is merely unused. Its deploy call is
+    `npx -y wrangler@latest`, which resolves and executes whatever npm currently serves, plus the
+    whole transitive tree, with a live Cloudflare Pages deploy token in the environment. That token
+    publishes the pay page, so anyone who found this script first and ran it would take the worse of
+    two supply-chain shapes for a deploy the other script already does. The live path resolves npx
+    explicitly, refuses if it is absent, and pins no version -- weaker exposure, and the one tracked
+    for fixing.
+
+    Delete this file only together with the citation in make_invariants.py, and only after checking
+    that no gitignored runbook invokes it, which a repo-scoped grep cannot see.
+    """
+    sys.exit(
+        f"REFUSED: {__file__} is superseded by {SUPERSEDED_BY} and does not deploy.\n"
+        f"Nothing was uploaded. Use: python {SUPERSEDED_BY} --publish"
+    )
+
+
 if __name__ == "__main__":
+    _refuse_if_superseded()
     sys.exit(main())

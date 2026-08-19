@@ -207,10 +207,11 @@ attacker address in the memo never becomes a transaction ACCOUNT (Scenario C). A
 it, the audited on-chain program is the final, uncircumventable cap.
 
 The same guarantees are pinned by the host test suite (`cargo test`, no wasm toolchain, no network).
-37 tests pass; the load-bearing ones:
+40 tests pass. The listing below is abridged to the load-bearing ones, so it shows fewer lines
+than the run reports:
 
 ```
-running 37 tests
+running 40 tests
 test allowance::tests::build_spend_hostile_delegatee_fails_closed ... ok
 test allowance::tests::build_spend_over_cap_fails_closed_with_onchain_note ... ok
 test allowance::tests::build_spend_wrong_owner_delegation_fails_closed ... ok
@@ -226,7 +227,7 @@ test allowance::tests::build_spend_recurring_durable_nonce ... ok
 test allowance::tests::hostile_memo_is_sanitized_in_bytes_and_labeled_in_summary ... ok
 test allowance::tests::output_is_compact_and_carries_the_summary ... ok
 ...
-test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 The RPC-dependent orchestration (getAccountInfo on the delegation, the mint, and the receiver token
@@ -237,13 +238,36 @@ real coverage with no live network.
 
 ## Output size (judges call execute and count tokens)
 
-The output is compact by design. The one-line `summary` (all the agent needs to read) is under ~430
-bytes; the whole JSON envelope minus the base64 transaction is under ~1.1 KB, a little larger than a
-plain transfer builder because it also carries the structured on-chain `cap` object and the
-delegation metadata a custody-aware approval gate needs (asserted in
-`output_is_compact_and_carries_the_summary`). The base64 transaction itself is the irreducible
-deliverable: ~0.8 KB for a recent-blockhash spend, ~1 KB for a durable-nonce + ATA-create spend.
-There is no filler.
+The output is compact by design, and the sizes below are ASSERTED CEILINGS rather than measured
+figures. This crate prints no size line under `--nocapture`, so a run tells you only that the
+bounds held, never what the output actually weighed. Read them as bounds the suite enforces, not
+as a measurement.
+
+What is bounded is the JSON envelope minus the base64 transaction, in two tests, and the wider
+one is the one that covers the crate:
+
+- `output_is_compact_and_carries_the_summary` asserts the envelope under **1160 bytes**. Its
+  fixture carries NO memo, so it never budgets for the one attacker-controlled field that reaches
+  the summary, and it is not a whole-crate ceiling.
+- `the_envelope_holds_under_a_multibyte_memo_flood` drives the same pipeline with the memo
+  present and flooded to its byte budget with 4-byte codepoints, and asserts the envelope under
+  **1280 bytes**. That is the number that bounds the crate. It carries fixture controls proving
+  the memo was neither dropped nor capped away, plus a before/after control showing the byte cap
+  rather than a loose bound is what holds it.
+
+The envelope is a little larger than a plain transfer builder's because it also carries the
+structured on-chain `cap` object and the delegation metadata a custody-aware approval gate needs.
+
+The one-line `summary` has **no asserted size bound in this crate**. Nothing in the suite measures
+or asserts one, so no figure is published for it here. The sibling `spl-transfer-build` does bound
+its summary, if you need a comparison point.
+
+The base64 transaction itself is the irreducible deliverable: ~0.8 KB for a recent-blockhash
+spend, ~1 KB for a durable-nonce + ATA-create spend. There is no filler.
+
+```
+cargo test --locked -- --nocapture --test-threads=1
+```
 
 ## Tool interface
 

@@ -10,9 +10,19 @@
   "vars": {
     // Explicit allowlist rather than "*". This proxy is small and read-only, but an open
     // CORS policy on someone else's infrastructure invites use as a free relay.
-    // The pay page is served from GitHub Pages; the localhost entry is for the harness,
-    // which serves the built page on an ephemeral port.
-    "ALLOWED_ORIGINS": "https://belumume.github.io,http://127.0.0.1"
+    //
+    // THE PAY PAGE IS SERVED FROM TWO ORIGINS AND BOTH MUST BE HERE. This list previously named
+    // only GitHub Pages, on the assumption that it was the pay page's origin. It is not the only
+    // one: `zeroclaw-shop-pay.pages.dev` is a separate Cloudflare Pages deployment and it is the
+    // origin the demo opens and the one `demo-preflight.py` probes as SHOP_PAY_URL. Omitting it
+    // did not fail loudly -- the page loaded, the Pay button worked, and only the ESCALATION was
+    // dead, because a missing access-control-allow-origin makes the browser drop the response.
+    // That silently disabled the double-payment protection on the one origin that needed it,
+    // while the served bytes contained the fix and every byte-level check read CURRENT.
+    //
+    // The localhost entry is for the harness, which serves the built page on an ephemeral port,
+    // and is why the matcher below is a prefix match rather than equality.
+    "ALLOWED_ORIGINS": "https://belumume.github.io,https://zeroclaw-shop-pay.pages.dev,http://127.0.0.1"
   },
 
   // Settlements are recorded permanently, so once this Worker has seen a payment it can answer for

@@ -65,9 +65,11 @@ import table by `scripts/check-custody-tier.py`, which runs in CI.
 paid. Every field is treated as hostile:
 
 - `description` is the only seller-authored text that reaches the operator. It is passed through
-  `sanitize_onchain` (structural stripping, 120-char cap) and `label_untrusted`, then printed on its
-  own line prefixed `seller says`, so nothing the seller wrote can be mistaken for this tool's own
-  finding.
+  `sanitize_onchain` (structural stripping, 120-character cap), then capped again at 120 **bytes**,
+  then `label_untrusted`, then printed on its own line prefixed `seller says`, so nothing the seller
+  wrote can be mistaken for this tool's own finding. Both caps are load-bearing: the character cap
+  alone leaves 120 astral-plane codepoints at 480 bytes, which is four times what the output ceiling
+  below is denominated in.
 - `memo` is the one value adopted verbatim, which is why it is bounded on both axes, a byte cap and
   a character allowlist, before it is echoed into a transaction.
 - `challenge_url` must be `https`. A challenge names where money goes; reading it over a channel
@@ -113,10 +115,20 @@ and in `src/args.rs`, `every_config_field_is_refused_at_the_top_level_by_name`, 
 
 ## Output size (judges call execute and count tokens)
 
-Worst case **1280 bytes**, measured rather than estimated, with every attacker-influenced field at
-its ceiling: `amount` at `u64::MAX` against a zero-decimal mint, 44-char addresses, a 96-byte memo,
-and a 120-char description carrying the injection label. Asserted at under 1400 bytes, and asserted
-free of control characters, by `the_worst_case_output_is_bounded_and_control_character_free`.
+Ceiling **1283 bytes**, derived from named parts rather than read off one fixture: `compose::OUTPUT_MAX`
+sums the fixed prose and every attacker-influenced field at its cap: `amount` at `u64::MAX` against a
+zero-decimal mint, 44-character addresses, a 96-byte memo, and a 120-byte description carrying the
+injection label.
+
+Measured against it, with every field at its ceiling: **1280 bytes** all-ASCII
+(`the_worst_case_output_is_bounded_and_control_character_free`, which also asserts the output is free
+of control characters) and **1277 bytes** when every seller-controlled field is filled with 4-byte
+codepoints (`the_worst_case_output_is_bounded_under_multibyte_codepoints`).
+
+Both numbers matter, because the caps used to count characters while this ceiling counts bytes: the
+same multibyte input measured **1552 bytes** through the character-cap-only path, which
+`the_character_cap_alone_does_not_bound_the_description_in_bytes` keeps as a permanent control. Run
+`cargo test -- --nocapture worst_case` to re-derive all three.
 
 ## Tool interface
 
@@ -158,7 +170,7 @@ the key, and a `max_amount` of `0` refuses with "authorises nothing" rather than
 ## Build
 
 ```
-cargo test --locked                                  # 47 host tests, no network
+cargo test --locked                                  # 57 host tests, no network
 cargo clippy --all-targets --locked -- -D warnings
 cargo build --target wasm32-wasip2 --release
 ```

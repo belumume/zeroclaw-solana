@@ -218,7 +218,7 @@ one lets you believe you are protected.
 
 ## Craft, briefly
 
-Sixteen crates, formatted and clippy-clean at `-D warnings` on host and wasm. Two Kani proofs on
+Seventeen crates, formatted and clippy-clean at `-D warnings` on host and wasm. Two Kani proofs on
 the shortvec decoder, one covering all 16,777,216 three-byte inputs. A differential fuzzer graded
 against solana-sdk's own deserializer rather than invariants we chose. Every gate ships a control
 proving it can fail, because zero findings is also what a broken detector prints.
@@ -244,7 +244,7 @@ would actually receive. Open `sanitizer-microworld/index.html`; there is no buil
 Those four are the numbers, and this page promised each one is checkable, so here is how:
 
 ```bash
-git ls-files '*Cargo.toml' | xargs grep -l '^\[package\]' | wc -l   # 16 crates
+git ls-files '*Cargo.toml' | xargs grep -l '^\[package\]' | wc -l   # 17 crates
 grep -rn 'kani::proof' crates/solana-core/src/ | wc -l              # 2 proofs
 python3 scripts/check-all.py                                        # every gate, one command
 ```

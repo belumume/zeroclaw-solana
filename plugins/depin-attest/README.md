@@ -58,24 +58,27 @@ These are the plugin's own host tests. No wasm toolchain, no live network. Run t
 `cargo test --lib`:
 
 ```
-running 15 tests
+running 18 tests
+test attest::tests::all_readings_round_trip ... ok
 test attest::tests::an_all_control_device_id_is_refused ... ok
 test attest::tests::bad_seed_length_fails_closed ... ok
-test attest::tests::missing_nonce_fails_closed ... ok
-test attest::tests::missing_seed_fails_closed ... ok
-test attest::tests::unknown_reading_is_rejected ... ok
-test attest::tests::multibyte_seed_fails_closed_not_panic ... ok
-test attest::tests::unknown_top_level_field_fails_closed ... ok
-test attest::tests::unknown_config_key_fails_closed ... ok
+test attest::tests::debug_output_redacts_the_signing_seed ... ok
 test attest::tests::hostile_device_id_is_sanitized_into_the_memo ... ok
 test attest::tests::http_rpc_override_rejected ... ok
+test attest::tests::missing_nonce_fails_closed ... ok
+test attest::tests::missing_seed_fails_closed ... ok
 test attest::tests::multibyte_device_id_memo_stays_within_byte_budget ... ok
-test attest::tests::debug_output_redacts_the_signing_seed ... ok
-test attest::tests::all_readings_round_trip ... ok
-test attest::tests::worst_case_report_is_bounded ... ok
+test attest::tests::multibyte_seed_fails_closed_not_panic ... ok
+test attest::tests::the_character_cap_alone_does_not_bound_the_report_in_bytes ... ok
+test attest::tests::the_published_ceiling_is_derived_from_the_prose_it_describes ... ok
+test attest::tests::unknown_config_key_fails_closed ... ok
+test attest::tests::unknown_reading_is_rejected ... ok
+test attest::tests::unknown_top_level_field_fails_closed ... ok
 test attest::tests::valid_attestation_parses_and_composes_memo ... ok
+test attest::tests::worst_case_report_is_bounded ... ok
+test attest::tests::worst_case_report_is_bounded_under_multibyte_codepoints ... ok
 
-test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 What the load-bearing cases prove:

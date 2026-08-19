@@ -46,6 +46,62 @@ VOCABULARY = (0, 1, 2)  # anything else means the mutant never ran
 # prints it reached the check; a mutant that could not start cannot forge it.
 STARTED_MARKER = "plugin directories tracked"
 
+# THE SELFTEST'S CATCH CODE IS 3, NOT 1. `selftest()` deliberately signals failure outside the
+# gate's own 0/1/2 vocabulary so a failing control can never be read as a disagreeing claim. A
+# control keyed on 1 here scores every mutant as a survivor, which is the reassuring direction.
+SELFTEST_FAILED = 3
+
+# (label, anchor in the gate, replacement, the selftest case that must go red)
+# Each reverts one fix to the operational scope's reporting. Every replacement keeps the file
+# parseable, because a mutant that cannot start also exits non-zero and would score as a catch.
+SELFTEST_MUTANTS = (
+    (
+        "found-count reverts to the tuple length",
+        'f"({where} plus {n_extra} of {len(OPERATIONAL_EXTRA)} named path(s)), which "',
+        'f"({where} plus {len(OPERATIONAL_EXTRA)} of {len(OPERATIONAL_EXTRA)} named path(s)), which "',
+        "an absent named path is reported as 0 found",
+    ),
+    (
+        "present-but-empty borrows the absent sentence",
+        '            f"{OPERATIONAL_DIR}/ is present but holds no matching file"\n'
+        "            if op_present",
+        '            f"no {OPERATIONAL_DIR}/ in this checkout"\n            if op_present',
+        "an empty notes/ is not described as absent",
+    ),
+    (
+        "check-ignore output is C-quoted again",
+        '            ["git", "-C", str(root), "check-ignore", "-z", "--stdin"],\n'
+        '            input="\\0".join(rels),',
+        '            ["git", "-C", str(root), "check-ignore", "--stdin"],\n'
+        '            input="\\n".join(rels),',
+        "a gitignored non-ASCII filename is still named",
+    ),
+    (
+        "a git failure is reported as found-nothing",
+        "    if r.returncode not in (0, 1):",
+        "    if False:",
+        "uncovered() outside a repo gives a reason",
+    ),
+    (
+        "the uncovered denominator returns nothing",
+        "    miss, miss_why = uncovered(root, set(al_paths) | set(op_paths))",
+        "    miss, miss_why = [], None",
+        "an uncovered gitignored claim is named",
+    ),
+)
+
+
+def run_selftest(script: pathlib.Path) -> tuple[int, str]:
+    r = subprocess.run(
+        [sys.executable, str(script), "--selftest"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(ROOT),
+    )
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
 
 def run(script: pathlib.Path, root: pathlib.Path) -> tuple[int, str]:
     r = subprocess.run(
@@ -218,6 +274,29 @@ def main() -> int:
             rc == 0 and "NOT CHECKED" in out,
             f"rc={rc}",
         )
+
+        # ---- F: THE SELFTEST'S OWN CASES MUST BE LOAD-BEARING. A-E drive the gate on synthetic
+        # fixtures. These revert a fix in the SOURCE and require the selftest to notice. A case
+        # that survives its own mutant is decorative, and the selftest is the one place where
+        # that is invisible: the case count goes up and nothing reports that the new cases
+        # assert nothing.
+        for label, anchor, repl, expect in SELFTEST_MUTANTS:
+            mutant = mutate(src, anchor, repl)
+            if mutant is None:
+                ok &= report(f"F  {label}", False, "the anchor is gone; tests nothing")
+                continue
+            p = base / f"selftest-mutant-{len(label)}.py"
+            p.write_text(mutant, encoding="utf-8", newline="\n")
+            try:
+                rc_m, out_m = run_selftest(p)
+            finally:
+                p.unlink(missing_ok=True)
+            named = expect in out_m
+            ok &= report(
+                f"F  {label}",
+                rc_m == SELFTEST_FAILED and named,
+                f"rc={rc_m}" + ("" if named else f"  {expect!r} did not go red"),
+            )
 
     print()
     if ok:

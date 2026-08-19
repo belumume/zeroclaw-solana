@@ -39,6 +39,22 @@ SRC_DIR = REPO / "webshop-pay"
 PROJECT = "zeroclaw-shop-pay"
 LIVE_URL = f"https://{PROJECT}.pages.dev/"
 
+# PINNED DELIBERATELY. A bare `npx wrangler` resolves at run time, so a deploy executes whatever
+# npm serves that day, plus its whole transitive tree, with a live Pages token in the environment.
+# That token publishes this page, and whoever holds it can publish one with a different MERCHANT
+# constant and take payments directly, which makes it the highest-consequence credential here.
+# Pinning does not remove the supply-chain surface; it makes it DETERMINISTIC, so nobody can reach
+# this deploy by publishing a new `latest`.
+#
+# A lockfile would be stronger and is not available: rpc-proxy/ declares no dependencies and has no
+# package-lock.json, so `npm ci` has nothing to install. A security review asserted that lockfile
+# exists and its recommended fix was built on it; the file has never existed. Verify before
+# reinstating that plan:  ls rpc-proxy/package-lock.json
+#
+# To move this pin, run the version you intend and record what it printed:
+#   npx wrangler@<new> --version
+WRANGLER = "4.124.0"  # `npx wrangler --version` on 2026-08-19
+
 # The page is one self-contained document plus Cloudflare's header config. Any
 # addition here needs a reason a reader can check: does the browser fetch it?
 SERVE = ("index.html", "_headers")
@@ -196,7 +212,7 @@ def main(argv: list[str]) -> int:
         rc = subprocess.run(
             [
                 npx,
-                "wrangler",
+                f"wrangler@{WRANGLER}",
                 "pages",
                 "deploy",
                 str(dest),

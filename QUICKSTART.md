@@ -117,12 +117,17 @@ one host.
 build section below reads as though they do:
 
 ```
-(cd crates/solana-core && cargo test)     # 120 tests, ~30s, no network
-(cd x402-feed-gate && cargo test)         # 37 tests, ~100s, no network
+(cd crates/solana-core && cargo test)     # 127 tests, ~30s, no network
+(cd x402-feed-gate && cargo test)         # 61 tests, ~100s, no network
 ```
 
-157 green, from a clean clone, with Rust and nothing else. Re-derive the counts by summing the
-`test result:` lines rather than trusting these figures. The `cd` is required rather than
+188 green, from a clean clone, with Rust and nothing else. Re-derive the counts by summing the
+`test result:` lines rather than trusting these figures. Both crates run more than one target,
+and the totals above are the sum across all of them: `cargo test` in `x402-feed-gate` runs the
+lib target (24) as well as the bin (37), and `crates/solana-core` runs its lib plus three
+integration suites.
+Without a toolchain the same totals come from the test attributes, none of which is `#[ignore]`d:
+`grep -rcE '^\s*#\[(tokio::)?test\]' crates/solana-core x402-feed-gate --include='*.rs'`. The `cd` is required rather than
 stylistic: there is no cargo manifest at the repo root, for the reason given in step 2.
 
 ## Building from source is a separate, optional path
