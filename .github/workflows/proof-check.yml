@@ -11,6 +11,14 @@ name: proof-check
 # A genuine failure here is the alarm we want: it means the feed went stale or a
 # published claim stopped holding.
 
+# Least privilege, declared here rather than inherited. Without this block the token's scope comes
+# from the repo-level "default workflow permissions" setting, which is currently read -- so this was
+# safe by a checkbox rather than by anything in the file. Flipping that default to read-and-write
+# would silently hand a write token to a workflow that runs third-party actions, and nothing in the
+# diff would show it. Declaring it makes the grant reviewable.
+permissions:
+  contents: read
+
 on:
   schedule:
     # Twice daily. The feed publishes every 20 minutes from the ARM node, so a

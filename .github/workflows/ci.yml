@@ -5,6 +5,14 @@ name: ci
 # The live on-chain claims are re-checked separately by proof-check.yml, so a
 # devnet outage can never turn this red and make working code look broken.
 
+# Least privilege, declared here rather than inherited. Without this block the token's scope comes
+# from the repo-level "default workflow permissions" setting, which is currently read -- so this was
+# safe by a checkbox rather than by anything in the file. Flipping that default to read-and-write
+# would silently hand a write token to a workflow that runs third-party actions, and nothing in the
+# diff would show it. Declaring it makes the grant reviewable.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -312,10 +320,21 @@ jobs:
       # and it was referenced by nothing -- the same "controls that gate nothing, and no exit code
       # says so" failure this PR is about, reproduced in the newest code the PR adds.
       #
-      # Its eight OFFLINE cases carry a floor and run here unconditionally. Its three LIVE cases
-      # self-skip as NOT RUN without HELIUS_API_KEY, which a fork's PR will not have, so this step
-      # is honest on a fork rather than red: the floor still fails the run if the offline cases
-      # stop scoring. Set the secret on this repo to exercise the live three in CI too.
+      # Its FOURTEEN offline cases carry a floor and run here unconditionally. That count and the
+      # floor in the suite move together; this comment said eight while the floor was ten, which is
+      # the shape where a maintainer reads slack that is not there, deletes a case as harmless, and
+      # the floor then fails in a way that reads as a broken gate rather than a stale number.
+      #
+      # Its three LIVE cases self-skip as NOT RUN without HELIUS_API_KEY, which a fork's PR will
+      # not have, so this step is honest on a fork rather than red: the floor still fails the run
+      # if the offline cases stop scoring.
+      #
+      # HONEST NOTE ON THE HEADER CONTRACT above, which says this workflow uses no secrets. This
+      # one step does, and it is the single point where a secret meets PR-authored code. It stays
+      # safe only while the trigger is never changed to pull_request_target and fork-PR workflows
+      # require approval. The live cases are also gated on reachability probed against the FAST
+      # endpoint only, so a Helius outage can still redden main here; that is a known edge and the
+      # reason the offline floor is what actually gates.
       - name: the settlement proxy refuses what it should and finds what it should
         env:
           HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}

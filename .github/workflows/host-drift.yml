@@ -15,6 +15,14 @@ name: host-drift
 # Separate from ci.yml on purpose: a red here means the OUTSIDE WORLD moved, not that
 # our code broke, and those two signals should never share a badge.
 
+# Least privilege, declared here rather than inherited. Without this block the token's scope comes
+# from the repo-level "default workflow permissions" setting, which is currently read -- so this was
+# safe by a checkbox rather than by anything in the file. Flipping that default to read-and-write
+# would silently hand a write token to a workflow that runs third-party actions, and nothing in the
+# diff would show it. Declaring it makes the grant reviewable.
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: "41 5 * * *"

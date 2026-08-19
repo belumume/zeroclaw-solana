@@ -16,5 +16,21 @@ permissions:
   actions: read
 jobs:
   claude:
+    # ACTOR GATE AT THE CALLER. This repo is PUBLIC and this workflow fires on `issues: [opened]`
+    # and `issue_comment`, so the trigger is anonymous: any GitHub user can open an issue. The
+    # shared workflow's only condition is that the body mentions @claude, and authorization
+    # otherwise lives inside anthropics/claude-code-action, a mutable tag. Sole-sourcing the
+    # decision to a third-party tag is the thing to avoid; this makes it explicit and local.
+    if: |
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+        github.event.comment.author_association
+        || github.event.issue.author_association
+        || github.event.review.author_association)
     uses: belumume/.github/.github/workflows/claude-shared.yml@main
-    secrets: inherit
+    # NOT `secrets: inherit`. The shared workflow declares exactly one required secret
+    # (CLAUDE_CODE_OAUTH_TOKEN, verified against its source), so inherit handed it every secret
+    # this repo holds -- including HELIUS_API_KEY, which it has no use for. Anyone able to rewrite
+    # claude-shared.yml@main would have received the full set, with no PR here and no trace in
+    # this repo's history.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
