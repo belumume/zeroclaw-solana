@@ -36,6 +36,11 @@ CLAUDE.local.md
 docs/BUILD-JOURNAL.md
 docs/BUILD-PATTERNS.md
 docs/COMPLIANCE-AUDIT.md
+# Its spoke. Split out 2026-08-19 so the @-imported hub stops carrying 33 KB of evidence
+# into every turn. Same audience and same internal status as the hub, so it inherits the
+# same ignore: a spoke that is not ignored while its hub is would be swept into the public
+# repo by any bulk add, carrying exactly the content the hub was withheld for.
+docs/COMPLIANCE-DETAIL.md
 docs/DEMO-SCRIPT.md
 docs/dossier-raw.json
 docs/grounded-facts.json
