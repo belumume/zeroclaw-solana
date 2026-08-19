@@ -120,6 +120,34 @@ jobs:
       - name: the shop-liveness check can actually go red
         run: python3 scripts/mutation-check-shop-liveness.py
 
+      # WIRED 2026-08-19, having run nowhere since it was written.
+      #
+      # IT GUARDS THIS WORKFLOW'S OWN RETRY LADDER, which is why it belongs here and not in
+      # ci.yml. The steps above branch on verify-proof.py's exit code: 0 clean, 2 transport so
+      # retry, anything else a real finding that must fail on the first attempt. The box
+      # self-check was the ONE gating block in that script which never incremented the
+      # transport counter, while five other call sites did. So a 500, 502, 504 or 429 in front
+      # of the node exited 1, printed "A published claim stopped holding. Not a transport
+      # problem.", and named a claim that was fine. The script contradicted its own predicate at
+      # that call site, and the ladder built for exactly that case was unreachable from it.
+      #
+      # THE NEIGHBOURING SUITE COULD NOT CATCH IT. test_verify_proof_transport.py proves the
+      # predicate is right in both directions with its own mutation control, and says nothing
+      # about whether any caller consults it.
+      #
+      # ITS DISCRIMINATING PAIR IS 500 AGAINST 503, both 5xx, both gating, which must count
+      # differently and were identical before the fix. The 503 case is the over-correction
+      # control: this endpoint gives 503 a local meaning the generic predicate cannot know, so
+      # routing it through that predicate would pass every other case here while converting a
+      # real finding into a retryable blip.
+      #
+      # HERE rather than in ci.yml for this file's standing reason: it runs verify-proof.py as a
+      # subprocess, which makes real RPC calls, and a third-party endpoint refusing a request
+      # must never turn a pull request red. It calibrates first and reports NOT CHECKED at exit
+      # 2 rather than a green, if its own healthy baseline is not clean.
+      - name: a server error is not a claim that stopped holding
+        run: python3 scripts/test_verify_proof_selfcheck_transport.py
+
       # IS THE BOX RUNNING THE CODE THIS REPO DESCRIBES. Nothing above answers that. The box's
       # own self-check compares it to the commit it was DEPLOYED FROM, so a box months behind
       # reports a green manifest, honestly, because it does match that snapshot. Measured on

@@ -408,6 +408,27 @@ jobs:
       - name: that pre-flight suite is load-bearing
         run: python3 scripts/mutation-check-demo-preflight.py
 
+      # WIRED 2026-08-19, having run nowhere since it was written, which is the same defect
+      # three sibling controls were fixed for in the commit before this one.
+      #
+      # WHAT IT GUARDS is a failure that would have shipped a false claim onto a public image.
+      # A JSON-RPC error arrives at HTTP 200, so nothing raises, and the generator turned an
+      # error body into an empty page: measured before the fix, it rendered "0 publishes" and
+      # "0 days" beside a stamp reading "figures verified" with today's date, and refresh()
+      # returned normally so render() would have committed that as the og:image, the
+      # twitter:image and the video poster.
+      #
+      # NOTHING DOWNSTREAM CATCHES IT, which is why the control belongs here rather than being
+      # left to the freshness gate: that gate checks the image's dimensions and its git age and
+      # never looks at the figures, and the generator's own positive control passed throughout
+      # because it exercises a different method at a different moment.
+      #
+      # Hermetic and about a second: it drives real urlopen against a loopback server, which is
+      # deliberate, because substituting the rpc helper would bypass the function the fix lives
+      # in. Case 7 is the over-correction control, requiring a genuine walk to still render.
+      - name: the social card refuses to publish a figure it could not read
+        run: python3 scripts/test_build_social_card_refresh.py
+
       # The on-chain evidence outlives the links to it. Public devnet RPC prunes
       # after about four days, so every explorer link in DEVNET-PROOF is dead well
       # before judging. This verifies the captured raw transactions instead:
