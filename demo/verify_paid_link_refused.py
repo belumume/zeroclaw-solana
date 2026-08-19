@@ -59,6 +59,10 @@ MERCHANT_MARKER = "var MERCHANT='"
 # intercept glob from whatever the page NAMES, so a repoint cannot leave them intercepting a host
 # nothing contacts and passing for free.
 RPC_MARKER = "var RPC='"
+# The settlement proxy, read the same way and for the same reason. The all-endpoints-dead case
+# below must break BOTH hosts, and deriving this from the page means a repoint cannot leave that
+# case intercepting only one of them and passing for free.
+PROXY_MARKER = "var SETTLEMENT_PROXY='"
 
 MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # mainnet USDC
 
@@ -312,20 +316,46 @@ def main() -> int:
     if shots:
         shots.mkdir(parents=True, exist_ok=True)
 
-    # name, reference, how to break the RPC, must the Pay button survive?
+    # name, reference, how to break the RPC, which hosts to break, must the Pay button survive?
+    #
+    # RE-KEYED after the page began escalating to the proxy on a primary FAILURE and not only on an
+    # empty answer. The two single-host cases previously expected a paid link to stay payable when
+    # the primary died, on the premise that a dead primary means we cannot know. The proxy makes
+    # that premise false: it answers, sees the settlement, and the card correctly refuses. Asserting
+    # the old expectation would now be asserting that the double-payment hole stays open.
+    #
+    # The invariant those cases were REALLY protecting is fail-open in the safe direction: a network
+    # failure must never refuse a GOOD link. That is now carried by `unpaid` (payable with every
+    # endpoint healthy) and by `paid-all-rpc-dead` (payable when NOTHING can answer), so the gate
+    # still fails if the page ever starts refusing on ignorance.
     CASES = [
-        ("paid", PAID_REFERENCE, None, False),
-        ("unpaid", UNPAID_REFERENCE, None, True),
-        ("paid-rpc-dead", PAID_REFERENCE, "abort", True),
-        ("paid-rpc-429", PAID_REFERENCE, "429", True),
+        ("paid", PAID_REFERENCE, None, (), False),
+        ("unpaid", UNPAID_REFERENCE, None, (), True),
+        # primary broken, proxy alive -> the escalation must find the settlement and refuse
+        ("paid-rpc-dead", PAID_REFERENCE, "abort", ("primary",), False),
+        ("paid-rpc-429", PAID_REFERENCE, "429", ("primary",), False),
+        # nothing can answer -> the card must stay payable rather than refuse on ignorance
+        ("paid-all-rpc-dead", PAID_REFERENCE, "abort", ("primary", "proxy"), True),
     ]
+    proxy = read_pin(PROXY_MARKER)
+    hosts = {
+        "primary": endpoint.split("//", 1)[1].split("/")[0],
+        "proxy": proxy.split("//", 1)[1].split("/")[0],
+    }
+    if hosts["primary"] == hosts["proxy"]:
+        print(
+            "FAIL  the page names the same host for RPC and the settlement proxy, so the "
+            "single-host cases below cannot distinguish an escalation from the primary answering.",
+            file=sys.stderr,
+        )
+        return 2
 
     srv, port = serve()
     failures: list[str] = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="chrome")
-            for name, reference, breakage, want_payable in CASES:
+            for name, reference, breakage, break_hosts, want_payable in CASES:
                 page = browser.new_page(**profile)
                 calls = {"n": 0}
 
@@ -342,11 +372,10 @@ def main() -> int:
                         )
 
                 if breakage:
-                    # Glob derived from the endpoint the page actually names, so a repoint cannot
+                    # Globs derived from the hosts the page actually names, so a repoint cannot
                     # leave this intercepting a host nothing contacts and passing for free.
-                    page.route(
-                        f"**{endpoint.split('//', 1)[1].split('/')[0]}**", handler
-                    )
+                    for which in break_hosts:
+                        page.route(f"**{hosts[which]}**", handler)
 
                 page.goto(f"http://127.0.0.1:{port}{pay_url(reference, LINK_AMOUNT)}")
                 # Long enough for two round trips on the paid path; the check is asynchronous

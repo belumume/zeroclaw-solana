@@ -233,9 +233,14 @@ function isPubkey(s){return typeof s==='string'&&/^[1-9A-HJ-NP-Za-km-z]{32,44}$/
 // endpoint leaves a good link fully payable. That direction is deliberate: refusing a real order
 // because a public RPC was busy would be a worse failure than the one being fixed, and it would
 // be invisible to the shop, whereas the untaken second payment simply does not happen. The cost
-// of that choice, stated rather than hidden: for the few hundred milliseconds the call is in
-// flight, a spent link is still clickable. The realistic customer is reading the page for longer
-// than that, and the shop's own watcher is the authority either way.
+// of that choice, stated rather than hidden: while the lookup is in flight, a spent link is still
+// clickable. That window used to be a few hundred milliseconds against one endpoint. It is no
+// longer: each `rpc()` carries its own 6s abort, and a settled-but-pruned reference can now chain
+// four of them -- primary and proxy for getSignaturesForAddress, then primary and proxy for
+// getTransaction -- so the worst case is roughly 24 seconds when the primary is hanging rather
+// than refusing. The happy path is unchanged at one call. Sizing that honestly matters more than
+// making it look small, because this number is what a reader uses to judge the accepted risk on a
+// money path. The shop's own watcher remains the authority either way.
 //
 // One JSON-RPC POST. Returns the result, or null for ANY failure -- offline, DNS, abort, HTTP
 // error, a rate-limit 429, malformed JSON, or a JSON-RPC error object. Null is the only failure
@@ -260,14 +265,19 @@ function settledSignature(){
   // reference lifted out of a hostile link never reaches an endpoint unless it is a pubkey.
   if(!isPubkey(reference))return Promise.resolve(null);
   return rpc('getSignaturesForAddress',[reference,{limit:20,commitment:'confirmed'}]).then(function(list){
-    if(!Array.isArray(list))return null;
-    var sig=oldestSettled(list);
+    var sig=Array.isArray(list)?oldestSettled(list):null;
     if(sig)return sig;
-    // EMPTY IS AMBIGUOUS, and the ambiguity costs money. Escalate ONCE to the proxy, which can see
-    // past this endpoint's retention window. The PAYABLE path is untouched: a reference with a
-    // visible settlement returned above at exactly one call, which is what the polling loop and
-    // the filmed demo depend on. A null here is treated exactly as before -- ask again, card stays
-    // payable -- so an unreachable proxy can never turn a good link into a refusal.
+    // NO POSITIVE SETTLEMENT YET, and there are TWO ways to get here that must be treated the
+    // same: the endpoint answered an empty list, or it did not answer at all. `rpc()` collapses
+    // every failure to null -- 429, the 6s abort, DNS, TLS, malformed JSON -- so an early return
+    // on null skipped the escalation exactly when the primary was rate-limited, which is the
+    // routine condition for a keyless shared endpoint. That reopened the double-payment hole the
+    // proxy exists to close: a settled-but-pruned link read as unpaid and stayed clickable.
+    //
+    // Escalating here is safe in the only direction that matters. The proxy can turn "no answer"
+    // into "settled" and can never turn a settlement into a refusal, so a failing or unreachable
+    // proxy leaves the card exactly as it was. The PAYABLE path still costs one call: a visible
+    // settlement returned above.
     return rpc('getSignaturesForAddress',[reference,{limit:20,commitment:'confirmed'}],SETTLEMENT_PROXY)
       .then(function(deep){ return Array.isArray(deep)?oldestSettled(deep):null; });
   });
