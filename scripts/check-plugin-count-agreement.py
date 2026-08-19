@@ -449,17 +449,24 @@ def check(root: Path) -> tuple[int, list[str]]:
             f"always-loaded tier is absent here (it is gitignored, so a clone, a runner and an "
             f"agent worktree all lack it). The verdict below covers the tracked surfaces only."
         )
-    if op_present:
+    # BRANCH ON WHAT WAS SCANNED, not on whether the directory exists. Those were the same
+    # question until OPERATIONAL_EXTRA arrived, and they are not any more: a checkout with no
+    # notes/ can still carry an extra. Keying on op_present printed "0 ... were scanned" directly
+    # above a finding for the very file it had just scanned, which is the misleading zero this
+    # scope exists to prevent, reproduced by its own summary line.
+    if op_paths:
+        where = f"{OPERATIONAL_DIR}/" if op_present else f"no {OPERATIONAL_DIR}/ here"
         lines.append(
             f"operational: {op_total} claim(s) across {len(op_paths)} gitignored file(s) "
-            f"({OPERATIONAL_DIR}/ plus {len(OPERATIONAL_EXTRA)} named path(s)), which git "
-            f"ls-files cannot name, {len(op_exempt)} exempt as dated record(s)"
+            f"({where} plus {len(OPERATIONAL_EXTRA)} named path(s)), which git ls-files cannot "
+            f"name, {len(op_exempt)} exempt as dated record(s)"
         )
         lines.extend(op_exempt)
     else:
         lines.append(
-            f"operational: NOT CHECKED. No {OPERATIONAL_DIR}/ in this checkout, so 0 gitignored "
-            f"operational file(s) were scanned. Expected in a clone, a runner and a worktree."
+            f"operational: NOT CHECKED. No {OPERATIONAL_DIR}/ in this checkout and none of the "
+            f"{len(OPERATIONAL_EXTRA)} named path(s) present, so 0 gitignored operational file(s) "
+            f"were scanned. Expected in a clone, a runner and a worktree."
         )
     if bad:
         lines.append(f"{len(bad)} claim(s) disagree with the tree:")
@@ -872,7 +879,19 @@ def selftest() -> int:
 
         _sh.rmtree(tmp / OPERATIONAL_DIR)
         extra.write_text("The suite ships all 8 plugins.\n", encoding="utf-8")
-        report("an extra is still scanned when notes/ is absent", check(tmp)[0] == 1)
+        rc, out = check(tmp)
+        report("an extra is still scanned when notes/ is absent", rc == 1)
+        op_line = next((ln for ln in out if ln.startswith("operational:")), "")
+        report(
+            # The case above passed on a build whose summary said "0 ... were scanned" directly
+            # above the finding for that same file, because it only ever checked the exit code.
+            "and the summary does not claim zero were scanned",
+            "0 gitignored operational file(s) were scanned" not in op_line,
+        )
+        report(
+            "and it says the directory is absent rather than implying it is present",
+            f"no {OPERATIONAL_DIR}/ here" in op_line,
+        )
 
     for f in failures:
         print(f"  FAIL  {f}")
