@@ -28,7 +28,13 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MIN_GATES = 27  # below this the discovery walk is broken; see the docstring.
+MIN_GATES = 30  # below this the discovery walk is broken; see the docstring.
+# Raised from 27 to 30 on 2026-08-19 because the constant had drifted three below the rule stated
+# two lines down, which is the only rule this floor has. The tracked set was 31 and discovery
+# returned 30 while the floor read 27, so three gates could vanish and the walk would still look
+# healthy -- and by this file's own argument a floor slack by five "cannot detect a discovery
+# break, which is the only thing it exists to catch". Re-derive rather than trusting this number:
+#   git ls-files 'scripts/check-*.py' | wc -l   ->  one MORE than this, check-all.py being excluded
 # Raised from 25 to 27 by TWO gates landing in parallel: check-untracked-root-divergence on main,
 # and check-plugin-count-agreement on this branch. Each side independently wrote 26, which is the
 # arithmetic a merge cannot do for you: taking either side verbatim leaves the floor slack by one

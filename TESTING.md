@@ -463,7 +463,9 @@ is the whole standard.
 `ci.yml` runs a second documentation gate on every push, `check-doc-slop.py`, and it was applied
 before it was ever recorded. It shipped the same day as the `fmt` job above and had three
 paragraphs there and none here, so a reader of this file would have concluded the repository does
-not check its own prose. It reads every tracked markdown document, currently thirty-one, against
+not check its own prose. It reads every tracked prose document -- the count is printed in its own
+output rather than restated here, because a number repeated on a second surface goes stale on
+whichever one nobody re-derived, which is the failure this whole file argues against -- against
 fourteen patterns: em-dashes, rogue unicode, flagged vocabulary, templated and reflex openers,
 defensive hedging, unverifiable certainty, negative-contrast framing, empty closers, and the
 editorial-bloat classes that leak internal process into a public document, which are decision
@@ -648,10 +650,18 @@ with no imports, which is why compiling it for the browser is possible at all.
 You can also rebuild it rather than trust the committed bytes. `sanitizer-microworld/build.sh`
 runs the host tests first, compiles the crate to `wasm32-unknown-unknown`, inlines the module
 into the page, and structure-checks the result. Regeneration is byte-identical: running it
-against the shipped source reproduces the committed `index.html` exactly, 76,411 bytes, which
-is what lets a reader confirm the wasm embedded in the page is built from the `src/lib.rs`
-sitting next to it rather than from something else. That mattered enough to fix, because a
-self-contained artifact whose generator is missing is one a reader can run and cannot verify.
+against the shipped source reproduces the committed `index.html` exactly, which is what lets a
+reader confirm the wasm embedded in the page is built from the `src/lib.rs` sitting next to it
+rather than from something else. Compare sizes rather than taking a number from this page, since
+the size moves with the source and a stale figure here reads as evidence of tampering:
+
+```bash
+git show HEAD:sanitizer-microworld/index.html | wc -c   # the committed artifact
+wc -c < sanitizer-microworld/index.html                 # what build.sh just produced
+```
+
+That mattered enough to fix, because a self-contained artifact whose generator is missing is one
+a reader can run and cannot verify.
 
 Six presets, because a blank box does not tell a reader which inputs matter: bidirectional
 override, zero-width split, injection framing with nothing to strip, newline smuggling, an
