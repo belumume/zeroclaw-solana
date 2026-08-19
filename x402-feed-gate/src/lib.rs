@@ -16,7 +16,7 @@
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use solana_core::pubkey::{associated_token_program, memo_program, token_program};
-use solana_core::{decode_transaction, find_payment, has_memo, Pubkey};
+use solana_core::{decode_transaction, find_payment, has_memo, verify_declared_signatures, Pubkey};
 
 /// A single purchasable option, rendered into the `accepts` array of the 402
 /// body. Several of these in one response IS the x402 tiered price menu:
@@ -221,6 +221,12 @@ pub enum Reject {
     Malformed(String),
     /// The transaction bytes did not decode.
     Undecodable,
+    /// A signature the message declares does not verify against the message bytes.
+    ///
+    /// Distinct from `Undecodable`: these bytes parse perfectly and name a signer set.
+    /// Nobody signed for it. Until this check existed the gate could not tell the two
+    /// apart and treated the second as a valid payment from whoever the message named.
+    BadSignature,
     /// No TransferChecked to our ATA for our mint of at least the price.
     NoValidPayment,
     /// The payment did not carry the challenge nonce as a memo (replay guard).
@@ -233,9 +239,10 @@ pub enum Reject {
     PriceMismatch { paid: u64 },
 }
 
-/// A verified, ready-to-broadcast payment. `raw_tx` is the exact bytes to send;
-/// `payer` is the fee payer (used for daily-cap accounting); `amount` is what
-/// was actually paid; `is_day_pass` records which menu tier was purchased.
+/// A verified, ready-to-broadcast payment. `raw_tx` is the exact bytes to send; `payer`
+/// is the TOKEN AUTHORITY, whose signature over `raw_tx` has been checked and whose
+/// tokens move; `fee_payer` is recorded for the receipt only; `amount` is what was
+/// actually paid; `is_day_pass` records which menu tier was purchased.
 ///
 /// `is_day_pass` IS NOT AN ENTITLEMENT and never was. It is a record of the amount paid, kept for
 /// the receipt and the log. The tier it names is no longer advertised, because nothing granted the
@@ -243,10 +250,11 @@ pub enum Reject {
 /// the entitlement it would need: keyed on the token authority rather than the fee payer,
 /// persisted across restart, and with a replay story for repeat reads.
 ///
-/// `payer` is the FEE PAYER, which in SVM is independent of the token authority whose USDC
-/// actually moves. The daily cap meters this field, so a buyer behind rotating fee sponsors could
-/// spend past their own ceiling. Latent today because this gate does not advertise a `feePayer` in
-/// its challenge, so honest clients self-pay; it becomes real the moment sponsorship is offered.
+/// `payer` is the TOKEN AUTHORITY rather than the fee payer, because in SVM the two are
+/// independent and a quota is about whoever's tokens moved. Metering the fee payer let a buyer
+/// behind rotating sponsors spend past their own ceiling while every payment verified. The
+/// authority is verified to be in the signer set AND to have actually signed, so it is an
+/// identity the ledger can be keyed on rather than one the sender asserted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedPayment {
     pub raw_tx: Vec<u8>,
@@ -298,9 +306,35 @@ pub fn verify_x_payment(
 
     // 2. Decode the transaction and confirm it pays us.
     let decoded = decode_transaction(&raw_tx).map_err(|_| Reject::Undecodable)?;
+
+    // 2b. EVERY DECLARED SIGNATURE MUST ACTUALLY VERIFY, and this must run before any
+    // other step reads the decoded message.
+    //
+    // Decoding proves the header is self-consistent, which makes the signer PREFIX
+    // well-formed and says nothing about whether anyone signed. Every check below, and
+    // the ledger write the caller performs on the strength of them, keys on identities
+    // taken from that prefix. Without this a sender supplies 64 arbitrary bytes per slot,
+    // names any account as the token authority, and the gate meters the spend against a
+    // stranger who never touched it.
+    //
+    // Settlement would still refuse such a transaction, which is exactly why this is not
+    // redundant: everything the gate decides BEFORE broadcast is decided on these bytes.
+    verify_declared_signatures(&raw_tx, &decoded).map_err(|_| Reject::BadSignature)?;
+
     let our_ata = cfg.receiving_ata();
 
-    // 3. Memo must equal the nonce we issued for THIS challenge.
+    // 3. The payment must carry `nonce` as a Memo.
+    //
+    // Nothing here looks the value up in an issued set, and the caller does not hand one
+    // down: `handle_reading` reads the nonce OUT of this payment's own memo and passes it
+    // straight back in, so on its own this step is a tautology. A gate that describes this
+    // as a check against an issued set is describing a binding it does not implement.
+    //
+    // What defeats replay is the pair of properties around it. The memo sits inside the
+    // signed message, so step 2b binds it to the account that signed and a sender cannot
+    // vary it without the key. The ledger then burns it once, so the same signed
+    // transaction is refused the second time it arrives. A payment carrying no memo at
+    // all is refused here.
     if !has_memo(&decoded, &memo_program(), nonce.as_bytes()) {
         return Err(Reject::MissingMemo);
     }
@@ -350,8 +384,41 @@ pub fn verify_x_payment(
     })
 }
 
+/// A held place in the ledger, outstanding while a payment is being settled.
+///
+/// Returned by [`DailyLedger::reserve`] and resolved by exactly one of
+/// [`DailyLedger::confirm`] or [`DailyLedger::release`]. Both take it BY VALUE, so a
+/// resolved reservation cannot be resolved twice.
+///
+/// HONEST LIMIT ON THE `must_use` BELOW: it catches a reservation DISCARDED outright, and
+/// it does NOT catch one bound to a variable and then dropped. That path leaks a hold --
+/// the cap stays consumed and the nonce stays burned for the rest of the UTC day -- and
+/// nothing in the compiler or this suite would report it. What contains it is that
+/// `handle_reading` resolves both arms of one `match` in straight-line code, which is
+/// worth re-reading rather than assuming whenever that function grows an early return.
+///
+/// Its fields are private on purpose, and it is deliberately NOT `Clone`. A caller able
+/// to build or duplicate one could release spend it never reserved, which is this type's
+/// own defect pointed the other way: measured, a double release of a 900 hold against a
+/// row also holding 100 of settled money took the settled 100 to zero.
+#[derive(Debug, PartialEq, Eq)]
+#[must_use = "resolve a reservation with confirm or release, or the cap stays consumed for money that never moved"]
+pub struct Reservation {
+    payer: String,
+    nonce: String,
+    day: i64,
+    amount: u64,
+}
+
 /// Per-payer daily spend accounting, enforced in code. Pure: the caller passes
 /// the current UTC day so the boundary logic is deterministic and testable.
+///
+/// WHAT THIS TRACKS IS SETTLED MONEY, plus whatever is in flight at this instant. It used
+/// to track ATTEMPTED money: the gate recorded the spend and burned the nonce before
+/// broadcasting, and a payment that never reached the network left both behind for the
+/// rest of the UTC day. An unauthenticated sender could therefore exhaust a stranger's
+/// daily cap with payments that settlement refused, and `/health` published the total as
+/// revenue.
 #[derive(Debug, Default)]
 pub struct DailyLedger {
     /// (payer_base58, utc_day) -> cumulative atomic units spent.
@@ -375,16 +442,25 @@ impl DailyLedger {
         already.saturating_add(amount) <= cap
     }
 
-    /// Commit a verified payment: enforce single-use nonce and the daily cap,
-    /// then record the spend. Returns `Ok(())` or the specific rejection.
-    pub fn commit(
+    /// Take a place in the ledger for a payment that is about to be settled: enforce the
+    /// single-use nonce and the daily cap, then hold the room the payment needs.
+    ///
+    /// The hold is what makes the cap safe to enforce without freezing the ledger across a
+    /// network round trip. Checking with [`within_cap`](Self::within_cap) and recording
+    /// afterwards would be a check-then-act with a settlement in the gap, and two requests
+    /// that both read before either wrote would both be told there was room. Here the
+    /// decision and the taking are one critical section, so they cannot interleave.
+    ///
+    /// The caller MUST resolve the returned [`Reservation`] with
+    /// [`confirm`](Self::confirm) or [`release`](Self::release).
+    pub fn reserve(
         &mut self,
         payer: &Pubkey,
         nonce: &str,
         utc_day: i64,
         amount: u64,
         cap: u64,
-    ) -> Result<(), Reject> {
+    ) -> Result<Reservation, Reject> {
         if self.used_nonces.contains(nonce) {
             return Err(Reject::NonceReused);
         }
@@ -395,7 +471,63 @@ impl DailyLedger {
             return Err(Reject::DailyCapExceeded { would_be, cap });
         }
         self.used_nonces.insert(nonce.to_string());
-        self.spent.insert(key, would_be);
+        self.spent.insert(key.clone(), would_be);
+        Ok(Reservation {
+            payer: key.0,
+            nonce: nonce.to_string(),
+            day: utc_day,
+            amount,
+        })
+    }
+
+    /// Settlement succeeded: the held spend is real money and stays.
+    ///
+    /// Nothing is written here because `reserve` already wrote it, which is deliberate --
+    /// the cap has to bind while the payment is in flight. The method exists to CONSUME the
+    /// reservation, so a path that resolves neither way is a value left unused rather than
+    /// an invisible omission.
+    pub fn confirm(&mut self, reservation: Reservation) {
+        debug_assert!(
+            self.used_nonces.contains(&reservation.nonce),
+            "confirming a reservation whose nonce the ledger is not holding"
+        );
+    }
+
+    /// Settlement failed: give the room back and un-burn the nonce.
+    ///
+    /// No money moved, so the ledger must not say any did. Returning the nonce is the
+    /// correct half too: the payment it belongs to was never accepted by the network, so
+    /// refusing a retry of it would charge a buyer for a failure that was ours or the
+    /// cluster's. A payment that DID settle keeps its nonce burned, which is where replay
+    /// protection actually lives.
+    pub fn release(&mut self, reservation: Reservation) {
+        self.used_nonces.remove(&reservation.nonce);
+        let key = (reservation.payer, reservation.day);
+        if let Some(entry) = self.spent.get_mut(&key) {
+            *entry = entry.saturating_sub(reservation.amount);
+            // Drop an emptied row rather than leaving a zero behind, so `tracked_payer_days`
+            // counts payers who actually bought something.
+            if *entry == 0 {
+                self.spent.remove(&key);
+            }
+        }
+    }
+
+    /// Reserve and immediately confirm, for a caller with NO settlement step between the
+    /// two -- a test, or a replay of something already known to have settled.
+    ///
+    /// `handle_reading` must NOT use this. Its whole defect was recording the spend before
+    /// the money moved, so it needs the two phases held apart across the broadcast.
+    pub fn commit(
+        &mut self,
+        payer: &Pubkey,
+        nonce: &str,
+        utc_day: i64,
+        amount: u64,
+        cap: u64,
+    ) -> Result<(), Reject> {
+        let reservation = self.reserve(payer, nonce, utc_day, amount, cap)?;
+        self.confirm(reservation);
         Ok(())
     }
 
@@ -407,12 +539,11 @@ impl DailyLedger {
     /// process does is not the per-day cap the brief asks for, and nothing in the
     /// output would have shown it.
     ///
-    /// HONEST SCOPE. This replays what actually SETTLED, because that is what the
-    /// earnings ledger records. A payment that passed `commit` and then failed to
-    /// broadcast consumed cap in the old process and is not restored here. That is
-    /// the accurate direction rather than the lenient one: no settlement means the
-    /// payer never actually bought anything, so charging them for it across a
-    /// restart would be the bug.
+    /// SCOPE. This replays what actually SETTLED, because that is what the earnings
+    /// ledger records, and the live ledger now holds exactly the same set: a payment
+    /// whose broadcast fails has its reservation released, so it consumes nothing in
+    /// either place. The two agreeing is the point. They did not before, when a failed
+    /// broadcast left spend behind in memory that no restart could reproduce.
     ///
     /// Returns the number of records applied, so the caller can say so at startup
     /// instead of leaving a silent no-op indistinguishable from an empty ledger.
@@ -982,6 +1113,188 @@ mod tests {
         l.rehydrate([earning(&payer, 42, 900, None)]);
         assert!(!l.within_cap(&payer, 42, 200, 1_000));
         assert!(l.commit(&payer, "any-memo", 42, 50, 1_000).is_ok());
+    }
+
+    // ---- reserve / confirm / release -----------------------------------------
+    //
+    // The gate used to record the spend and burn the nonce BEFORE broadcasting, with no
+    // rollback, so a payment that never settled still consumed the payer's day. Splitting
+    // the write into a hold and a resolution is what fixes that, and the hold is also what
+    // keeps the cap safe to enforce across the settlement round trip.
+
+    #[test]
+    fn a_released_reservation_leaves_no_trace_at_all() {
+        let payer = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let mut l = DailyLedger::new();
+        let r = l.reserve(&payer, "n", 42, 400, 1_000).unwrap();
+        assert_eq!(l.total_settled(), 400, "the hold is real while it is held");
+
+        l.release(r);
+        assert_eq!(
+            l.total_settled(),
+            0,
+            "released money must not read as settled"
+        );
+        assert_eq!(
+            l.redeemed_nonce_count(),
+            0,
+            "the nonce must be spendable again"
+        );
+        assert_eq!(
+            l.tracked_payer_days(),
+            0,
+            "an emptied row would count a payer who bought nothing"
+        );
+        assert!(
+            l.within_cap(&payer, 42, 1_000, 1_000),
+            "the whole day is free again"
+        );
+        // And the same payment can now be retried, which is the point: the failure was
+        // not the buyer's.
+        assert!(l.reserve(&payer, "n", 42, 400, 1_000).is_ok());
+    }
+
+    #[test]
+    fn a_confirmed_reservation_stays_and_keeps_its_nonce_burned() {
+        let payer = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let mut l = DailyLedger::new();
+        let r = l.reserve(&payer, "n", 42, 400, 1_000).unwrap();
+        l.confirm(r);
+        assert_eq!(l.total_settled(), 400);
+        assert_eq!(l.redeemed_nonce_count(), 1);
+        assert!(matches!(
+            l.reserve(&payer, "n", 42, 1, 1_000),
+            Err(Reject::NonceReused)
+        ));
+    }
+
+    /// THE CONCURRENCY QUESTION, answered as a test rather than as an argument.
+    ///
+    /// A `within_cap` check followed by a later write is a check-then-act: two requests
+    /// that both read before either wrote would both be told there was room, and the pair
+    /// would settle past the cap. Reserving decides and takes inside one critical section,
+    /// so the second request sees the first one's hold even though nothing has settled.
+    ///
+    /// The gate is single-threaded today, so this cannot happen in the shipped binary. It
+    /// is asserted anyway because the ledger sits behind a `Mutex`, which is a promise the
+    /// type makes to any future caller, and because the settlement round trip inside the
+    /// request is exactly the reason someone would add a worker pool.
+    #[test]
+    fn a_second_request_cannot_slip_under_the_cap_while_the_first_is_in_flight() {
+        let payer = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let cap = 1_000;
+        let mut l = DailyLedger::new();
+
+        // First payment is reserved and still settling: nothing is confirmed yet.
+        let first = l.reserve(&payer, "a", 42, 700, cap).unwrap();
+
+        // A concurrent second payment must be refused on the HELD total, not on the
+        // settled one, which is still zero.
+        assert_eq!(
+            l.reserve(&payer, "b", 42, 700, cap),
+            Err(Reject::DailyCapExceeded {
+                would_be: 1_400,
+                cap
+            }),
+            "an in-flight payment must count against the cap while it is in flight"
+        );
+
+        // CONTROL: the refusal is about the cap and not about refusing everything. A
+        // payment that genuinely fits is still accepted while the first is in flight.
+        let small = l.reserve(&payer, "c", 42, 300, cap).unwrap();
+        l.confirm(first);
+        l.confirm(small);
+        assert_eq!(l.total_settled(), 1_000);
+    }
+
+    /// CONTROL for the case above: once the in-flight payment is RELEASED, the room it was
+    /// holding really does come back. Without this, the assertion above is equally
+    /// consistent with a reservation that permanently consumes the cap.
+    #[test]
+    fn releasing_an_in_flight_payment_frees_the_room_it_was_holding() {
+        let payer = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let cap = 1_000;
+        let mut l = DailyLedger::new();
+        let first = l.reserve(&payer, "a", 42, 700, cap).unwrap();
+        assert!(l.reserve(&payer, "b", 42, 700, cap).is_err());
+
+        l.release(first);
+        assert!(
+            l.reserve(&payer, "b", 42, 700, cap).is_ok(),
+            "the released room never came back"
+        );
+    }
+
+    /// A release must give back exactly what its own hold took, and nothing that was
+    /// already settled in the same row.
+    ///
+    /// This case is why [`Reservation`] is not `Clone`. Written first with a double
+    /// release, it went red: the second subtraction came out of the settled 100 sitting
+    /// beside the hold and took the row to zero, so a stray extra release erased real
+    /// revenue. Dropping `Clone` makes that a compile error rather than a runtime hazard,
+    /// which is what the type's own doc had been claiming all along.
+    #[test]
+    fn a_release_returns_its_own_hold_and_leaves_settled_money_alone() {
+        let payer = Pubkey::new(pubkey_from_seed(&[9; 32]));
+        let mut l = DailyLedger::new();
+        l.commit(&payer, "settled", 42, 100, 1_000).unwrap();
+        let held = l.reserve(&payer, "inflight", 42, 900, 1_000).unwrap();
+        assert_eq!(
+            l.total_settled(),
+            1_000,
+            "settled plus held while in flight"
+        );
+
+        l.release(held);
+        assert_eq!(
+            l.total_settled(),
+            100,
+            "the settled payment beside the hold must survive the release"
+        );
+        assert!(
+            !l.within_cap(&payer, 42, 901, 1_000),
+            "the settled 100 must still count against the day"
+        );
+        assert!(l.within_cap(&payer, 42, 900, 1_000));
+    }
+
+    /// The control that keeps the case above honest, since a compile-time property cannot
+    /// be exercised at runtime: re-adding `Clone` to `Reservation` would silently restore
+    /// the double release, and nothing else in this suite would notice.
+    ///
+    /// Source-level, like the lockfile scope guard in the binary, because that is the only
+    /// instrument available without pulling in a compile-fail harness.
+    #[test]
+    fn the_reservation_type_is_still_not_cloneable() {
+        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+            .expect("the crate can read its own source");
+
+        let derive_above = |struct_line: &str| -> String {
+            let at = src
+                .find(struct_line)
+                .unwrap_or_else(|| panic!("{struct_line} not found"));
+            src[..at]
+                .lines()
+                .rev()
+                .find(|l| l.trim_start().starts_with("#[derive("))
+                .unwrap_or_else(|| panic!("no derive above {struct_line}"))
+                .to_string()
+        };
+
+        let reservation = derive_above("pub struct Reservation {");
+        assert!(
+            !reservation.contains("Clone"),
+            "Reservation became Clone again, which re-enables the double release: {reservation}"
+        );
+
+        // POSITIVE CONTROL. Without it, a helper that always returned a Clone-free string
+        // (a bad search, a renamed struct, an empty read) would pass the assertion above
+        // while checking nothing at all.
+        let earning = derive_above("pub struct EarningRecord {");
+        assert!(
+            earning.contains("Clone"),
+            "the check cannot detect Clone at all, so its verdict above is worthless: {earning}"
+        );
     }
 
     #[test]

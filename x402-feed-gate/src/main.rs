@@ -1219,12 +1219,12 @@ fn handle_reading<T: RpcTransport, S: RpcTransport>(
         return (402, cfg.challenge(&nonce).to_json(), None);
     };
 
-    // The client echoes the nonce it was challenged with inside the memo; we
-    // recover it from the payment itself by trying the memo against our issued
-    // set. To keep the gate stateless-per-request while still binding the
-    // payment, we accept ANY memo the payment carries as the nonce and enforce
-    // single-use in the ledger — so a replay of the same signed tx is refused,
-    // and a tx with no memo is refused by verify's MissingMemo path.
+    // The nonce comes out of the payment's OWN memo. Nothing checks it against a set of
+    // values we issued, and nothing needs to: the memo is inside the signed message, so
+    // `verify_x_payment` binds it to the account that signed, and a sender cannot vary it
+    // without that account's key. Single-use is then enforced in the ledger, so a replay of
+    // the same signed transaction is refused. A transaction with no memo is refused by
+    // verify's MissingMemo path.
     let nonce = match extract_memo_nonce(header) {
         Some(n) => n,
         None => {
@@ -1238,19 +1238,31 @@ fn handle_reading<T: RpcTransport, S: RpcTransport>(
         Err(reject) => return reject_to_response(cfg, nonce_counter, reject),
     };
 
-    // Enforce single-use nonce + daily cap BEFORE broadcasting.
+    // RESERVE the nonce and the cap room before broadcasting, then confirm or release once
+    // settlement has answered. Both halves matter and they answer different questions.
+    //
+    // Reserving first is what keeps the cap enforceable: the check and the taking happen in
+    // one critical section, so two requests cannot both be told there is room. A bare
+    // `within_cap` read followed by a later write would leave the settlement round trip
+    // sitting inside the gap.
+    //
+    // Confirming only on success is what keeps the ledger honest. This used to `commit`
+    // here and never roll back, so a payment that failed to settle still consumed the
+    // payer's cap for the rest of the UTC day and still counted toward the total `/health`
+    // publishes. Nothing about a payment is known to be real until settlement says so.
     let day = utc_day_now();
-    {
+    let reservation = {
         let mut l = ledger.lock().unwrap();
-        if let Err(reject) = l.commit(&verified.payer, &nonce, day, verified.amount, cfg.daily_cap)
-        {
-            return reject_to_response(cfg, nonce_counter, reject);
+        match l.reserve(&verified.payer, &nonce, day, verified.amount, cfg.daily_cap) {
+            Ok(r) => r,
+            Err(reject) => return reject_to_response(cfg, nonce_counter, reject),
         }
-    }
+    };
 
     // Simulate, then broadcast, then confirm.
     match settle(settle_rpc, &verified) {
         Ok(signature) => {
+            ledger.lock().unwrap().confirm(reservation);
             // Append to the earnings ledger (JSON-lines) so the ZeroClaw agent can
             // report "sold N readings, earned X" to the owner's channel. Best-effort:
             // a log-write failure never withholds a paid response.
@@ -1267,8 +1279,11 @@ fn handle_reading<T: RpcTransport, S: RpcTransport>(
             (200, body, Some(hdr))
         }
         Err(e) => {
-            // Settlement failed after the cap was recorded; the nonce is spent
-            // (correct — the same signed tx must not be retried). Report 502.
+            // No money moved, so the ledger must not say any did: give the cap room back and
+            // un-burn the nonce. The buyer is free to retry the same signed transaction,
+            // which is the right outcome for a failure that was ours or the cluster's. A
+            // payment that DID settle keeps its nonce, so replay protection is unaffected.
+            ledger.lock().unwrap().release(reservation);
             (
                 502,
                 serde_json::json!({ "paid": false, "error": e }).to_string(),
@@ -2541,5 +2556,381 @@ mod build_provenance_tests {
     fn the_absent_sentinel_is_not_shaped_like_a_commit() {
         assert_ne!("unknown".len(), 40);
         assert!(!"unknown".chars().all(|c| c.is_ascii_hexdigit()));
+    }
+}
+
+#[cfg(test)]
+mod settlement_ordering_tests {
+    //! What the gate is allowed to write down, and when.
+    //!
+    //! Two defects met here, and either one alone was enough to let an unauthenticated
+    //! sender exhaust a stranger's daily cap over HTTP for free:
+    //!
+    //! 1. The signer set was DECLARED, never verified. Sixty-four arbitrary bytes per slot
+    //!    bought a payment that named any account as the token authority.
+    //! 2. The ledger was written BEFORE settlement and never rolled back, so a payment
+    //!    that failed to broadcast still spent the cap and still counted as revenue on
+    //!    the public `/health` total.
+    //!
+    //! The cases are split so each fix is provable on its own: `a_forged_signature_*`
+    //! goes red without the verification, `a_failed_settlement_*` goes red without the
+    //! release, and the two happy-path cases go red if either fix over-corrects into
+    //! refusing real payments.
+
+    use super::*;
+    use solana_core::instruction::{memo as memo_ix, AccountMeta, Instruction};
+    use solana_core::message::compile;
+    use solana_core::pubkey::token_program;
+    use solana_core::rpc::MockTransport;
+    use solana_core::signing::{pubkey_from_seed, serialize_transaction, sign_message};
+    use solana_core::token::TRANSFER_CHECKED_TAG;
+
+    const CAP: u64 = 10_000_000;
+    const PRICE: u64 = 1_000_000;
+
+    fn cfg() -> GateConfig {
+        GateConfig {
+            seller_wallet: Pubkey::new(pubkey_from_seed(&[100; 32])),
+            mint: Pubkey::new(pubkey_from_seed(&[101; 32])),
+            network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1".into(),
+            resource_url: "https://example.invalid/reading".into(),
+            price_single: PRICE,
+            price_day_pass: 5_000_000,
+            daily_cap: CAP,
+        }
+    }
+
+    fn key(seed: u8) -> Pubkey {
+        Pubkey::new(pubkey_from_seed(&[seed; 32]))
+    }
+
+    /// A TransferChecked paying the gate, whose AUTHORITY (account index 3) is `authority`
+    /// and is declared a signer. That declaration is the only thing `find_payment` could
+    /// see before this change.
+    fn transfer_to_gate(cfg: &GateConfig, authority: &Pubkey, amount: u64) -> Instruction {
+        let mut data = vec![TRANSFER_CHECKED_TAG];
+        data.extend_from_slice(&amount.to_le_bytes());
+        data.push(6);
+        Instruction {
+            program_id: token_program(),
+            accounts: vec![
+                AccountMeta::writable(
+                    Pubkey::associated_token_address(authority, &cfg.mint, &token_program()),
+                    false,
+                ),
+                AccountMeta::readonly(cfg.mint, false),
+                AccountMeta::writable(cfg.receiving_ata(), false),
+                AccountMeta::readonly(*authority, true),
+            ],
+            data,
+        }
+    }
+
+    fn envelope(raw_tx: &[u8]) -> String {
+        let tx_b64 = base64::engine::general_purpose::STANDARD.encode(raw_tx);
+        base64::engine::general_purpose::STANDARD.encode(
+            serde_json::json!({"x402Version": 2, "payload": {"transaction": tx_b64}}).to_string(),
+        )
+    }
+
+    /// An ordinary self-paid payment, signed for real by the account whose tokens move.
+    fn honest_header(cfg: &GateConfig, seed: u8, amount: u64, nonce: &str) -> String {
+        let seed_bytes = [seed; 32];
+        let payer = key(seed);
+        let msg = compile(
+            &payer,
+            &[
+                transfer_to_gate(cfg, &payer, amount),
+                memo_ix(&payer, nonce.as_bytes()),
+            ],
+            &[9u8; 32],
+        )
+        .unwrap();
+        let body = msg.serialize_legacy();
+        let raw = serialize_transaction(&[sign_message(&seed_bytes, &body)], &body);
+        envelope(&raw)
+    }
+
+    /// THE ATTACK, built exactly as an unauthenticated sender would.
+    ///
+    /// `account_keys` = [attacker, victim, ...] with `num_required_signatures = 2` and
+    /// `num_readonly_signed = 1`, so the victim sits in the signer prefix and `is_signer`
+    /// reports true for them. The victim's signature slot is 64 bytes of nothing, because
+    /// the attacker does not have their key and never needed it. The attacker signs their
+    /// own fee-payer slot for real, so the only thing wrong with the transaction is the
+    /// one thing nothing was checking.
+    fn forged_header(cfg: &GateConfig, attacker_seed: u8, victim: &Pubkey, nonce: &str) -> String {
+        let attacker_seed_bytes = [attacker_seed; 32];
+        let attacker = key(attacker_seed);
+        let msg = compile(
+            &attacker,
+            &[
+                transfer_to_gate(cfg, victim, PRICE),
+                memo_ix(&attacker, nonce.as_bytes()),
+            ],
+            &[9u8; 32],
+        )
+        .unwrap();
+        assert_eq!(
+            msg.num_required_signatures, 2,
+            "the fixture must declare the victim as a second signer, or it is not the attack"
+        );
+        assert_eq!(msg.num_readonly_signed, 1);
+        assert_eq!(
+            msg.account_keys[1], *victim,
+            "the victim must land in the signer prefix"
+        );
+        let body = msg.serialize_legacy();
+        // Slot 0 is the attacker's real signature; slot 1 is the forgery.
+        let sigs = [sign_message(&attacker_seed_bytes, &body), [0xAB; 64]];
+        envelope(&serialize_transaction(&sigs, &body))
+    }
+
+    /// Canned settle-side responses: simulate clean, send returns a signature, the first
+    /// status poll reports confirmed. Returns immediately, so no test sleeps.
+    fn settles_ok() -> MockTransport {
+        MockTransport::new([
+            r#"{"jsonrpc":"2.0","id":1,"result":{"value":{"err":null}}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"result":"5FakeSettlementSignature"}"#,
+            r#"{"jsonrpc":"2.0","id":3,"result":{"value":[{"confirmationStatus":"confirmed","err":null}]}}"#,
+        ])
+    }
+
+    /// Simulate clean, then the broadcast is refused by the cluster. This is what a forged
+    /// or otherwise unacceptable transaction looks like at the network boundary, and it is
+    /// where the old code had already written the ledger.
+    fn settle_send_fails() -> MockTransport {
+        MockTransport::new([
+            r#"{"jsonrpc":"2.0","id":1,"result":{"value":{"err":null}}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32003,"message":"Transaction signature verification failure"}}"#,
+        ])
+    }
+
+    struct Outcome {
+        status: u16,
+        body: String,
+        receipt: Option<String>,
+        settle_requests: usize,
+        settled_total: u64,
+        redeemed_nonces: usize,
+        tracked_payer_days: usize,
+        /// Whether the payer still has their entire daily allowance available.
+        cap_untouched_for_payer: bool,
+    }
+
+    /// Drive one `/reading` request against a ledger the caller can pre-load.
+    fn request(
+        cfg: &GateConfig,
+        header: &str,
+        settle: MockTransport,
+        payer_of_interest: &Pubkey,
+        preload: impl FnOnce(&mut DailyLedger),
+    ) -> Outcome {
+        // Keep the happy path's earnings append out of the crate directory.
+        std::env::set_var(
+            "X402_EARNINGS_LOG",
+            std::env::temp_dir().join("x402-gate-settlement-tests.jsonl"),
+        );
+
+        let mut ledger = DailyLedger::new();
+        preload(&mut ledger);
+        let ledger = Mutex::new(ledger);
+        let read_rpc = SolanaRpc::new(MockTransport::single(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"value":null}}"#,
+        ));
+        let settle_rpc = SolanaRpc::new(settle);
+        let counter = AtomicU64::new(1);
+
+        let (status, body, receipt) = handle_reading(
+            cfg,
+            &read_rpc,
+            &settle_rpc,
+            &key(200),
+            &ledger,
+            &counter,
+            Some(header),
+        );
+
+        let settle_requests = settle_rpc.transport().requests.borrow().len();
+        let l = ledger.lock().unwrap();
+        Outcome {
+            status,
+            body,
+            receipt,
+            settle_requests,
+            settled_total: l.total_settled(),
+            redeemed_nonces: l.redeemed_nonce_count(),
+            tracked_payer_days: l.tracked_payer_days(),
+            cap_untouched_for_payer: l.within_cap(payer_of_interest, utc_day_now(), CAP, CAP),
+        }
+    }
+
+    /// THE REPRODUCTION. A payment naming a victim as its token authority, with garbage
+    /// where the victim's signature should be, must not move one byte of the victim's
+    /// ledger state.
+    ///
+    /// Before the signature check this returned a verified payment: the gate recorded
+    /// PRICE against the victim, burned the nonce, and broadcast. Repeat with fresh memos
+    /// and the victim's whole day is gone, at zero cost to the sender.
+    #[test]
+    fn a_forged_signature_cannot_touch_the_victims_ledger() {
+        let cfg = cfg();
+        let victim = key(42);
+        let out = request(
+            &cfg,
+            &forged_header(&cfg, 7, &victim, "forge-1"),
+            settles_ok(),
+            &victim,
+            |_| {},
+        );
+
+        assert_eq!(out.status, 402, "a forgery must be refused, not served");
+        assert!(
+            out.body.contains("BadSignature"),
+            "the refusal must name the actual reason: {}",
+            out.body
+        );
+        assert_eq!(out.settled_total, 0, "the victim was charged for a forgery");
+        assert_eq!(out.redeemed_nonces, 0, "a forgery burned a nonce");
+        assert_eq!(out.tracked_payer_days, 0);
+        assert!(
+            out.cap_untouched_for_payer,
+            "the victim's daily allowance was consumed by someone else"
+        );
+        assert_eq!(
+            out.settle_requests, 0,
+            "a forgery reached the network; it must be refused before broadcast"
+        );
+    }
+
+    /// The same forgery, repeated. The point of the attack was that it scales: each
+    /// attempt is free and each one takes another slice of the victim's day.
+    #[test]
+    fn repeated_forgeries_never_accumulate_against_the_victim() {
+        let cfg = cfg();
+        let victim = key(42);
+        for i in 0..12 {
+            let out = request(
+                &cfg,
+                &forged_header(&cfg, 7, &victim, &format!("forge-loop-{i}")),
+                settles_ok(),
+                &victim,
+                |_| {},
+            );
+            assert_eq!(out.status, 402);
+            assert_eq!(out.settled_total, 0, "attempt {i} charged the victim");
+        }
+    }
+
+    /// THE ORDERING FIX, provable on its own. This payment is genuinely signed, so the
+    /// signature check passes it; settlement then refuses it at the network. Nothing
+    /// moved, so nothing may be recorded.
+    ///
+    /// The old code committed before broadcasting and had no rollback, so this left the
+    /// payer's cap consumed and the nonce burned for the rest of the UTC day.
+    #[test]
+    fn a_failed_settlement_leaves_the_ledger_exactly_as_it_found_it() {
+        let cfg = cfg();
+        let payer = key(11);
+        let out = request(
+            &cfg,
+            &honest_header(&cfg, 11, PRICE, "settle-fails"),
+            settle_send_fails(),
+            &payer,
+            |_| {},
+        );
+
+        assert_eq!(out.status, 502, "the buyer must be told settlement failed");
+        assert_eq!(
+            out.settled_total, 0,
+            "money that never moved is recorded as settled, and /health publishes it"
+        );
+        assert_eq!(
+            out.redeemed_nonces, 0,
+            "the nonce stayed burned, so the buyer cannot retry a failure that was not theirs"
+        );
+        assert_eq!(out.tracked_payer_days, 0, "an emptied row was left behind");
+        assert!(out.cap_untouched_for_payer);
+        assert!(
+            out.settle_requests >= 2,
+            "the fixture must actually have attempted a broadcast, or it proves nothing"
+        );
+    }
+
+    /// CONTROL for both fixes: a real payment that really settles is still served, still
+    /// recorded, and still burns its nonce. Without this, refusing everything would pass
+    /// every case above.
+    #[test]
+    fn a_settled_payment_is_served_and_recorded() {
+        let cfg = cfg();
+        let payer = key(11);
+        let out = request(
+            &cfg,
+            &honest_header(&cfg, 11, PRICE, "settles"),
+            settles_ok(),
+            &payer,
+            |_| {},
+        );
+
+        assert_eq!(out.status, 200, "body: {}", out.body);
+        assert!(out.receipt.is_some(), "a paid response carries its receipt");
+        assert!(out.body.contains("5FakeSettlementSignature"));
+        assert_eq!(out.settled_total, PRICE, "settled money must be recorded");
+        assert_eq!(out.redeemed_nonces, 1, "a settled nonce must stay burned");
+        assert_eq!(out.tracked_payer_days, 1);
+        assert!(
+            !out.cap_untouched_for_payer,
+            "the payer's spend must count against their day"
+        );
+    }
+
+    /// CONTROL: the cap is still enforced, and still enforced BEFORE broadcast. Moving the
+    /// ledger write after settlement must not turn the cap into something checked too late
+    /// to refuse anything.
+    #[test]
+    fn a_payer_at_their_cap_is_still_refused_without_broadcasting() {
+        let cfg = cfg();
+        let payer = key(11);
+        let out = request(
+            &cfg,
+            &honest_header(&cfg, 11, PRICE, "over-cap"),
+            settles_ok(),
+            &payer,
+            |l| {
+                l.commit(&payer, "earlier-today", utc_day_now(), CAP, CAP)
+                    .expect("preload fills the day exactly");
+            },
+        );
+
+        assert_eq!(out.status, 402);
+        assert!(out.body.contains("DailyCapExceeded"), "body: {}", out.body);
+        assert_eq!(
+            out.settle_requests, 0,
+            "an over-cap payment must never reach the network"
+        );
+        assert_eq!(out.settled_total, CAP, "the preloaded spend must be intact");
+    }
+
+    /// CONTROL: a settled payment's nonce stays burned, so replaying the identical signed
+    /// transaction is refused. The release path must not have weakened this.
+    #[test]
+    fn a_settled_payment_cannot_be_replayed() {
+        let cfg = cfg();
+        let payer = key(11);
+        let header = honest_header(&cfg, 11, PRICE, "replay-me");
+
+        let mut ledger = DailyLedger::new();
+        ledger
+            .commit(&payer, "replay-me", utc_day_now(), PRICE, CAP)
+            .unwrap();
+        let out = request(&cfg, &header, settles_ok(), &payer, |l| {
+            l.commit(&payer, "replay-me", utc_day_now(), PRICE, CAP)
+                .unwrap();
+        });
+
+        assert_eq!(out.status, 402);
+        assert!(out.body.contains("NonceReused"), "body: {}", out.body);
+        assert_eq!(out.settle_requests, 0);
+        assert_eq!(out.settled_total, PRICE, "the replay must not double-count");
     }
 }

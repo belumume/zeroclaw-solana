@@ -225,15 +225,228 @@ impl DecodedTransaction {
     /// signature vector; without that check a crafted message could name any key as a
     /// signer while supplying no signature for it.
     ///
-    /// Note this answers "the message DECLARES this key as a signer", which is the right
-    /// question for a payment verifier: the runtime will reject the transaction outright
-    /// if a declared signature is absent or invalid.
+    /// Note this answers "the message DECLARES this key as a signer", and nothing more.
+    /// The runtime does reject a transaction whose declared signature is absent or
+    /// invalid, so the declaration is load-bearing for anything that happens AT
+    /// SETTLEMENT. It is worth nothing BEFORE settlement: a caller that writes a
+    /// ledger, meters a quota, or serves a paid resource on the strength of this alone
+    /// is acting on bytes the sender chose, and the sender can name any key here for
+    /// the price of 64 arbitrary bytes.
+    ///
+    /// Call [`verify_declared_signatures`] first if the answer will be acted on before
+    /// the transaction reaches the network.
     pub fn is_signer(&self, key: &Pubkey) -> bool {
         let n = self.message.num_required_signatures as usize;
         self.message
             .account_keys
             .get(..n)
             .is_some_and(|signers| signers.contains(key))
+    }
+}
+
+/// Why a declared signature could not be accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureCheckError {
+    /// `bytes` is not the buffer this transaction was decoded from, so the span the
+    /// signatures cover cannot be located. Refused rather than guessed: verifying the
+    /// wrong span would report a pass for a message nobody signed.
+    MessageBytesUnrecoverable,
+    /// Signature at `index` is absent, malformed, or does not verify against the
+    /// message. The index is into the signer prefix of `account_keys`.
+    Invalid { index: usize },
+}
+
+/// Verify every signature the message declares, against the exact bytes they cover.
+///
+/// [`DecodedTransaction::is_signer`] answers what the message DECLARES. That is only a
+/// useful question once something has established the declaration is backed by a real
+/// signature, and until this runs nothing has: [`decode_transaction`]'s header check
+/// proves the signature vector is the right LENGTH, never that any of it verifies. So a
+/// verifier acting on `is_signer` before broadcast is acting on attacker-chosen bytes.
+///
+/// `bytes` must be the buffer `tx` was decoded from. The message span is recomputed from
+/// that buffer rather than re-serialized from `tx`, because a re-serialization differing
+/// by a single byte would happily verify a message nobody ever signed.
+///
+/// A partially signed transaction fails here, by design. An empty slot is 64 zero bytes,
+/// which is not a valid signature over anything, and a caller that cannot itself add the
+/// missing signature has nothing to gain from accepting one.
+pub fn verify_declared_signatures(
+    bytes: &[u8],
+    tx: &DecodedTransaction,
+) -> Result<(), SignatureCheckError> {
+    let (count, consumed) =
+        decode_len(bytes).map_err(|_| SignatureCheckError::MessageBytesUnrecoverable)?;
+    if count as usize != tx.signatures.len() {
+        return Err(SignatureCheckError::MessageBytesUnrecoverable);
+    }
+    let start = tx
+        .signatures
+        .len()
+        .checked_mul(64)
+        .and_then(|n| n.checked_add(consumed))
+        .ok_or(SignatureCheckError::MessageBytesUnrecoverable)?;
+    let message = bytes
+        .get(start..)
+        .ok_or(SignatureCheckError::MessageBytesUnrecoverable)?;
+
+    // The signer prefix and the signature vector are index-aligned, and
+    // `decode_transaction` has already refused a message where they disagree in length,
+    // so the zip below cannot silently skip a declared signer.
+    let n = tx.message.num_required_signatures as usize;
+    let signers = tx
+        .message
+        .account_keys
+        .get(..n)
+        .ok_or(SignatureCheckError::MessageBytesUnrecoverable)?;
+    if signers.len() != tx.signatures.len() {
+        return Err(SignatureCheckError::MessageBytesUnrecoverable);
+    }
+    for (index, (key, sig)) in signers.iter().zip(tx.signatures.iter()).enumerate() {
+        // A key that is not a valid ed25519 point lands here too, as an invalid
+        // signature rather than as a separate outcome: either way nobody signed.
+        if crate::signing::verify_signature(key.as_bytes(), message, sig) != Ok(true) {
+            return Err(SignatureCheckError::Invalid { index });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod signature_verification_tests {
+    use super::*;
+    use crate::instruction::system_transfer;
+    use crate::message::compile;
+    use crate::signing::{pubkey_from_seed, serialize_transaction, sign_message};
+
+    /// A one-signer transfer, signed for real.
+    fn signed_transfer() -> Vec<u8> {
+        let seed = [1u8; 32];
+        let payer = Pubkey::new(pubkey_from_seed(&seed));
+        let dest = Pubkey::new(pubkey_from_seed(&[2u8; 32]));
+        let msg = compile(&payer, &[system_transfer(&payer, &dest, 5)], &[7u8; 32]).unwrap();
+        let body = msg.serialize_legacy();
+        serialize_transaction(&[sign_message(&seed, &body)], &body)
+    }
+
+    /// The positive control. Without it, every case below passes just as happily
+    /// against a checker that refuses everything.
+    #[test]
+    fn a_genuinely_signed_transaction_verifies() {
+        let raw = signed_transfer();
+        let tx = decode_transaction(&raw).unwrap();
+        assert_eq!(verify_declared_signatures(&raw, &tx), Ok(()));
+    }
+
+    /// The defect this exists to close: 64 bytes of anything at all, in a message that
+    /// declares a signer. `is_signer` says yes and the bytes say nothing.
+    #[test]
+    fn garbage_signature_bytes_are_refused_even_though_is_signer_says_yes() {
+        let raw = signed_transfer();
+        let tx = decode_transaction(&raw).unwrap();
+        let signer = tx.message.account_keys[0];
+
+        // Overwrite the signature in place, leaving the message untouched.
+        let mut forged = raw.clone();
+        let (_, consumed) = decode_len(&forged).unwrap();
+        for b in &mut forged[consumed..consumed + 64] {
+            *b = 0xAB;
+        }
+        let ftx = decode_transaction(&forged).unwrap();
+
+        assert!(
+            ftx.is_signer(&signer),
+            "the declaration is unchanged; that is precisely the problem"
+        );
+        assert_eq!(
+            verify_declared_signatures(&forged, &ftx),
+            Err(SignatureCheckError::Invalid { index: 0 })
+        );
+    }
+
+    /// An unsigned slot is all zeroes, which is the shape a partially signed
+    /// transaction arrives in. It must not read as signed.
+    #[test]
+    fn an_all_zero_signature_slot_is_refused() {
+        let raw = signed_transfer();
+        let mut blank = raw.clone();
+        let (_, consumed) = decode_len(&blank).unwrap();
+        for b in &mut blank[consumed..consumed + 64] {
+            *b = 0;
+        }
+        let tx = decode_transaction(&blank).unwrap();
+        assert_eq!(
+            verify_declared_signatures(&blank, &tx),
+            Err(SignatureCheckError::Invalid { index: 0 })
+        );
+    }
+
+    /// A real signature over a DIFFERENT message must not verify: the check has to be
+    /// against the bytes, not merely against a well-formed signature.
+    #[test]
+    fn a_signature_over_another_message_is_refused() {
+        let seed = [1u8; 32];
+        let payer = Pubkey::new(pubkey_from_seed(&seed));
+        let dest = Pubkey::new(pubkey_from_seed(&[2u8; 32]));
+        let msg = compile(&payer, &[system_transfer(&payer, &dest, 5)], &[7u8; 32]).unwrap();
+        let body = msg.serialize_legacy();
+        let wrong = sign_message(&seed, b"some other message entirely");
+        let raw = serialize_transaction(&[wrong], &body);
+        let tx = decode_transaction(&raw).unwrap();
+        assert_eq!(
+            verify_declared_signatures(&raw, &tx),
+            Err(SignatureCheckError::Invalid { index: 0 })
+        );
+    }
+
+    /// Handed a buffer that is not the one decoded, the answer is a refusal rather than
+    /// a verdict about a span it guessed at.
+    #[test]
+    fn a_foreign_buffer_is_refused_rather_than_verified_against_the_wrong_span() {
+        let raw = signed_transfer();
+        let tx = decode_transaction(&raw).unwrap();
+        assert_eq!(
+            verify_declared_signatures(&raw[..raw.len() - 1], &tx),
+            Err(SignatureCheckError::Invalid { index: 0 }),
+            "a truncated message is a different message, so the signature must not verify"
+        );
+        assert_eq!(
+            verify_declared_signatures(&[], &tx),
+            Err(SignatureCheckError::MessageBytesUnrecoverable)
+        );
+    }
+
+    /// Two signers, both real. The loop must check every slot, not only the first.
+    #[test]
+    fn every_declared_signer_is_checked_not_only_the_first() {
+        let (a_seed, b_seed) = ([3u8; 32], [4u8; 32]);
+        let a = Pubkey::new(pubkey_from_seed(&a_seed));
+        let b = Pubkey::new(pubkey_from_seed(&b_seed));
+        // The transfer's source signs (system_transfer marks it), and the fee payer is a
+        // different account, so the message declares two signers.
+        let msg = compile(&a, &[system_transfer(&b, &a, 1)], &[7u8; 32]).unwrap();
+        assert_eq!(msg.num_required_signatures, 2, "fixture needs two signers");
+        let body = msg.serialize_legacy();
+        let seed_of = |k: &Pubkey| if *k == a { a_seed } else { b_seed };
+        let good: Vec<[u8; 64]> = msg.account_keys[..2]
+            .iter()
+            .map(|k| sign_message(&seed_of(k), &body))
+            .collect();
+        let raw = serialize_transaction(&good, &body);
+        assert_eq!(
+            verify_declared_signatures(&raw, &decode_transaction(&raw).unwrap()),
+            Ok(())
+        );
+
+        // Now break only the SECOND slot. A checker that stopped at index 0 passes this
+        // wrongly, which is the whole reason the case exists.
+        let mut broken = good.clone();
+        broken[1] = [0x11; 64];
+        let raw = serialize_transaction(&broken, &body);
+        assert_eq!(
+            verify_declared_signatures(&raw, &decode_transaction(&raw).unwrap()),
+            Err(SignatureCheckError::Invalid { index: 1 })
+        );
     }
 }
 
