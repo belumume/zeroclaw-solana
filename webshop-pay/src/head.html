@@ -1,1 +1,28 @@
 <!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Pay with Solana</title>
+<!-- The page's hermeticity was AUDITED but not ENFORCED. `demo/verify_no_cdn_dependency.py` reads
+     the source and asserts no third-party subresource, which is a build-time claim about a file;
+     nothing stopped the shipped page reaching another host at runtime. On a page that renders a
+     merchant address and a payment amount, the difference matters.
+
+     It is a meta tag rather than a header because `_headers` is a Cloudflare Pages file and this
+     is served from GitHub Pages, which ignores it entirely. A CSP written there would have looked
+     like protection and applied to nothing.
+
+     connect-src is the load-bearing directive: it pins network egress to exactly the two hosts the
+     gate's ALLOWED_DATA_HOSTS already declares, so an injected fetch cannot reach elsewhere even
+     if one were ever introduced. script-src needs 'unsafe-inline' because build.py inlines
+     everything by design, which is the same decision that removes every external script; the CSP
+     does not make that stricter and does not pretend to. default-src 'none' means anything not
+     named here is refused rather than defaulted.
+
+     frame-ancestors IS DELIBERATELY ABSENT. It is ignored when delivered via a meta element, and
+     the browser says so in the console. Leaving it would be a directive that reads as clickjacking
+     protection and enforces nothing, which is the same "looks like protection, applies to nothing"
+     failure as putting this in _headers. Real frame protection needs a response header, and GitHub
+     Pages does not serve custom headers, so it is honestly unavailable here rather than faked.
+
+     Verified LIVE rather than assumed present, because a malformed policy is silently ignored: a
+     fetch to an undeclared host is refused with a console violation naming connect-src, and a
+     declared host still returns 200. Both directions, because a policy that blocks everything
+     would also pass the first half. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://solana-rpc.publicnode.com https://zeroclaw-rpc-proxy.cf-eeyw6.workers.dev; base-uri 'none'; form-action 'none'">
