@@ -37,7 +37,22 @@ on:
 # A superseded run on the same ref is wasted minutes, but never cancel on the default
 # branch, where the last completed run is the record.
 concurrency:
-  group: regression-gate-${{ github.ref }}
+  # KEYED ON THE BRANCH, NOT github.ref, because this workflow fires on BOTH push and
+  # pull_request and `github.ref` differs between them: refs/heads/<branch> against
+  # refs/pull/<n>/merge. Two groups meant the two runs never cancelled each other, so every
+  # commit started two full runs of a job whose dependency installs are most of its budget.
+  #
+  # That is not only waste. Branch protection requires this job's check-run, and BOTH events
+  # emit one on the same commit, so protection stays BLOCKED while EITHER is cancelled even
+  # when the newer one succeeded. Measured 2026-08-19 on PR #106: success at 17:15 beside
+  # cancelled at 16:48, and `gh pr merge` refused with "the base branch policy prohibits the
+  # merge". Two runs therefore DOUBLE the odds any given merge is blocked.
+  #
+  # head_ref is set only on pull_request and holds the source branch; ref_name holds it on
+  # push. Both resolve to the same string, so one group, and the later run supersedes.
+  group: regression-gate-${{ github.head_ref || github.ref_name }}
+  # Unchanged, and still correct: on a push to main github.ref is refs/heads/main, so main
+  # keeps its no-cancel behaviour.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
