@@ -37,22 +37,29 @@ on:
 # A superseded run on the same ref is wasted minutes, but never cancel on the default
 # branch, where the last completed run is the record.
 concurrency:
-  # KEYED ON THE BRANCH, NOT github.ref, because this workflow fires on BOTH push and
-  # pull_request and `github.ref` differs between them: refs/heads/<branch> against
-  # refs/pull/<n>/merge. Two groups meant the two runs never cancelled each other, so every
-  # commit started two full runs of a job whose dependency installs are most of its budget.
+  # DELIBERATELY KEYED ON github.ref, which DIFFERS between the push and pull_request events, so
+  # the two runs for one commit sit in SEPARATE groups and do NOT cancel each other.
   #
-  # That is not only waste. Branch protection requires this job's check-run, and BOTH events
-  # emit one on the same commit, so protection stays BLOCKED while EITHER is cancelled even
-  # when the newer one succeeded. Measured 2026-08-19 on PR #106: success at 17:15 beside
-  # cancelled at 16:48, and `gh pr merge` refused with "the base branch policy prohibits the
-  # merge". Two runs therefore DOUBLE the odds any given merge is blocked.
+  # That looks like a bug and was changed to a shared key on 2026-08-19. Measured immediately
+  # after, on the very next push: the shared key cancelled the push run in 2 seconds, and a
+  # cancelled run still emits a check-run named `hermetic regression gate`. That name is the ONE
+  # required context in branch protection on main, and protection refuses while ANY check-run of a
+  # required name is cancelled. So the shared key did not reduce a risk of a blocked merge, it made
+  # a blocked merge CERTAIN on every push, clearable only by manually rerunning a job whose only
+  # defect was being superseded.
   #
-  # head_ref is set only on pull_request and holds the source branch; ref_name holds it on
-  # push. Both resolve to the same string, so one group, and the later run supersedes.
-  group: regression-gate-${{ github.head_ref || github.ref_name }}
-  # Unchanged, and still correct: on a push to main github.ref is refs/heads/main, so main
-  # keeps its no-cancel behaviour.
+  # The reason the shared key was tried does not survive either. It was meant to stop the two runs
+  # contending for runners and blowing `timeout-minutes: 20`. Across 60 runs the median is 2.2
+  # minutes and never moved (2.1 / 2.1 / 2.2 by day); every run before 14:38 on 2026-08-19 took
+  # 1.2-3.5 minutes with BOTH events in parallel for hours. Contention was never the cause. The
+  # measured signature of that day's timeouts was an event asymmetry -- the push run hanging at the
+  # cap while the pull_request run for the SAME commit finished in 2.3 minutes -- which is
+  # runner-side and which no concurrency key can address.
+  #
+  # If the duplicate run is ever worth removing, the route is to SKIP the push job when a PR is
+  # open rather than to cancel it: a skipped check-run does not block protection, and a cancelled
+  # one does.
+  group: regression-gate-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
