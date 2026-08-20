@@ -1074,7 +1074,14 @@ jobs:
   test-count-agreement:
     name: the docs quote test counts the toolchain prints
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 90 rather than the 30 its neighbours use, and the reason is the WORST case rather than
+    # the usual one. The gate grows its accepted union lazily, so a tree whose published
+    # figures are all correct never compiles the e2e crates or the on-chain programs at all
+    # and this job is quick. A tree carrying a bare figure no crate prints forces exactly that
+    # expansion, and those four crates are the heaviest compiles here. That is the run this
+    # ceiling is for: it is going to fail, and it should fail by SAYING which figure is wrong
+    # rather than by timing out, because a timeout reads as infrastructure and gets rerun.
+    timeout-minutes: 90
     # WHY THIS IS ITS OWN JOB rather than a step inside an existing one.
     #
     # The gate compares a published test count against the number cargo prints, so it has to
