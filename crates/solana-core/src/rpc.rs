@@ -124,6 +124,16 @@ impl<T: RpcTransport> SolanaRpc<T> {
         self
     }
 
+    /// Borrow the underlying transport.
+    ///
+    /// For host tests holding a [`MockTransport`], whose `requests` log answers a question
+    /// no return value can: whether a call reached the network AT ALL. A test asserting
+    /// that an unacceptable payment is refused BEFORE broadcast has to read this, because
+    /// "refused" and "refused only after we sent it" produce the same status code.
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+
     fn next_id(&self) -> u64 {
         let n = self.id.get();
         self.id.set(n + 1);

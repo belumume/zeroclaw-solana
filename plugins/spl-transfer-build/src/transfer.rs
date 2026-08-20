@@ -1694,6 +1694,83 @@ mod tests {
         }
     }
 
+    /// The test above calls its fixture "the largest case", and its memo is the 12 ASCII bytes
+    /// `invoice #412`. `MEMO_MAX` permits 120 CODEPOINTS in that slot, which is up to 480 bytes,
+    /// so 400/820 were measured on a near-minimum memo and asserted as a ceiling.
+    ///
+    /// This drives the same real pipeline with the memo flooded with 4-byte codepoints, and
+    /// carries its own before/after control so the two numbers cannot drift apart.
+    #[test]
+    fn the_summary_and_envelope_hold_under_a_multibyte_memo_flood() {
+        let flood = "\u{1F600}".repeat(500);
+        let a = format!(
+            r#"{{"recipient":"{RECIPIENT}","amount":"25","mint":"{USDC}","memo":"{flood}",{}}}"#,
+            cfg(&format!(
+                r#","nonce_account":"{NONCE_ACCT}","nonce_authority":"{PAYER}""#
+            ))
+        );
+        let v = parse_and_validate(&a).unwrap();
+
+        // FIXTURE CONTROLS. A rejected or capped-away memo makes every size assertion below
+        // pass vacuously.
+        let m = v
+            .memo
+            .as_ref()
+            .expect("the flood memo was dropped entirely, so this measures no memo at all");
+        assert!(!m.text.is_empty(), "the memo capped away to nothing");
+        assert!(
+            m.text.len() <= MEMO_MAX_BYTES,
+            "memo is {} bytes, over the {MEMO_MAX_BYTES}-byte budget",
+            m.text.len()
+        );
+
+        let ixs = spl_instructions(&v, &resolved(&v, true), 25_000_000).unwrap();
+        let tx = build_unsigned_tx(&v.payer, &ixs, &[9u8; 32]).unwrap();
+        let meta = OutputMeta {
+            mode: BlockhashMode::DurableNonce,
+            decimals: 6,
+            creates_recipient_ata: true,
+            signatures_required: tx.signatures_required,
+        };
+        let out = render_output(&v, &tx, &meta);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let summary = parsed["summary"].as_str().unwrap();
+
+        // The memo must actually REACH the summary, or this re-measures the memo-less case.
+        assert!(
+            summary.contains("memo:"),
+            "the memo never reached the summary: {summary}"
+        );
+
+        let tx_b64 = parsed["transaction"].as_str().unwrap();
+        let envelope = out.len() - tx_b64.len();
+        // 560/1000 rather than the ASCII fixture's 400/820: those hold for their own 12-byte
+        // memo and were never whole-crate ceilings. Measured, not guessed, with the bound just
+        // above so it still bites.
+        assert!(summary.len() < 560, "summary is {} bytes", summary.len());
+        assert!(envelope < 1000, "json envelope is {envelope} bytes");
+
+        // BEFORE/AFTER CONTROL: re-render the identical request with the memo capped on
+        // CHARACTERS only — what this crate emitted before `MEMO_MAX_BYTES` — and confirm the
+        // byte cap is what holds the bound, rather than the bound being loose either way.
+        let mut v_char_only = parse_and_validate(&a).unwrap();
+        v_char_only.memo = Some(sanitize_onchain(&flood, MEMO_MAX));
+        let out_before = render_output(&v_char_only, &tx, &meta);
+        let before: serde_json::Value = serde_json::from_str(&out_before).unwrap();
+        let summary_before = before["summary"].as_str().unwrap().len();
+        let envelope_before = out_before.len() - before["transaction"].as_str().unwrap().len();
+        assert!(
+            summary_before >= 560 && envelope_before >= 1000,
+            "the char-only path yielded summary {summary_before} / envelope {envelope_before}, \
+             both inside the bounds, so the byte cap is not what holds them here"
+        );
+        eprintln!(
+            "multibyte memo flood: summary {} B / envelope {envelope} B byte-capped, \
+             {summary_before} B / {envelope_before} B char-capped only",
+            summary.len()
+        );
+    }
+
     #[test]
     fn debug_is_available_and_holds_no_secret() {
         // The whole plugin is T1: there is no key material to leak. This confirms
