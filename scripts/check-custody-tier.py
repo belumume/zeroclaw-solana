@@ -234,6 +234,37 @@ def capability_of(import_name: str) -> str | None:
     return PACKAGE_FALLBACK.get(pkg)
 
 
+def source_tier_fails(plugin_dir: pathlib.Path, name: str, tier: str | None) -> list[str]:
+    """Tier agreement between the manifest and the source doc comments.
+
+    Deliberately OUTSIDE audit(): that runs only for a plugin whose wasm is built, and this
+    needs no compiled artifact. Left inside, it was dead for eight of nine plugins locally,
+    which a planted-disagreement control caught and a green run would not have.
+    """
+    fails: list[str] = []
+    # The SOURCE doc comments are the FOURTH place a tier is declared, and the one no
+    # surface above can see. Measured 2026-08-20: this crate's manifest, wasm and README all
+    # said T0 while two `//!` headers still said T1, on the highest-weighted judged axis. A
+    # reader who opens the source meets that line before any of the three checked surfaces.
+    # Absence is NOT a failure here: several crates declare no tier in source at all, and
+    # requiring one would be a new rule rather than an agreement check.
+    for src in sorted((plugin_dir / "src").glob("*.rs")):
+        for sm in re.finditer(
+            r"^//!.*?\btier:?\s+(T\d(?:\s*/\s*T\d)*)", src.read_text(encoding="utf-8"), re.M | re.I
+        ):
+            stated = [t.strip() for t in sm.group(1).split("/")]
+            where = f"{name}: {src.name}"
+            if len(stated) > 1:
+                fails.append(
+                    f"{where} declares {'/'.join(stated)}, which is two tiers, not one"
+                )
+            elif tier and stated[0].upper() != tier.upper():
+                fails.append(
+                    f"{where} says {stated[0]} but the manifest declares {tier}"
+                )
+    return fails
+
+
 def audit(
     manifest_path: pathlib.Path, wasm_path: pathlib.Path
 ) -> tuple[list[str], list[str]]:
@@ -437,6 +468,11 @@ def main() -> int:
     all_fails: list[str] = []
     for mp in manifests:
         manifest = tomllib.loads(mp.read_text(encoding="utf-8"))
+        all_fails.extend(
+            source_tier_fails(
+                mp.parent, mp.parent.name, (manifest.get("custody") or {}).get("tier")
+            )
+        )
         wp = wasm_for(mp.parent, manifest)
         if not wp.is_file():
             missing.append(mp.parent.name)
@@ -455,6 +491,23 @@ def main() -> int:
         all_fails.extend(fails)
         audited += 1
 
+    if missing:
+        print(f"\n  not built, so not audited: {', '.join(missing)}")
+
+    # A REAL disagreement outranks cannot-check, and the order here is the point. The text
+    # comparisons (manifest against README against source) need no compiled artifact, so they
+    # are collected for every plugin. Returning cannot-check first drops them whenever NOTHING
+    # is built, which is a fresh clone and any CI run staged before the build, and check-all
+    # reads exit 2 as a skip. That is the same swallow this file was just changed to remove one
+    # level down, so it must not be reintroduced here.
+    if all_fails:
+        print(
+            f"\nFAIL  {len(all_fails)} custody declaration(s) disagree:\n"
+        )
+        for f in all_fails:
+            print(f"  - {f}")
+        return 1
+
     if audited == 0:
         print(
             f"cannot check: none of {len(manifests)} components are built.\n"
@@ -463,17 +516,6 @@ def main() -> int:
             f"cargo build --target wasm32-wasip2 --release"
         )
         return CANNOT_CHECK
-
-    if missing:
-        print(f"\n  not built, so not audited: {', '.join(missing)}")
-
-    if all_fails:
-        print(
-            f"\nFAIL  {len(all_fails)} custody declaration(s) disagree with the binary:\n"
-        )
-        for f in all_fails:
-            print(f"  - {f}")
-        return 1
 
     print(f"\nall {audited} built component(s) match their declared custody tier")
     return 0
