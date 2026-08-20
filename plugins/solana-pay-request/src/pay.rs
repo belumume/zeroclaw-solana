@@ -64,6 +64,40 @@ pub const LABEL_MAX_BYTES: usize = LABEL_MAX;
 pub const MESSAGE_MAX_BYTES: usize = MESSAGE_MAX;
 /// See [`LABEL_MAX_BYTES`].
 pub const MEMO_MAX_BYTES: usize = MEMO_MAX;
+// --- Error-echo budgets ---------------------------------------------------------------------
+//
+// PROVENANCE INVERTS ON AN ERROR PATH, which is why these sites look like they need no byte cap
+// and do. On the SUCCESS path a `recipient`, `spl_token` or `reference` is a base58 pubkey and
+// therefore ASCII, so a character cap would bound it. Each of these branches fires precisely
+// BECAUSE the base58 check failed, and the `amount` branch because the value carried a byte
+// outside `[0-9.]`, so the string being echoed is whatever the caller sent, in whatever
+// encoding. serde is the worst of them, and the vector here is the unknown FIELD NAME rather
+// than an `invalid type` value: every field this module declares is a `String` or a
+// `serde_json::Value`, so there is no type mismatch whose value serde could quote back. A JSON
+// KEY is arbitrary UTF-8 of arbitrary length, and `deny_unknown_fields` embeds it verbatim.
+//
+// These echoes reach the agent's context through the shim's error return, which no output
+// ceiling covers: `OUTPUT_MAX` bounds a RENDERED request, and an argument refused at the door
+// never reaches a render. They are bounded here or nowhere.
+//
+// THERE IS NO OPERATOR-PROVENANCE SITE TO REFUSE IN THIS CRATE, recorded so a later sweep does
+// not go looking for the exemption its siblings carry. `spl-transfer-build` and `payment-watch`
+// deliberately leave their operator-supplied `__config` strings char-capped only, because the
+// provenance there is the operator rather than an attacker, and the truncation marker is a
+// signal the operator is the sole reader of. This plugin declares `permissions = []`, reads no
+// config and makes no network call, so no string it returns has operator provenance.
+//
+// STATED PRECISELY, because the loose version of this sentence was wrong twice over. Every error
+// string in this module that carries caller BYTES is byte-capped, and those are exactly the five
+// `sanitize_to_bytes` sites below. The rest are static literals or interpolate a const. Two
+// interpolate a caller-INFLUENCED value that is not caller bytes, a type name drawn from six
+// fixed literals and an array LENGTH, and each is recorded as a deliberate non-cap at its own
+// site rather than here.
+//
+// Each byte budget reuses its character cap, this crate's convention (`LABEL_MAX_BYTES` and its
+// two neighbours above): a real value is ASCII and untouched, so only the multibyte case that
+// was never bounded changes.
+
 /// The character cap on a value echoed back through an error string.
 const ECHO_MAX: usize = 64;
 /// The same cap in bytes, so a rejected multibyte payload cannot reflect four times its
@@ -73,6 +107,20 @@ const ECHO_MAX_BYTES: usize = 64;
 const ARG_ERROR_MAX: usize = 120;
 /// The same cap in bytes.
 const ARG_ERROR_MAX_BYTES: usize = 120;
+/// The character cap on a rejected `amount` echoed back in its own rejection.
+///
+/// The value is pre-existing; naming it is the change here. Its justification is NOT that a
+/// canonical amount fits inside it, which reasons about the wrong population: this branch fires
+/// only when the value is already non-canonical, so what it echoes is a malformed one, and a
+/// long enough malformed one is truncated with the sanitizer's marker. 32 bytes is what it takes
+/// to show an operator which value was refused.
+///
+/// It is a per-site budget and not the crate's worst case: `ARG_ERROR_MAX` already admits 120
+/// bytes of caller-chosen content on the serde path, so tightening this one buys nothing against
+/// a flood.
+const AMOUNT_ECHO_MAX: usize = 32;
+/// The same cap in bytes.
+const AMOUNT_ECHO_MAX_BYTES: usize = 32;
 
 /// Longest `amount` [`validate_amount`] accepts: the integer part, the point, the fraction.
 const AMOUNT_MAX: usize = AMOUNT_MAX_INT_DIGITS + 1 + AMOUNT_MAX_FRAC_DIGITS;
@@ -244,7 +292,15 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedRequest, String> {
 fn amount_value_to_string(v: &serde_json::Value) -> Result<String, String> {
     match v {
         serde_json::Value::String(s) => Ok(s.clone()),
+        // `n.to_string()` is unbounded ONLY under `serde_json/arbitrary_precision`, which
+        // preserves the caller's literal verbatim; the crate does not enable it. Bounded either
+        // way, and checked rather than assumed: a non-numeric literal fails the `[0-9.]` gate in
+        // `validate_amount` and is echoed under `AMOUNT_ECHO_MAX_BYTES`, while a long digit run
+        // trips the `AMOUNT_MAX_INT_DIGITS` check, whose message echoes no value at all.
         serde_json::Value::Number(n) => Ok(n.to_string()),
+        // NOT sanitized and NOT capped, deliberately: `json_kind` returns one of six
+        // `&'static str` literals, so nothing the caller sent reaches this string. See the
+        // error-echo budget block for the sites where the caller's own bytes DO get through.
         other => Err(format!(
             "amount must be a string or number, got {}",
             json_kind(other)
@@ -267,7 +323,7 @@ fn validate_amount(raw: &str) -> Result<String, String> {
     {
         return Err(format!(
             "amount must be a plain non-negative decimal (digits and one optional '.'; no sign, no scientific notation): {}",
-            sanitize_to_bytes(s, 32, 32)
+            sanitize_to_bytes(s, AMOUNT_ECHO_MAX, AMOUNT_ECHO_MAX_BYTES)
         ));
     }
     let mut parts = s.split('.');
@@ -323,6 +379,8 @@ fn reference_value_to_pubkeys(v: &serde_json::Value) -> Result<Vec<Pubkey>, Stri
         _ => return Err("reference must be a base58 string or an array of them".to_string()),
     };
     if items.len() > MAX_REFERENCES {
+        // NOT sanitized and NOT capped, deliberately: the only interpolated value is a `usize`
+        // LENGTH, which renders as at most 20 ASCII digits however large the array was.
         return Err(format!(
             "too many references ({}, max {MAX_REFERENCES})",
             items.len()
@@ -871,7 +929,10 @@ mod tests {
         let out = render_output(&v(&format!(
             r#"{{"recipient":"{RECIPIENT}","amount":"25","spl_token":"{USDC}","memo":"table 4"}}"#
         )));
-        // Measured 373 bytes (~120 tokens); the bound guards against drift.
+        println!(
+            "MEASURED solana-pay-request demo output: {} bytes",
+            out.len()
+        );
         //
         // SCOPE: this is a DEMO-PATH drift guard, not a worst case. It fixes a 7-character memo
         // and sets no label, no message and no references, so its 512-byte bound describes one
@@ -1087,6 +1148,238 @@ mod tests {
             out.len() <= OUTPUT_MAX,
             "{} bytes, over the published {OUTPUT_MAX}-byte ceiling",
             out.len()
+        );
+    }
+
+    // --- The REJECTION paths, which every ceiling above leaves uncovered ------------------
+    //
+    // `OUTPUT_MAX` bounds a RENDERED request. An argument refused at the door never reaches a
+    // render, so it reaches the agent through an error string no output bound touches. Until
+    // these landed, the four byte caps on that path were unproven in this crate: reverting them
+    // to the character-only form failed nothing here.
+
+    /// Every rejection that echoes the value it refused, bounded in BYTES.
+    ///
+    /// The provenance FLIPS on these branches, which is why a character cap looks sufficient and
+    /// is not. A `recipient`, `spl_token` or `reference` is ASCII base58 on the success path;
+    /// each branch below fires precisely BECAUSE that check failed, and the `amount` branch
+    /// because the value carried a byte outside `[0-9.]`.
+    #[test]
+    fn every_rejected_argument_echo_is_byte_bounded() {
+        let flood = "\u{1F600}".repeat(2000);
+        let cases: [(&str, String, &str, usize, usize); 4] = [
+            (
+                "recipient",
+                format!(r#"{{"recipient":"{flood}"}}"#),
+                "recipient is not a valid base58 pubkey: ",
+                ECHO_MAX,
+                ECHO_MAX_BYTES,
+            ),
+            (
+                "spl_token",
+                format!(r#"{{"recipient":"{RECIPIENT}","spl_token":"{flood}"}}"#),
+                "spl_token mint is not a valid base58 pubkey: ",
+                ECHO_MAX,
+                ECHO_MAX_BYTES,
+            ),
+            (
+                "reference",
+                format!(r#"{{"recipient":"{RECIPIENT}","reference":"{flood}"}}"#),
+                "reference is not a valid base58 pubkey: ",
+                ECHO_MAX,
+                ECHO_MAX_BYTES,
+            ),
+            (
+                "amount",
+                format!(r#"{{"recipient":"{RECIPIENT}","amount":"{flood}"}}"#),
+                "amount must be a plain non-negative decimal (digits and one optional '.'; no sign, no scientific notation): ",
+                AMOUNT_ECHO_MAX,
+                AMOUNT_ECHO_MAX_BYTES,
+            ),
+        ];
+
+        let mut checked = 0;
+        for (field, json, prose, char_cap, budget) in &cases {
+            let e = err(json);
+            // FIXTURE CONTROL: a fixture that fails EARLIER takes a different branch, and every
+            // size assertion below would then pass vacuously against some other message.
+            assert!(
+                e.starts_with(*prose),
+                "{field}: the intended branch was not taken, so this measures some other \
+                 rejection. Got: {e}"
+            );
+            let echoed = e.len() - prose.len();
+            assert!(
+                echoed > 0,
+                "{field}: the echo capped away to nothing, so the bound below proves nothing"
+            );
+            assert!(
+                echoed <= *budget,
+                "{field}: echoed {echoed} bytes, over the {budget}-byte budget"
+            );
+
+            // BEFORE/AFTER CONTROL: what the CHARACTER cap alone admitted on this same input.
+            // Without it the bound is equally consistent with a budget loose enough for either
+            // form, and the byte cap would be proven to do nothing.
+            let char_only = sanitize_onchain(&flood, *char_cap).text.len();
+            assert!(
+                char_only > *budget,
+                "{field}: the char cap alone yields {char_only} bytes, already inside the \
+                 {budget}-byte budget, so the byte cap is not what holds it"
+            );
+            eprintln!(
+                "MEASURED solana-pay-request {field} rejection echo: {echoed} bytes \
+                 (char-capped only: {char_only} bytes, budget {budget})"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 4, "a case was skipped");
+    }
+
+    /// The same class with a nastier source: serde's own error text.
+    ///
+    /// This plugin takes no non-string argument an `invalid type` could quote back, so the
+    /// caller-chosen span is the unknown FIELD NAME that `deny_unknown_fields` refuses. serde
+    /// embeds it verbatim, and a JSON key is arbitrary UTF-8 of arbitrary length.
+    #[test]
+    fn the_malformed_arguments_echo_is_byte_bounded() {
+        let flood = "\u{1F600}".repeat(2000);
+        let json = format!(r#"{{"recipient":"{RECIPIENT}","{flood}":1}}"#);
+
+        const PREFIX: &str = "invalid arguments: ";
+        let e = err(&json);
+        assert!(
+            e.starts_with(PREFIX),
+            "the message no longer opens with the prose this bound subtracts. Got: {e}"
+        );
+        let echoed = e.len() - PREFIX.len();
+        assert!(
+            echoed > 0,
+            "the serde error capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            echoed <= ARG_ERROR_MAX_BYTES,
+            "echoed {echoed} bytes, over the {ARG_ERROR_MAX_BYTES}-byte budget"
+        );
+
+        // FIXTURE CONTROL, measured against what serde ACTUALLY produced rather than an assumed
+        // shape. `raw.len()` alone would be satisfied by this crate's own "expected one of" list,
+        // so the assertion is that the CALLER's own bytes reached the message. Counting
+        // codepoints rather than bytes is deliberate and still sound as a lower bound: every
+        // codepoint is at least one byte, so exceeding a BYTE budget in codepoints exceeds it in
+        // bytes too.
+        let raw = match serde_json::from_str::<ExecuteArgs>(&json) {
+            Ok(_) => panic!("the fixture parsed, so there is no serde error to bound"),
+            Err(err) => err.to_string(),
+        };
+        let carried = raw.matches('\u{1F600}').count();
+        assert!(
+            carried > ARG_ERROR_MAX_BYTES,
+            "serde carried only {carried} of the caller's codepoints into its error text, so \
+             this test measures a fixed message rather than an attacker-chosen one"
+        );
+        let char_only = sanitize_onchain(&raw, ARG_ERROR_MAX).text.len();
+        assert!(
+            char_only > ARG_ERROR_MAX_BYTES,
+            "the char cap alone yields {char_only} bytes, already inside the budget, so the \
+             byte cap is not what holds it"
+        );
+        eprintln!(
+            "MEASURED solana-pay-request invalid-arguments echo: {echoed} bytes (raw serde: {} \
+             bytes carrying {carried} caller codepoints, char-capped only: {char_only} bytes, \
+             budget {ARG_ERROR_MAX_BYTES})",
+            raw.len()
+        );
+    }
+
+    /// The narrowing control: the byte cap must leave an ORDINARY rejection byte-identical.
+    ///
+    /// Without it, "the echo is bounded" is equally consistent with a cap that mangles every real
+    /// rejection an operator has to read. One case per SITE, since a reword at any of them would
+    /// otherwise go unnoticed, plus the boundary case that makes this discriminate.
+    /// The three echo budgets are PUBLISHED in this crate's README as judge-facing figures, and
+    /// every other assertion in this module reads them as its own budget rather than pinning a
+    /// value. That includes the boundary fixture below, which is built by repeating a character
+    /// `ECHO_MAX_BYTES` times and so moves with the constant it is meant to hold. The suite
+    /// therefore proves a byte cap EXISTS and, without this test, proves nothing about where any
+    /// of them sits: raising `ECHO_MAX` to 200, `AMOUNT_ECHO_MAX` to 400 or `ARG_ERROR_MAX` to
+    /// 400 each leaves every other test green while making three published numbers false.
+    ///
+    /// Pinning the literals is what makes a budget change fail here and force the README to move
+    /// in the same edit. Read a failure as "the README now disagrees", not as "lower the number
+    /// back".
+    #[test]
+    fn published_echo_budgets_are_pinned_to_their_readme_figures() {
+        assert_eq!(
+            (ECHO_MAX, ECHO_MAX_BYTES),
+            (64, 64),
+            "README publishes 64 bytes for an echoed pubkey-shaped value"
+        );
+        assert_eq!(
+            (AMOUNT_ECHO_MAX, AMOUNT_ECHO_MAX_BYTES),
+            (32, 32),
+            "README publishes 32 bytes for an echoed amount"
+        );
+        assert_eq!(
+            (ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES),
+            (120, 120),
+            "README publishes 120 bytes for serde's own error text"
+        );
+    }
+
+    #[test]
+    fn the_byte_cap_leaves_an_ordinary_rejection_untouched() {
+        // BOUNDARY CASE, and it is what turns this test into a control rather than a formality.
+        // Every short case below runs 2 to 10 ASCII bytes against budgets of 32 and 64, so byte
+        // truncation could not fire on them whatever the budget were, and they would pass for any
+        // budget above about ten. This one sits exactly ON the budget: 64 ASCII characters are 64
+        // bytes, neither cap fires, and one character more would truncate. What it discriminates
+        // is an IMPLEMENTATION whose effective cap sits below the declared constant; it cannot
+        // notice the constant itself moving, because the fixture is built from that same
+        // constant. `published_echo_budgets_are_pinned_to_their_readme_figures` above is what
+        // holds the value. 'l' is outside the base58 alphabet, so the value still reaches the
+        // recipient rejection rather than parsing.
+        let at_budget = "l".repeat(ECHO_MAX_BYTES);
+
+        let mut checked = 0;
+        for (json, tail) in [
+            (
+                r#"{"recipient":"typo-here"}"#.to_string(),
+                "typo-here".to_string(),
+            ),
+            (
+                format!(r#"{{"recipient":"{at_budget}"}}"#),
+                at_budget.clone(),
+            ),
+            (
+                format!(r#"{{"recipient":"{RECIPIENT}","spl_token":"not-a-mint"}}"#),
+                "not-a-mint".to_string(),
+            ),
+            (
+                format!(r#"{{"recipient":"{RECIPIENT}","reference":["not-a-key"]}}"#),
+                "not-a-key".to_string(),
+            ),
+            (
+                format!(r#"{{"recipient":"{RECIPIENT}","amount":"-5"}}"#),
+                "-5".to_string(),
+            ),
+        ] {
+            let e = err(&json);
+            assert!(
+                e.ends_with(&tail),
+                "an ASCII rejection was altered by the byte cap: {e}"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 5, "a case was skipped");
+
+        // serde's own message gets its own assertion rather than a tail match: the "expected one
+        // of" list it appends runs close enough to ARG_ERROR_MAX that pinning the tail would
+        // pin the field list too. What has to survive is the caller-chosen part.
+        let e = err(&format!(r#"{{"recipient":"{RECIPIENT}","drain_to":1}}"#));
+        assert!(
+            e.starts_with("invalid arguments: ") && e.contains("drain_to"),
+            "an ASCII serde rejection lost the field name it refused: {e}"
         );
     }
 
