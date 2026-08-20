@@ -106,10 +106,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install playwright pyzbar opencv-python-headless numpy pillow
 
-      # Two browsers on purpose. Three of the five checks call pw.chromium.launch()
-      # (bundled chromium); demo/verify-merchant-invariant.py calls
-      # pw.chromium.launch(channel="chrome"), which resolves the Google Chrome channel and
-      # fails with a launch error if only bundled chromium is present.
+      # Two browsers on purpose. Four of the six checks call pw.chromium.launch() (bundled
+      # chromium); demo/verify-merchant-invariant.py and demo/verify_reference_required.py
+      # call pw.chromium.launch(channel="chrome"), which resolves the Google Chrome channel
+      # and fails with a launch error if only bundled chromium is present.
+      # Re-derive rather than trusting this count: grep -c 'chromium.launch' demo/*.py
       - name: Browsers
         run: python -m playwright install --with-deps chromium chrome
 
@@ -231,6 +232,19 @@ jobs:
 
       - name: the page polls the reference while the card is payable
         run: python3 demo/verify_settlement_poll.py
+
+      # The already-paid guard rests entirely on the reference: strip `?reference=` from a pay URL
+      # and settledSignature() has nothing to ask the chain about, so it returns null forever, the
+      # card keeps offering Pay, and one order takes two transfers. The page refuses such a link
+      # rather than offering a payment it cannot prove is the first one.
+      #
+      # Belongs in the REQUIRED job rather than live-smoke: every RPC answer is fulfilled by the
+      # harness on the hosts the page itself names, so it reaches no third party and no pruning
+      # window or rate limit can turn it red. It also carries its own mutation control -- the same
+      # page with that one branch neutralised, which must render the reference-less link payable
+      # again. If the control stops firing, the cases above are measuring something else.
+      - name: a link the page cannot check for settlement is refused, and a good one is not
+        run: python3 demo/verify_reference_required.py
 
       # ----------------------------------------------------------------------------
       # Hermetic suites that no workflow currently runs.
