@@ -154,6 +154,7 @@ here only because `.github/workflows/ci.yml` is being edited concurrently:
 import contextlib
 import io
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -470,9 +471,16 @@ def write_extract() -> int:
     # newline="\n" so the artifact does not acquire the platform's line ending: this is a
     # tracked file regenerated on both Windows and CI, and a whole-file ending flip would
     # bury the one number that changed inside a total rewrite.
-    with EXTRACT.open("w", encoding="utf-8", newline="\n") as fh:
+    # Written to a sibling temp file and RENAMED, because a direct open("w") TRUNCATES
+    # first: an interruption between the truncate and the flush leaves a tracked,
+    # syntactically plausible but truncated JSON on disk, and the clone run compares
+    # against exactly this file. os.replace is atomic on both platforms, so the artifact
+    # is either the old one or the new one and never a partial.
+    tmp = EXTRACT.with_name(EXTRACT.name + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="\n") as fh:
         json.dump(extract_payload(claimed), fh, indent=2, sort_keys=True)
         fh.write("\n")
+    os.replace(tmp, EXTRACT)
     n = sum(len(b["claims"]) for b in claimed.values())
     print(
         f"wrote {rel(EXTRACT)}: {n} published figure(s) across "
