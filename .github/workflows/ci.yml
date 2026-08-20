@@ -938,6 +938,62 @@ jobs:
       - name: every tracked document is reachable by a reader
         run: python3 scripts/check-doc-reachability.py
 
+  pre-export-gate:
+    name: the pre-export gate can fail in every direction
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # demo/pre_export_gate.py is the last thing between a cut and a public post, and the two
+    # things it guards -- a disqualifier, and an operator identifier in a judged video -- are
+    # the two that cannot be undone afterwards. Its control suite existed and NOTHING RAN IT:
+    # measured over the tracked set, `pre_export` appeared in exactly 2 of 164 tracked .md,
+    # .yml and .py files, and both were the gate and the suite themselves. So the only thing
+    # that ever exercised it was somebody remembering to type it.
+    #
+    # That is not hypothetical rot. Two of the three mutation controls in that suite went
+    # stale under a single refactor and were caught only because each asserts its target
+    # string is present before mutating; had the suite been running here, they would have
+    # gone red the day the refactor landed instead of waiting to be noticed.
+    #
+    # It is a separate job rather than a step in publish-gates because it is the only one
+    # needing ffmpeg and tesseract, and publish-gates has a 5-minute budget this would eat.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Check 4 compares the export against every superseded version of a cut this repo
+          # DELETED on purpose, recovering the bytes from history because no clone has the
+          # file. At depth 1 there is no history to recover them from: the row reads NOT
+          # CHECKED and case E1, the incident shape the suite exists to pin, skips entirely.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+
+      # ffmpeg builds and reads layer 2's fixtures; tesseract is what checks 7 and 8 use, and
+      # those two ARE the identifier sweep this gate exists for. The suite degrades cleanly
+      # without either and names the layer it dropped, so a runner missing them goes green
+      # over less -- which is exactly why they are installed here rather than assumed.
+      - name: Install the tools layers 2 and 4 read
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg tesseract-ocr
+          ffprobe -version | head -1
+          tesseract --version | head -1
+
+      # A green run here must mean all four layers ran, not that three were skipped politely.
+      # The suite prints "NOT RUN: ..." for any layer a missing tool took off the table, and
+      # exits 0 in that case by design, so the exit code alone cannot tell the two apart.
+      - name: every check can fail, and the incident shape is still refused
+        run: |
+          set -euo pipefail
+          python3 demo/test_pre_export_gate.py | tee /tmp/pre-export-gate.log
+          if grep -q '^NOT RUN:' /tmp/pre-export-gate.log; then
+            echo "a layer did not run on this runner; a partial pass is not a pass" >&2
+            grep '^NOT RUN:' /tmp/pre-export-gate.log >&2
+            exit 1
+          fi
+
   supply-chain:
     name: advisories, licenses, sources
     runs-on: ubuntu-latest

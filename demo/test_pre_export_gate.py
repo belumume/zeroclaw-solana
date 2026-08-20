@@ -30,11 +30,12 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import urllib.error
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -44,6 +45,16 @@ import pre_export_gate as g
 CHECKS = 0
 FAILS = 0
 SKIPPED = 0
+# Whole layers that a missing tool took off the table. Named rather than counted, because a
+# hardcoded case count is a number that drifts every time a case is added and nothing
+# reports the drift. The summary prints these, so "110/110" can never read as full coverage
+# when a layer never ran.
+NOT_RUN: list[str] = []
+
+# The module constant as it stood at import, before any case moved it. Layer 2 points
+# VOID_CUT at a stand-in; this is what it must be back to afterwards, and asserting that is
+# how the restore is shown to have fired rather than assumed to have.
+VOID_AT_IMPORT = g.VOID_CUT
 
 PASS, FAIL, NC = g.PASS, g.FAIL, g.NOT_CHECKED
 
@@ -115,19 +126,49 @@ check(
 
 # --- 4 not the superseded cut ----------------------------------------------
 check(
-    "4 a different digest passes", verdict(g.check_not_void_cut("aaa", "bbb")) == PASS
+    "4 a different digest passes",
+    verdict(g.check_not_void_cut("aaa", ["bbb"], "the working tree")) == PASS,
 )
 check(
-    "4 an identical digest FAILS", verdict(g.check_not_void_cut("aaa", "aaa")) == FAIL
+    "4 an identical digest FAILS",
+    verdict(g.check_not_void_cut("aaa", ["aaa"], "the working tree")) == FAIL,
 )
 check(
     "4 identical names the constraint",
-    "human-voice" in g.check_not_void_cut("aaa", "aaa")[1],
+    "human-voice" in g.check_not_void_cut("aaa", ["aaa"], "the working tree")[1],
 )
-# The superseded cut is scheduled for deletion. Absent reference must NOT read as a pass.
+# The superseded cut WAS deleted. Absent reference must NOT read as a pass.
 check(
     "4 absent reference is NOT CHECKED",
-    verdict(g.check_not_void_cut("aaa", None)) == NC,
+    verdict(g.check_not_void_cut("aaa", [], "shallow clone")) == NC,
+)
+# The path carries TWO deleted versions, a 175.02s cut and the 159.52s trim that replaced
+# it, and both were destroyed. A check that refused only one of them would pass the other
+# -- which is the same artifact and the same disqualifier. Both directions, so a narrowing
+# back to a single digest cannot pass silently.
+_BOTH = ["first-version", "second-version"]
+check(
+    "4 the OLDER of two deleted versions FAILS",
+    verdict(g.check_not_void_cut("first-version", _BOTH, "git history")) == FAIL,
+)
+check(
+    "4 the NEWER of two deleted versions FAILS",
+    verdict(g.check_not_void_cut("second-version", _BOTH, "git history")) == FAIL,
+)
+check(
+    "4 a cut matching neither still passes",
+    verdict(g.check_not_void_cut("something-else", _BOTH, "git history")) == PASS,
+)
+# WHICH MODE ANSWERED must be legible on every branch. A PASS sourced from git history and
+# a PASS from a clone that had nothing to compare are different claims, and the second one
+# is not a comparison at all -- so the label is asserted, not assumed.
+check(
+    "4 a PASS says where the reference came from",
+    "git history" in g.check_not_void_cut("something-else", _BOTH, "git history")[1],
+)
+check(
+    "4 a NOT CHECKED says why it could not look",
+    "shallow clone" in g.check_not_void_cut("aaa", [], "shallow clone")[1],
 )
 
 # --- 5 audio present and audible -------------------------------------------
@@ -174,8 +215,11 @@ check("6 no reading is NOT CHECKED", verdict(g.check_loudness(None, None)) == NC
 # --- 7 identifiers ----------------------------------------------------------
 # Derived from the environment at runtime and never written into either file. Hardcoding
 # the name into the screen that looks for it would publish it in a tracked, public repo.
-USER = os.environ.get("USERNAME", "")
-HOME = os.environ.get("USERPROFILE", "")
+# The same two-platform pair the check itself reads, and it has to stay the same pair: with
+# only the Windows names, every case below skipped on Linux while the check there had no
+# needle either, so the suite reported a clean skip over a detector searching for nothing.
+USER = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+HOME = os.environ.get("USERPROFILE") or os.environ.get("HOME") or ""
 BASE = Path(HOME).name if HOME else ""
 
 check(
@@ -387,6 +431,13 @@ check(
 
 print("\nlayer 2: real fixtures, so the extraction path is exercised")
 
+# ffmpeg and ffprobe BUILD and READ every fixture here. Absent, build() used to raise
+# FileNotFoundError out of subprocess.run and take the whole suite down with a traceback --
+# including layers 1 and 3, which need no tools at all and are the controls that have
+# actually caught regressions here (M2 and M3 both went stale under one refactor and both
+# fired). A missing tool is an environment fact, not a finding, so it skips and says so.
+FFMPEG_OK = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+
 
 def build(td: Path):
     """Real mp4s. Layer 1 can be green while no fact ever reaches it."""
@@ -559,9 +610,12 @@ def facts(path: Path):
 
 
 with tempfile.TemporaryDirectory(prefix="zcx-gate-test-") as _td:
-    F = build(Path(_td))
+    F = build(Path(_td)) if FFMPEG_OK else {}
     missing = [k for k, v in F.items() if not v.is_file() or v.stat().st_size == 0]
-    if missing:
+    if not FFMPEG_OK:
+        NOT_RUN.append("layer 2 (ffmpeg/ffprobe not on PATH)")
+        print("  SKIP layer 2: ffmpeg/ffprobe not on PATH, so no fixture can be built")
+    elif missing:
         check("fixtures build", False, f"ffmpeg produced nothing for {missing}")
     else:
         good = facts(F["good"])
@@ -670,83 +724,165 @@ with tempfile.TemporaryDirectory(prefix="zcx-gate-test-") as _td:
             _body,
         )
 
-        # ROW 4 compares the target against the superseded AI-narrated cut at VOID_CUT.
-        # That artifact was deliberately destroyed once the human-voice cut replaced it,
-        # so in a clone the row reads NOT CHECKED -- which makes rc 0 unreachable and the
-        # tenth row unable to ever be PASS, so the four cases below could not be satisfied
-        # by any checkout. Point VOID_CUT at a real file whose bytes differ from the
-        # fixture: the digest comparison then genuinely RUNS and legitimately passes.
-        # This supplies an input, it does not switch the row off -- the check's own logic
-        # (equal digest FAILS, absent digest is NOT CHECKED) is pinned by the "4 ..."
-        # cases in layer 1, and the gate only ever reads these bytes in order to hash them.
-        _real_void = g.VOID_CUT
-        _void_fixture = Path(_td) / "superseded-cut.mp4"
-        _void_fixture.write_bytes(b"stand-in for the superseded cut; digest only")
-        g.VOID_CUT = _void_fixture
-
-        # THE OTHER DIRECTION, in two parts, because the first draft of this case asserted
-        # rc==0 while passing --no-network --no-gates and the suite went red. The gate was
-        # right and the case was wrong: two checks genuinely could not run, so 3 is the
-        # correct answer and 0 would have been the gate lying. Kept split, because the two
-        # halves prove different things.
+        # ROW 4 compares the target against every superseded version of the deleted cut.
+        # Those resolve from git history now, so in an ordinary clone the row genuinely
+        # runs -- but a SHALLOW clone reaches no history at all, and there the row reads
+        # NOT CHECKED, rc 0 becomes unreachable and the E2b cases below cannot be satisfied.
+        # Point VOID_CUT at a real file whose bytes differ from the fixture, so this block
+        # is hermetic and does not depend on how the checkout was fetched. That supplies an
+        # input, it does not switch the row off -- the check's own logic (a matching digest
+        # FAILS, an empty set is NOT CHECKED, and BOTH deleted versions are refused) is
+        # pinned by the "4 ..." cases in layer 1, and the gate only ever reads these bytes
+        # in order to hash them.
         #
-        # E2a: a clean file with two checks switched OFF must reach 3, never 0.
-        _o2 = io.StringIO()
-        with redirect_stdout(_o2), redirect_stderr(io.StringIO()):
-            _rc2 = g.main([str(F["good"]), "--no-network", "--no-gates", "--fps", "1"])
-        _body2 = _o2.getvalue()
-        _expect_off = 2 if g.TESSERACT.exists() else 4  # OCR off adds two more
-        check("F e2e: a good fixture never FAILS", _rc2 != 1, f"rc={_rc2}\n{_body2}")
-        check(
-            "F e2e: switched-off checks yield 3, not 0",
-            _rc2 == 3,
-            f"rc={_rc2}\n{_body2}",
-        )
-        check(
-            f"F e2e: exactly {_expect_off} row(s) read NOT CHECKED",
-            _body2.count(f"  {NC}  ") == _expect_off,
-            _body2,
-        )
-        check(
-            "F e2e: the summary refuses to call it clean",
-            "could NOT be run" in _body2 and "incomplete, not clean" in _body2,
-            _body2,
-        )
-        if g.TESSERACT.exists():
+        # EVERY RESTORE IS REGISTERED AT ITS MUTATION, never in a try/finally further down.
+        # The previous shape assigned g.VOID_CUT here and restored it in a `finally` roughly
+        # fifty lines below that guarded only the last few statements, so anything raising
+        # in between leaked the stand-in for the whole rest of the run -- and layer 4 reads
+        # g.VOID_CUT, so a failure here would have silently pointed the incident case at 43
+        # bytes of fixture text instead of a video. ExitStack rather than a hand-widened
+        # try, because a hand-widened try is the thing that drifted in the first place: it
+        # has to be remembered and re-widened on every edit, and a callback does not.
+        with ExitStack() as _restore:
+            _void_fixture = Path(_td) / "superseded-cut.mp4"
+            _void_fixture.write_bytes(b"stand-in for the superseded cut; digest only")
+            _restore.callback(setattr, g, "VOID_CUT", g.VOID_CUT)
+            g.VOID_CUT = _void_fixture
+
+            # THE OTHER DIRECTION, in two parts, because the first draft of this case
+            # asserted rc==0 while passing --no-network --no-gates and the suite went red.
+            # The gate was right and the case was wrong: two checks genuinely could not
+            # run, so 3 is the correct answer and 0 would have been the gate lying. Kept
+            # split, because the two halves prove different things.
+            #
+            # E2a: a clean file with two checks switched OFF must reach 3, never 0.
+            _o2 = io.StringIO()
+            with redirect_stdout(_o2), redirect_stderr(io.StringIO()):
+                _rc2 = g.main(
+                    [str(F["good"]), "--no-network", "--no-gates", "--fps", "1"]
+                )
+            _body2 = _o2.getvalue()
+            _expect_off = 2 if g.TESSERACT.exists() else 4  # OCR off adds two more
             check(
-                "F e2e: the OCR rows really ran",
-                f"{PASS}  7  no identifier" in _body2,
+                "F e2e: a good fixture never FAILS", _rc2 != 1, f"rc={_rc2}\n{_body2}"
+            )
+            check(
+                "F e2e: switched-off checks yield 3, not 0",
+                _rc2 == 3,
+                f"rc={_rc2}\n{_body2}",
+            )
+            check(
+                f"F e2e: exactly {_expect_off} row(s) read NOT CHECKED",
+                _body2.count(f"  {NC}  ") == _expect_off,
                 _body2,
             )
+            check(
+                "F e2e: the summary refuses to call it clean",
+                "could NOT be run" in _body2 and "incomplete, not clean" in _body2,
+                _body2,
+            )
+            if g.TESSERACT.exists():
+                check(
+                    "F e2e: the OCR rows really ran",
+                    f"{PASS}  7  no identifier" in _body2,
+                    _body2,
+                )
 
-        # E2b: and rc 0 MUST be reachable, or the gate can never say "safe to export" and
-        # every green above would be describing a verdict nothing can obtain. The two slow
-        # checks are stubbed rather than skipped, so main()'s success branch is the thing
-        # under test here -- their own logic is covered by cases 9 and 10 above.
-        _real_gates, _real_fetch = g.check_repo_gates, g.fetch_status
-        g.check_repo_gates = lambda rc, tail: (PASS, "stubbed for the rc-0 path")
-        g.fetch_status = lambda url: ("ok", "HTTP 200 (stubbed)")
-        try:
-            _o4 = io.StringIO()
-            with redirect_stdout(_o4), redirect_stderr(io.StringIO()):
-                _rc4 = g.main([str(F["good"]), "--fps", "1"])
-            _body4 = _o4.getvalue()
-        finally:
-            g.check_repo_gates, g.fetch_status = _real_gates, _real_fetch
-            g.VOID_CUT = _real_void
-        check(
-            "F e2e: rc 0 is reachable on a clean cut", _rc4 == 0, f"rc={_rc4}\n{_body4}"
-        )
-        check(
-            "F e2e: all ten rows PASS on the clean path",
-            _body4.count(f"  {PASS}  ") == 10,
-            _body4,
-        )
-        check(
-            "F e2e: and it says so",
-            "safe to export and safe to post" in _body4,
-            _body4,
-        )
+            # E2b: and rc 0 MUST be reachable, or the gate can never say "safe to export"
+            # and every green above would describe a verdict nothing can obtain.
+            #
+            # THE EXTRACTION IS STUBBED, NOT ONLY THE CHECK. This used to stub
+            # check_repo_gates while gate() still shelled out to scripts/check-all.py, so a
+            # 155.5s subprocess ran and its result was thrown away -- 69% of a 226s suite,
+            # spent on a value nothing reads. Stubbing repo_gate_result instead lets the
+            # REAL check_repo_gates run on supplied facts, which is strictly more coverage
+            # for strictly less time. Their own logic is covered by cases 9 and 10 above.
+            #
+            # Rows 7 and 8 need tesseract, so without it two rows are NOT CHECKED, rc is 3
+            # rather than 0, and these three cases are unprovable. That is a missing tool,
+            # not a finding: skip, and let the skip count say so.
+            if not g.TESSERACT.exists():
+                SKIPPED += 3
+                print("  SKIP E2b: no tesseract, so rows 7 and 8 cannot reach PASS")
+            else:
+                _restore.callback(setattr, g, "fetch_status", g.fetch_status)
+                _restore.callback(setattr, g, "repo_gate_result", g.repo_gate_result)
+                g.fetch_status = lambda url: ("ok", "HTTP 200 (stubbed)")
+                g.repo_gate_result = lambda: (
+                    0,
+                    "stubbed: check-all.py not re-run here",
+                )
+
+                _o4 = io.StringIO()
+                with redirect_stdout(_o4), redirect_stderr(io.StringIO()):
+                    _rc4 = g.main([str(F["good"]), "--fps", "1"])
+                _body4 = _o4.getvalue()
+                check(
+                    "F e2e: rc 0 is reachable on a clean cut",
+                    _rc4 == 0,
+                    f"rc={_rc4}\n{_body4}",
+                )
+                check(
+                    "F e2e: all ten rows PASS on the clean path",
+                    _body4.count(f"  {PASS}  ") == 10,
+                    _body4,
+                )
+                check(
+                    "F e2e: and it says so",
+                    "safe to export and safe to post" in _body4,
+                    _body4,
+                )
+
+
+# ======================================= 2b. THE RESTORE IS SCOPED TO THE MUTATION
+
+print("\nlayer 2b: module state layer 2 moved is back where it started")
+
+# R0 is the claim that matters: layer 2 pointed g.VOID_CUT at a 43-byte stand-in, and by
+# the time layer 4 reads it, it is the real path again. Asserting it is the difference
+# between the restore having FIRED and the restore having been WRITTEN.
+check(
+    "R0 layer 2 left g.VOID_CUT back at its import-time value",
+    g.VOID_CUT == VOID_AT_IMPORT,
+    f"{g.VOID_CUT} != {VOID_AT_IMPORT}",
+)
+
+# R1/R2 are the over-correction control for that change, and they are the reason it is not
+# merely a tidier spelling of the same thing. R1 drives the OLD shape -- mutate, then a
+# try/finally that begins BELOW the mutation -- and requires it to LEAK, because a control
+# that cannot show the previous shape failing proves nothing about the new one. Both run
+# against the real module object rather than a stand-in namespace, since the bug was about
+# this module's attribute and a toy would not have caught it.
+_before = g.VOID_CUT
+try:
+    g.VOID_CUT = Path("stand-in-that-must-not-survive.mp4")
+    raise RuntimeError("anything at all raising in the window between the two")
+    # The old code's try/finally started HERE, below the assignment, and so never covered
+    # the statement that did the mutating.
+except RuntimeError:
+    pass
+check(
+    "R1 the old narrow-try shape LEAKS the stand-in through a raise",
+    g.VOID_CUT != _before,
+    "if this stopped leaking, the old shape was safe and R2 proves nothing",
+)
+g.VOID_CUT = (
+    _before  # by hand, which is exactly what the old shape required of a reader
+)
+check("R1b and only a hand repair puts it back", g.VOID_CUT == _before)
+
+try:
+    with ExitStack() as _probe:
+        _probe.callback(setattr, g, "VOID_CUT", g.VOID_CUT)
+        g.VOID_CUT = Path("stand-in-that-must-not-survive.mp4")
+        raise RuntimeError("the same failure, in the same window")
+except RuntimeError:
+    pass
+check(
+    "R2 the ExitStack shape restores g.VOID_CUT through that same raise",
+    g.VOID_CUT == _before,
+    f"{g.VOID_CUT} != {_before}",
+)
 
 
 # ==================================================== 3. MUTATION CONTROLS
@@ -784,7 +920,7 @@ check(
 # doing its job: without it, M2 would have silently exec'd an unmodified detector and the
 # green below would have meant nothing.
 _m2 = mutate(
-    '("os account name", os.environ.get("USERNAME", "").lower()),',
+    '("os account name", account),',
     '("os account name", ""),',
 )
 if USER:
@@ -825,12 +961,43 @@ check(
 
 print("\nlayer 4: the incident shape")
 
-if g.VOID_CUT.is_file():
+# THE FIXTURE IS RECOVERED FROM GIT when the working tree no longer has it, which is every
+# clone, because the artifact was deleted on purpose. Before this, E1 could only ever run on
+# the one machine that still had the file -- so the case pinned as "the incident shape" was
+# skipped everywhere it would have been useful, and the four assertions below had never been
+# exercised by anybody else.
+#
+# ids[0] is the NEWEST surviving version, which matters: the path has two, a 175.02s cut and
+# the 159.52s trim that replaced it. The measurements pinned below were taken on 2026-08-06,
+# after the trim landed, so they describe the 159.52s one -- 159 frames at fps=1 is that
+# duration and not the other. Reading the older blob would quietly re-point this case at a
+# different video than the numbers in it describe.
+_e1: Path | None = None
+_e1_mode = ""
+_e1_tmp = None
+if not FFMPEG_OK:
+    _e1_mode = "ffmpeg/ffprobe not on PATH, so the gate could not read a video anyway"
+    NOT_RUN.append("layer 4 / E1 (ffmpeg/ffprobe not on PATH)")
+elif g.VOID_CUT.is_file():
+    _e1, _e1_mode = g.VOID_CUT, "the working tree"
+else:
+    _ids, _mode = g.superseded_blob_ids()
+    _raw = g.git_blob_bytes(_ids[0]) if _ids else b""
+    if _raw:
+        _e1_tmp = tempfile.TemporaryDirectory(prefix="zcx-gate-e1-")
+        _e1 = Path(_e1_tmp.name) / g.VOID_CUT.name
+        _e1.write_bytes(_raw)
+        _e1_mode = f"{_mode}, blob {_ids[0][:12]}, {len(_raw)} bytes"
+    else:
+        _e1_mode = _mode
+
+if _e1 is not None:
+    print(f"  E1 fixture recovered from {_e1_mode}")
     _o3 = io.StringIO()
     with redirect_stdout(_o3), redirect_stderr(io.StringIO()):
         # 0.05 fps keeps this to ~8 frames. The claim here is that the extraction path runs
         # on a real 159s file, NOT that 8 frames are leak coverage.
-        _rc3 = g.main([str(g.VOID_CUT), "--no-network", "--no-gates", "--fps", "0.05"])
+        _rc3 = g.main([str(_e1), "--no-network", "--no-gates", "--fps", "0.05"])
     _b3 = _o3.getvalue()
     check("E1 the superseded cut is REFUSED", _rc3 == 1, f"rc={_rc3}\n{_b3}")
     # MEASURED 2026-08-06 at fps=1: 159 frames scanned, and a Solana Explorer lower third
@@ -852,11 +1019,19 @@ if g.VOID_CUT.is_file():
             "E1 the timezone leak is reported with a span",
             "s" in _b3.split("timezone marker")[1][:80],
         )
-    check(
-        "E1 check 8 does NOT catch those explorer pages (the measured blind spot)",
-        f"{PASS}  8 " in _b3,
-        "if this flipped to FAIL the ceiling documented in check_explorer has changed",
-    )
+    # The blind-spot claim is about what OCR DID read, so it needs OCR to have run at all.
+    # Without tesseract row 8 is NOT CHECKED, and asserting PASS there would turn a missing
+    # tool into a red -- the exact "could not look" / "looked and it was fine" collapse the
+    # gate's own exit codes exist to keep apart.
+    if g.TESSERACT.exists():
+        check(
+            "E1 check 8 does NOT catch those explorer pages (the measured blind spot)",
+            f"{PASS}  8 " in _b3,
+            "if this flipped to FAIL the ceiling documented in check_explorer has changed",
+        )
+    else:
+        SKIPPED += 1
+        print("  SKIP E1 check-8 blind spot: no tesseract, so row 8 could not run")
     check("E1 refused on resolution", f"{FAIL}  2  resolution" in _b3, _b3)
     check(
         "E1 refused as the superseded cut", f"{FAIL}  4  not the superseded" in _b3, _b3
@@ -866,12 +1041,16 @@ if g.VOID_CUT.is_file():
         f"{PASS}  1  duration" in _b3,
         _b3,
     )
+    if _e1_tmp is not None:
+        _e1_tmp.cleanup()
 else:
     SKIPPED += 4
-    print(
-        f"  SKIP E1: {g.VOID_CUT.name} is no longer in the tree (its planned end state)."
-    )
-    print("       Re-pin this case against the shipped cut when one exists.")
+    print(f"  SKIP E1: no fixture to run against ({_e1_mode or 'no reason recorded'}).")
+    print("       A shallow clone reaches no history; fetch with --depth=0 to run it.")
 
 print(f"\n{CHECKS - FAILS}/{CHECKS} checks passed, {SKIPPED} skipped")
+if NOT_RUN:
+    # A layer that never ran is not a layer that passed. Said out loud, because the count
+    # above cannot distinguish them and a reader will take it for coverage.
+    print("NOT RUN: " + "; ".join(NOT_RUN))
 sys.exit(1 if FAILS else 0)
