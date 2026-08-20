@@ -670,6 +670,20 @@ with tempfile.TemporaryDirectory(prefix="zcx-gate-test-") as _td:
             _body,
         )
 
+        # ROW 4 compares the target against the superseded AI-narrated cut at VOID_CUT.
+        # That artifact was deliberately destroyed once the human-voice cut replaced it,
+        # so in a clone the row reads NOT CHECKED -- which makes rc 0 unreachable and the
+        # tenth row unable to ever be PASS, so the four cases below could not be satisfied
+        # by any checkout. Point VOID_CUT at a real file whose bytes differ from the
+        # fixture: the digest comparison then genuinely RUNS and legitimately passes.
+        # This supplies an input, it does not switch the row off -- the check's own logic
+        # (equal digest FAILS, absent digest is NOT CHECKED) is pinned by the "4 ..."
+        # cases in layer 1, and the gate only ever reads these bytes in order to hash them.
+        _real_void = g.VOID_CUT
+        _void_fixture = Path(_td) / "superseded-cut.mp4"
+        _void_fixture.write_bytes(b"stand-in for the superseded cut; digest only")
+        g.VOID_CUT = _void_fixture
+
         # THE OTHER DIRECTION, in two parts, because the first draft of this case asserted
         # rc==0 while passing --no-network --no-gates and the suite went red. The gate was
         # right and the case was wrong: two checks genuinely could not run, so 3 is the
@@ -719,6 +733,7 @@ with tempfile.TemporaryDirectory(prefix="zcx-gate-test-") as _td:
             _body4 = _o4.getvalue()
         finally:
             g.check_repo_gates, g.fetch_status = _real_gates, _real_fetch
+            g.VOID_CUT = _real_void
         check(
             "F e2e: rc 0 is reachable on a clean cut", _rc4 == 0, f"rc={_rc4}\n{_body4}"
         )
