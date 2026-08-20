@@ -173,15 +173,22 @@ def docs(root: pathlib.Path) -> list[str]:
     return _git(root, "ls-files", "*.md")
 
 
-def claims_in(text: str) -> list[tuple[int, int, str]]:
-    """Every (line number, value, kind) this document presents as a test count."""
-    out: list[tuple[int, int, str]] = []
+def claims_in(text: str) -> list[tuple[int, int, str, tuple[str, ...]]]:
+    """Every (line the FIGURE is on, value, kind, scopes) presented as a test count.
+
+    `scopes` is what `attribute()` weighs, NARROWEST FIRST. A same-line claim has one
+    scope: its own line. A wrapped claim has two, because the crate name can sit on
+    either side of the join and the line alone cannot see the far half.
+    """
+    out: list[tuple[int, int, str, tuple[str, ...]]] = []
     lines = text.split("\n")
     for lineno, line in enumerate(lines, 1):
         for m in RESULT.finditer(line):
-            out.append((lineno, int(m.group(1).replace(",", "")), "harness line"))
+            out.append(
+                (lineno, int(m.group(1).replace(",", "")), "harness line", (line,))
+            )
         for m in CLAIM.finditer(line):
-            out.append((lineno, int(m.group(1).replace(",", "")), "prose"))
+            out.append((lineno, int(m.group(1).replace(",", "")), "prose", (line,)))
         # A HARD WRAP SPLITS THE FIGURE FROM ITS DENOMINATOR, and a per-line scan then
         # returns a CLEAN verdict over a stale figure it structurally cannot see.
         # MEASURED: docs/WRITEUP.md ended a line with "the 127 host" and began the next
@@ -199,7 +206,23 @@ def claims_in(text: str) -> list[tuple[int, int, str]]:
             for m in pat.finditer(joined):
                 if m.start() < edge < m.end():
                     value = int(m.group(1).replace(",", ""))
-                    out.append((lineno, value, kind + ", wrapped across lines"))
+                    # REPORT THE LINE THE FIGURE IS ON, never the pair's start. `RESULT`
+                    # begins at `test result:` and its `\s*` absorbs the join, so
+                    # `test result: ok.` / `150 passed` straddles with the FIGURE on the
+                    # SECOND line and the pair's start names a line carrying no number at
+                    # all. A message pointing a reader at the wrong line is worse than
+                    # one that is merely imprecise about which crate it meant.
+                    fig = lineno if m.start(1) < edge else lineno + 1
+                    # THE FIGURE'S OWN LINE FIRST, THE PAIR ONLY AS A FALLBACK, and the
+                    # order is what stops this being a downgrade. Attributing against the
+                    # join alone gathers crate names from BOTH sentences the wrap spans,
+                    # and two names mean the union. MEASURED on this corpus: its one
+                    # wrapped claim (`docs/WRITEUP.md`, "the pure core with the 150 host"
+                    # / "tests. ... x402-feed-gate is the earning node") attributes to
+                    # `crates/solana-core` from its own line and would fall back to the
+                    # weaker union check if the join replaced it rather than backing it.
+                    scope = (lines[fig - 1], joined)
+                    out.append((fig, value, kind + ", wrapped across lines", scope))
     return out
 
 
@@ -210,15 +233,26 @@ def _token(name: str) -> re.Pattern:
     return re.compile(r"(?<![\w/-])" + re.escape(name) + r"(?![\w-])")
 
 
-def attribute(doc_rel: str, line: str, known: dict[str, str]) -> str | None:
-    """Which crate a claim is about, or None when it is about no single crate."""
-    named = {
-        d for d, n in known.items() if _token(d).search(line) or _token(n).search(line)
-    }
-    if len(named) == 1:
-        return named.pop()
-    if len(named) > 1:
-        return None
+def attribute(
+    doc_rel: str, scopes: tuple[str, ...], known: dict[str, str]
+) -> str | None:
+    """Which crate a claim is about, or None when it is about no single crate.
+
+    `scopes` are weighed in the order given, narrowest first, and the first scope that
+    names any crate at all decides -- including deciding for the union when it names two.
+    A wider scope is consulted only when the narrower one was silent, so widening can
+    ADD an attribution and can never replace one.
+    """
+    for text in scopes:
+        named = {
+            d
+            for d, n in known.items()
+            if _token(d).search(text) or _token(n).search(text)
+        }
+        if len(named) == 1:
+            return named.pop()
+        if len(named) > 1:
+            return None
     parent = str(pathlib.PurePosixPath(doc_rel).parent)
     if pathlib.PurePosixPath(doc_rel).name.lower() == "readme.md" and parent in known:
         return parent
@@ -281,10 +315,8 @@ def check(root: pathlib.Path, provider) -> tuple[int, list[str]]:
             text = (root / rel).read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        by_line = text.split("\n")
-        for lineno, value, kind in claims_in(text):
-            line = by_line[lineno - 1]
-            found.append((rel, lineno, value, kind, attribute(rel, line, known)))
+        for lineno, value, kind, scope in claims_in(text):
+            found.append((rel, lineno, value, kind, attribute(rel, scope, known)))
 
     scanned_docs = {rel for rel, *_ in found}
     if not found:
@@ -539,7 +571,20 @@ def selftest() -> int:
     )
     report(
         "and each of those is the value on its own line",
-        sorted(v for _, v, _ in claims_in(two_claims)) == [7, 11],
+        sorted(v for _, v, _, _ in claims_in(two_claims)) == [7, 11],
+    )
+
+    # THE FIGURE'S LINE, NOT THE PAIR'S START. `RESULT` starts at `test result:` and its
+    # `\s*` absorbs the join, so a transcript wrapped after `ok.` straddles with the number
+    # on the SECOND line. Both directions are pinned: without the second case a fix that
+    # simply added 1 to every wrapped claim would look correct.
+    report(
+        "a wrapped harness line is reported at the line its FIGURE is on",
+        [ln for ln, *_ in claims_in("test result: ok.\n150 passed; 0 failed\n")] == [2],
+    )
+    report(
+        "and a wrapped prose claim is still reported at its own line",
+        [ln for ln, *_ in claims_in("the core carries 11 host\ntests today.\n")] == [1],
     )
 
     # The embedded harness transcript is a quotation of the toolchain and is gated as one.
@@ -577,6 +622,68 @@ def selftest() -> int:
         "two crates named on one line falls back to the union rather than guessing",
         _run({"docs/free.md": "fx-crate and other-crate together run 12 tests\n"})[0]
         == 1,
+    )
+
+    # ATTRIBUTION ACROSS A HARD WRAP. The joined re-scan finds the CLAIM either way; what
+    # this pins is which crate the claim is then judged against. Every fixture below has
+    # its figure and its crate name on OPPOSITE sides of the join, which is the shape a
+    # per-line attribution structurally cannot resolve.
+    #
+    # The value 7 is doing the work in the first case: it is `fx`'s and it is in the
+    # union, so an unattributed verdict PASSES it and an attributed one FAILS it. That
+    # gap IS the residual this gate's docstring names -- a figure that coincidentally
+    # matches some other crate's count -- so the case can only be met by attributing.
+    rc, out = _run(
+        {"docs/free.md": "the suite there runs 7\ntests, all in other-crate.\n"}
+    )
+    report(
+        "a crate named only on the CONTINUATION line still attributes to that crate",
+        rc == 1 and "but other prints" in out,
+    )
+    report(
+        "and a correct figure attributed that way passes",
+        _run({"docs/free.md": "the suite there runs 5\ntests, all in other-crate.\n"})[
+            0
+        ]
+        == 0,
+    )
+    # OVER-CORRECTION, half one: two crates across the pair must still reach the union
+    # rather than have one of them guessed. Asserted on the union's own message, because
+    # 12 is nobody's figure and so fails under a guess too -- only the wording separates
+    # "no crate prints it" from "other prints [5]".
+    rc, out = _run(
+        {
+            "docs/free.md": "together they run 12\ntests, across fx-crate and other-crate.\n"
+        }
+    )
+    report(
+        "two crates across the pair falls back to the union, not a guess",
+        rc == 1 and "no crate in this repo prints it" in out,
+    )
+    report(
+        "and a union-satisfied figure in that shape is not failed by a guessed crate",
+        _run(
+            {
+                "docs/free.md": "together they run 7\ntests, across fx-crate and other-crate.\n"
+            }
+        )[0]
+        == 0,
+    )
+    # OVER-CORRECTION, half two, and this is the corpus's own shape: `docs/WRITEUP.md`
+    # ends a line with "the pure core with the 150 host" and continues "tests. ...
+    # x402-feed-gate is the earning node", so the FIGURE'S line names one crate and the
+    # pair names two. Weighing the join INSTEAD of the line would drop that claim from an
+    # attributed check to the union. 5 is `other`'s and is in the union, so the union
+    # would pass it while the figure's own crate fails it -- which is what makes this
+    # case discriminate between backing the line up and replacing it.
+    rc, out = _run(
+        {
+            "docs/free.md": "the fx-crate core carries 5 host\ntests. other-crate earns.\n"
+        }
+    )
+    report(
+        "the figure's own line wins over the pair when both name a crate",
+        rc == 1 and "but fx prints" in out,
     )
 
     # MUST NOT FIRE. Every line below is real syntax from this repo's docs, and each one
