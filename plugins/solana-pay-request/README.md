@@ -28,7 +28,7 @@ solana:<recipient>?amount=<amount>&spl-token=<mint>&reference=<ref>&label=<label
 - `label` and `message` are display-only (the wallet shows them, they are not
   written on-chain); `memo` is written ON-CHAIN with the transfer.
 
-For the demo above the tool returns (measured: 373 bytes, roughly 120 tokens):
+For the demo above the tool returns (measured: 413 bytes):
 
 ```
 solana:mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN?amount=25&spl-token=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&memo=table%204
@@ -37,8 +37,11 @@ solana:mvines9iiHiQTysrwkJjGf2gb9Ex9jXJX8ns3qwf2kN?amount=25&spl-token=EPjFWdd5A
 wrapped in a compact JSON envelope `{"url", "qr_payload", "summary"}`. `qr_payload`
 equals `url` on purpose: a Solana Pay QR encodes the URL verbatim, so the field is
 the exact string a QR encoder consumes, letting the host render it without
-re-deriving anything. `summary` is a one-line human readout (amount, asset, and a
-shortened recipient), with any echoed memo/label marked untrusted (see below).
+re-deriving anything. `summary` is a one-line human readout: amount, asset, and the
+recipient IN FULL. The mint is shortened and the recipient deliberately is not, because
+this line names where a payer's money goes and a rendering that shows only both ends
+invites a vanity address ground to match them. Any echoed memo or label is marked
+untrusted (see below).
 
 ## Faithful to the spec (validated against its own examples)
 
@@ -71,7 +74,12 @@ This plugin is the safest tier in the suite:
   reading the source. It is now read out of the compiled component instead: the
   shipped `.wasm` imports no `wasi:http`, no `wasi:sockets` and no
   `wasi:filesystem`, so there is no host function through which it could reach any
-  of them. Re-derive with `python3 ../../scripts/check-custody-tier.py`.
+  of them. Re-derive with
+`python3 ../../scripts/check-custody-tier.py --wasm solana_pay_request.wasm`. The
+`--wasm` argument is load-bearing: this workspace builds to a shared target directory,
+so without it the script looks for the component under this crate's own `target/`, finds
+nothing, prints `not built, so not audited` and still exits 0. Green there would mean it
+audited some other plugin.
 - The output is a payment REQUEST, not a signed transaction. Nothing it emits can
   authorize a transfer; the payer's own wallet builds, signs, and sends the
   transaction after scanning the QR.
@@ -119,19 +127,19 @@ These are the plugin's own host tests, with no wasm toolchain and no network. Ru
 them with `cargo test --lib`:
 
 ```
-running 41 tests
-test pay::tests::amount_as_json_number_is_accepted ... ok
-test pay::tests::amount_exact_decimal_string_is_preserved ... ok
-test pay::tests::bad_reference_is_rejected ... ok
+running 44 tests
+test pay::tests::control_chars_in_memo_become_a_single_space ... ok
 test pay::tests::bad_spl_token_is_rejected ... ok
+test pay::tests::demo_charge_table_4_for_25_usdc ... ok
+test pay::tests::amount_as_json_number_is_accepted ... ok
+test pay::tests::bad_reference_is_rejected ... ok
+test pay::tests::demo_output_is_compact ... ok
+test pay::tests::amount_exact_decimal_string_is_preserved ... ok
 test pay::tests::bare_recipient_has_no_query ... ok
 test pay::tests::bidi_and_zero_width_in_label_are_stripped ... ok
-test pay::tests::control_chars_in_memo_become_a_single_space ... ok
-test pay::tests::debug_is_available_and_holds_no_secret ... ok
-test pay::tests::demo_charge_table_4_for_25_usdc ... ok
-test pay::tests::demo_output_is_compact ... ok
-test pay::tests::double_dot_amount_rejected ... ok
 test pay::tests::every_reserved_char_in_memo_is_percent_encoded ... ok
+test pay::tests::double_dot_amount_rejected ... ok
+test pay::tests::debug_is_available_and_holds_no_secret ... ok
 test pay::tests::hostile_memo_cannot_inject_a_second_recipient_or_param ... ok
 test pay::tests::injection_framing_in_memo_is_labeled_untrusted_in_summary ... ok
 test pay::tests::leading_dot_amount_rejected ... ok
@@ -148,21 +156,24 @@ test pay::tests::reference_single_and_array_both_accepted ... ok
 test pay::tests::scientific_notation_amount_rejected ... ok
 test pay::tests::sol_transfer_has_no_spl_token_param ... ok
 test pay::tests::spec_example_sol_transfer_matches_verbatim ... ok
+test pay::tests::every_rejected_argument_echo_is_byte_bounded ... ok
 test pay::tests::spec_example_usdc_transfer_matches_verbatim ... ok
 test pay::tests::spl_token_hyphenated_key_alias_accepted ... ok
 test pay::tests::the_byte_cap_leaves_an_ordinary_ascii_request_untouched ... ok
+test pay::tests::the_byte_cap_leaves_an_ordinary_rejection_untouched ... ok
 test pay::tests::the_character_cap_alone_does_not_bound_the_output_in_bytes ... ok
 test pay::tests::the_published_ceiling_is_derived_from_the_prose_it_describes ... ok
 test pay::tests::the_untrusted_label_is_the_length_the_output_ceiling_assumes ... ok
 test pay::tests::too_many_fractional_digits_rejected ... ok
 test pay::tests::too_many_references_rejected ... ok
+test pay::tests::the_malformed_arguments_echo_is_byte_bounded ... ok
 test pay::tests::trailing_dot_amount_rejected ... ok
 test pay::tests::unknown_field_fails_closed ... ok
 test pay::tests::worst_case_output_is_bounded_under_multibyte_codepoints ... ok
 test pay::tests::worst_case_output_is_bounded_with_every_field_at_its_cap ... ok
 test pay::tests::zero_amount_is_spec_valid ... ok
 
-test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 What the load-bearing cases prove:
@@ -205,9 +216,28 @@ None. This plugin reads no config and holds no secrets. `permissions = []`.
 
 ## Output size (judges count tokens)
 
-The execute output is a small JSON envelope: 373 bytes for the demo above (roughly
-120 tokens), and it scales only with the input URL. There is no unbounded field;
-every free-text field is length-capped before it enters the output.
+The demo above returns 413 bytes. That is one happy-path payload rather than a bound:
+it carries a 7-character memo and sets no label, no message and no references.
+
+The bound is 3367 bytes, and it is DERIVED rather than read off a fixture. `OUTPUT_MAX`
+in `src/pay.rs` sums the JSON scaffolding, the URL twice (`url` and `qr_payload`), and
+the summary at twice its length to cover JSON escaping. Two tests fill every field to
+its cap and measure against it, printing what they measured: 1970 bytes all-ASCII and
+3026 bytes in 4-byte codepoints.
+
+Output does not scale with the URL alone. The summary is a second contributor, the memo
+reaches it a third time unencoded, and up to 54 further bytes come from this crate
+rather than from any input, because a memo carrying injection framing is tagged
+`[untrusted on-chain data; possible injection framing]` before it is echoed.
+
+There is no unbounded field. Every free-text field is capped in BYTES as well as in
+characters before it enters the output, since each is percent-encoded into the URL at
+three characters per byte outside the unreserved set, so a character cap alone would
+bound nothing a judge counting tokens measures.
+
+Rejections are bounded separately and to their own budgets, because an argument refused
+at the door never reaches a render and no output ceiling covers it: 64 bytes for an
+echoed pubkey-shaped value, 32 for an echoed amount, 120 for serde's own error text.
 
 ## What you would build next
 
