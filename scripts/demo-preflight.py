@@ -537,6 +537,163 @@ def currency_report():
     print(summary)
 
 
+def runbook_pins_report(price_result):
+    """Compare the runbook's PINNED /price values against the body just fetched.
+
+    WHY THIS EXISTS, and why it lives here rather than in a repo gate. `notes/` is gitignored, so
+    every tracked-path checker in this repo is structurally blind to it. That blind spot has now
+    produced the same class of defect THREE times, and the third was the expensive one: after the
+    gate binary was deployed and the day-pass tier left the live menu, the runbook still told the
+    operator that saying "one payment, one read" would be CONTRADICTED BY THE SCREEN. It no longer
+    was. That instruction would have suppressed the truest sentence in the beat, on camera, to
+    avoid a contradiction which had been fixed hours earlier.
+
+    The check keys on the INVARIANT -- the runbook must not describe a live menu that differs from
+    the live menu -- rather than on any wording, because wording is what changes when someone
+    improves the prose, and a check keyed to one phrasing punishes the correct edit.
+
+    It runs HERE because this script already fetches /price on demo morning, which is both the
+    moment a stale pin costs the most and the only moment the live value is in hand.
+
+    SKIPS cleanly when the runbook is absent (a fresh clone has no `notes/`) and SAYS so, because a
+    silent pass and a real pass must never look alike.
+    """
+    t0 = time.time()
+    rb = pathlib.Path(__file__).resolve().parent.parent / "notes" / "DEMO-RUNBOOK.md"
+    if not rb.exists():
+        return Result(
+            "runbook pins", GREEN, time.time() - t0,
+            "SKIPPED: no notes/DEMO-RUNBOOK.md here (expected in a fresh clone)",
+        )
+    if not getattr(price_result, "body", None):
+        return Result(
+            "runbook pins", GREEN, time.time() - t0,
+            "SKIPPED: /price returned no body, so there is nothing to compare against",
+        )
+    try:
+        live = json.loads(price_result.body.decode("utf-8", "replace"))
+        tiers = live.get("accepts") or []
+    except json.JSONDecodeError:
+        return Result(
+            "runbook pins", GREEN, time.time() - t0,
+            "SKIPPED: /price body did not parse as JSON",
+        )
+
+    live_bytes = len(price_result.body)
+    lines = rb.read_text(encoding="utf-8", errors="replace").splitlines()
+    problems = []
+    scanned = 0
+
+    # A figure is HISTORICAL when its own line marks it so. That exemption is what lets a line cite
+    # a past value as context without this reading it as a live claim -- the same distinction a
+    # correction sweep draws between a value still being asserted and one quoted to retire it.
+    historical = ("was ", "before", "previously", "used to", "prior to", "superseded")
+
+    for i, line in enumerate(lines, 1):
+        if "/price" not in line:
+            continue
+        scanned += 1
+        if any(h in line.lower() for h in historical):
+            continue
+        toks = line.replace("**", " ").replace("|", " ").replace(",", "").split()
+        for j, tok in enumerate(toks[:-1]):
+            if tok.isdigit() and toks[j + 1].rstrip(".,;)").upper() == "B":
+                n = int(tok)
+                if n != live_bytes and n > 99:
+                    problems.append(f"line {i} pins /price at {n} B; live is {live_bytes} B")
+
+    # The tier claim. Only a CURRENT-tense assertion counts: a line retiring the day pass has to
+    # NAME it in order to retire it, which is the prohibition-must-name-what-it-forbids trap.
+    n_live = len(tiers)
+    current = ("still serves", "still advertis", "both menu tiers", "both tiers")
+    for i, line in enumerate(lines, 1):
+        low = line.lower()
+        if "day pass" not in low and "day-pass" not in low:
+            continue
+        if any(h in low for h in historical) or "gone from the live menu" in low:
+            continue
+        if any(w in low for w in current):
+            descs = [t.get("description") for t in tiers]
+            problems.append(
+                f"line {i} says the live menu still carries a day pass; live /price has "
+                f"{n_live} tier(s): {descs}"
+            )
+
+    dt = time.time() - t0
+    if problems:
+        return Result(
+            "runbook pins", RED, dt,
+            f"{len(problems)} stale live-value claim(s): " + "; ".join(problems[:3]),
+            SUBSTANCE,
+        )
+    return Result(
+        "runbook pins", GREEN, dt,
+        f"{scanned} /price line(s) scanned, all agree with live ({live_bytes} B, {n_live} tier)",
+    )
+
+
+def selftest_runbook_pins():
+    """Drive both verdicts against a temp runbook. Opens no socket.
+
+    The control is the whole point: a checker that has only ever printed GREEN cannot be told apart
+    from one that cannot print anything else. The cases are PAIRED -- a stale claim that must fire
+    beside its corrected form that must not -- so a later narrowing which silences the detector goes
+    red here rather than in front of the operator.
+    """
+
+    class FakeResult:
+        pass
+
+    body = json.dumps(
+        {"accepts": [{"description": "one feed reading", "maxAmountRequired": "1000000"}]}
+    ).encode()
+    fake = FakeResult()
+    fake.body = body
+    live_n = len(body)
+
+    cases = [
+        (f"| x402 `/price` | HTTP 402, {live_n} B | ok |", False, "matching byte pin"),
+        ("| x402 `/price` | HTTP 402, 988 B | ok |", True, "stale byte pin"),
+        ("The deployed gate still serves BOTH menu tiers, including a day pass.", True,
+         "current-tense day-pass claim"),
+        ("The withdrawn day-pass tier is gone from the live menu.", False,
+         "retirement sentence naming what it retires"),
+        ("The day pass was removed on 2026-08-20.", False, "historical day-pass mention"),
+        (f"| x402 `/price` | **{live_n} B** (was 988 before the deploy) | ok |", False,
+         "a line citing a past value behind a historical marker"),
+        ("nothing relevant here at all", False, "unrelated text"),
+    ]
+
+    failures = []
+    rb = pathlib.Path(__file__).resolve().parent.parent / "notes" / "DEMO-RUNBOOK.md"
+    rb.parent.mkdir(exist_ok=True)
+    backup = rb.read_text(encoding="utf-8") if rb.exists() else None
+    try:
+        for text, must_fire, label in cases:
+            rb.write_text(text, encoding="utf-8", newline="")
+            r = runbook_pins_report(fake)
+            fired = r.verdict == RED
+            if fired != must_fire:
+                want = "FIRE" if must_fire else "silent"
+                failures.append(f"  {label}: expected {want}, got: {r.note}")
+        # The skip path must be reachable AND must announce itself.
+        rb.unlink()
+        r = runbook_pins_report(fake)
+        if "SKIPPED" not in r.note:
+            failures.append("  absent runbook: expected an explicit SKIPPED note")
+    finally:
+        if backup is not None:
+            rb.write_text(backup, encoding="utf-8", newline="")
+        elif rb.exists():
+            rb.unlink()
+
+    for f in failures:
+        print(f)
+    total = len(cases) + 1
+    print(f"runbook-pin selftest: {total - len(failures)}/{total}")
+    return 1 if failures else 0
+
+
 def selftest_currency():
     """Drive every currency verdict against a localhost server. Opens no outside socket.
 
@@ -740,7 +897,8 @@ def main():
     args = ap.parse_args()
 
     if args.selftest:
-        return selftest_currency()
+        rc = selftest_currency()
+        return rc | selftest_runbook_pins()
 
     started = datetime.now(timezone.utc)
     print(f"demo preflight  {started.strftime('%Y-%m-%dT%H:%M:%SZ')}")
@@ -804,6 +962,10 @@ def main():
     # 3. Every live element the demo leans on. GET or HEAD only.
     price = probe("x402 /price", PRICE_URL, expect=402, want_body=True)
     results.append(price)
+    # The runbook is gitignored, so no repo gate can see it. This is the only place that
+    # both holds a live /price body and can read the operator's own pins, so it is where
+    # they meet.
+    results.append(runbook_pins_report(price))
     # want_body on every GET so the reported size is bytes received rather than a
     # header that some of these responses do not send.
     results.append(probe("x402 /selfcheck", SELFCHECK_URL, expect=200, want_body=True))
