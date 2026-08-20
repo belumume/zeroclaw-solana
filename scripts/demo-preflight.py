@@ -713,7 +713,10 @@ def selftest_runbook_pins():
     """
 
     class FakeResult:
-        pass
+        # Declared rather than assigned onto a bare class, so a type checker can see the one
+        # attribute runbook_pins_report reads. The real Result carries far more; this stands in
+        # for exactly the field under test and nothing else.
+        body: bytes = b""
 
     # PADDED PAST THE n > 99 FLOOR ON PURPOSE, and this is a fixture correction rather than a
     # decoration. The unpadded body was 82 B, which the byte-pin floor discards before comparing,
