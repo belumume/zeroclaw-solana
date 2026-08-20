@@ -392,10 +392,14 @@ value are in [`MAINNET-PROOF.md`](MAINNET-PROOF.md), which is the canonical expl
 clusters. It also covers the trap a reader hits when re-sending this captured message with a
 different amount: a fixed delegation carries a remaining balance, this devnet run spent its entire
 5,000,000 cap in the within-cap transfer, so the delegation's remaining allowance is now zero and
-every non-zero replay is refused with the same 300. Check that here rather than taking it on trust:
+every non-zero replay is refused with the same 300. Check that here rather than taking it on trust.
+The bundle records two refused captures, this one and the buy-loop run in the next section, so the
+command names which of them to replay; the probe refuses to guess rather than measure a boundary
+belonging to a different delegation.
 
 ```
-python3 scripts/replay_allowance_probe.py --bundle docs/proof-bundle/devnet-transactions.json
+python3 scripts/replay_allowance_probe.py --bundle docs/proof-bundle/devnet-transactions.json \
+  --signature 3TLSrfWVYdC3hSiAWnyyd7T694bLJQDtdJYQ64EWUsBNDehGc6Kq1veR7xa8Y1BiMdpvfFm3N1dKjDrXF3BEq2ps
 ```
 
 ## The same cap, at the prices our own x402 gate actually charges (the buy loop)

@@ -90,6 +90,31 @@ def build() -> None:
         print(r.stdout[-2000:])
         print(r.stderr[-2000:])
         raise SystemExit(f"build failed rc={r.returncode}")
+    require_wasm()
+
+
+def require_wasm() -> None:
+    """A missing artifact is CANNOT CHECK, never a traceback.
+
+    `build()` unlinks the wasm before invoking cargo, so any path where the build reports success
+    without producing it leaves `caps()` reading a file that is not there. That surfaced as a raw
+    FileNotFoundError pointing at a path under target/, which reads as a broken checkout rather
+    than as the one thing it means: this control did not run, so the custody gate's green is
+    standing on nothing. ci.yml cites this file as the control proving that gate can fail, and a
+    control has to be able to say when it could not.
+    """
+    if WASM.is_file():
+        return
+    print(f"CANNOT CHECK  no artifact at {WASM.relative_to(ROOT).as_posix()}")
+    print(
+        "  cargo reported success but produced nothing at the path check-custody-tier.py"
+    )
+    print(
+        "  derives from the manifest. Likely the wasm32-wasip2 target is not installed:"
+    )
+    print("    rustup target add wasm32-wasip2")
+    print("  Until this runs, check-custody-tier.py has no control behind it.")
+    raise SystemExit(2)
 
 
 def caps():

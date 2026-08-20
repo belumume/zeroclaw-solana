@@ -352,16 +352,26 @@ def selftest() -> int:
     # synthetic tree cannot exhibit it.
     # ------------------------------------------------------------------------------------
     derived = {u for _, u in unit_pairs(ROOT)}
-    check(
-        "every tracked unit file is derived, none missed",
-        derived,
-        {
-            "zc-announce.service",
-            "zc-announce.timer",
-            "zc-selfcheck.service",
-            "zc-selfcheck.timer",
-        },
-    )
+
+    # RE-KEYED 2026-08-19. This asserted a hardcoded set of four filenames, which contradicted the
+    # very property it was guarding: unit_pairs exists so "a unit added to git should appear here
+    # without anyone remembering to list it", and a pinned expectation requires exactly that
+    # remembering. Committing a fifth unit turned it red, and the diff that would make it green
+    # lived in the test rather than in the code -- the tell that a check has been keyed to an
+    # implementation detail instead of to its invariant.
+    #
+    # The expectation is now DERIVED, by a deliberately DIFFERENT route than unit_pairs uses:
+    # it lists the whole directory and filters by suffix in Python, where unit_pairs asks git for
+    # suffix globs directly. So a wrong glob, a wrong directory or a dropped entry still fails,
+    # which is what the pin was really protecting. Comparing git against itself would be
+    # tautological and is what makes the two mechanisms matter.
+    tracked_deploy = {Path(r).name for r in git_ls(ROOT, "deploy")}
+    unit_exts = {s.lstrip("*") for s in UNIT_SUFFIXES}
+    expected = {n for n in tracked_deploy if Path(n).suffix in unit_exts}
+    check("every tracked unit file is derived, none missed", derived, expected)
+    # A zero-length agreement is two empty sets agreeing, which is not a measurement. This is the
+    # denominator: without it the check above passes loudest exactly when the derivation is broken.
+    check("the derived unit set is non-empty", len(derived) > 0, True)
     # CONTROL for the set the deployer must NOT have used. deploy-targets.json's `units` names
     # what must be RUNNING; five of its six entries have no file in this repo, so deploying
     # against it would place nothing and skip three real files.

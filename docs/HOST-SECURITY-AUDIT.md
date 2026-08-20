@@ -25,7 +25,17 @@ carrying `status:accepted` and twelve `status:in-progress`, and five pull reques
 merged. If a figure elsewhere disagrees with what those commands print, the commands are right.
 
 Audited at `zeroclaw-labs/zeroclaw` commit `63f432da` (v0.8.3-182), a Rust workspace of 1064 source
-files across 31 crates.
+files across 31 crates. Both figures were re-derived against that exact tree on 2026-08-19 and both
+hold. Re-derive rather than trusting this sentence, and read `.truncated` in the same breath as the
+count, because the API caps a large tree and a capped walk returns a smaller number that looks like
+a measurement:
+
+```bash
+gh api "repos/zeroclaw-labs/zeroclaw/git/trees/63f432da?recursive=1" \
+  --jq '{crates: [.tree[]|select(.path|endswith("Cargo.toml"))]|length,
+         sources: [.tree[]|select(.path|endswith(".rs"))]|length,
+         truncated: .truncated}'
+```
 
 ## Why this belongs in a plugin submission
 

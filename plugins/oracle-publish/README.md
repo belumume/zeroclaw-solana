@@ -95,28 +95,29 @@ These are the plugin's own host tests, with no wasm toolchain and no network. Ru
 with `cargo test --lib`:
 
 ```
-running 19 tests
+running 23 tests
 test publish::tests::an_all_control_unit_is_identical_to_an_absent_unit ... ok
 test publish::tests::bad_scale_rejected ... ok
-test publish::tests::multibyte_seed_fails_closed_not_panic ... ok
-test publish::tests::unknown_feed_kind_is_rejected ... ok
-test publish::tests::missing_seed_fails_closed ... ok
-test publish::tests::humidity_over_100_rejected ... ok
-test publish::tests::out_of_range_value_is_rejected ... ok
-test publish::tests::unknown_top_level_field_fails_closed ... ok
-test publish::tests::unknown_config_key_fails_closed ... ok
 test publish::tests::build_instructions_puts_advance_nonce_first ... ok
-test publish::tests::worst_case_report_is_bounded_and_never_echoes_the_unit ... ok
-test publish::tests::hostile_unit_is_sanitized_and_capped ... ok
-test publish::tests::instruction_data_has_discriminator_and_exact_layout ... ok
-test publish::tests::negative_temperature_in_range_ok ... ok
-test publish::tests::http_rpc_override_rejected ... ok
 test publish::tests::debug_output_redacts_the_device_seed ... ok
-test publish::tests::valid_reading_parses_and_derives_everything ... ok
-test publish::tests::missing_mandatory_pubkeys_fail_closed ... ok
 test publish::tests::device_signs_index_one_payer_slot_left_empty ... ok
+test publish::tests::hostile_unit_is_sanitized_and_capped ... ok
+test publish::tests::http_rpc_override_rejected ... ok
+test publish::tests::humidity_over_100_rejected ... ok
+test publish::tests::instruction_data_has_discriminator_and_exact_layout ... ok
+test publish::tests::missing_mandatory_pubkeys_fail_closed ... ok
+test publish::tests::missing_seed_fails_closed ... ok
+test publish::tests::multibyte_seed_fails_closed_not_panic ... ok
+test publish::tests::negative_temperature_in_range_ok ... ok
+test publish::tests::out_of_range_value_is_rejected ... ok
+test publish::tests::the_unit_is_byte_packed_and_absent_from_the_report_under_multibyte_codepoints ... ok
+test publish::tests::unknown_config_key_fails_closed ... ok
+test publish::tests::unknown_feed_kind_is_rejected ... ok
+test publish::tests::unknown_top_level_field_fails_closed ... ok
+test publish::tests::valid_reading_parses_and_derives_everything ... ok
+test publish::tests::worst_case_report_is_bounded_and_never_echoes_the_unit ... ok
 
-test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 What the load-bearing cases prove:

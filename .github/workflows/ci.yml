@@ -63,6 +63,20 @@ jobs:
         working-directory: crates/solana-core
         run: cargo test --locked
 
+      # WIRED 2026-08-19. TESTING.md credits this harness twice -- it is the whole basis
+      # of the claim that the property suite discriminates -- and no workflow ran it, so
+      # the argument was load-bearing and unenforced. It belongs in THIS job rather than
+      # beside the other mutation controls in publish-gates: it needs cargo and a built
+      # solana-core, both of which the step above has already paid for, and publish-gates
+      # caps itself at five minutes precisely because it is meant to stay toolchain-free.
+      #
+      # It mutates a tracked source file and restores it on every exit path, including an
+      # interrupt. That is the same shape as mutation-check-tlv.sh, which is wired, so it
+      # is not the reason this one was left out; being left out looks like an oversight.
+      - name: The property suite can actually fail
+        working-directory: crates/solana-core
+        run: bash ../../scripts/mutation-check.sh
+
       - name: Clippy, host, warnings are errors
         working-directory: crates/solana-core
         run: cargo clippy --all-targets --locked -- -D warnings
@@ -394,6 +408,27 @@ jobs:
       - name: that pre-flight suite is load-bearing
         run: python3 scripts/mutation-check-demo-preflight.py
 
+      # WIRED 2026-08-19, having run nowhere since it was written, which is the same defect
+      # three sibling controls were fixed for in the commit before this one.
+      #
+      # WHAT IT GUARDS is a failure that would have shipped a false claim onto a public image.
+      # A JSON-RPC error arrives at HTTP 200, so nothing raises, and the generator turned an
+      # error body into an empty page: measured before the fix, it rendered "0 publishes" and
+      # "0 days" beside a stamp reading "figures verified" with today's date, and refresh()
+      # returned normally so render() would have committed that as the og:image, the
+      # twitter:image and the video poster.
+      #
+      # NOTHING DOWNSTREAM CATCHES IT, which is why the control belongs here rather than being
+      # left to the freshness gate: that gate checks the image's dimensions and its git age and
+      # never looks at the figures, and the generator's own positive control passed throughout
+      # because it exercises a different method at a different moment.
+      #
+      # Hermetic and about a second: it drives real urlopen against a loopback server, which is
+      # deliberate, because substituting the rpc helper would bypass the function the fix lives
+      # in. Case 7 is the over-correction control, requiring a genuine walk to still render.
+      - name: the social card refuses to publish a figure it could not read
+        run: python3 scripts/test_build_social_card_refresh.py
+
       # The on-chain evidence outlives the links to it. Public devnet RPC prunes
       # after about four days, so every explorer link in DEVNET-PROOF is dead well
       # before judging. This verifies the captured raw transactions instead:
@@ -561,6 +596,32 @@ jobs:
 
       - name: the TLV controls can fail
         run: bash scripts/mutation-check-tlv.sh
+
+      # THE CONTROL FOR THE TWO STEPS ABOVE, and for mutation-check.sh in the core job.
+      # All three plant a defect and require the suite under them to go red, and until
+      # 2026-08-19 all three decided that with `exit != 0`. That cannot separate a mutant
+      # the assertions CAUGHT from one that CRASHED -- a mutation that does not compile
+      # also exits non-zero, with the harness never running a single assertion, and the
+      # old code printed "the suite discriminates" over exactly that. Both cargo-driven
+      # harnesses mutate Rust source, so "does not compile" is not a hypothetical there.
+      #
+      # Measured against the pre-fix scripts this control scores 3 of 6: every crash
+      # scenario returned 0. Against the fixed ones it scores 6 of 6, which is what makes
+      # it a control rather than a second opinion.
+      #
+      # It stubs cargo, so it needs no Rust toolchain and belongs in this job.
+      - name: those mutation harnesses can tell a crashed mutant from a caught one
+        run: python3 scripts/mutation-check-crash-vs-catch.py
+
+      # WIRED 2026-08-19, having run nowhere. TESTING.md credits it, and the guard it
+      # controls refuses to start the shop when an empty allowed_groups silently means
+      # permit-ALL on this host build -- a group-spam incident this project already had.
+      # A start gate whose control has never run is a start gate nobody has shown works.
+      # Both directions matter and the suite covers both: refuse-everything would just
+      # wedge the shop, refuse-nothing is the fail-open it exists to prevent. Fixtures are
+      # written to mktemp, so it touches no config and needs no node.
+      - name: the WhatsApp start gate refuses a fail-open posture, and permits a safe one
+        run: bash scripts/test_whatsapp_posture_guard.sh
 
       # THE DEPLOY-STALENESS GATE'S CONTROLS BELONG HERE, not beside the gate itself. The gate
       # asks a live box a question and lives in proof-check.yml; these controls ask it four

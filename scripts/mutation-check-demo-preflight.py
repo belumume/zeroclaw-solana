@@ -28,7 +28,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 TARGET = "demo-preflight.py"
 SUITE = "test_demo_preflight.py"
 
-# (label, anchor in demo-preflight.py, replacement, what the suite must notice)
+# (label, anchor in demo-preflight.py, replacement, what must notice it, which runner)
+#
+# EVERY REPLACEMENT IS TYPE-CORRECT ON PURPOSE. A mutant that crashes exits non-zero too, so a
+# harness keying on the exit code cannot tell "the checker noticed" from "the mutant could not
+# run" -- and the second proves nothing while looking identical. Swapping a digest for a
+# length-derived digest keeps a hex string flowing through, where swapping it for an int would
+# die in the f-string slice two lines later and score as a catch.
 MUTANTS = [
     (
         "retry everything",
@@ -51,18 +57,80 @@ MUTANTS = [
         "an out-of-root --capture-dir would raise ValueError again, which is the "
         "regression this tool shipped with, so the out-of-root case must go red",
     ),
+    (
+        "currency by byte length",
+        '    return hashlib.sha256(b.replace(b"\\r\\n", b"\\n").replace(b"\\r", b"\\n")).hexdigest()',
+        "    return hashlib.sha256(str(len(b)).encode()).hexdigest()",
+        "the digest becomes a pure function of LENGTH, which is the check this replaced, "
+        "so the same-length-edit case must go red",
+        "selftest",
+    ),
+    (
+        "currency without eol normalising",
+        '    return hashlib.sha256(b.replace(b"\\r\\n", b"\\n").replace(b"\\r", b"\\n")).hexdigest()',
+        "    return hashlib.sha256(b).hexdigest()",
+        "the same content re-encoded CRLF would read DIFFERS, so the over-correction "
+        "case must go red",
+        "selftest",
+    ),
+    (
+        "currency accepts a 404 page",
+        '    r = probe("pay page", PAY_URL, 200, want_body=True)',
+        '    r = probe("pay page", PAY_URL, 404, want_body=True)',
+        "an error page would be scored as served content, which is the false-DIFFERS this "
+        "replaced, so the 404 case must go red",
+        "selftest",
+    ),
+    (
+        "currency header lookup is case-sensitive again",
+        '        got_hdr = _hdr(w.headers, "access-control-expose-headers")',
+        '        got_hdr = w.headers.get("access-control-expose-headers")',
+        "a title-cased header would read ABSENT on a current Worker, so the "
+        "title-case case must go red",
+        "selftest",
+    ),
+    (
+        "currency baseline searches the whole file",
+        "    body = text[start : end if end != -1 else len(text)]",
+        "    body = text",
+        "a decoy literal above cors() would become the baseline, so the decoy case "
+        "must go red",
+        "selftest",
+    ),
+    (
+        "currency by header presence",
+        "            mine, theirs = _hdr_tokens(got_hdr), _hdr_tokens(want_hdr)",
+        "            mine, theirs = _hdr_tokens(got_hdr), _hdr_tokens(got_hdr)",
+        "the worker verdict becomes a presence ratchet that can only say CURRENT, so the "
+        "stale-header case must go red",
+        "selftest",
+    ),
 ]
 
 
 def run_suite(scripts_dir):
+    return _run([sys.executable, str(scripts_dir / SUITE)])
+
+
+def run_selftest(scripts_dir):
+    """The currency block's control lives in the target itself, not in SUITE.
+
+    Kept as a SECOND runner rather than folded into the first, because a mutant must be judged
+    by the checker that is supposed to notice it. Running both and accepting either red would
+    let a currency mutant be "caught" by an unrelated failure in the retry suite, which is a
+    catch that proves nothing about the case it was written for.
+    """
+    return _run([sys.executable, str(scripts_dir / TARGET), "--selftest"])
+
+
+def _run(argv):
     r = subprocess.run(
-        [sys.executable, str(scripts_dir / SUITE)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+        argv, capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
     return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+RUNNERS = {"suite": run_suite, "selftest": run_selftest}
 
 
 def main() -> int:
@@ -76,15 +144,20 @@ def main() -> int:
 
         # A baseline that is not green means the mutants prove nothing, because a red
         # mutant would be indistinguishable from a red baseline.
-        rc, out = run_suite(work)
-        if rc != 0:
-            print("FAIL  baseline suite is not green in the temp copy; cannot mutate.")
-            print(out[-1200:])
-            return 2
-        print(f"baseline  rc=0  {out.strip().splitlines()[-1]}")
+        # BOTH runners must be green before any mutant is judged, not just the one that happens
+        # to run first. A red baseline in either makes every mutant it judges unreadable.
+        for which, fn in RUNNERS.items():
+            rc, out = fn(work)
+            if rc != 0:
+                print(f"FAIL  baseline {which} is not green in the temp copy.")
+                print(out[-1200:])
+                return 2
+            print(f"baseline {which:<9} rc=0  {out.strip().splitlines()[-1]}")
 
         survivors = []
-        for label, anchor, repl, expect in MUTANTS:
+        for mutant in MUTANTS:
+            label, anchor, repl, expect = mutant[:4]
+            run = RUNNERS[mutant[4] if len(mutant) > 4 else "suite"]
             if anchor not in src:
                 print(
                     f"FAIL  anchor for mutant {label!r} not found in scripts/{TARGET}."
@@ -95,7 +168,7 @@ def main() -> int:
             (work / TARGET).write_text(
                 src.replace(anchor, repl), encoding="utf-8", newline="\n"
             )
-            rc, out = run_suite(work)
+            rc, out = run(work)
             last = out.strip().splitlines()[-1] if out.strip() else "(no output)"
             # rc 0 means the mutant survived. Any non-zero means the suite noticed; rc 2
             # would mean it could not run, which is not a catch, so require exactly 1.

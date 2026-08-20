@@ -58,8 +58,8 @@ use solana_core::instruction::advance_nonce_account;
 use solana_core::instruction::memo as memo_instruction;
 use solana_core::{
     compile, decode_mint, decode_nonce_account, label_untrusted, pubkey, sanitize_onchain,
-    serialize_transaction, short_pubkey, AccountMeta, Instruction, Pubkey, RpcTransport, Sanitized,
-    SolanaRpc,
+    sanitize_onchain_bounded, serialize_transaction, short_pubkey, AccountMeta, Instruction,
+    Pubkey, RpcTransport, Sanitized, SolanaRpc,
 };
 
 // --- Program constants, every one cited to its source in the audited repo ------
@@ -134,8 +134,50 @@ const IX_CREATE_IDEMPOTENT: u8 = 1;
 /// overrides this via `__config.rpc_url` (e.g. a devnet URL for the demo).
 pub const DEFAULT_RPC: &str = "https://api.mainnet-beta.solana.com";
 
-/// Byte cap for the optional on-chain `memo`.
+/// CHARACTER cap for the optional on-chain `memo`.
+///
+/// This constant's doc read "Byte cap" until the byte axis was actually bounded, and the label
+/// was the defect in miniature: the value is passed to `sanitize_onchain` as `max_chars`, which
+/// counts codepoints, so 120 astral-plane characters were 480 bytes in both the on-chain memo
+/// instruction and the `summary` field the ceiling test bounds. See [`MEMO_MAX_BYTES`].
 pub const MEMO_MAX: usize = 120;
+/// BYTE cap for the same memo, applied after the character cap.
+///
+/// The character cap reused as a byte cap, so every real memo — ASCII, already under both — is
+/// untouched, and only the multibyte case that was never bounded changes. This bounds the memo
+/// on the two paths it reaches: the on-chain memo instruction, and the agent-facing `summary`.
+pub const MEMO_MAX_BYTES: usize = 120;
+// --- Error-echo budgets -------------------------------------------------------------------
+//
+// The echoes below are ATTACKER-INFLUENCED, and on an error path the provenance is the reverse
+// of what it looks like. The `receiver` and `delegation` echoes fire precisely BECAUSE the
+// base58 check failed, so "it is a pubkey, therefore ASCII" is true on the success path and
+// exactly backwards on these; the `amount` echo fires because the value carried a byte outside
+// `[0-9.]`, which is the same inversion. serde is worse still: an `invalid type` / unknown-field
+// error embeds the offending value VERBATIM, so the string being echoed is whatever the caller
+// sent.
+//
+// They are deliberately NOT applied to the operator's `__config` endpoint (`rpc_url`); see that
+// site for the reason.
+//
+// Each byte budget reuses its character cap, this repo's established convention (`MEMO_MAX` /
+// [`MEMO_MAX_BYTES`] above): a real value is ASCII and untouched, so only the multibyte case
+// that was never bounded changes.
+
+/// CHARACTER cap for the serde error echoed by a malformed-arguments rejection.
+const ARG_ERROR_MAX: usize = 120;
+/// BYTE cap for the same. serde embeds the offending value verbatim, so this echoes attacker text.
+const ARG_ERROR_MAX_BYTES: usize = 120;
+/// CHARACTER cap for a rejected pubkey-shaped argument echoed back in its own rejection
+/// (`receiver`, `delegation`).
+const ECHO_MAX: usize = 64;
+/// BYTE cap for the same.
+const ECHO_MAX_BYTES: usize = 64;
+/// CHARACTER cap for a rejected `amount` echoed back in its own rejection.
+const AMOUNT_ECHO_MAX: usize = 32;
+/// BYTE cap for the same.
+const AMOUNT_ECHO_MAX_BYTES: usize = 32;
+
 /// Parse-time cap on the integer part of `amount` (u64::MAX is 20 digits).
 pub const AMOUNT_MAX_INT_DIGITS: usize = 20;
 /// Parse-time cap on the fractional part of `amount`.
@@ -314,7 +356,7 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedSpend, String> {
         // an unbounded or injection-framed string back through the error path.
         format!(
             "invalid arguments: {}",
-            sanitize_onchain(&e.to_string(), 120).text
+            sanitize_onchain_bounded(&e.to_string(), ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES).text
         )
     })?;
 
@@ -327,11 +369,14 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedSpend, String> {
     let receiver = Pubkey::from_base58(args.receiver.trim()).map_err(|_| {
         format!(
             "receiver is not a valid base58 wallet address: {}",
-            sanitize_onchain(&args.receiver, 64).text
+            sanitize_onchain_bounded(&args.receiver, ECHO_MAX, ECHO_MAX_BYTES).text
         )
     })?;
 
-    let memo = args.memo.as_deref().and_then(|s| cap_memo(s, MEMO_MAX));
+    let memo = args
+        .memo
+        .as_deref()
+        .and_then(|s| cap_memo(s, MEMO_MAX, MEMO_MAX_BYTES));
 
     let cfg = args.config.unwrap_or_default();
 
@@ -362,12 +407,22 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedSpend, String> {
         }
     };
 
+    // DELIBERATELY CHAR-CAPPED ONLY. `__config` is injected by the host, which strips any
+    // caller-supplied section before inserting the operator's, so this string is the OPERATOR's
+    // and not a path an attacker reaches. A byte cap would buy nothing against anyone and would
+    // cost the operator the `…` marker on a diagnostic they are the sole reader of — the one
+    // signal telling them their own pasted URL was truncated rather than mangled. The echo is
+    // bounded either way: the char cap fires first and this is the operator's own text, not a
+    // codepoint flood.
+    //
+    // Not an oversight and not an inconsistency to sweep: the attacker-reachable echoes in this
+    // crate use `sanitize_onchain_bounded`, and the difference in function name is the signal.
     let rpc_url = match cfg.rpc_url {
         Some(u) => {
             if !u.starts_with("https://") {
                 return Err(format!(
                     "rpc_url must be https, got: {}",
-                    sanitize_onchain(&u, 64).text
+                    sanitize_onchain(&u, ECHO_MAX).text
                 ));
             }
             u
@@ -412,7 +467,7 @@ fn validate_amount(raw: &str) -> Result<String, String> {
     {
         return Err(format!(
             "amount must be a plain non-negative decimal (digits and one optional '.'; no sign, no scientific notation): {}",
-            sanitize_onchain(s, 32).text
+            sanitize_onchain_bounded(s, AMOUNT_ECHO_MAX, AMOUNT_ECHO_MAX_BYTES).text
         ));
     }
     let mut parts = s.split('.');
@@ -483,8 +538,14 @@ pub fn to_base_units(amount: &str, decimals: u8) -> Result<u64, String> {
     Ok(value as u64)
 }
 
-fn cap_memo(s: &str, max_chars: usize) -> Option<Sanitized> {
-    let san = sanitize_onchain(s, max_chars);
+/// Sanitize a memo and bound it on BOTH axes: characters, then bytes.
+///
+/// Emptiness is checked AFTER truncation, not before. A memo whose first codepoint alone
+/// exceeds the byte budget would otherwise pass a non-empty check and then truncate to nothing,
+/// putting an empty `memo:` in the summary and a zero-length memo instruction on chain rather
+/// than omitting both.
+fn cap_memo(s: &str, max_chars: usize, max_bytes: usize) -> Option<Sanitized> {
+    let san = sanitize_onchain_bounded(s, max_chars, max_bytes);
     if san.text.is_empty() {
         None
     } else {
@@ -497,11 +558,17 @@ fn parse_pubkey_cfg(v: Option<String>, field: &str, why: &str) -> Result<Pubkey,
     parse_pubkey_required(field, &s)
 }
 
+/// BYTE-capped, unlike the `rpc_url` echo above, because this helper has MIXED provenance and
+/// one of its callers is attacker-reachable: `delegation` comes straight off the caller's
+/// arguments, while `nonce_account` / `nonce_authority` / `agent_pubkey` arrive via `__config`.
+/// A shared helper is bounded by its most hostile caller, and the operator loses nothing real
+/// here — a valid pubkey is at most 44 ASCII characters, so anything reaching the cap is already
+/// malformed well past recognition.
 fn parse_pubkey_required(field: &str, s: &str) -> Result<Pubkey, String> {
     Pubkey::from_base58(s.trim()).map_err(|_| {
         format!(
             "{field} is not valid base58: {}",
-            sanitize_onchain(s, 64).text
+            sanitize_onchain_bounded(s, ECHO_MAX, ECHO_MAX_BYTES).text
         )
     })
 }
@@ -1315,6 +1382,177 @@ mod tests {
         assert!(e.contains("delegation is not valid base58"), "got: {e}");
     }
 
+    /// The REJECTION paths, which the envelope ceilings never cover: an envelope is only
+    /// rendered once every field validated, so an argument refused at the door reaches the agent
+    /// through an error string that no envelope bound touches.
+    ///
+    /// The provenance FLIPS here, and that is why these sites were missed. On the success path a
+    /// `receiver` or `delegation` is a base58 pubkey and therefore ASCII, which makes a character
+    /// cap look sufficient. These branches fire precisely BECAUSE the base58 check failed, and
+    /// the `amount` branch because the value carried a byte outside `[0-9.]` — so in every case
+    /// the string being echoed is whatever the caller sent, in whatever encoding.
+    #[test]
+    fn every_rejected_argument_echo_is_byte_bounded() {
+        let flood = "\u{1F600}".repeat(2000);
+        let cases: [(&str, String, &str, usize, usize); 3] = [
+            (
+                "delegation",
+                format!(
+                    r#"{{"delegation":"{flood}","amount":"1","receiver":"{RECEIVER}",{}}}"#,
+                    cfg("")
+                ),
+                "delegation is not valid base58: ",
+                ECHO_MAX,
+                ECHO_MAX_BYTES,
+            ),
+            (
+                "receiver",
+                format!(
+                    r#"{{"delegation":"{DELEGATION}","amount":"1","receiver":"{flood}",{}}}"#,
+                    cfg("")
+                ),
+                "receiver is not a valid base58 wallet address: ",
+                ECHO_MAX,
+                ECHO_MAX_BYTES,
+            ),
+            (
+                "amount",
+                format!(
+                    r#"{{"delegation":"{DELEGATION}","amount":"{flood}","receiver":"{RECEIVER}",{}}}"#,
+                    cfg("")
+                ),
+                "amount must be a plain non-negative decimal (digits and one optional '.'; no sign, no scientific notation): ",
+                AMOUNT_ECHO_MAX,
+                AMOUNT_ECHO_MAX_BYTES,
+            ),
+        ];
+
+        let mut checked = 0;
+        for (field, json, prose, char_cap, budget) in &cases {
+            let e = err(json);
+            // FIXTURE CONTROL: a fixture that fails EARLIER takes a different branch, and every
+            // size assertion below would then pass vacuously against some other message.
+            assert!(
+                e.starts_with(*prose),
+                "{field}: the intended branch was not taken, so this measures some other \
+                 rejection. Got: {e}"
+            );
+            let echoed = e.len() - prose.len();
+            assert!(
+                echoed > 0,
+                "{field}: the echo capped away to nothing, so the bound below proves nothing"
+            );
+            assert!(
+                echoed <= *budget,
+                "{field}: echoed {echoed} bytes, over the {budget}-byte budget"
+            );
+
+            // BEFORE/AFTER CONTROL: what the CHARACTER cap alone admitted on this same input.
+            // Without it the bound is equally consistent with a budget loose enough for either
+            // form, and the byte cap would be proven to do nothing.
+            let char_only = sanitize_onchain(&flood, *char_cap).text.len();
+            assert!(
+                char_only > *budget,
+                "{field}: the char cap alone yields {char_only} bytes, already inside the \
+                 {budget}-byte budget, so the byte cap is not what holds it"
+            );
+            eprintln!(
+                "MEASURED allowance-spend-build {field} echo: {echoed} bytes (char-capped only: \
+                 {char_only} bytes, budget {budget})"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 3, "a case was skipped");
+    }
+
+    /// The same class with a nastier source: serde embeds the offending value VERBATIM in its
+    /// `invalid type` and unknown-field messages, so the caller chooses most of that string and
+    /// none of the crate's field-shaped reasoning applies to it at all.
+    #[test]
+    fn the_malformed_arguments_echo_is_byte_bounded() {
+        let flood = "\u{1F600}".repeat(2000);
+        // A string where an object belongs: serde's `invalid type` quotes the value back.
+        let json = format!(
+            r#"{{"delegation":"{DELEGATION}","amount":"1","receiver":"{RECEIVER}","__config":"{flood}"}}"#
+        );
+
+        const PREFIX: &str = "invalid arguments: ";
+        let e = err(&json);
+        assert!(
+            e.starts_with(PREFIX),
+            "the message no longer opens with the prose this bound subtracts. Got: {e}"
+        );
+        let echoed = e.len() - PREFIX.len();
+        assert!(
+            echoed > 0,
+            "the serde error capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            echoed <= ARG_ERROR_MAX_BYTES,
+            "echoed {echoed} bytes, over the {ARG_ERROR_MAX_BYTES}-byte budget"
+        );
+
+        // CONTROL, measured against what serde ACTUALLY produced rather than an assumed shape:
+        // if the flood never reached the error text, the bound above is satisfied trivially.
+        let raw = match serde_json::from_str::<ExecuteArgs>(&json) {
+            Ok(_) => panic!("the fixture parsed, so there is no serde error to bound"),
+            Err(err) => err.to_string(),
+        };
+        assert!(
+            raw.len() > 4 * ARG_ERROR_MAX_BYTES,
+            "serde no longer embeds the offending value ({} bytes), so this test measures a \
+             fixed message rather than an attacker-chosen one",
+            raw.len()
+        );
+        let char_only = sanitize_onchain(&raw, ARG_ERROR_MAX).text.len();
+        assert!(
+            char_only > ARG_ERROR_MAX_BYTES,
+            "the char cap alone yields {char_only} bytes, already inside the budget, so the byte \
+             cap is not what holds it"
+        );
+        eprintln!(
+            "MEASURED allowance-spend-build invalid-arguments echo: {echoed} bytes (raw serde: \
+             {} bytes, char-capped only: {char_only} bytes, budget {ARG_ERROR_MAX_BYTES})",
+            raw.len()
+        );
+    }
+
+    /// The narrowing control: the byte cap must leave ORDINARY input byte-identical, or "the
+    /// echo is bounded" is equally consistent with a cap that mangles every real rejection an
+    /// operator has to read. All three fields, since each carries its own budget.
+    #[test]
+    fn the_byte_cap_leaves_an_ordinary_rejection_untouched() {
+        for (json, tail) in [
+            (
+                format!(
+                    r#"{{"delegation":"not-an-address","amount":"1","receiver":"{RECEIVER}",{}}}"#,
+                    cfg("")
+                ),
+                "not-an-address",
+            ),
+            (
+                format!(
+                    r#"{{"delegation":"{DELEGATION}","amount":"1","receiver":"typo-here",{}}}"#,
+                    cfg("")
+                ),
+                "typo-here",
+            ),
+            (
+                format!(
+                    r#"{{"delegation":"{DELEGATION}","amount":"-5","receiver":"{RECEIVER}",{}}}"#,
+                    cfg("")
+                ),
+                "-5",
+            ),
+        ] {
+            let e = err(&json);
+            assert!(
+                e.ends_with(tail),
+                "an ASCII rejection was altered by the byte cap: {e}"
+            );
+        }
+    }
+
     #[test]
     fn receiver_injection_string_rejected_before_any_rpc() {
         let e = err(&format!(
@@ -1820,6 +2058,133 @@ mod tests {
         let b64_len = parsed["transaction"].as_str().unwrap().len();
         let envelope = out.len() - b64_len;
         assert!(envelope < 1160, "envelope (minus tx) is {envelope} bytes");
+        // PRINT the figure, do not only assert it. An `assert!` message is emitted ONLY when the
+        // assertion FAILS, so a passing run published no number at all and the ceiling this
+        // crate advertised was an asserted bound rather than a measurement — unverifiable from
+        // outside, and invisible to `scripts/verify-output-ceiling-agreement.py`, which compares
+        // what the docs PUBLISH against what the suites PRINT.
+        eprintln!(
+            "MEASURED allowance-spend-build envelope, memo-less: {envelope} bytes (bound 1160), \
+             summary {} bytes",
+            summary.len()
+        );
+    }
+
+    /// The fixture above carries NO memo at all, so the 1160 ceiling was measured with the one
+    /// attacker-controlled field that reaches the summary absent. This drives the same real
+    /// pipeline with the memo present and floods it with 4-byte codepoints.
+    ///
+    /// U+1F600 is the point. Every flood fixture in this crate was ASCII, which makes a
+    /// character cap and a byte ceiling indistinguishable: `MEMO_MAX` counts codepoints, so 120
+    /// astral-plane characters were 480 bytes in a field the ceiling budgeted 120 for.
+    #[test]
+    fn the_envelope_holds_under_a_multibyte_memo_flood() {
+        let flood = "\u{1F600}".repeat(500);
+        let a = format!(
+            r#"{{"delegation":"{DELEGATION}","amount":"25","receiver":"{RECEIVER}","memo":"{flood}",{}}}"#,
+            cfg("")
+        );
+        let v = parse_and_validate(&a).unwrap();
+
+        // FIXTURE CONTROLS. A memo that was rejected, or capped away to nothing, would make
+        // every size assertion below pass vacuously.
+        let m = v
+            .memo
+            .as_ref()
+            .expect("the flood memo was dropped entirely, so this measures no memo at all");
+        assert!(!m.text.is_empty(), "the memo capped away to nothing");
+        assert!(
+            m.text.len() <= MEMO_MAX_BYTES,
+            "memo is {} bytes, over the {MEMO_MAX_BYTES}-byte budget",
+            m.text.len()
+        );
+
+        let rpc = SolanaRpc::new(MockTransport::new([
+            fixed_deleg_resp(975_000_000, AGENT),
+            account_resp(&pubkey::token_program().to_base58(), &legacy_mint_6dec()),
+            null_resp(),
+            blockhash_resp(USDC),
+        ]));
+        let (tx, meta) = build_spend(&rpc, &v).unwrap();
+        let out = render_output(&v, &tx, &meta);
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let summary = parsed["summary"].as_str().unwrap();
+
+        // The memo must actually REACH the summary, or the envelope below is measuring the
+        // memo-less case again under a different name.
+        assert!(
+            summary.contains("memo:"),
+            "the memo never reached the summary: {summary}"
+        );
+
+        let b64_len = parsed["transaction"].as_str().unwrap().len();
+        let envelope = out.len() - b64_len;
+
+        // 1280, not the memo-less test's 1160. That number was derived from a fixture carrying
+        // NO memo, so it never budgeted for the one attacker-controlled field that reaches the
+        // summary; it is correct for its own fixture and was never a whole-crate ceiling.
+        // Measured at 1250 with the memo present and byte-capped, and the bound sits just above
+        // it so it still bites. The control below shows what this same envelope was before the
+        // byte cap existed.
+        assert!(envelope < 1280, "envelope (minus tx) is {envelope} bytes");
+
+        // THE BEFORE/AFTER CONTROL, in one run so the two numbers cannot drift apart. Re-render
+        // the identical request with the memo capped on CHARACTERS only — exactly what this
+        // crate emitted before `MEMO_MAX_BYTES` — and confirm the byte cap is what brought the
+        // envelope under the bound, rather than the bound being loose enough to hold either way.
+        let mut v_char_only = parse_and_validate(&a).unwrap();
+        v_char_only.memo = Some(sanitize_onchain(&flood, MEMO_MAX));
+        let out_before = render_output(&v_char_only, &tx, &meta);
+        let before_parsed: serde_json::Value = serde_json::from_str(&out_before).unwrap();
+        let envelope_before =
+            out_before.len() - before_parsed["transaction"].as_str().unwrap().len();
+        assert!(
+            envelope_before > 1280,
+            "the char-only path yielded {envelope_before} bytes, inside the bound, so the byte \
+             cap is not what is holding this ceiling and this test proves nothing"
+        );
+        assert!(
+            envelope_before > envelope,
+            "byte cap did not narrow the envelope: {envelope_before} vs {envelope}"
+        );
+        eprintln!(
+            "MEASURED allowance-spend-build envelope, multibyte memo flood: {envelope} bytes \
+             byte-capped, {envelope_before} bytes char-capped only (bound 1280)"
+        );
+    }
+
+    /// The control on the test above: the byte cap narrows HOSTILE input only.
+    ///
+    /// An ordinary ASCII memo is under both caps, so it must survive byte-for-byte. Without
+    /// this, "the memo is bounded" is equally consistent with a cap that truncates every real
+    /// invoice reference.
+    #[test]
+    fn the_byte_cap_leaves_an_ordinary_ascii_memo_untouched() {
+        let ordinary = "inv:2026-07-22:po-1099";
+        let a = format!(
+            r#"{{"delegation":"{DELEGATION}","amount":"25","receiver":"{RECEIVER}","memo":"{ordinary}",{}}}"#,
+            cfg("")
+        );
+        let v = parse_and_validate(&a).unwrap();
+        let m = v.memo.as_ref().expect("an ordinary memo was dropped");
+        assert_eq!(m.text, ordinary, "an ordinary ASCII memo was altered");
+        assert!(!m.truncated, "an ordinary ASCII memo was truncated");
+    }
+
+    /// The char cap ALONE does not bound this field, which is what makes the byte cap
+    /// load-bearing rather than belt-and-braces. If this ever stops overshooting, the fixture
+    /// has drifted and the test above proves less than it appears to.
+    #[test]
+    fn the_char_cap_alone_would_blow_the_memo_budget() {
+        let flood = "\u{1F600}".repeat(500);
+        let char_only = sanitize_onchain(&flood, MEMO_MAX).text;
+        assert_eq!(char_only.chars().count(), MEMO_MAX);
+        assert!(
+            char_only.len() > MEMO_MAX_BYTES,
+            "the char cap alone yielded {} bytes, which is inside the {MEMO_MAX_BYTES}-byte \
+             budget, so this fixture no longer exercises the byte axis",
+            char_only.len()
+        );
     }
 
     // --- memo sanitization: hostile framing labelled untrusted, RLO stripped ---
@@ -1834,13 +2199,18 @@ mod tests {
         // pure invisibles must yield NO memo instruction, not a memo
         // instruction carrying an empty payload.
         assert_eq!(
-            cap_memo("\u{202E}\u{200B}\u{0000}\u{FEFF}\u{2069}", MEMO_MAX),
+            cap_memo(
+                "\u{202E}\u{200B}\u{0000}\u{FEFF}\u{2069}",
+                MEMO_MAX,
+                MEMO_MAX_BYTES
+            ),
             None
         );
-        assert_eq!(cap_memo("", MEMO_MAX), None);
+        assert_eq!(cap_memo("", MEMO_MAX, MEMO_MAX_BYTES), None);
 
         // Control: a memo with any surviving visible content is still kept.
-        let kept = cap_memo("invoice #412", MEMO_MAX).expect("visible memo survives");
+        let kept =
+            cap_memo("invoice #412", MEMO_MAX, MEMO_MAX_BYTES).expect("visible memo survives");
         assert_eq!(kept.text, "invoice #412");
     }
 

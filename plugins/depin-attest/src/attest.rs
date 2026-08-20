@@ -29,11 +29,70 @@
 //!   in a host log or error path cannot leak the key.
 
 use serde::Deserialize;
-use solana_core::{sanitize_onchain, Pubkey};
+use solana_core::{sanitize_onchain, sanitize_onchain_bounded, truncate_to_byte_budget, Pubkey};
 
 /// Max bytes of the on-chain memo. SPL Memo tolerates more, but a DePIN
 /// attestation is tiny and a cap keeps fees + context bounded.
 pub const MEMO_MAX: usize = 180;
+
+/// Max BYTES of the sanitized device identifier.
+///
+/// `sanitize_onchain` caps CHARACTERS, and every ceiling this plugin publishes — the memo
+/// budget and the agent-facing report — is denominated in BYTES. A 48-character cap therefore
+/// bounds nothing on its own: 48 codepoints from the astral planes are 192 bytes, and even the
+/// ASCII path overshoots, because the truncation marker `…` the sanitizer appends is itself 3
+/// bytes. So the sanitized identifier is truncated to a char boundary at or under this budget,
+/// which is what makes the report's ceiling below a derivation rather than an observation.
+///
+/// 48 is the existing character cap reused as a byte cap, so a serial made of ASCII — every
+/// real one — is untouched, and only the multibyte case that was never bounded changes.
+pub const DEVICE_ID_MAX_BYTES: usize = 48;
+
+// --- Error-echo budgets -------------------------------------------------------------------
+//
+// The two echoes below are ATTACKER-INFLUENCED and, on this path, the provenance is the reverse
+// of what it looks like. `device_id` and `reading` arrive from the caller; the reading echo fires
+// precisely BECAUSE the value was not on the allowlist, so "it is an allowlist token, therefore
+// ASCII" is true on the success path and exactly backwards on this one. serde is worse still: an
+// `invalid type` / unknown-field error embeds the offending value VERBATIM, so the string being
+// echoed is whatever the caller sent.
+//
+// They are deliberately NOT applied to the operator's `__config` fields (`nonce_account`,
+// `rpc_url`); see the `sanitize_onchain` calls at those two sites for the reason.
+//
+// Each byte budget reuses its character cap, this repo's established convention (`MEMO_MAX`,
+// `DEVICE_ID_MAX_BYTES`): a real value is ASCII and untouched, so only the multibyte case that
+// was never bounded changes.
+
+/// CHARACTER cap for the serde error echoed by a malformed-arguments rejection.
+const ARG_ERROR_MAX: usize = 120;
+/// BYTE cap for the same. serde embeds the offending value verbatim, so this echoes attacker text.
+const ARG_ERROR_MAX_BYTES: usize = 120;
+/// CHARACTER cap for a rejected `reading` echoed back in its own rejection.
+const ECHO_MAX: usize = 64;
+/// BYTE cap for the same.
+const ECHO_MAX_BYTES: usize = 64;
+
+/// Longest allowlisted reading identifier, `tamper_triggered`.
+const READING_MAX: usize = 16;
+/// `solana-core` refuses an RPC-supplied signature longer than this, precisely so a compromised
+/// RPC cannot push an oversized string through a plugin into the agent's context.
+const SIGNATURE_MAX: usize = 96;
+/// A 32-byte pubkey base58-encodes to at most 44 characters, all ASCII.
+const BASE58_PUBKEY_MAX: usize = 44;
+/// The literal prose in [`compose_report`], with every interpolated field removed. Pinned by
+/// `the_published_ceiling_is_derived_from_the_prose_it_describes`, so a reworded report fails
+/// that test rather than silently invalidating the ceiling below.
+const REPORT_FIXED: usize = 97;
+
+/// The published BYTE ceiling for the agent-facing report.
+///
+/// Derived from its parts rather than measured off one fixture: the prose is fixed, the reading
+/// is a `&'static str` off an allowlist, the device identifier is byte-capped above, the
+/// signature is refused by `solana-core` past 96 bytes, and a base58 pubkey tops out at 44. A
+/// number read off an ASCII fixture is a ceiling for the one encoding that cannot exceed it.
+pub const REPORT_MAX: usize =
+    REPORT_FIXED + READING_MAX + DEVICE_ID_MAX_BYTES + SIGNATURE_MAX + BASE58_PUBKEY_MAX;
 
 /// The allowlisted physical events a node may attest. An injected free-text
 /// "reading" cannot pass this gate — it is not open-ended.
@@ -134,7 +193,7 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedAttestation, Strin
         // type-mismatched field. Cap + strip it before it reaches the agent.
         format!(
             "invalid arguments: {}",
-            sanitize_onchain(&e.to_string(), 120).text
+            sanitize_onchain_bounded(&e.to_string(), ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES).text
         )
     })?;
 
@@ -144,13 +203,19 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedAttestation, Strin
         // 40 KB payload back into the agent's context via the error.
         format!(
             "unknown reading (not on the allowlist): {}",
-            sanitize_onchain(&args.reading, 64).text
+            sanitize_onchain_bounded(&args.reading, ECHO_MAX, ECHO_MAX_BYTES).text
         )
     })?;
 
-    // Device id is attacker-influenceable metadata: sanitize + cap it.
-    let device = sanitize_onchain(&args.device_id, 48);
-    if device.text.is_empty() {
+    // Device id is attacker-influenceable metadata: sanitize + cap it. The sanitizer's cap is
+    // in CHARACTERS and both budgets downstream (the memo, the report) are in BYTES, so the
+    // byte cap is applied here, once, at the only place the value is produced.
+    let mut device_text = sanitize_onchain(&args.device_id, DEVICE_ID_MAX_BYTES).text;
+    truncate_to_byte_budget(&mut device_text, DEVICE_ID_MAX_BYTES);
+    // Emptiness is checked AFTER the byte truncation, not before: a device_id whose first
+    // codepoint alone exceeds the budget would otherwise pass a non-empty check and then be
+    // truncated to nothing, publishing an attestation with a blank device identity.
+    if device_text.is_empty() {
         return Err("device_id is empty after sanitization".to_string());
     }
 
@@ -164,10 +229,20 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedAttestation, Strin
     let nonce_b58 = cfg.nonce_account.ok_or_else(|| {
         "no nonce_account in config: durable-nonce replay guard is mandatory".to_string()
     })?;
+    // DELIBERATELY CHAR-CAPPED ONLY, here and at the `rpc_url` echo below. Both fields arrive in
+    // `__config`, which the host injects after stripping any caller-supplied section, so these
+    // strings are the OPERATOR's and not a path an attacker reaches. A byte cap would buy nothing
+    // against anyone and would cost the operator the `…` marker on a diagnostic they are the sole
+    // reader of — the one signal telling them their own pasted value was truncated rather than
+    // mangled. The echo is bounded either way: the char cap fires first and this is the
+    // operator's own text, not a codepoint flood.
+    //
+    // Not an oversight and not an inconsistency to sweep: the attacker-reachable echoes above use
+    // `sanitize_onchain_bounded`, and the difference in function name is the signal.
     let nonce_account = Pubkey::from_base58(nonce_b58.trim()).map_err(|_| {
         format!(
             "nonce_account is not valid base58: {}",
-            sanitize_onchain(&nonce_b58, 64).text
+            sanitize_onchain(&nonce_b58, ECHO_MAX).text
         )
     })?;
 
@@ -176,7 +251,7 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedAttestation, Strin
             if !u.starts_with("https://") {
                 return Err(format!(
                     "rpc_url must be https, got: {}",
-                    sanitize_onchain(&u, 64).text
+                    sanitize_onchain(&u, ECHO_MAX).text
                 ));
             }
             u
@@ -188,24 +263,18 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedAttestation, Strin
     let raw = format!(
         "zeroclaw-depin/v1 {} dev={} at={}",
         reading.as_str(),
-        device.text,
+        device_text,
         args.observed_at
     );
     // sanitize_onchain caps CHARACTERS; MEMO_MAX is a BYTE budget (on-chain memo
     // size + fee). A multibyte device_id can leave the char-capped string over
     // the byte budget, so truncate to a char boundary <= MEMO_MAX bytes.
     let mut memo_payload = sanitize_onchain(&raw, MEMO_MAX).text;
-    if memo_payload.len() > MEMO_MAX {
-        let mut end = MEMO_MAX;
-        while end > 0 && !memo_payload.is_char_boundary(end) {
-            end -= 1;
-        }
-        memo_payload.truncate(end);
-    }
+    truncate_to_byte_budget(&mut memo_payload, MEMO_MAX);
 
     Ok(ValidatedAttestation {
         reading,
-        device_id: device.text,
+        device_id: device_text,
         observed_at: args.observed_at,
         memo_payload,
         nonce_account,
@@ -263,10 +332,15 @@ fn parse_seed_hex(s: &str) -> Result<[u8; 32], String> {
 /// listing warns that judges will call execute and count tokens.
 ///
 /// Every piece is already bounded upstream, which is what makes the total bounded: `reading`
-/// is a fixed `&'static str` off an allowlist, `device_id` is sanitized and capped at 48 by
-/// `parse_and_validate`, `nonce_account` is fixed-width base58, and `signature` is refused by
-/// `solana-core` above 96 chars precisely so a compromised RPC cannot push an oversized string
-/// through a plugin into the agent's context.
+/// is a fixed `&'static str` off an allowlist, `device_id` is sanitized and capped at
+/// [`DEVICE_ID_MAX_BYTES`] BYTES by `parse_and_validate`, `nonce_account` is fixed-width base58,
+/// and `signature` is refused by `solana-core` above 96 bytes precisely so a compromised RPC
+/// cannot push an oversized string through a plugin into the agent's context.
+///
+/// The unit is the load-bearing word. The cap used to be 48 CHARACTERS, which bounds this
+/// report at 48 bytes only for ASCII; a device_id of astral-plane codepoints satisfied it while
+/// carrying 191 bytes. The ceiling is [`REPORT_MAX`], derived from those parts rather than read
+/// off one fixture.
 pub fn compose_report(v: &ValidatedAttestation, signature: &str) -> String {
     format!(
         "broadcast {} (device {}): {}
@@ -322,15 +396,309 @@ mod tests {
             !out.contains(&"z".repeat(64)),
             "the 4 KB device_id flood reached the report past its 48-char cap"
         );
+        // Asserted against the DERIVED ceiling rather than the round 400 this carried until the
+        // byte-vs-character gap was measured. 400 passed a 303-byte ASCII report and would also
+        // have passed a 4-byte-codepoint one at 444 only by luck of the ordering; a bound with
+        // that much slack is not testing the thing it is named for.
         assert!(
-            out.len() < 400,
-            "worst-case report was {} bytes (expected bounded < 400)",
+            out.len() <= REPORT_MAX,
+            "worst-case report was {} bytes, over the published {REPORT_MAX}-byte ceiling",
             out.len()
         );
         eprintln!(
             "MEASURED worst-case depin-attest report: {} bytes",
             out.len()
         );
+    }
+
+    /// The same ceiling, driven with 4-BYTE CODEPOINTS instead of ASCII.
+    ///
+    /// The test above is a worst case for the 1-byte encoding only. `sanitize_onchain` caps
+    /// CHARACTERS and the ceiling this plugin publishes is in BYTES, so a device_id built from
+    /// U+1F600 satisfies the 48-CHAR cap while carrying up to four times the bytes. An ASCII
+    /// fixture measured against a byte budget proves the budget for the one encoding that
+    /// cannot exceed it.
+    ///
+    /// Both encodings run here rather than only the hostile one, so the ASCII column is the
+    /// control: if a future cap change collapsed every device_id to nothing, both numbers would
+    /// go to the floor together and the assertion below would still pass, which is what the
+    /// non-empty content check is for.
+    #[test]
+    fn worst_case_report_is_bounded_under_multibyte_codepoints() {
+        let max_sig = "S".repeat(96);
+        // Measured first and asserted after the loop, so a failure in one encoding still
+        // reports the other. Asserting inside the loop hides the multibyte number behind the
+        // ASCII one, which is the number that was already known.
+        let mut measured: Vec<(&str, usize)> = Vec::new();
+        for (label, fill) in [("ascii", "z"), ("4-byte", "\u{1f600}")] {
+            // Built through serde_json so the fixture is real JSON rather than a format! string
+            // that has to survive escaping, and so a malformed fixture fails HERE instead of
+            // routing into the error branch where every assertion below would pass vacuously.
+            let body = serde_json::json!({
+                "reading": "tamper_triggered",
+                "device_id": fill.repeat(4000),
+                "observed_at": 1737300000u64,
+                "__config": {"signer_seed_hex": SEED_HEX, "nonce_account": NONCE},
+            })
+            .to_string();
+
+            let v = parse_and_validate(&body)
+                .unwrap_or_else(|e| panic!("{label} fixture must validate, got: {e}"));
+            let out = compose_report(&v, &max_sig);
+
+            // The subject really ran on the hostile input: the device survived sanitization as
+            // non-empty content and reached the report.
+            assert!(
+                !v.device_id.is_empty() && out.contains(&v.device_id),
+                "{label}: the sanitized device_id never reached the report"
+            );
+            assert!(
+                !out.contains(&fill.repeat(64)),
+                "{label}: the 4 KB device_id flood reached the report past its cap"
+            );
+            eprintln!(
+                "MEASURED depin-attest report ({label}): {} bytes, device_id {} bytes / {} chars",
+                out.len(),
+                v.device_id.len(),
+                v.device_id.chars().count()
+            );
+            measured.push((label, out.len()));
+        }
+
+        assert_eq!(
+            measured.len(),
+            2,
+            "both encodings must be measured, not just one"
+        );
+        for (label, len) in &measured {
+            assert!(
+                *len <= REPORT_MAX,
+                "{label}: worst-case report was {len} bytes, over the published \
+                 {REPORT_MAX}-byte ceiling"
+            );
+        }
+    }
+
+    /// The control proving the byte cap is load-bearing rather than decorative.
+    ///
+    /// It reconstructs what the CHARACTER cap alone produced — the code this replaced — on the
+    /// same hostile input, and requires that it blow the ceiling the byte-capped path stays
+    /// inside. A fix whose removal changes nothing is not a fix.
+    #[test]
+    fn the_character_cap_alone_does_not_bound_the_report_in_bytes() {
+        let hostile = "\u{1f600}".repeat(4000);
+        let body = serde_json::json!({
+            "reading": "tamper_triggered",
+            "device_id": hostile,
+            "observed_at": 1737300000u64,
+            "__config": {"signer_seed_hex": SEED_HEX, "nonce_account": NONCE},
+        })
+        .to_string();
+        let v = parse_and_validate(&body).expect("the fixture must validate");
+
+        // The pre-fix device identifier: sanitized with a CHARACTER cap and nothing else.
+        let char_capped_only = sanitize_onchain(&hostile, DEVICE_ID_MAX_BYTES).text;
+        let was = ValidatedAttestation {
+            reading: v.reading,
+            device_id: char_capped_only.clone(),
+            observed_at: v.observed_at,
+            memo_payload: v.memo_payload.clone(),
+            nonce_account: v.nonce_account,
+            rpc_url: v.rpc_url.clone(),
+            signer_seed: v.signer_seed,
+        };
+        let max_sig = "S".repeat(96);
+        let before = compose_report(&was, &max_sig).len();
+        let after = compose_report(&v, &max_sig).len();
+
+        eprintln!(
+            "MEASURED depin-attest report: char-cap-only {before} bytes, byte-capped {after} \
+             bytes (ceiling {REPORT_MAX}); device_id {} -> {} bytes",
+            char_capped_only.len(),
+            v.device_id.len()
+        );
+        assert!(
+            before > REPORT_MAX,
+            "the character cap alone produced {before} bytes, inside the published ceiling, so \
+             this control proves nothing"
+        );
+        assert!(after <= REPORT_MAX);
+
+        // The common case must be untouched: an identifier that already fits is byte-identical
+        // either way, so the byte cap is a narrowing on hostile input, not a behaviour change.
+        let ordinary = "sensor-A7";
+        assert_eq!(
+            sanitize_onchain(ordinary, DEVICE_ID_MAX_BYTES).text,
+            parse_and_validate(&args("motion_detected", ""))
+                .unwrap()
+                .device_id,
+            "the byte cap altered a device_id that was already inside every budget"
+        );
+    }
+
+    /// The REJECTION paths, which the ceiling above never covers: a report is only composed
+    /// once every field validated, so an argument refused at the door reaches the agent through
+    /// an error string that no report ceiling bounds.
+    ///
+    /// The provenance FLIPS here, and that is why these two sites were missed. On the success
+    /// path a `reading` is an allowlist token and therefore ASCII, which makes a character cap
+    /// look sufficient. This branch fires precisely BECAUSE the value was not on the allowlist,
+    /// so the string being echoed is whatever the caller sent, in whatever encoding.
+    #[test]
+    fn the_rejected_reading_echo_is_byte_bounded() {
+        let flood = "\u{1f600}".repeat(2000);
+        let body = serde_json::json!({
+            "reading": flood,
+            "device_id": "sensor-A7",
+            "observed_at": 1737300000u64,
+            "__config": {"signer_seed_hex": SEED_HEX, "nonce_account": NONCE},
+        })
+        .to_string();
+
+        const PREFIX: &str = "unknown reading (not on the allowlist): ";
+        let err = parse_and_validate(&body).expect_err("the flood reading must be refused");
+        // FIXTURE CONTROL: a fixture that fails EARLIER takes a different branch, and every
+        // size assertion below would then pass vacuously against some other message.
+        assert!(
+            err.starts_with(PREFIX),
+            "the intended branch was not taken, so this measures some other rejection: {err}"
+        );
+        let echoed = err.len() - PREFIX.len();
+        assert!(
+            echoed > 0,
+            "the echo capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            echoed <= ECHO_MAX_BYTES,
+            "echoed {echoed} bytes, over the {ECHO_MAX_BYTES}-byte budget"
+        );
+
+        // BEFORE/AFTER CONTROL: what the CHARACTER cap alone admitted on this same input.
+        // Without it the bound is equally consistent with a budget loose enough for either form.
+        let char_only = sanitize_onchain(&flood, ECHO_MAX).text.len();
+        assert!(
+            char_only > ECHO_MAX_BYTES,
+            "the char cap alone yields {char_only} bytes, already inside the {ECHO_MAX_BYTES}-byte \
+             budget, so the byte cap is not what holds it"
+        );
+        eprintln!(
+            "MEASURED depin-attest reading echo: {echoed} bytes (char-capped only: {char_only} \
+             bytes, budget {ECHO_MAX_BYTES})"
+        );
+    }
+
+    /// The same class with a nastier source: serde embeds the offending value VERBATIM in its
+    /// `invalid type` and unknown-field messages, so the caller chooses most of that string and
+    /// none of the crate's field-shaped reasoning applies to it at all.
+    #[test]
+    fn the_malformed_arguments_echo_is_byte_bounded() {
+        let flood = "\u{1f600}".repeat(2000);
+        // A string where a number belongs: serde's `invalid type` quotes the value back.
+        let body = serde_json::json!({
+            "reading": "motion_detected",
+            "device_id": "sensor-A7",
+            "observed_at": flood,
+            "__config": {"signer_seed_hex": SEED_HEX, "nonce_account": NONCE},
+        })
+        .to_string();
+
+        const PREFIX: &str = "invalid arguments: ";
+        let err = parse_and_validate(&body).expect_err("the fixture must fail to parse");
+        assert!(
+            err.starts_with(PREFIX),
+            "the message no longer opens with the prose this bound subtracts: {err}"
+        );
+        let echoed = err.len() - PREFIX.len();
+        assert!(
+            echoed > 0,
+            "the serde error capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            echoed <= ARG_ERROR_MAX_BYTES,
+            "echoed {echoed} bytes, over the {ARG_ERROR_MAX_BYTES}-byte budget"
+        );
+
+        // CONTROL, measured against what serde ACTUALLY produced rather than an assumed shape:
+        // if the flood never reached the error text, the bound above is satisfied trivially.
+        let raw = match serde_json::from_str::<ExecuteArgs>(&body) {
+            Ok(_) => panic!("the fixture parsed, so there is no serde error to bound"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            raw.len() > 4 * ARG_ERROR_MAX_BYTES,
+            "serde no longer embeds the offending value ({} bytes), so this test measures a \
+             fixed message rather than an attacker-chosen one",
+            raw.len()
+        );
+        let char_only = sanitize_onchain(&raw, ARG_ERROR_MAX).text.len();
+        assert!(
+            char_only > ARG_ERROR_MAX_BYTES,
+            "the char cap alone yields {char_only} bytes, already inside the budget, so the byte \
+             cap is not what holds it"
+        );
+        eprintln!(
+            "MEASURED depin-attest invalid-arguments echo: {echoed} bytes (raw serde: {} bytes, \
+             char-capped only: {char_only} bytes, budget {ARG_ERROR_MAX_BYTES})",
+            raw.len()
+        );
+    }
+
+    /// The narrowing control: both caps must leave ORDINARY input byte-identical, or "the echo
+    /// is bounded" is equally consistent with a cap that mangles every real rejection message
+    /// an operator has to read.
+    #[test]
+    fn the_byte_cap_leaves_an_ordinary_rejection_untouched() {
+        let body = serde_json::json!({
+            "reading": "motion_detcted",
+            "device_id": "sensor-A7",
+            "observed_at": 1737300000u64,
+            "__config": {"signer_seed_hex": SEED_HEX, "nonce_account": NONCE},
+        })
+        .to_string();
+        let err = parse_and_validate(&body).expect_err("a typo'd reading must be refused");
+        assert!(
+            err.ends_with("motion_detcted"),
+            "an ASCII typo was altered by the byte cap: {err}"
+        );
+    }
+
+    /// The control on [`REPORT_MAX`]'s derivation: the constant is a sum of parts, and one of
+    /// those parts is the length of prose that a reword would change. Measuring the prose here
+    /// means a reworded report fails THIS test, which names the cause, instead of silently
+    /// making the published ceiling wrong.
+    #[test]
+    fn the_published_ceiling_is_derived_from_the_prose_it_describes() {
+        let v = parse_and_validate(&args("motion_detected", "")).unwrap();
+        let sig = "sig";
+        let out = compose_report(&v, sig);
+        let interpolated = v.reading.as_str().len()
+            + v.device_id.len()
+            + sig.len()
+            + v.nonce_account.to_base58().len();
+        assert_eq!(
+            out.len() - interpolated,
+            REPORT_FIXED,
+            "compose_report's prose is {} bytes, not the {REPORT_FIXED} REPORT_MAX is derived \
+             from; update REPORT_FIXED",
+            out.len() - interpolated
+        );
+        assert_eq!(
+            REPORT_MAX,
+            REPORT_FIXED + READING_MAX + DEVICE_ID_MAX_BYTES + SIGNATURE_MAX + BASE58_PUBKEY_MAX
+        );
+        // The allowlist's own longest identifier, so READING_MAX cannot drift from the enum.
+        let longest = [
+            Reading::MotionDetected,
+            Reading::MotionCleared,
+            Reading::ContactOpened,
+            Reading::ContactClosed,
+            Reading::TamperTriggered,
+        ]
+        .iter()
+        .map(|r| r.as_str().len())
+        .max()
+        .expect("the allowlist is not empty");
+        assert_eq!(longest, READING_MAX, "READING_MAX drifted from the enum");
     }
 
     #[test]
