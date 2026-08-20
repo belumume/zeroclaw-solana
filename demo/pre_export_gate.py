@@ -241,7 +241,21 @@ def superseded_blob_ids() -> tuple[list[str], str]:
         if len(fields) >= 3 and fields[1] == "blob" and fields[2] not in ids:
             ids.append(fields[2])
     if not ids:
-        return [], "no commit in this clone reaches that path (a shallow clone cannot)"
+        # TWO DIFFERENT CAUSES REACH THIS LINE and they have different remedies, so the
+        # message must not pick one. A shallow clone genuinely cannot see the commits that
+        # carried the file; a FULL clone reporting the same thing means the path never
+        # existed in this repository's history at all, which is a wrong-repo or wrong-path
+        # problem rather than a depth problem. git answers it directly, so neither has to
+        # be guessed from the other's symptom.
+        shallow = run(
+            ["git", "-C", str(REPO), "rev-parse", "--is-shallow-repository"]
+        ).stdout.strip() == "true"
+        if shallow:
+            return [], "unreachable in git: this is a SHALLOW clone, which cannot reach them"
+        return [], (
+            "unreachable in git: full history here, and no commit in it contains that "
+            "path, so the path is wrong or this is not the repository that held it"
+        )
     return ids, "git history"
 
 
