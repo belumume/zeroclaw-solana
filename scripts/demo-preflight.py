@@ -584,9 +584,9 @@ def runbook_pins_report(price_result):
     problems = []
     scanned = 0
 
-    # A figure is HISTORICAL when its own line marks it so. That is what lets a corrected line keep
-    # the old number for context without this reading it as a live claim -- the same distinction a
-    # correction sweep makes between a stale value and one quoted in order to retire it.
+    # A figure is HISTORICAL when its own line marks it so. That exemption is what lets a line cite
+    # a past value as context without this reading it as a live claim -- the same distinction a
+    # correction sweep draws between a value still being asserted and one quoted to retire it.
     historical = ("was ", "before", "previously", "used to", "prior to", "superseded")
 
     for i, line in enumerate(lines, 1):
@@ -660,7 +660,7 @@ def selftest_runbook_pins():
          "retirement sentence naming what it retires"),
         ("The day pass was removed on 2026-08-20.", False, "historical day-pass mention"),
         (f"| x402 `/price` | **{live_n} B** (was 988 before the deploy) | ok |", False,
-         "corrected line keeping the old figure behind a historical marker"),
+         "a line citing a past value behind a historical marker"),
         ("nothing relevant here at all", False, "unrelated text"),
     ]
 
