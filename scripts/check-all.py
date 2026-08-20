@@ -28,7 +28,13 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MIN_GATES = 31  # below this the discovery walk is broken; see the docstring.
+MIN_GATES = 32  # below this the discovery walk is broken; see the docstring.
+# Raised from 31 to 32 on 2026-08-20 when check-test-count-agreement joined, per this file's own
+# rule two lines down. That gate is the only one here that needs a Rust toolchain: with cargo on
+# PATH it RUNS the suites and is by some distance the slowest gate in this walk, and without cargo
+# it self-reports exit 2 and costs nothing. It is deliberately NOT in EXCLUDED below, because that
+# list is for gates that cannot say so themselves, and this one can. Export a shared
+# CARGO_TARGET_DIR before running check-all if you want it to reuse an existing build.
 # Raised from 30 to 31 on 2026-08-20 when check-pr-base-freshness joined, per this file's own
 # rule two lines down: the floor is one BELOW the tracked count, and a floor slack by one
 # detects nothing.
