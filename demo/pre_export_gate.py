@@ -14,10 +14,11 @@ unhandled exception exits 2 with its traceback rather than exiting 0 with a shru
 the opposite posture from a productivity guard, and it is chosen for that reason.
 
 A MISSING OPTIONAL INPUT IS "NOT CHECKED", NEVER "PASSED". Tesseract absent, network
-absent, the superseded cut already deleted -- each of those makes a check unanswerable, and
-an unanswerable check must not read as green. They get their own verdict and their own exit
-code, because collapsing "I looked and it was fine" into "I could not look" is how a gate
-starts lying.
+absent, the superseded cut unreachable even in git history -- each of those makes a check
+unanswerable, and an unanswerable check must not read as green. They get their own verdict
+and their own exit code, because collapsing "I looked and it was fine" into "I could not
+look" is how a gate starts lying. Check 4 says which of its three modes answered it, so a
+PASS from a real comparison is distinguishable from a clone that had nothing to compare.
 
   0  every check ran and passed          -> safe to export, safe to post
   1  at least one check FAILED           -> do not export
@@ -52,7 +53,26 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-TESSERACT = Path("C:/Program Files/Tesseract-OCR/tesseract.exe")  # installed, off PATH
+
+
+def _find_tesseract() -> Path:
+    """The capture machine's install first, then PATH.
+
+    The literal below is where tesseract lives on the capture machine, and it is off PATH
+    there, which is why it was written down. Keeping ONLY that literal made checks 7 and 8
+    -- the identifier sweep, the two checks this gate exists for -- structurally NOT_CHECKED
+    on every other machine, including one with tesseract installed and on PATH. Returning
+    the unfound Windows path when neither resolves keeps `.exists()` False, so an absent
+    tesseract still reads NOT_CHECKED rather than pretending.
+    """
+    pinned = Path("C:/Program Files/Tesseract-OCR/tesseract.exe")
+    if pinned.is_file():
+        return pinned
+    found = shutil.which("tesseract")
+    return Path(found) if found else pinned
+
+
+TESSERACT = _find_tesseract()
 
 PASS, FAIL, NOT_CHECKED = "PASS", "FAIL", "n/a "
 
@@ -71,6 +91,26 @@ MIN_W, MIN_H = 1920, 1080
 LUFS_MIN, LUFS_MAX = -24.0, -12.0
 # True peak. -1 dBTP is the ceiling every lossy-encoding platform asks for; above it,
 # transcoding to AAC/Opus introduces intersample clipping the master never had.
+#
+# THE SHIPPED VIDEO FAILS THIS CHECK AND IS DELIBERATELY NOT BEING FIXED. Measured
+# 2026-08-20 on docs/assets/zeroclaw-demo-1080p.mp4: true peak -0.4 dBFS against this -1.0
+# ceiling, integrated -22.5 LUFS (in range). Re-derive rather than trusting the figure:
+#     ffmpeg -nostdin -hide_banner -i docs/assets/zeroclaw-demo-1080p.mp4 -af ebur128=peak=true -f null -
+#
+# WHY IT STAYS. That video is a SUBMITTED artifact: the submission deadline passed on
+# 2026-08-07 and judging is still open, which is checkable with .tools/fetch-listing.py --
+# isWinnersAnnounced is False. Re-encoding a graded deliverable mid-judging to recover 0.6 dB
+# is a bad trade, and it is not a free one either: the audio re-encode changes every byte, so
+# the published size and duration figures cited across several documents would all need a
+# sweep behind it.
+#
+# The 0.6 dB is a real risk and a modest one. It threatens intersample clipping only on a
+# lossy re-encode, and the platforms that re-encode also loudness-normalise, which pulls the
+# peak back down.
+#
+# This note exists so a later sweep does not rediscover the failure as new and 'fix' it. If
+# the video is ever re-cut for another reason, clear this at the same time; an undocumented
+# known failure is indistinguishable from an unnoticed one.
 TRUE_PEAK_MAX = -1.0
 # Below this the track is not audio, whatever the container says it is.
 SILENCE_LUFS = -60.0
@@ -80,6 +120,9 @@ SILENCE_LUFS = -60.0
 # that artifact. When it is finally deleted the check becomes unanswerable, which is
 # NOT_CHECKED and not a pass.
 VOID_CUT = REPO / ".demo-assets" / "cut" / "zeroclaw-solana-demo.mp4"
+# The same path as git spells it: repo-relative, forward slashes, which is what git wants on
+# every platform. Used to recover the bytes from history once the file itself is gone.
+VOID_CUT_REL = ".demo-assets/cut/zeroclaw-solana-demo.mp4"
 
 # THE RULE, stated rather than cited: do not film or link a devnet EXPLORER PAGE. It was carried
 # here as "C2", a label in a plan document that is gitignored and reaches no clone, so a reader
@@ -180,6 +223,97 @@ def probe(path: Path) -> dict:
         return json.loads(r.stdout)
     except json.JSONDecodeError as e:
         raise CannotRun(f"ffprobe emitted unparseable json: {e}") from e
+
+
+def git_blob_bytes(blob_id: str) -> bytes:
+    """Raw bytes of one blob. Deliberately NOT run(), which decodes as text and would
+    corrupt an mp4 the moment a byte is not valid utf-8."""
+    r = subprocess.run(
+        ["git", "-C", str(REPO), "cat-file", "blob", blob_id], capture_output=True
+    )
+    return r.stdout if r.returncode == 0 else b""
+
+
+def superseded_blob_ids() -> tuple[list[str], str]:
+    """(blob id of every deleted version of the cut, newest first; and a mode label).
+
+    ADDRESSED BY PATH, never by a pinned blob id, for exactly the reason the module
+    docstring gives against pinning the sha256: a pinned id is a claim with no expiry.
+    Resolving by path also surfaced what a pinned id would have hidden -- the path carries
+    TWO historical versions, a 175.02s cut and the 159.52s trim that replaced it, and the
+    delete removed both. Both are the synthetic-narration artifact, so both are refused.
+
+    `ls-tree <commit> -- <path>` and `cat-file blob <id>`, never the `<rev>:<path>` colon
+    form: MSYS rewrites that form when the rev holds a slash and the path begins with a
+    dot, and this path begins with a dot.
+    """
+    if not shutil.which("git"):
+        return [], "git is not on PATH"
+    r = run(["git", "-C", str(REPO), "rev-list", "--all", "--", VOID_CUT_REL])
+    if r.returncode != 0:
+        return [], f"git rev-list failed: {(r.stderr or '').strip()[:120]}"
+    ids: list[str] = []
+    for commit in r.stdout.split():
+        # "100644 blob <id>\t<path>", and empty for the commit that did the deleting.
+        fields = run(
+            ["git", "-C", str(REPO), "ls-tree", commit, "--", VOID_CUT_REL]
+        ).stdout.split()
+        if len(fields) >= 3 and fields[1] == "blob" and fields[2] not in ids:
+            ids.append(fields[2])
+    if not ids:
+        # TWO DIFFERENT CAUSES REACH THIS LINE and they have different remedies, so the
+        # message must not pick one. A shallow clone genuinely cannot see the commits that
+        # carried the file; a FULL clone reporting the same thing means the path never
+        # existed in this repository's history at all, which is a wrong-repo or wrong-path
+        # problem rather than a depth problem. git answers it directly, so neither has to
+        # be guessed from the other's symptom.
+        shallow = run(
+            ["git", "-C", str(REPO), "rev-parse", "--is-shallow-repository"]
+        ).stdout.strip() == "true"
+        if shallow:
+            return [], "this is a SHALLOW clone, which cannot reach them"
+        return [], (
+            "full history here, and no commit in it contains that "
+            "path, so the path is wrong or this is not the repository that held it"
+        )
+    return ids, "git history"
+
+
+def superseded_digests() -> tuple[list[str], str]:
+    """(sha256 of every superseded cut this clone can reach; and where they came from).
+
+    WORKING TREE FIRST, THEN GIT HISTORY. The artifact was deleted on purpose, so in every
+    clone the file is absent and check 4 read NOT_CHECKED permanently -- a check that could
+    not run anywhere except the one machine still holding the file, which is the same as no
+    check at all for everybody else. git still has the bytes. Where it does not -- a shallow
+    clone, no git on PATH -- the returned label says which mode this is, and the check
+    reports NOT_CHECKED rather than degrading quietly into a green.
+    """
+    if VOID_CUT.is_file():
+        return [hashlib.sha256(VOID_CUT.read_bytes()).hexdigest()], "the working tree"
+    ids, mode = superseded_blob_ids()
+    digests = [
+        hashlib.sha256(raw).hexdigest() for raw in map(git_blob_bytes, ids) if raw
+    ]
+    if ids and not digests:
+        return [], "git named the blob(s) but could not read them back"
+    return digests, mode
+
+
+def repo_gate_result() -> tuple[int, str]:
+    """(returncode, last line) from scripts/check-all.py.
+
+    A SEAM, and it earns a function for a measured reason. The suite's rc-0 case stubs
+    check_repo_gates, so what this produces is discarded there -- while the subprocess still
+    ran, at 155.5s against a 226s whole-suite runtime. Stubbing a check without stubbing the
+    work that feeds it is what kept this suite too slow to route into CI, where it would also
+    have re-run in full the same gates the job around it had just run.
+    """
+    # Read the returncode directly. A pipe would report the pager's status and this
+    # repo has already taken that exact false green once.
+    r = run([sys.executable, str(REPO / "scripts" / "check-all.py")], cwd=str(REPO))
+    lines = [ln for ln in (r.stdout or r.stderr or "").split("\n") if ln.strip()]
+    return r.returncode, (lines[-1][:150] if lines else "(no output)")
 
 
 def atom_order(path: Path) -> list[str]:
@@ -348,15 +482,27 @@ def check_container(vcodec, acodec, atoms):
     return PASS, f"h264+aac, faststart, atoms {'/'.join(atoms[:5])}"
 
 
-def check_not_void_cut(target_digest, void_digest):
-    if void_digest is None:
-        return NOT_CHECKED, f"{VOID_CUT.name} is not in the tree to compare against"
-    if target_digest == void_digest:
+def check_not_void_cut(target_digest, void_digests, source):
+    """void_digests: every superseded version's sha256. source: where they came from.
+
+    The source is reported on EVERY branch on purpose. This check has three modes now --
+    the working tree, git history, or unreachable -- and a reader who cannot tell which one
+    produced a PASS cannot tell a real comparison from a clone that had nothing to compare.
+    """
+    if not void_digests:
+        return NOT_CHECKED, (
+            f"{VOID_CUT.name} is absent from the tree and unreachable in git "
+            f"({source}), so there is nothing to compare against"
+        )
+    if target_digest in void_digests:
         return FAIL, (
             "byte-identical to the superseded AI-narrated cut, which the human-voice "
             "constraint disqualifies outright"
         )
-    return PASS, "not the superseded synthetic-narration cut"
+    return PASS, (
+        f"not the superseded synthetic-narration cut "
+        f"({len(void_digests)} known version(s), from {source})"
+    )
 
 
 def check_audio_present(acodec, channels, lufs):
@@ -421,19 +567,28 @@ def check_identifiers(frames):
     """
     if frames is None:
         return NOT_CHECKED, "tesseract unavailable, so no frame was read"
-    home = os.environ.get("USERPROFILE", "")
-    needles = [
-        ("os account name", os.environ.get("USERNAME", "").lower()),
+    # USERNAME/USERPROFILE are Windows; USER/HOME are what every other platform sets. With
+    # only the Windows pair, this check ran on a Linux machine with ZERO identity needles --
+    # it searched for nothing and reported "no account name", which is a PASS asserting
+    # something it never looked for. The count is in the detail below for the same reason:
+    # a reader can then tell a real sweep from one that had no name to sweep for.
+    home = os.environ.get("USERPROFILE") or os.environ.get("HOME") or ""
+    account = (os.environ.get("USERNAME") or os.environ.get("USER") or "").lower()
+    identity = [
+        ("os account name", account),
         ("home-directory basename", Path(home).name.lower() if home else ""),
         ("full home path", home.lower()),
-    ] + [(f"timezone marker {m.strip()!r}", m) for m in TZ_MARKERS]
+    ]
+    live = sum(1 for _, needle in identity if needle)
+    needles = identity + [(f"timezone marker {m.strip()!r}", m) for m in TZ_MARKERS]
     found = _scan(frames, needles)
     if found:
         detail = "; ".join(f"{label} at {_spans(ts)}" for label, ts in found)
         return FAIL, f"{len(frames)} frame(s) scanned -- {detail}"
     return (
         PASS,
-        f"{len(frames)} frame(s), no account name, home path or timezone marker",
+        f"{len(frames)} frame(s), {live} identity needle(s) and "
+        f"{len(TZ_MARKERS)} timezone marker(s), none present",
     )
 
 
@@ -504,11 +659,7 @@ def gate(video: Path, fps: float, frame_cap: int, network: bool, gates: bool) ->
     aud = next((s for s in streams if s.get("codec_type") == "audio"), {})
 
     digest = hashlib.sha256(video.read_bytes()).hexdigest()
-    void = (
-        hashlib.sha256(VOID_CUT.read_bytes()).hexdigest()
-        if VOID_CUT.is_file()
-        else None
-    )
+    void_digests, void_source = superseded_digests()
     lufs, peak = measure_loudness(video)
 
     # [(timestamp_seconds, ocr_text)], so a finding can name WHERE rather than only that
@@ -526,12 +677,7 @@ def gate(video: Path, fps: float, frame_cap: int, network: bool, gates: bool) ->
 
     rc, tail = None, ""
     if gates:
-        # Read the returncode directly. A pipe would report the pager's status and this
-        # repo has already taken that exact false green once.
-        r = run([sys.executable, str(REPO / "scripts" / "check-all.py")], cwd=str(REPO))
-        rc = r.returncode
-        lines = [ln for ln in (r.stdout or r.stderr or "").split("\n") if ln.strip()]
-        tail = lines[-1][:150] if lines else "(no output)"
+        rc, tail = repo_gate_result()
 
     links = []
     if network:
@@ -555,7 +701,10 @@ def gate(video: Path, fps: float, frame_cap: int, network: bool, gates: bool) ->
                 vs.get("codec_name"), aud.get("codec_name"), atom_order(video)
             ),
         ),
-        ("4  not the superseded cut", *check_not_void_cut(digest, void)),
+        (
+            "4  not the superseded cut",
+            *check_not_void_cut(digest, void_digests, void_source),
+        ),
         (
             "5  audio present and audible",
             *check_audio_present(aud.get("codec_name"), aud.get("channels"), lufs),
