@@ -100,6 +100,8 @@ def assess(base: str, head: str) -> dict | None:
 
 def selftest() -> int:
     print("SELFTEST: the detector must FIRE on two real pre-fix heads.\n")
+    if run(["git", "rev-parse", "--is-shallow-repository"])[1].strip() == "true":
+        run(["git", "fetch", "--unshallow", "--quiet", "origin"])
     run(["git", "fetch", "origin", "--quiet"])
     ok = True
     for sha, label in CONTROL_CASES:
@@ -148,9 +150,11 @@ def main() -> int:
         "--pr",
         type=int,
         default=None,
-        help="check ONLY this pull request. CI passes the PR under test, so a required "
-        "check fails the branch actually at fault rather than reddening every open PR "
-        "because a sibling happens to have a stale base.",
+        help="check ONLY this pull request rather than every open one. NOTHING calls "
+        "this today: the required gate here may not touch a live third party, and this "
+        "reads the GitHub API. It exists so that a future per-PR check fails the branch "
+        "actually at fault instead of reddening every open PR because a sibling has a "
+        "stale base.",
     )
     ap.add_argument("--base", default="origin/main")
     args = ap.parse_args()
@@ -172,11 +176,15 @@ def main() -> int:
         run(["git", "fetch", "--unshallow", "--quiet", "origin"])
     run(["git", "fetch", "origin", "--quiet"])
     if args.pr is not None:
-        rc, out = run(["gh", "pr", "view", str(args.pr), "--json", "number,title,headRefName"])
+        rc, out = run(["gh", "pr", "view", str(args.pr), "--json", "number,title,headRefName,state"])
         if rc != 0:
             print(f"cannot check: could not read PR #{args.pr} (network or auth)")
             return CANNOT_CHECK
-        prs = [json.loads(out)] if out else []
+        one = json.loads(out) if out else None
+        if one and one.get("state") and one["state"] != "OPEN":
+            print(f"PASS  PR #{args.pr} is {one['state']}, not open; nothing to merge")
+            return 0
+        prs = [one] if one else []
     else:
         rc, out = run(
             ["gh", "pr", "list", "--state", "open", "--json", "number,title,headRefName"]
