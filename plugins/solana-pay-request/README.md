@@ -128,53 +128,54 @@ These are the plugin's own host tests, with no wasm toolchain and no network. Ru
 them with `cargo test --lib`:
 
 ```
-running 44 tests
+running 45 tests
+test pay::tests::bidi_and_zero_width_in_label_are_stripped ... ok
+test pay::tests::amount_as_json_number_is_accepted ... ok
 test pay::tests::control_chars_in_memo_become_a_single_space ... ok
 test pay::tests::bad_spl_token_is_rejected ... ok
-test pay::tests::demo_charge_table_4_for_25_usdc ... ok
-test pay::tests::amount_as_json_number_is_accepted ... ok
-test pay::tests::bad_reference_is_rejected ... ok
-test pay::tests::demo_output_is_compact ... ok
 test pay::tests::amount_exact_decimal_string_is_preserved ... ok
+test pay::tests::bad_reference_is_rejected ... ok
 test pay::tests::bare_recipient_has_no_query ... ok
-test pay::tests::bidi_and_zero_width_in_label_are_stripped ... ok
-test pay::tests::every_reserved_char_in_memo_is_percent_encoded ... ok
-test pay::tests::double_dot_amount_rejected ... ok
 test pay::tests::debug_is_available_and_holds_no_secret ... ok
+test pay::tests::demo_charge_table_4_for_25_usdc ... ok
 test pay::tests::hostile_memo_cannot_inject_a_second_recipient_or_param ... ok
-test pay::tests::injection_framing_in_memo_is_labeled_untrusted_in_summary ... ok
-test pay::tests::leading_dot_amount_rejected ... ok
-test pay::tests::leading_zeros_amount_rejected ... ok
+test pay::tests::demo_output_is_compact ... ok
 test pay::tests::missing_recipient_fails_closed ... ok
+test pay::tests::leading_zeros_amount_rejected ... ok
 test pay::tests::multibyte_memo_encodes_utf8_bytes_without_panic ... ok
-test pay::tests::negative_amount_rejected ... ok
-test pay::tests::no_amount_summary_says_payer_entered ... ok
 test pay::tests::pure_hidden_payload_field_is_dropped ... ok
+test pay::tests::negative_amount_rejected ... ok
 test pay::tests::qr_payload_equals_url ... ok
-test pay::tests::recipient_injection_string_is_rejected ... ok
-test pay::tests::recipient_is_re_encoded_canonically_trimming_whitespace ... ok
-test pay::tests::reference_single_and_array_both_accepted ... ok
+test pay::tests::leading_dot_amount_rejected ... ok
+test pay::tests::every_reserved_char_in_memo_is_percent_encoded ... ok
+test pay::tests::published_echo_budgets_are_pinned_to_their_readme_figures ... ok
+test pay::tests::no_amount_summary_says_payer_entered ... ok
 test pay::tests::scientific_notation_amount_rejected ... ok
 test pay::tests::sol_transfer_has_no_spl_token_param ... ok
+test pay::tests::recipient_injection_string_is_rejected ... ok
+test pay::tests::reference_single_and_array_both_accepted ... ok
+test pay::tests::recipient_is_re_encoded_canonically_trimming_whitespace ... ok
+test pay::tests::double_dot_amount_rejected ... ok
 test pay::tests::spec_example_sol_transfer_matches_verbatim ... ok
-test pay::tests::every_rejected_argument_echo_is_byte_bounded ... ok
 test pay::tests::spec_example_usdc_transfer_matches_verbatim ... ok
-test pay::tests::spl_token_hyphenated_key_alias_accepted ... ok
 test pay::tests::the_byte_cap_leaves_an_ordinary_ascii_request_untouched ... ok
 test pay::tests::the_byte_cap_leaves_an_ordinary_rejection_untouched ... ok
-test pay::tests::the_character_cap_alone_does_not_bound_the_output_in_bytes ... ok
-test pay::tests::the_published_ceiling_is_derived_from_the_prose_it_describes ... ok
+test pay::tests::spl_token_hyphenated_key_alias_accepted ... ok
+test pay::tests::injection_framing_in_memo_is_labeled_untrusted_in_summary ... ok
 test pay::tests::the_untrusted_label_is_the_length_the_output_ceiling_assumes ... ok
+test pay::tests::the_published_ceiling_is_derived_from_the_prose_it_describes ... ok
 test pay::tests::too_many_fractional_digits_rejected ... ok
 test pay::tests::too_many_references_rejected ... ok
-test pay::tests::the_malformed_arguments_echo_is_byte_bounded ... ok
 test pay::tests::trailing_dot_amount_rejected ... ok
 test pay::tests::unknown_field_fails_closed ... ok
-test pay::tests::worst_case_output_is_bounded_under_multibyte_codepoints ... ok
-test pay::tests::worst_case_output_is_bounded_with_every_field_at_its_cap ... ok
 test pay::tests::zero_amount_is_spec_valid ... ok
+test pay::tests::worst_case_output_is_bounded_with_every_field_at_its_cap ... ok
+test pay::tests::worst_case_output_is_bounded_under_multibyte_codepoints ... ok
+test pay::tests::the_character_cap_alone_does_not_bound_the_output_in_bytes ... ok
+test pay::tests::the_malformed_arguments_echo_is_byte_bounded ... ok
+test pay::tests::every_rejected_argument_echo_is_byte_bounded ... ok
 
-test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 What the load-bearing cases prove:
