@@ -28,7 +28,10 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MIN_GATES = 30  # below this the discovery walk is broken; see the docstring.
+MIN_GATES = 31  # below this the discovery walk is broken; see the docstring.
+# Raised from 30 to 31 on 2026-08-20 when check-pr-base-freshness joined, per this file's own
+# rule two lines down: the floor is one BELOW the tracked count, and a floor slack by one
+# detects nothing.
 # Raised from 27 to 30 on 2026-08-19 because the constant had drifted three below the rule stated
 # two lines down, which is the only rule this floor has. The tracked set was 31 and discovery
 # returned 30 while the floor read 27, so three gates could vanish and the walk would still look

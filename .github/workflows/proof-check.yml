@@ -18,6 +18,7 @@ name: proof-check
 # diff would show it. Declaring it makes the grant reviewable.
 permissions:
   contents: read
+  pull-requests: read
 
 on:
   schedule:
@@ -186,4 +187,31 @@ jobs:
             esac
           done
           echo "the box self-check endpoint was unreachable on three attempts"
+          exit 1
+
+      # A pull request's DISPLAYED diff is three-dot and reads as additions; merging applies the
+      # two-dot delta, which on a branch that forked before a squash merge deletes whatever landed
+      # in between. Four pull requests here have carried that. Same retry shape as the step above:
+      # 2 is transport and is retried, anything else is a real finding on the first attempt.
+      - name: no open pull request would revert work already on main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            python3 scripts/check-pr-base-freshness.py
+            rc=$?
+            case "$rc" in
+              0) exit 0 ;;
+              2)
+                echo "Could not reach the GitHub API on attempt $attempt; retrying."
+                sleep 20
+                ;;
+              *)
+                echo "An open pull request would revert work already on main."
+                exit 1
+                ;;
+            esac
+          done
+          echo "the GitHub API was unreachable on three attempts"
           exit 1
