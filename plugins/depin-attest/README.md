@@ -58,7 +58,7 @@ These are the plugin's own host tests. No wasm toolchain, no live network. Run t
 `cargo test --lib`:
 
 ```
-running 18 tests
+running 21 tests
 test attest::tests::all_readings_round_trip ... ok
 test attest::tests::an_all_control_device_id_is_refused ... ok
 test attest::tests::bad_seed_length_fails_closed ... ok
@@ -78,7 +78,7 @@ test attest::tests::valid_attestation_parses_and_composes_memo ... ok
 test attest::tests::worst_case_report_is_bounded ... ok
 test attest::tests::worst_case_report_is_bounded_under_multibyte_codepoints ... ok
 
-test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 What the load-bearing cases prove:

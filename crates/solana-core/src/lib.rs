@@ -54,7 +54,10 @@ pub use signing::{
 pub use token::{find_payment, has_memo, FoundPayment, PaymentError};
 #[cfg(target_family = "wasm")]
 pub use transport::WakiTransport;
-pub use tx_decode::{decode_transaction, DecodeError, DecodedTransaction};
+pub use tx_decode::{
+    decode_transaction, verify_declared_signatures, DecodeError, DecodedTransaction,
+    SignatureCheckError,
+};
 
 /// Shorten a base58 identifier for display: `AAAA…ZZZZ`. Operates on CHARS, not
 /// bytes, so an untrusted non-ASCII input (a Kamino `market` label read straight

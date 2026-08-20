@@ -95,7 +95,7 @@ These are the plugin's own host tests, with no wasm toolchain and no network. Ru
 with `cargo test --lib`:
 
 ```
-running 20 tests
+running 23 tests
 test publish::tests::an_all_control_unit_is_identical_to_an_absent_unit ... ok
 test publish::tests::bad_scale_rejected ... ok
 test publish::tests::build_instructions_puts_advance_nonce_first ... ok
@@ -117,7 +117,7 @@ test publish::tests::unknown_top_level_field_fails_closed ... ok
 test publish::tests::valid_reading_parses_and_derives_everything ... ok
 test publish::tests::worst_case_report_is_bounded_and_never_echoes_the_unit ... ok
 
-test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 What the load-bearing cases prove:
