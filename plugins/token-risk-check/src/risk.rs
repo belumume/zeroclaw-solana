@@ -1035,4 +1035,35 @@ mod tests {
             "a real base58 value was altered by the echo cap: {e}"
         );
     }
+
+    /// The echo budgets are PUBLISHED in this crate's README as judge-facing figures, and every
+    /// other assertion in this module reads them as its own budget rather than pinning a value.
+    /// That includes the boundary fixture above, which is built by repeating a character
+    /// `ECHO_MAX_BYTES` times and so MOVES WITH the constant it is meant to hold. The suite
+    /// therefore proves a byte cap EXISTS and, without this test, proves nothing about where any
+    /// of them sits: raising `ECHO_MAX` to 200 or `RPC_ERROR_MAX` to 800 leaves every other test
+    /// green while making the README false.
+    ///
+    /// Pinning the literals is what makes a budget change fail here and force the README to move
+    /// in the same edit. Read a failure as "the README now disagrees", not as "put the number
+    /// back". Convention adopted from `solana-pay-request`, which closed the same class on the
+    /// other five crates.
+    #[test]
+    fn published_echo_budgets_are_pinned_to_their_readme_figures() {
+        assert_eq!(
+            (ECHO_MAX, ECHO_MAX_BYTES),
+            (64, 64),
+            "README publishes 64 B for the rejected mint and rpc_url echoes"
+        );
+        assert_eq!(
+            (ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES),
+            (120, 120),
+            "README publishes a 118 B measurement against this 120 B budget"
+        );
+        assert_eq!(
+            (RPC_ERROR_MAX, RPC_ERROR_MAX_BYTES),
+            (200, 200),
+            "README publishes 198 to 199 B measurements against this 200 B budget"
+        );
+    }
 }

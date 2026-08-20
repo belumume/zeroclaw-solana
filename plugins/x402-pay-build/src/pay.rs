@@ -1390,4 +1390,42 @@ mod tests {
             );
         }
     }
+
+    /// The echo budgets are PUBLISHED in this crate's README as judge-facing figures, and every
+    /// other assertion in this module reads them as its own budget rather than pinning a value.
+    /// That includes `the_echo_budget_is_exact_on_both_sides`, whose fixture is built by
+    /// repeating a character `ECHO_MAX_BYTES` times and so MOVES WITH the constant it is meant to
+    /// hold. The suite therefore proves a byte cap EXISTS and, without this test, proves nothing
+    /// about where any of them sits: raising `ECHO_MAX` to 200, `ARG_ERROR_MAX` to 400 or
+    /// `REFUSALS_ECHOED_MAX` to 200 each leaves every other test green while making a published
+    /// number false, and the last of those silently restores the multiplier this module bounds.
+    ///
+    /// Pinning the literals is what makes a budget change fail here and force the README to move
+    /// in the same edit. Read a failure as "the README now disagrees", not as "put the number
+    /// back". Convention adopted from `solana-pay-request`, which closed the same class on the
+    /// other five crates.
+    #[test]
+    fn published_echo_budgets_are_pinned_to_their_readme_figures() {
+        assert_eq!(
+            (ECHO_MAX, ECHO_MAX_BYTES),
+            (64, 64),
+            "README publishes 61 to 63 B measurements against this 64 B budget"
+        );
+        assert_eq!(
+            (ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES),
+            (120, 120),
+            "README publishes 118 B measurements against this 120 B budget, for both the \
+             arguments error and the 402 body"
+        );
+        assert_eq!(
+            (RPC_ERROR_MAX, RPC_ERROR_MAX_BYTES),
+            (200, 200),
+            "README publishes 198 to 199 B measurements against this 200 B budget"
+        );
+        assert_eq!(
+            REFUSALS_ECHOED_MAX, 8,
+            "README publishes 2,118 B for a 200-tier refusal, which is a product of the per-tier \
+             message and THIS count"
+        );
+    }
 }
