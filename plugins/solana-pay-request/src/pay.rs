@@ -1,6 +1,6 @@
 //! Pure core of the `solana-pay-request` plugin: validate a payment request and
 //! emit a Solana Pay **transfer-request** URL plus a QR-ready payload. Custody
-//! tier T1 (and stricter): this plugin holds **no secrets and makes no network
+//! tier T0: this plugin holds **no secrets and makes no network
 //! calls**. It is pure computation — validate inputs, then construct a `solana:`
 //! URL — so it is fully host-testable with no wasm toolchain and no RPC.
 //!
