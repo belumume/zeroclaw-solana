@@ -176,11 +176,30 @@ def docs(root: pathlib.Path) -> list[str]:
 def claims_in(text: str) -> list[tuple[int, int, str]]:
     """Every (line number, value, kind) this document presents as a test count."""
     out: list[tuple[int, int, str]] = []
-    for lineno, line in enumerate(text.split("\n"), 1):
+    lines = text.split("\n")
+    for lineno, line in enumerate(lines, 1):
         for m in RESULT.finditer(line):
             out.append((lineno, int(m.group(1).replace(",", "")), "harness line"))
         for m in CLAIM.finditer(line):
             out.append((lineno, int(m.group(1).replace(",", "")), "prose"))
+        # A HARD WRAP SPLITS THE FIGURE FROM ITS DENOMINATOR, and a per-line scan then
+        # returns a CLEAN verdict over a stale figure it structurally cannot see.
+        # MEASURED: docs/WRITEUP.md ended a line with "the 127 host" and began the next
+        # with "tests.", and this gate reported "24 compared, 0 not compared, all
+        # published test counts are values the toolchain prints" while that 127 was live
+        # and wrong. Re-scan each line joined to its successor and keep ONLY matches that
+        # STRADDLE the join, so a same-line claim is never counted twice. A blank line
+        # ends a paragraph, so it is never joined across.
+        nxt = lines[lineno] if lineno < len(lines) else ""
+        if not line.strip() or not nxt.strip():
+            continue
+        joined = line + " " + nxt
+        edge = len(line)
+        for pat, kind in ((RESULT, "harness line"), (CLAIM, "prose")):
+            for m in pat.finditer(joined):
+                if m.start() < edge < m.end():
+                    value = int(m.group(1).replace(",", ""))
+                    out.append((lineno, value, kind + ", wrapped across lines"))
     return out
 
 
@@ -478,6 +497,27 @@ def selftest() -> int:
         report(
             f"wording {i} of a wrong number fails", _run({"fx/README.md": bad})[0] == 1
         )
+
+    # A HARD WRAP splits the figure from its denominator, and a per-line scan then returns
+    # a CLEAN verdict over a stale figure. MEASURED on the real corpus: docs/WRITEUP.md
+    # ended a line with "the 127 host" and began the next with "tests.", and this gate
+    # reported 24 compared / 0 not compared / all published counts correct while that 127
+    # was live and wrong. Widening the scan needs three controls, not one: the NEW fire, an
+    # over-correction control proving it did not start matching everything, and a boundary
+    # control proving a paragraph break is never joined across.
+    wrapped_bad = "the core carries 12 host\ntests today.\n"
+    wrapped_ok = "the core carries 11 host\ntests today.\n"
+    across_blank = "the core carries 12 host\n\ntests today.\n"
+    report("a WRAPPED wrong number fails", _run({"fx/README.md": wrapped_bad})[0] == 1)
+    report("a WRAPPED correct number passes", _run({"fx/README.md": wrapped_ok})[0] == 0)
+    report(
+        "a blank line is never joined across",
+        _run({"fx/README.md": across_blank})[0] != 1,
+    )
+    report(
+        "a same-line claim is not counted twice by the join",
+        len(claims_in("cargo test   # 11 tests\n")) == 1,
+    )
 
     # The embedded harness transcript is a quotation of the toolchain and is gated as one.
     report(

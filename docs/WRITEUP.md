@@ -900,7 +900,7 @@ every confirmation until nine in the evening.
 worked example of the layering argument above: it is a skill rather than a plugin because the
 tier test said so.
 
-**Code.** [`crates/solana-core`](../crates/solana-core) is the pure core with the 127 host
+**Code.** [`crates/solana-core`](../crates/solana-core) is the pure core with the 150 host
 tests. [`plugins/`](../plugins) holds all nine components. [`x402-feed-gate`](../x402-feed-gate)
 is the earning node.
 
