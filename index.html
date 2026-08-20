@@ -370,7 +370,14 @@ python3 scripts/certify_publish_tx.py     # seven injection shapes, all refused<
 <h2><span class="n">06</span>Everything else</h2>
 <ul class="links">
   <li><b><a href="https://github.com/belumume/zeroclaw-solana">Repository</a></b>
-      <span>sixteen crates, clippy-clean at <code>-D warnings</code> on host and wasm</span></li>
+      <!-- Re-derive before editing this number; it moves whenever a crate is added:
+           git ls-files '*Cargo.toml' | xargs grep -l '^\[package\]' | wc -l
+           docs/ARGUMENT.md carries the same command beside the same claim. This said sixteen
+           while that said seventeen, because a crate was added and only one surface was swept.
+           Deliberately NOT gated: a counter cannot tell this claim from TESTING.md's historical
+           account or ci.yml's intentional floor without judgement, and a gate that fires on
+           those two is worse than this comment. -->
+      <span>seventeen crates, clippy-clean at <code>-D warnings</code> on host and wasm</span></li>
   <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/WRITEUP.md">Write-up</a></b>
       <span>what it is, who it is for, custody and threat model</span></li>
   <li><b><a href="https://github.com/belumume/zeroclaw-solana/blob/main/docs/ONE-PAGER.md">One-pager</a></b>
