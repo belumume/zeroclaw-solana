@@ -861,6 +861,23 @@ jobs:
       - name: that gate's always-loaded scope is load-bearing
         run: python3 scripts/mutation-check-plugin-count-agreement.py
 
+      # THE SAME SHAPE ON THE TEST-COUNT AXIS, and its GATE half cannot live in this job. Only
+      # the controls are here; `check-test-count-agreement.py` itself runs in the
+      # `test-count-agreement` job below, because it has to RUN the suites and this job is
+      # deliberately toolchain-free and capped at five minutes.
+      #
+      # Both controls below are offline and hermetic: the suite injects the counts rather than
+      # measuring them, which is why it can run on a machine with no Rust at all, and the
+      # mutation half disables one load-bearing piece at a time and requires the suite to go
+      # red for each. The pair is the point -- a clean run cannot be told from a detector that
+      # cannot detect, so the suite asserts a correct figure PASSING in the same shape a wrong
+      # one FAILS.
+      - name: the test-count gate's own controls
+        run: python3 scripts/check-test-count-agreement.py --selftest
+
+      - name: each piece of the test-count gate is load-bearing
+        run: python3 scripts/mutation-check-test-count-agreement.py
+
       # The same shape again, one axis over, and this one had already gone wrong. Four judge-facing
       # surfaces said `10 static + 4 live claims` while verify-proof.py derives its live total as
       # `3 + two optional claims` and a fresh clone printed 5/5. The repo's own captured terminal
@@ -1053,6 +1070,46 @@ jobs:
       - name: The shipped release binary builds
         working-directory: x402-feed-gate
         run: cargo build --release --locked
+
+  test-count-agreement:
+    name: the docs quote test counts the toolchain prints
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # WHY THIS IS ITS OWN JOB rather than a step inside an existing one.
+    #
+    # The gate compares a published test count against the number cargo prints, so it has to
+    # RUN the suites, and it needs ALL of them at once whenever some doc publishes a count
+    # without naming a crate -- which `README.md` and `docs/WRITEUP.md` both do. No existing
+    # job builds that set: `core` builds one crate, the `plugins` matrix builds one plugin per
+    # leg, and `publish-gates` is deliberately toolchain-free. A cross-crate comparison cannot
+    # be hosted by a job that only ever sees one crate.
+    #
+    # ITS CONTROLS ARE NOT HERE. `--selftest` and the mutation checks run in `publish-gates`,
+    # because they inject their counts and need no Rust at all. Keeping them off this job means
+    # a Rust failure here cannot take the controls down with it.
+    #
+    # WHAT MAKES IT AFFORDABLE. Cargo dominates, so the gate runs only the crates a doc
+    # actually makes a claim about, and reaches for the rest only when a claim names no crate.
+    # One shared CARGO_TARGET_DIR compiles the common dependency tree once rather than per
+    # crate, which is most of the cost. Measured on this project's Windows host, warm shared
+    # target dir, thirteen crates: see the gate's docstring.
+    #
+    # A CRATE THAT WILL NOT BUILD DEGRADES, IT DOES NOT VOID. The gate reports it as NOT
+    # MEASURED and keeps gating every claim attributed to a crate that did build; only the
+    # unattributed class, which is judged by absence from the union, is set aside. That is
+    # deliberate: judging absence against an incomplete union manufactures failures against
+    # correct prose, and a gate that reddens on correct prose is a gate that gets removed.
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target-shared
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: . -> target-shared
+
+      - name: every published test count is a number cargo prints
+        run: python3 scripts/check-test-count-agreement.py
 
   differential-fuzz:
     name: differential fuzzer, the run the write-up advertises
