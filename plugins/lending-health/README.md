@@ -35,7 +35,7 @@ plugin's own test suite, which is a different and weaker kind of evidence.
 Host tests, no wasm toolchain, no network. Run with `cargo test --lib`:
 
 ```
-test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 The load-bearing cases:
@@ -82,3 +82,23 @@ cargo test --locked -- --nocapture --test-threads=1 2>&1 | grep MEASURED
 
 `--test-threads=1` is load-bearing. The default parallel harness interleaves stdout and tears
 these lines, and a torn parse under-reports, which reads as agreement.
+
+### The refusal path is a second output path, and it is bounded too
+
+A rejection echoes the value it refused, that string lands in `ToolResult::error`, and it reaches
+the agent's context exactly as the report does. Provenance INVERTS there: "the wallet is a base58
+address, so it is 44 ASCII bytes" is true of an accepted call and exactly backwards on the branch
+that fires BECAUSE the decode failed. Every echo is therefore capped on both axes, and the caps are
+now measured rather than asserted (`every_error_path_echo_is_byte_bounded_not_just_char_bounded`):
+
+| echoed value | measured | what a character cap alone admitted |
+| --- | --- | --- |
+| rejected wallet | 64 B | 255 B |
+| `serde` arguments error | 120 B | 479 B |
+| non-2xx Kamino body | 200 B | 799 B |
+
+`bad JSON:` and `invalid JSON body:` are deliberately left uncapped, and that is a MEASUREMENT, not
+an oversight: both deserialize into `serde_json::Value`, which accepts every well-formed document,
+so the only failure available is a positional syntax error: 43 bytes on the same flood that makes
+a TYPED parse produce 8,057. `an_untyped_value_parse_error_does_not_echo_the_body` pins both halves,
+so the day that stops being true the suite says so.

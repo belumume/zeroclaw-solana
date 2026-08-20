@@ -90,17 +90,29 @@ mod component {
             let rpc = SolanaRpc::new(WakiTransport::new(&v.rpc_url));
             let acct = match rpc.get_account_info(&v.mint) {
                 Ok(Some(a)) => a,
+                // NOT ECHO-BOUNDED, deliberately: `mint_b58` reached here only by SURVIVING
+                // `Pubkey::from_base58` in the pure core, which requires exactly 32 decoded bytes
+                // and therefore admits nothing longer than 44 characters. MEASURED against the
+                // decoder rather than assumed: 32 chars of `1` decode to 32 zero bytes and parse,
+                // 33 do not, and a round-tripped address is 44 ASCII bytes. This is the ACCEPTED
+                // path, where "it is an address, so it is short" is the true half of the
+                // provenance argument that inverts on the rejection branch in `parse_and_validate`.
                 Ok(None) => return Ok(fail(format!("mint account not found: {}", v.mint_b58))),
+                // BOUNDED, in the pure core so it is host-testable. This is the most REMOTE string
+                // the plugin renders: the endpoint's own error text, or an unsanitized 200-CHARACTER
+                // snippet of a non-2xx body from `solana-core`'s transport.
                 Err(e) => {
                     emit(
                         PluginAction::Fail,
                         PluginOutcome::Failure,
                         "rpc fetch failed",
                     );
-                    return Ok(fail(format!("rpc error: {e:?}")));
+                    return Ok(fail(risk::rpc_error_message(&e)));
                 }
             };
 
+            // NOT ECHO-BOUNDED, deliberately: `acct.owner` is a `Pubkey` decoded from 32 bytes and
+            // re-encoded, so it is at most 44 ASCII characters whatever the node sent.
             let token_2022 = acct.owner == pubkey::token_2022_program();
             if !token_2022 && acct.owner != pubkey::token_program() {
                 return Ok(fail(format!(
@@ -109,6 +121,9 @@ mod component {
                 )));
             }
 
+            // NOT ECHO-BOUNDED, deliberately: every `MintError` variant carries a NUMBER and no
+            // string — `TooShort(usize)`, `NotAMint(u8)`, `MalformedTlv(usize)`, `BadCOption(u32)`.
+            // None of the account's bytes reach this message.
             let decoded = match decode_mint(&acct.data, token_2022) {
                 Ok(d) => d,
                 Err(e) => return Ok(fail(format!("mint decode failed (fail-closed): {e:?}"))),

@@ -49,7 +49,7 @@ plugin's own test suite, which is a different and weaker kind of evidence.
 Host tests, no wasm toolchain, no network. Run with `cargo test --lib`:
 
 ```
-test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 The load-bearing cases:
@@ -108,3 +108,30 @@ cargo test --locked -- --nocapture --test-threads=1 2>&1 | grep MEASURED
 
 `--test-threads=1` is load-bearing. The default parallel harness interleaves stdout and tears
 these lines, and a torn parse under-reports, which reads as agreement.
+
+### The refusal path is a second output path, and it is bounded too
+
+A rejection echoes the value it refused, that string lands in `ToolResult::error`, and it reaches
+the agent's context exactly as the report does. Provenance INVERTS there: "the mint is a base58
+address, so it is 44 ASCII bytes" is true of an accepted call and exactly backwards on the branch
+that fires BECAUSE the decode failed. Measured, with the figure a character cap alone admitted
+beside each:
+
+| echoed value | measured | what a character cap alone admitted |
+| --- | --- | --- |
+| rejected mint | 64 B | 255 B |
+| rejected `rpc_url` | 64 B | 255 B |
+| `serde` arguments error | 118 B | 413 B |
+| `RpcError` from the node | 198 to 199 B | 709 to 778 B |
+
+The first three caps were already in source; what did not exist was anything that could tell. Every
+error-path fixture here was an ASCII flood measured in CHARACTERS, and an ASCII flood is bounded
+identically by either axis, so the byte half of each cap could have been deleted with the suite
+still green. `every_argument_error_echo_is_byte_bounded_not_just_char_bounded` and
+`the_malformed_arguments_echo_is_byte_bounded` are the missing control.
+
+The fourth was genuinely unbounded. `rpc error: {e:?}` is the most remote string this plugin
+renders: `solana-core` caps `RpcError::Rpc.message` on CHARACTERS and leaves `RpcError::Transport`'s
+non-2xx body snippet unsanitized, so a hostile endpoint answering in 4-byte codepoints reached the
+agent at four times the figure either cap suggests. Bounded now, and measured across all three
+variants by `an_rpc_error_echo_is_byte_bounded`.
