@@ -1,4 +1,4 @@
-# Produce the box's aarch64 gate binary on a clean Linux runner.
+# Produce the box's aarch64 gate binary on a clean Linux runner, and make it retrievable.
 #
 # WHY THIS EXISTS, in three stages, because each fix moved the problem rather than removing it.
 # The binaries were originally built ON the box, and on 2026-08-17 that OOM-killed a 12 GB machine
@@ -11,6 +11,29 @@
 #
 # The three verification steps are not ceremony. A silently x86-64 binary is exactly what would
 # brick the box, and a clean compile cannot tell you the difference.
+#
+# WHY THE RELEASE JOB EXISTS. Producing the binary is not the same as being able to FETCH it.
+# Measured 2026-08-20 from the operator's network with the VPN off:
+#
+#     api.github.com                              HTTP 200
+#     objects.githubusercontent.com               reached          (a githubusercontent host)
+#     productionresultssa9.blob.core.windows.net  connection forcibly closed
+#
+# Actions ARTIFACTS are served from that Azure blob host. RELEASE ASSETS are served from a
+# githubusercontent host: a download from github.com/<o>/<r>/releases/download/... answered 302 to
+# release-assets.githubusercontent.com when traced on 2026-08-20, against an RFC5737 control that
+# correctly failed to resolve anywhere.
+#
+# The durable property is that split -- githubusercontent versus Azure blob -- and NOT any one
+# hostname. GitHub has already moved this once, from objects.githubusercontent.com to
+# release-assets.githubusercontent.com, so a rationale pinned to a specific subdomain would read
+# as false within a release cycle while the reasoning behind it stayed true. Anything re-checking
+# this should trace the redirect rather than assume the name above.
+#
+# Confirmed positively rather than inferred: a real asset from a public release downloaded fine
+# over the same link while the artifact host was still refusing, and Python's own TLS stack fails
+# identically on the blob host, so it is the network rather than schannel. Publishing the same
+# proven bytes BOTH ways means the deploy is not hostage to which CDN a given network permits.
 
 name: cross-build-gate
 
@@ -18,8 +41,18 @@ name: cross-build-gate
 # you it is broken too late, and the whole point of this job is that the artifact is available
 # when someone needs to deploy. Running it on the PR is also what makes it verifiable before it
 # is trusted.
+#
+# The RELEASE is deliberately NOT on every push to main. A release per commit is noise on a page
+# a stranger reads, and this repo's releases page currently holds exactly one curated entry.
+# Publishing is therefore gated on an explicit act: a `gate-aarch64-v*` tag, or a dispatch that
+# ticks the box below.
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Also publish the proven binary as a GitHub release asset (fetchable where the Actions artifact host is blocked)"
+        type: boolean
+        default: false
   pull_request:
     paths:
       - "x402-feed-gate/**"
@@ -27,11 +60,25 @@ on:
       - ".github/workflows/cross-build-gate.yml"
   push:
     branches: [main]
+    # Scoped to this one namespace ON PURPOSE. A broad glob would fire on the tags this repo
+    # already carries for other reasons -- `submission-2026-08-07` and the two
+    # `control/base-freshness-*` tags that check-pr-base-freshness.py drives its selftest from --
+    # and each of those would publish a binary release nobody asked for.
+    #
+    # Path filters are NOT evaluated for pushes of tags (GitHub's workflow-syntax reference states
+    # this outright), so the `paths:` list below does not suppress a tag push. That was worth
+    # checking rather than assuming: had it been the other way, this trigger would have silently
+    # never fired, which is the failure shape that reads as "the release just never appeared".
+    tags:
+      - "gate-aarch64-v*"
     paths:
       - "x402-feed-gate/**"
       - "crates/**"
       - ".github/workflows/cross-build-gate.yml"
 
+# The file-level default stays READ. Only the publish job widens it, and only to `contents: write`,
+# which is the single scope creating a release requires. Widening here instead would hand a
+# write-capable token to the build job on every pull request, for nothing.
 permissions:
   contents: read
 
@@ -39,6 +86,18 @@ jobs:
   aarch64:
     name: aarch64 gate binary, built and proven
     runs-on: ubuntu-latest
+
+    # These outputs are what the publish job refuses to proceed without. Step ordering alone
+    # already gates it -- a failed step ends the job -- but ordering is a property someone can
+    # edit away, and `continue-on-error: true` on a proof would let the job go green with a proof
+    # that did not hold. An explicit output per proof closes that: the flag is written on the last
+    # line of each proof, so it exists only if every assertion above it passed.
+    outputs:
+      arch_proven: ${{ steps.proof_arch.outputs.ok }}
+      daypass_proven: ${{ steps.proof_daypass.outputs.ok }}
+      control_proven: ${{ steps.proof_control.outputs.ok }}
+      sha256: ${{ steps.checksum.outputs.sha256 }}
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -67,6 +126,7 @@ jobs:
       # PROOF 1: the artifact is genuinely ARM. A clean compile does NOT establish this, and an
       # x86-64 binary installed on the box takes the paywall down with an exec-format error.
       - name: prove it is aarch64 and not silently host-arch
+        id: proof_arch
         working-directory: x402-feed-gate
         run: |
           set -euo pipefail
@@ -75,12 +135,14 @@ jobs:
           file "$BIN"
           readelf -h "$BIN" | grep -q 'Machine:.*AArch64'
           echo "  confirmed AArch64"
+          echo "ok=1" >> "$GITHUB_OUTPUT"
 
       # PROOF 2: the withdrawn day-pass tier is absent. The live gate advertised "day pass:
       # unlimited reads this UTC day" long after the code withdrew it, because nothing ever
       # granted the second read. A total-strings denominator is printed beside the zero, so a
       # zero from a broken read is distinguishable from a zero that is a measurement.
       - name: prove the withdrawn day-pass tier is not in the artifact
+        id: proof_daypass
         working-directory: x402-feed-gate
         run: |
           set -euo pipefail
@@ -92,26 +154,35 @@ jobs:
           test "$TOTAL" -gt 1000
           test "$KEEP" -ge 1
           test "$DAYPASS" -eq 0
+          echo "ok=1" >> "$GITHUB_OUTPUT"
 
       # PROOF 3: a control for the two greps above. If `strings` or the pipeline were broken, both
       # counts would read zero and PROOF 2 would pass for the wrong reason. Asserting a token that
       # MUST be present is what makes the day-pass zero mean something.
       - name: control, so the day-pass zero is a measurement rather than a failed read
+        id: proof_control
         working-directory: x402-feed-gate
         run: |
           set -euo pipefail
           BIN=target/aarch64-unknown-linux-gnu/release/x402-feed-gate
           strings "$BIN" | grep -q 'X402_SELLER_WALLET'
           echo "  control token present, so the greps reach the binary"
+          echo "ok=1" >> "$GITHUB_OUTPUT"
 
       - name: checksum, for verifying what actually lands on the box
+        id: checksum
         working-directory: x402-feed-gate
         run: |
           set -euo pipefail
           BIN=target/aarch64-unknown-linux-gnu/release/x402-feed-gate
           sha256sum "$BIN" | tee ../gate-binary.sha256
           stat -c '  bytes: %s' "$BIN"
+          echo "sha256=$(sha256sum "$BIN" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
+      # KEPT, not replaced. The artifact costs nothing, CI consumers expect it, and for anyone
+      # whose network does not block the blob host it is the faster path. The release is an
+      # ADDITIONAL route to the same proven bytes, and it is also how those bytes reach the
+      # publish job below.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: x402-feed-gate-aarch64
@@ -120,3 +191,189 @@ jobs:
             gate-binary.sha256
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    name: publish the proven binary as a release asset
+    # `needs:` is the gate. The publish job cannot start unless the build job succeeded in full,
+    # which includes all three proofs. This is a native mechanism rather than an ordering
+    # convention, and it is why the release ships on exactly the evidence the artifact ships on --
+    # never weaker, which matters because a release asset is the more public of the two.
+    needs: aarch64
+    # `github.event.inputs.*` rather than `inputs.*`, and the comparison is against the STRING
+    # 'true'. A boolean workflow_dispatch input arrives as a real boolean in the `inputs` context
+    # and as a string in the webhook payload under `github.event.inputs`. The payload form is used
+    # here because `github.event` exists on every trigger, so the expression is well defined on a
+    # push and a pull_request too, where there are no inputs at all. Do not "simplify" the two
+    # halves toward each other: `inputs.publish_release == 'true'` compares a boolean against a
+    # string and is always false, which disables publishing while looking entirely reasonable.
+    if: ${{ startsWith(github.ref, 'refs/tags/gate-aarch64-v') || github.event.inputs.publish_release == 'true' }}
+    runs-on: ubuntu-latest
+
+    # The whole reason the file-level default stays `read`. Creating a release needs `contents:
+    # write` and nothing else: no packages, no id-token, no pull-requests, no actions.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: x402-feed-gate-aarch64
+          path: downloaded
+
+      # The proofs ran in the other job. This asserts they actually PASSED rather than merely
+      # having been present, which is what `continue-on-error` on a proof step would otherwise
+      # hide. Values arrive through env rather than direct ${{ }} interpolation into the script,
+      # which is the documented shape for keeping expression values out of the shell's parser.
+      - name: refuse to publish unless all three proofs actually passed
+        env:
+          ARCH_PROVEN: ${{ needs.aarch64.outputs.arch_proven }}
+          DAYPASS_PROVEN: ${{ needs.aarch64.outputs.daypass_proven }}
+          CONTROL_PROVEN: ${{ needs.aarch64.outputs.control_proven }}
+        run: |
+          set -euo pipefail
+          echo "  aarch64=$ARCH_PROVEN  day-pass-absent=$DAYPASS_PROVEN  control=$CONTROL_PROVEN"
+          test "$ARCH_PROVEN" = "1"
+          test "$DAYPASS_PROVEN" = "1"
+          test "$CONTROL_PROVEN" = "1"
+          echo "  all three proofs hold; the bytes are publishable"
+
+      # The bytes about to be made public must be the bytes that were proven. Comparing the
+      # recomputed digest against the one the build job recorded establishes that by identity, so
+      # re-running readelf and strings here would add no information and would create a second
+      # place for the same assertion to drift. The length check is not decoration: without it an
+      # empty or missing checksum file yields an empty EXPECTED, and a comparison between two
+      # empty strings is the reassuring answer arrived at by measuring nothing.
+      - name: prove the downloaded bytes are the proven bytes
+        id: locate
+        env:
+          BUILD_SHA256: ${{ needs.aarch64.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          # `-print -quit` rather than piping into `head -n 1`. Under `set -o pipefail` that pipe
+          # is a latent abort: head exits after one line, find takes SIGPIPE if it still has
+          # results to write, and the pipeline fails on a search that actually succeeded. The
+          # paths are found rather than hardcoded because upload-artifact roots an archive at the
+          # least common ancestor of the paths it was given, so the depth here is a consequence
+          # of that packing rather than something worth restating and getting wrong.
+          BIN=$(find downloaded -type f -name x402-feed-gate -print -quit)
+          test -n "$BIN"
+          SUM=$(find downloaded -type f -name gate-binary.sha256 -print -quit)
+          test -n "$SUM"
+
+          EXPECTED=$(awk '{print $1}' "$SUM")
+          ACTUAL=$(sha256sum "$BIN" | awk '{print $1}')
+          echo "  recorded=$EXPECTED"
+          echo "  recomputed=$ACTUAL"
+          echo "  job-output=$BUILD_SHA256"
+          test "${#EXPECTED}" -eq 64
+          test "$EXPECTED" = "$ACTUAL"
+          test "$BUILD_SHA256" = "$ACTUAL"
+          echo "  transfer verified, digest unchanged since the proofs ran"
+
+          echo "bin=$BIN" >> "$GITHUB_OUTPUT"
+          echo "sum=$SUM" >> "$GITHUB_OUTPUT"
+          echo "sha256=$ACTUAL" >> "$GITHUB_OUTPUT"
+          echo "bytes=$(stat -c '%s' "$BIN")" >> "$GITHUB_OUTPUT"
+
+      # A tag push publishes under the tag that was pushed. A dispatch has no tag, so one is
+      # derived from the commit: `gate-aarch64-<short-sha>` names the exact source of the bytes
+      # without inventing a version scheme this project does not have. It deliberately does not
+      # match the `gate-aarch64-v*` trigger, so creating it cannot re-enter this workflow.
+      - name: decide the tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="gate-aarch64-$(echo "$GITHUB_SHA" | cut -c1-12)"
+          fi
+          echo "  tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          BIN: ${{ steps.locate.outputs.bin }}
+          SUM: ${{ steps.locate.outputs.sum }}
+          DIGEST: ${{ steps.locate.outputs.sha256 }}
+          BYTES: ${{ steps.locate.outputs.bytes }}
+        run: |
+          set -euo pipefail
+
+          # A second asset as well as the digest in the body, so the hash is readable without
+          # downloading anything and checkable with a file once you have.
+          #
+          # REGENERATED against the ASSET name rather than copied from the build. The build's own
+          # file records `target/aarch64-unknown-linux-gnu/release/x402-feed-gate`, the path the
+          # compiler wrote to, and `sha256sum -c` resolves the name it is given -- so shipping
+          # that file would hand every downloader a check that looks right and fails, because
+          # they have one file in one directory and not that tree. The digest is byte-identical;
+          # only the name it is bound to changes.
+          printf '%s  %s\n' "$DIGEST" "x402-feed-gate-aarch64" > ./x402-feed-gate-aarch64.sha256
+
+          cat > notes.md <<'HEADER'
+          The aarch64 build of the x402 feed gate, for the Arm box that serves the paywall.
+
+          This exists as a release, and not only as a CI artifact, because Actions artifacts are
+          served from a blob host that some networks refuse while release assets are served from a
+          host they permit. The artifact is still published alongside it and holds identical bytes.
+
+          ### Verify before installing
+
+          Download both assets into one directory, keeping their names, then:
+
+          ```
+          sha256sum -c x402-feed-gate-aarch64.sha256
+          readelf -h x402-feed-gate-aarch64 | grep Machine     # expect AArch64
+          ```
+
+          The asset arrives without the executable bit, so the mode has to be set rather than
+          assumed. Use `install`, never `cp`: writing over a running binary in place fails with
+          `Text file busy`, while `install` unlinks first, so the replacement actually lands.
+
+          ```
+          install -m755 x402-feed-gate-aarch64 <ExecStart path from the unit>
+          ```
+
+          HEADER
+
+          {
+            echo "### This build"
+            echo
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| sha256 | \`$DIGEST\` |"
+            echo "| bytes | $BYTES |"
+            echo "| commit | \`$GITHUB_SHA\` |"
+            echo "| built by | [run $GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) |"
+            echo
+            echo "### Proven in CI before this asset was created"
+            echo
+            echo "- ELF machine is AArch64, so a host-arch binary cannot reach the box."
+            echo "- The withdrawn day-pass tier is absent, counted against a total-strings denominator."
+            echo "- A control token that must be present was found, so that zero is a measurement."
+          } >> notes.md
+
+          # --latest=false on purpose. These are build outputs, and the releases page carries a
+          # curated milestone entry that should stay the one a stranger lands on.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "  release $TAG already exists; replacing its assets"
+            gh release upload "$TAG" \
+              "$BIN#x402-feed-gate-aarch64" \
+              "./x402-feed-gate-aarch64.sha256" \
+              --clobber
+          else
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "x402 feed gate, aarch64 ($TAG)" \
+              --notes-file notes.md \
+              --latest=false \
+              "$BIN#x402-feed-gate-aarch64" \
+              "./x402-feed-gate-aarch64.sha256"
+          fi
+
+          echo "  published: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
