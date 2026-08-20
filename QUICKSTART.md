@@ -47,7 +47,7 @@ cannot print a pass. Last line:
 PASS  all 2 bundles verified offline: devnet-transactions.json, mainnet-transactions.json
 ```
 
-That covers 29 devnet and 3 mainnet transactions, and it holds whether or not any RPC still
+That covers 32 devnet and 3 mainnet transactions, and it holds whether or not any RPC still
 serves them. Among them you can read the durable-nonce replay guard on every publish, and the
 over-cap transfer the on-chain allowance program refused, on both chains.
 
@@ -117,14 +117,14 @@ one host.
 build section below reads as though they do:
 
 ```
-(cd crates/solana-core && cargo test)     # 127 tests, ~30s, no network
-(cd x402-feed-gate && cargo test)         # 61 tests, ~100s, no network
+(cd crates/solana-core && cargo test)     # 150 tests, ~30s, no network
+(cd x402-feed-gate && cargo test)         # 77 tests, ~100s, no network
 ```
 
-188 green, from a clean clone, with Rust and nothing else. Re-derive the counts by summing the
+227 green, from a clean clone, with Rust and nothing else. Re-derive the counts by summing the
 `test result:` lines rather than trusting these figures. Both crates run more than one target,
 and the totals above are the sum across all of them: `cargo test` in `x402-feed-gate` runs the
-lib target (24) as well as the bin (37), and `crates/solana-core` runs its lib plus three
+lib target (30) as well as the bin (47), and `crates/solana-core` runs its lib plus three
 integration suites.
 Without a toolchain the same totals come from the test attributes, none of which is `#[ignore]`d:
 `grep -rcE '^\s*#\[(tokio::)?test\]' crates/solana-core x402-feed-gate --include='*.rs'`. The `cd` is required rather than
