@@ -1,0 +1,113 @@
+# Produce the box's aarch64 gate binary on a clean Linux runner.
+#
+# WHY THIS EXISTS, in three stages, because each fix moved the problem rather than removing it.
+# The binaries were originally built ON the box, and on 2026-08-17 that OOM-killed a 12 GB machine
+# (rustc, 11.5 GB anon-rss) with the reaper choosing the compiler; next time it may choose a
+# service. Cross-building on a developer's WSL moved that risk off the box and onto one laptop,
+# and on 2026-08-20 that WSL wedged so hard an ELEVATED `wsl --shutdown` did not return, taking
+# both the staged artifact and the ability to rebuild it with the same wall. This job removes both
+# at once: the artifact is produced reproducibly by anyone, with no local toolchain, on a machine
+# that is discarded afterwards.
+#
+# The three verification steps are not ceremony. A silently x86-64 binary is exactly what would
+# brick the box, and a clean compile cannot tell you the difference.
+
+name: cross-build-gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "x402-feed-gate/**"
+      - "crates/**"
+      - ".github/workflows/cross-build-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  aarch64:
+    name: aarch64 gate binary, built and proven
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: stable
+          targets: aarch64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: x402-feed-gate
+
+      - name: the aarch64 linker, without which cargo silently has no way to link
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      # --locked so the committed lockfile is what builds, matching every other job here and
+      # keeping the artifact a function of the commit rather than of the day it was built.
+      - name: build
+        working-directory: x402-feed-gate
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --locked --target aarch64-unknown-linux-gnu
+
+      # PROOF 1: the artifact is genuinely ARM. A clean compile does NOT establish this, and an
+      # x86-64 binary installed on the box takes the paywall down with an exec-format error.
+      - name: prove it is aarch64 and not silently host-arch
+        working-directory: x402-feed-gate
+        run: |
+          set -euo pipefail
+          BIN=target/aarch64-unknown-linux-gnu/release/x402-feed-gate
+          test -f "$BIN"
+          file "$BIN"
+          readelf -h "$BIN" | grep -q 'Machine:.*AArch64'
+          echo "  confirmed AArch64"
+
+      # PROOF 2: the withdrawn day-pass tier is absent. The live gate advertised "day pass:
+      # unlimited reads this UTC day" long after the code withdrew it, because nothing ever
+      # granted the second read. A total-strings denominator is printed beside the zero, so a
+      # zero from a broken read is distinguishable from a zero that is a measurement.
+      - name: prove the withdrawn day-pass tier is not in the artifact
+        working-directory: x402-feed-gate
+        run: |
+          set -euo pipefail
+          BIN=target/aarch64-unknown-linux-gnu/release/x402-feed-gate
+          TOTAL=$(strings "$BIN" | wc -l)
+          DAYPASS=$(strings "$BIN" | grep -ci 'day pass' || true)
+          KEEP=$(strings "$BIN" | grep -c 'one feed reading' || true)
+          echo "  day-pass=$DAYPASS  one-feed-reading=$KEEP  total strings=$TOTAL"
+          test "$TOTAL" -gt 1000
+          test "$KEEP" -ge 1
+          test "$DAYPASS" -eq 0
+
+      # PROOF 3: a control for the two greps above. If `strings` or the pipeline were broken, both
+      # counts would read zero and PROOF 2 would pass for the wrong reason. Asserting a token that
+      # MUST be present is what makes the day-pass zero mean something.
+      - name: control, so the day-pass zero is a measurement rather than a failed read
+        working-directory: x402-feed-gate
+        run: |
+          set -euo pipefail
+          BIN=target/aarch64-unknown-linux-gnu/release/x402-feed-gate
+          strings "$BIN" | grep -q 'X402_SELLER_WALLET'
+          echo "  control token present, so the greps reach the binary"
+
+      - name: checksum, for verifying what actually lands on the box
+        working-directory: x402-feed-gate
+        run: |
+          set -euo pipefail
+          BIN=target/aarch64-unknown-linux-gnu/release/x402-feed-gate
+          sha256sum "$BIN" | tee ../gate-binary.sha256
+          stat -c '  bytes: %s' "$BIN"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: x402-feed-gate-aarch64
+          path: |
+            x402-feed-gate/target/aarch64-unknown-linux-gnu/release/x402-feed-gate
+            gate-binary.sha256
+          if-no-files-found: error
+          retention-days: 30
