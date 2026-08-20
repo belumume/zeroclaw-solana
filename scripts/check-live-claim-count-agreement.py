@@ -127,6 +127,26 @@ _NUM = r"(\d+|" + "|".join(CARDINALS) + r")"
 PAT_STATIC = re.compile(r"\b" + _NUM + r"\s+static\b", re.I)
 PAT_LIVE = re.compile(r"\b" + _NUM + r"\s+live\s+claim", re.I)
 
+# THE ABBREVIATED FORM, and it existed on the STATIC side only by accident. The verifier prints
+# `N/M static claims verified` and `N/M live claims verified`; prose shortens both to `10/10 static
+# + 5/5 live`. PAT_STATIC happens to catch that, because tokenising `10/10 static` leaves a word
+# boundary before the denominator and it reads `10 static`. PAT_LIVE cannot, because it requires
+# the word `claim`, so the live half of the shortened pair was ungated while the static half was
+# covered -- an asymmetry visible nowhere in the output, since both halves sit in one sentence.
+#
+# It matters because that pair is SPOKEN ALOUD off the demo runbook, and it has already gone stale
+# once: work elsewhere took the live total from 4 to 5 and the line kept saying 4/4, which puts the
+# operator in the one position this repo will not accept, contradicting his own terminal on camera.
+#
+# GROUP 1 IS THE DENOMINATOR, matching the other two patterns' contract: the numerator is how many
+# passed on one run and varies legitimately, while the denominator is the ceiling this gate derives
+# from the verifier's own source.
+#
+# MEASURED before it was added, over the scope this gate actually reads: 0 hits across 42 tracked
+# prose files and 2 in the operational scope, both correct. Historical records outside the scope
+# (the handoff archive carries 50 of them, each right for its date) are untouched by construction.
+PAT_LIVE_RATIO = re.compile(r"\b\d+\s*/\s*" + _NUM + r"\s+live\b", re.I)
+
 # A discovery walk that matches nothing reports a clean sweep. Floor it well below the measured
 # 13 so ordinary editing does not trip it, but high enough that a broken scan cannot pass.
 #
@@ -267,6 +287,7 @@ def check(root: Path) -> tuple[int, list[str]]:
             for kind, pattern, want in (
                 ("static", PAT_STATIC, static_ceiling),
                 ("live", PAT_LIVE, live_ceiling),
+                ("live", PAT_LIVE_RATIO, live_ceiling),
             ):
                 for match in pattern.finditer(line):
                     seen += 1
@@ -591,6 +612,55 @@ def selftest() -> int:
             "and the failure names that file and its line",
             any(f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md:1" in x for x in out),
         )
+
+    #      THE ABBREVIATED `N/M live` FORM. A widening adds no failing case on its own, so the
+    #      suite passes identically before and after and "still 34/34" reads as confirmation when
+    #      it is really the absence of anything that could have failed. These two are the proof:
+    #      prose IDENTICAL apart from the denominator, one of which must now fire and did not
+    #      before. The static half of the same sentence is deliberately CORRECT in both, so a fire
+    #      here can only be attributed to the live half.
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _fixture(
+            tmp,
+            _agreeing_docs(),
+            ignored={
+                f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md": "Land on `10/10 static` + `4/4 live`.\n"
+            },
+        )
+        rc, out = run(tmp)
+        report("a wrong `N/M live` with no following 'claim' word FAILS", rc == 1)
+        report(
+            "and it is reported as a LIVE disagreement, not a static one",
+            any("says live 4," in x for x in out),
+        )
+
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _fixture(
+            tmp,
+            _agreeing_docs(),
+            ignored={
+                f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md": "Land on `10/10 static` + `5/5 live`.\n"
+            },
+        )
+        report("the corrected form of that same line passes", run(tmp)[0] == 0)
+
+    #      OVER-CORRECTION CONTROL for the same widening. `N/M` is an extremely common shape --
+    #      dates, versions, fractions, scores -- so the pattern must stay anchored on the word
+    #      `live` and must not fire on a ratio that merely sits near it.
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _fixture(
+            tmp,
+            _agreeing_docs(),
+            ignored={
+                f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md": (
+                    "Rehearsed 3/4 times; 2/3 of the live elements were probed on 2026/08/20.\n"
+                )
+            },
+        )
+        report("a bare ratio near the word 'live' does NOT fire", run(tmp)[0] == 0)
 
     #      AND THE FLOOR DOES NOT COUNT IT. An operational file full of claims must not let a
     #      dead tracked scan pass the floor, which would hand back the false green.
