@@ -130,6 +130,44 @@ same multibyte input measured **1552 bytes** through the character-cap-only path
 `the_character_cap_alone_does_not_bound_the_description_in_bytes` keeps as a permanent control. Run
 `cargo test -- --nocapture worst_case` to re-derive all three.
 
+### Refusal size, which is the OTHER output path
+
+Nothing above bounds a REFUSAL, and this plugin refuses far more often than it authorises. A
+refusal echoes the challenge field it rejected, that string lands in `ToolResult::error`, and it
+reaches the agent's context exactly as the summary does.
+
+Provenance INVERTS there, which is why the success path's reasoning does not carry over. "`payTo`
+is an address, so it is 44 ASCII bytes" is true of a tier this tool ACCEPTS and exactly backwards
+on the branch that fires BECAUSE the field did not match: nothing has validated the shape of a
+value at the moment it is being rejected for its shape. Every seller-controlled echo is now capped
+on both axes, measured rather than asserted:
+
+| echoed value | measured | what was there before |
+| --- | --- | --- |
+| `scheme`, `payTo`, `asset`, `network`, non-digit `amount` | 61 B each | uncapped; 252 B through a character cap alone |
+| all-digit `amount` that overflows `u64` | 63 B | uncapped; the charset check is not a size check, and 40,000 nines pass it |
+| `challenge_url` refused as non-https | 61 B | uncapped |
+| `serde` arguments error | 118 B | uncapped; 8,061 B raw |
+| the 402 body refused as not-a-v2-challenge | 118 B | uncapped; 8,058 B raw |
+| `RpcError` while reading the mint's decimals | 198 to 199 B | uncapped; 8,009 to 8,033 B raw |
+
+Bounding each field is not enough on its own. `authorise` joins one refusal per offered tier and
+`accepts` carries no length cap, so a bounded per-tier message times an unbounded tier count is
+still unbounded: measured at **50,653 bytes** for a 200-tier challenge before the count was
+bounded, and **2,118 bytes** after, with the tiers not named still counted in the message
+(`a_hostile_tier_count_cannot_multiply_a_bounded_refusal`).
+
+`x402Version`, the requested tier index, the over-ceiling amount and the rejected memo are
+deliberately NOT echo-bounded, each for a reason stated at its site: the first three render
+integers, and the memo branch reports its LENGTH and never its content, which is the one thing a
+refusal for a bad nonce must not do.
+
+Every figure above is printed by the test that asserts it:
+
+```
+cargo test --locked -- --nocapture --test-threads=1 2>&1 | grep MEASURED
+```
+
 ## Tool interface
 
 `x402_pay_build`

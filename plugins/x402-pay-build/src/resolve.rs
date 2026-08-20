@@ -17,6 +17,8 @@
 
 use solana_core::{decode_mint, pubkey, Pubkey, RpcTransport, SolanaRpc};
 
+use crate::pay::sanitize_rpc_error;
+
 /// A mint reporting more decimals than this is refused rather than trusted. Mirrors the ceiling
 /// `allowance-spend-build` applies for the same reason: an attacker-controlled RPC can say
 /// anything, and an absurd exponent is how that becomes an absurd amount.
@@ -26,19 +28,30 @@ pub const MAX_MINT_DECIMALS: u8 = 18;
 pub fn mint_decimals<T: RpcTransport>(rpc: &SolanaRpc<T>, mint: &Pubkey) -> Result<u8, String> {
     let acct = match rpc.get_account_info(mint) {
         Ok(Some(a)) => a,
+        // NOT ECHO-BOUNDED, deliberately: `mint` is a `Pubkey`, so this is `bs58` of exactly 32
+        // bytes. MEASURED against `Pubkey::from_base58`, which requires exactly 32 decoded bytes
+        // and therefore admits nothing longer than 44 characters: a round-tripped address is 44
+        // ASCII bytes and there is no input that makes it longer.
         Ok(None) => {
             return Err(format!(
                 "the configured mint {} was not found on chain",
                 mint.to_base58()
             ))
         }
-        Err(e) => return Err(format!("rpc error fetching the mint: {e:?}")),
+        // BOUNDED. This is the most REMOTE string this crate renders: `RpcError::Rpc.message` is
+        // the endpoint's own error text, and `RpcError::Transport` carries a 200-CHARACTER snippet
+        // of a non-2xx body that `solana-core`'s transport does not sanitize at all. Both are
+        // capped on characters upstream and neither is capped in BYTES, so an endpoint answering in
+        // astral-plane codepoints reaches this line at four times the figure the cap suggests.
+        Err(e) => return Err(sanitize_rpc_error("rpc error fetching the mint", &e)),
     };
 
     // The OWNER selects the layout, so it is checked before the data is decoded rather than
     // after. A non-token account decoded as a mint yields a plausible byte at the decimals
     // offset, which is a wrong exponent that looks like a right one.
     let token_2022 = acct.owner == pubkey::token_2022_program();
+    // NOT ECHO-BOUNDED, deliberately: `acct.owner` is a `Pubkey` decoded from the response, so it
+    // is 32 bytes re-encoded, 44 ASCII characters at most, whatever the node sent.
     if !token_2022 && acct.owner != pubkey::token_program() {
         return Err(format!(
             "the configured mint is owned by {}, which is not an SPL token program; it is not a \
@@ -47,8 +60,12 @@ pub fn mint_decimals<T: RpcTransport>(rpc: &SolanaRpc<T>, mint: &Pubkey) -> Resu
         ));
     }
 
+    // NOT ECHO-BOUNDED, deliberately: every `MintError` variant carries a NUMBER and no string --
+    // `TooShort(usize)`, `NotAMint(u8)`, `MalformedTlv(usize)`, `BadCOption(u32)`. None of the
+    // account's bytes reach this message.
     let decoded = decode_mint(&acct.data, token_2022)
         .map_err(|e| format!("the mint account did not decode: {e:?}"))?;
+    // NOT ECHO-BOUNDED, deliberately: `decimals` is a `u8`.
     if decoded.decimals > MAX_MINT_DECIMALS {
         return Err(format!(
             "the mint reports {} decimals, over the {MAX_MINT_DECIMALS} ceiling; refusing to \

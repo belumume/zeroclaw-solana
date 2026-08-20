@@ -94,13 +94,12 @@ impl Tool for X402PayBuild {
             },
         };
 
+        // The message is BUILT IN THE PURE CORE so it is host-testable, which matters most here:
+        // deserializing into a TYPED struct is the one serde failure that embeds the offending
+        // value verbatim, and this body is the seller's. See `pay::challenge_parse_error`.
         let challenge: pay::Challenge = match serde_json::from_str(&body) {
             Ok(c) => c,
-            Err(e) => {
-                return Ok(fail(format!(
-                    "the 402 body is not a v2 challenge this can read: {e}"
-                )))
-            }
+            Err(e) => return Ok(fail(pay::challenge_parse_error(&e.to_string()))),
         };
 
         let authorised = match pay::authorise(&challenge, &parsed.cfg, parsed.tier) {
@@ -147,19 +146,24 @@ fn fetch_challenge(url: &str) -> Result<String, String> {
         .header("Accept", "application/json")
         .connect_timeout(std::time::Duration::from_secs(10))
         .send()
-        .map_err(|e| format!("could not reach {url}: {e}"))?;
+        // Both refusals that echo `url` are BUILT IN THE PURE CORE so they are host-testable. The
+        // URL is the agent's argument and reaches here having passed only a `https://` prefix test,
+        // so it is bounded there and not here; see `args::unreachable_challenge_error`.
+        .map_err(|e| args::unreachable_challenge_error(url, &e.to_string()))?;
 
     // 402 is the point of the exchange. 200 is accepted too, because a gate that has already been
     // paid answers with the resource, and reporting that as a failure would be misleading.
     let status = resp.status_code();
     if status != 402 && !(200..300).contains(&status) {
-        return Err(format!(
-            "{url} answered {status}, which is not a payment challenge"
-        ));
+        return Err(args::unexpected_challenge_status_error(url, status));
     }
+    // NOT ECHO-BOUNDED, deliberately: `waki`'s body error is the host runtime's own text about a
+    // stream it was reading, not the remote body, and nothing the seller wrote reaches it.
     let bytes = resp
         .body()
         .map_err(|e| format!("could not read the body: {e}"))?;
+    // NOT ECHO-BOUNDED, deliberately: this reports the body's LENGTH and never its content, which
+    // is the one thing a refusal for an oversized body must not echo.
     if bytes.len() > MAX_CHALLENGE_BYTES {
         return Err(format!(
             "the 402 body is {} bytes, over the {MAX_CHALLENGE_BYTES} cap; a price list is small \

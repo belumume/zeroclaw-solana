@@ -97,21 +97,26 @@ mod component {
 
             // Validate the wallet is a real base58 pubkey BEFORE any network
             // call: a prompt-injected non-address cannot reach an attacker URL.
+            //
+            // BOUNDED, and the message is built in the pure core so a host test can measure it.
+            // This branch fires precisely BECAUSE the base58 decode failed, so the value it echoes
+            // has passed no shape check; "it is an address, therefore short" holds on the line
+            // below and is exactly backwards here.
             let wallet = parsed.wallet.trim();
             if solana_core::Pubkey::from_base58(wallet).is_err() {
-                return Ok(fail(format!(
-                    "not a valid base58 wallet address: {}",
-                    crate::health::sanitize_to_bytes(
-                        wallet,
-                        crate::health::ECHO_MAX,
-                        crate::health::ECHO_MAX_BYTES,
-                    )
-                )));
+                return Ok(fail(crate::health::invalid_wallet_message(wallet)));
             }
 
             let url = format!("{KAMINO_BASE}/portfolio/{wallet}");
             let value = match fetch_json(&url) {
                 Ok(v) => v,
+                // NOT ECHO-BOUNDED at this line, deliberately: `e` is one of the three strings
+                // `fetch_json` builds, and each is bounded where it is CONSTRUCTED rather than
+                // here. `HTTP {status}: {snippet}` is capped on both axes by
+                // `health::http_error_message`; `invalid JSON body:` is an untyped-`Value` syntax
+                // error, measured at 33 bytes; `request failed:` is `waki`'s own text about a
+                // connection it attempted, and carries nothing the caller or the remote wrote.
+                // Bounding again here would double-truncate a string already inside its budget.
                 Err(e) => {
                     emit(
                         PluginAction::Fail,
@@ -153,22 +158,24 @@ mod component {
                 .body()
                 .ok()
                 .and_then(|b| String::from_utf8(b).ok())
-                .unwrap_or_default()
-                .chars()
-                .take(200)
-                .collect();
+                .unwrap_or_default();
             // An error-response body is untrusted (a WAF/gateway block page can
             // carry control/bidi/zero-width injection framing); strip it before
             // it reaches the agent, matching the on-chain-field treatment.
-            // Capped on BOTH axes: `.take(200)` above counts CHARACTERS, so 200 astral-plane
-            // codepoints reach this line as 800 bytes.
-            let snippet = crate::health::sanitize_to_bytes(
-                &raw,
-                crate::health::BODY_SNIPPET_MAX,
-                crate::health::BODY_SNIPPET_MAX_BYTES,
-            );
-            return Err(format!("HTTP {status}: {snippet}"));
+            //
+            // BOUNDED on both axes, and the head-cap plus the sanitize now live TOGETHER in
+            // `health::http_error_message` so one host test drives the whole path. Split across
+            // the shim and the core, the character pre-cap read like a bound and was not one.
+            return Err(crate::health::http_error_message(status, &raw));
         }
+        // NOT ECHO-BOUNDED, deliberately, and MEASURED rather than assumed. The target type is
+        // `serde_json::Value`, which accepts every well-formed JSON document, so this can only
+        // ever be a SYNTAX error — and a syntax error is positional, never quoting. Measured on
+        // this toolchain: a 2,000-codepoint flood inside an otherwise-invalid body produced
+        // `expected value at line 1 column 7`, 33 bytes, with none of the body in it. The
+        // contrast that makes the distinction real rather than a hopeful reading: the SAME crate
+        // deserializing into a TYPED struct produced 8,058 bytes from the same flood, which is
+        // why `invalid_arguments_message` above exists and this line does not need it.
         resp.json::<serde_json::Value>()
             .map_err(|e| format!("invalid JSON body: {e}"))
     }
