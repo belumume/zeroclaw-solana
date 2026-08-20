@@ -552,6 +552,18 @@ def runbook_pins_report(price_result):
     the live menu -- rather than on any wording, because wording is what changes when someone
     improves the prose, and a check keyed to one phrasing punishes the correct edit.
 
+    IT IS ENFORCED IN BOTH DIRECTIONS, which the first version was not. It fired when the runbook
+    said the day-pass tier was STILL on the menu and was silent when the runbook said the tier was
+    GONE and the tier came back -- so the reversal of the exact defect it was built for would have
+    passed. Both directions now compare against the live tier COUNT.
+
+    HONEST CEILING, three of them, so this is never read as covering the file. It reads only lines
+    naming `/price` or the day pass, so a stale figure elsewhere in the runbook is invisible to it
+    (the enumeration of what else the runbook claims, and what is deliberately left ungated, is the
+    survey this grew out of). A historical marker still silences everything after it on its line,
+    so a line that puts its retired value FIRST is skipped. And it can only run where a live body
+    is in hand, which is demo morning, not CI.
+
     It runs HERE because this script already fetches /price on demo morning, which is both the
     moment a stale pin costs the most and the only moment the live value is in hand.
 
@@ -562,12 +574,16 @@ def runbook_pins_report(price_result):
     rb = pathlib.Path(__file__).resolve().parent.parent / "notes" / "DEMO-RUNBOOK.md"
     if not rb.exists():
         return Result(
-            "runbook pins", GREEN, time.time() - t0,
+            "runbook pins",
+            GREEN,
+            time.time() - t0,
             "SKIPPED: no notes/DEMO-RUNBOOK.md here (expected in a fresh clone)",
         )
     if not getattr(price_result, "body", None):
         return Result(
-            "runbook pins", GREEN, time.time() - t0,
+            "runbook pins",
+            GREEN,
+            time.time() - t0,
             "SKIPPED: /price returned no body, so there is nothing to compare against",
         )
     try:
@@ -575,7 +591,9 @@ def runbook_pins_report(price_result):
         tiers = live.get("accepts") or []
     except json.JSONDecodeError:
         return Result(
-            "runbook pins", GREEN, time.time() - t0,
+            "runbook pins",
+            GREEN,
+            time.time() - t0,
             "SKIPPED: /price body did not parse as JSON",
         )
 
@@ -589,18 +607,36 @@ def runbook_pins_report(price_result):
     # correction sweep draws between a value still being asserted and one quoted to retire it.
     historical = ("was ", "before", "previously", "used to", "prior to", "superseded")
 
+    def current_span(line):
+        """The part of a line that is still being ASSERTED: everything before the first marker.
+
+        Shared by both checks below so the two cannot drift apart on how they read tense, which is
+        the asymmetry review found here: the mirror was matching whole lines while the byte pin was
+        span-scoped.
+        """
+        low = line.lower()
+        cut = min((low.find(h) for h in historical if h in low), default=len(line))
+        return line[:cut], low
+
     for i, line in enumerate(lines, 1):
         if "/price" not in line:
             continue
         scanned += 1
-        if any(h in line.lower() for h in historical):
-            continue
-        toks = line.replace("**", " ").replace("|", " ").replace(",", "").split()
+        # SPAN-SCOPED, NOT LINE-SCOPED. A marker retires the figures that FOLLOW it, never the
+        # whole line. `**666 B** (was 988 before the deploy)` states one current value and one
+        # retired one, and dropping the line to spare the 988 spares the 666 with it. Measured:
+        # the runbook pinned /price at 664 B against a live 666 B and this reported "all agree",
+        # because the same line carried a historical parenthetical. Everything from the first
+        # marker onward is dropped and the prefix is still read.
+        head, low = current_span(line)
+        toks = head.replace("**", " ").replace("|", " ").replace(",", "").split()
         for j, tok in enumerate(toks[:-1]):
             if tok.isdigit() and toks[j + 1].rstrip(".,;)").upper() == "B":
                 n = int(tok)
                 if n != live_bytes and n > 99:
-                    problems.append(f"line {i} pins /price at {n} B; live is {live_bytes} B")
+                    problems.append(
+                        f"line {i} pins /price at {n} B; live is {live_bytes} B"
+                    )
 
     # The tier claim. Only a CURRENT-tense assertion counts: a line retiring the day pass has to
     # NAME it in order to retire it, which is the prohibition-must-name-what-it-forbids trap.
@@ -619,15 +655,50 @@ def runbook_pins_report(price_result):
                 f"{n_live} tier(s): {descs}"
             )
 
+    # THE MIRROR, and it is the direction that cost the most. The loop above only fires when the
+    # runbook says the menu STILL carries a day pass. Nothing fires when the runbook asserts the
+    # tier is GONE and a tier comes BACK -- and a retirement sentence has to NAME what it retires,
+    # so `gone from the live menu` is both the honest wording and the exemption that would keep the
+    # reversal silent. That asymmetry is the whole defect class here: the expensive one was a
+    # SPOKEN instruction derived from live state, still true when written and false by the morning.
+    # Keyed to the tier COUNT, which is the invariant, rather than to either phrasing.
+    retired = (
+        "gone from the live menu",
+        "one `accepts` entry",
+        "one accepts entry",
+        "the screen now agrees",
+    )
+    # SPAN-SCOPED FOR THE SAME REASON THE BYTE PIN IS, and review is what surfaced that this loop
+    # was not. A whole-line skip would have been the obvious fix and is the wrong one here, measured
+    # on the three sentences that matter: the runbook's own spoken instruction carries `was deployed`
+    # later in the same line, so a line-level skip SILENCES a correct detection, while a past-tense
+    # narration of the tier having once been gone still fires. Reading only the span before the first
+    # marker gets all three right -- the spoken line fires, the retirement line fires, the narration
+    # stays silent.
+    if n_live > 1:
+        descs = [t.get("description") for t in tiers]
+        for i, line in enumerate(lines, 1):
+            head, low = current_span(line)
+            if any(w in head.lower() for w in retired):
+                problems.append(
+                    f"line {i} says the live menu no longer carries the withdrawn tier, or that "
+                    f"the screen agrees with a one-tier line; live /price has {n_live} tier(s): "
+                    f"{descs}"
+                )
+
     dt = time.time() - t0
     if problems:
         return Result(
-            "runbook pins", RED, dt,
+            "runbook pins",
+            RED,
+            dt,
             f"{len(problems)} stale live-value claim(s): " + "; ".join(problems[:3]),
             SUBSTANCE,
         )
     return Result(
-        "runbook pins", GREEN, dt,
+        "runbook pins",
+        GREEN,
+        dt,
         f"{scanned} /price line(s) scanned, all agree with live ({live_bytes} B, {n_live} tier)",
     )
 
@@ -644,24 +715,138 @@ def selftest_runbook_pins():
     class FakeResult:
         pass
 
+    # PADDED PAST THE n > 99 FLOOR ON PURPOSE, and this is a fixture correction rather than a
+    # decoration. The unpadded body was 82 B, which the byte-pin floor discards before comparing,
+    # so EVERY must-not-fire byte case here passed without the equality branch ever running and
+    # the one must-fire case passed only because 988 happens to clear the floor. A fixture that
+    # cannot reach the code it is asserting on is the same false-green this file exists to catch.
+    # The real endpoint answers in the high hundreds, so this also matches production shape.
     body = json.dumps(
-        {"accepts": [{"description": "one feed reading", "maxAmountRequired": "1000000"}]}
+        {
+            "accepts": [
+                {"description": "one feed reading", "maxAmountRequired": "1000000"}
+            ],
+            "resource": "https://example.invalid/feed/latest" + "x" * 480,
+        }
     ).encode()
     fake = FakeResult()
     fake.body = body
     live_n = len(body)
+    assert live_n > 99, (
+        "fixture must clear the byte-pin floor or every byte case is vacuous"
+    )
+
+    # A SECOND live shape, so the mirror cases have a two-tier menu to disagree with. Without it
+    # the reversal cases could only be asserted against a one-tier body, which is the state in
+    # which they must stay SILENT -- and a case that can only pass is not a control.
+    two_tier = FakeResult()
+    two_tier.body = json.dumps(
+        {
+            "accepts": [
+                {"description": "one feed reading", "maxAmountRequired": "1000000"},
+                {"description": "day pass: unlimited", "maxAmountRequired": "9000000"},
+            ]
+        }
+    ).encode()
 
     cases = [
-        (f"| x402 `/price` | HTTP 402, {live_n} B | ok |", False, "matching byte pin"),
-        ("| x402 `/price` | HTTP 402, 988 B | ok |", True, "stale byte pin"),
-        ("The deployed gate still serves BOTH menu tiers, including a day pass.", True,
-         "current-tense day-pass claim"),
-        ("The withdrawn day-pass tier is gone from the live menu.", False,
-         "retirement sentence naming what it retires"),
-        ("The day pass was removed on 2026-08-20.", False, "historical day-pass mention"),
-        (f"| x402 `/price` | **{live_n} B** (was 988 before the deploy) | ok |", False,
-         "a line citing a past value behind a historical marker"),
-        ("nothing relevant here at all", False, "unrelated text"),
+        (
+            f"| x402 `/price` | HTTP 402, {live_n} B | ok |",
+            False,
+            "matching byte pin",
+            fake,
+        ),
+        ("| x402 `/price` | HTTP 402, 988 B | ok |", True, "stale byte pin", fake),
+        (
+            "The deployed gate still serves BOTH menu tiers, including a day pass.",
+            True,
+            "current-tense day-pass claim",
+            fake,
+        ),
+        (
+            "The withdrawn day-pass tier is gone from the live menu.",
+            False,
+            "retirement sentence naming what it retires",
+            fake,
+        ),
+        (
+            "The day pass was removed on 2026-08-20.",
+            False,
+            "historical day-pass mention",
+            fake,
+        ),
+        (
+            f"| x402 `/price` | **{live_n} B** (was 988 before the deploy) | ok |",
+            False,
+            "a line citing a past value behind a historical marker",
+            fake,
+        ),
+        # THE PAIR THAT FAILED BEFORE THIS CHANGE, and the reason it was found. Identical prose to
+        # the case above except the CURRENT figure is stale; the line-scoped exemption cleared both
+        # and reported "all agree" over a real 2-byte drift in the live runbook.
+        (
+            f"| x402 `/price` | **988 B** (was {live_n} before the deploy) | ok |",
+            True,
+            "a STALE current pin sharing its line with a historical aside",
+            fake,
+        ),
+        (
+            "| x402 `/price` | **previously 988 B**, now smaller | ok |",
+            False,
+            "over-correction control: a marker FIRST still silences the rest of the line",
+            fake,
+        ),
+        # THE MIRROR. Each of these is the sentence a correct runbook carries TODAY, so the
+        # one-tier column proves the gate is not simply loud, and the two-tier column proves it
+        # can see the reversal at all.
+        (
+            "The withdrawn day-pass tier is gone from the live menu.",
+            True,
+            "mirror: a retirement sentence while the tier is BACK",
+            two_tier,
+        ),
+        (
+            "`/price` returns ONE `accepts` entry, and nothing else.",
+            True,
+            "mirror: a one-tier assertion while the tier is BACK",
+            two_tier,
+        ),
+        (
+            'SAY "ONE PAYMENT, ONE READ". The screen now agrees with you.',
+            True,
+            "mirror: the SPOKEN instruction while the tier is BACK",
+            two_tier,
+        ),
+        (
+            'SAY "ONE PAYMENT, ONE READ". The screen now agrees with you.',
+            False,
+            "the same spoken instruction while the menu really is one tier",
+            fake,
+        ),
+        # THE TENSE PAIR, which review found uncovered. A past-tense narration of the tier having
+        # once been gone is accurate history and must stay silent even on a two-tier menu; the
+        # runbook's real spoken line carries a historical marker LATER in the same line and must
+        # still fire. Only span-scoping gets both, which is why the fix is not a whole-line skip.
+        (
+            "The day-pass tier was briefly gone from the live menu before the redeploy.",
+            False,
+            "mirror: past-tense narration containing a retired phrase, two-tier menu",
+            two_tier,
+        ),
+        (
+            'SAY "ONE PAYMENT, ONE READ". The screen now agrees with you.** '
+            "The gate binary was deployed on 2026-08-20.",
+            True,
+            "mirror: a live assertion whose line ALSO carries a later historical marker",
+            two_tier,
+        ),
+        ("nothing relevant here at all", False, "unrelated text", fake),
+        (
+            "nothing relevant here at all",
+            False,
+            "unrelated text, two-tier menu",
+            two_tier,
+        ),
     ]
 
     failures = []
@@ -669,9 +854,9 @@ def selftest_runbook_pins():
     rb.parent.mkdir(exist_ok=True)
     backup = rb.read_text(encoding="utf-8") if rb.exists() else None
     try:
-        for text, must_fire, label in cases:
+        for text, must_fire, label, price in cases:
             rb.write_text(text, encoding="utf-8", newline="")
-            r = runbook_pins_report(fake)
+            r = runbook_pins_report(price)
             fired = r.verdict == RED
             if fired != must_fire:
                 want = "FIRE" if must_fire else "silent"
