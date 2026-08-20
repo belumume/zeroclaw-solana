@@ -48,8 +48,7 @@ impl RpcTransport for WakiTransport {
             .map_err(|e| RpcError::Transport(format!("non-utf8 body: {e}")))?;
 
         if !(200..300).contains(&status) {
-            let snippet: String = text.chars().take(200).collect();
-            return Err(RpcError::Transport(format!("HTTP {status}: {snippet}")));
+            return Err(RpcError::Transport(crate::rpc::body_snippet(status, &text)));
         }
         Ok(text)
     }
