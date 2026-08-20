@@ -31,6 +31,30 @@ use solana_core::{instruction_sighash, sanitize_onchain, sanitize_onchain_bounde
 /// Fixed byte width of the on-chain `unit` label (borsh `[u8; 12]`).
 pub const UNIT_LEN: usize = 12;
 
+// --- Error-echo budgets -------------------------------------------------------------------
+//
+// The two echoes below are ATTACKER-INFLUENCED, and on this path the provenance is the reverse
+// of what it looks like. The `feed_kind` echo fires precisely BECAUSE the value was not on the
+// allowlist, so "it is an allowlist token, therefore ASCII" is true on the success path and
+// exactly backwards on this one. serde is worse still: an `invalid type` / unknown-field error
+// embeds the offending value VERBATIM, so the string being echoed is whatever the caller sent.
+//
+// They are deliberately NOT applied to the operator's `__config` fields (`rpc_url`, and the
+// pubkeys `parse_pubkey_cfg` refuses); see those two sites for the reason.
+//
+// Each byte budget reuses its character cap, this repo's established convention (`UNIT_LEN`,
+// `MEMO_MAX_BYTES`, `DEVICE_ID_MAX_BYTES`): a real value is ASCII and untouched, so only the
+// multibyte case that was never bounded changes.
+
+/// CHARACTER cap for the serde error echoed by a malformed-arguments rejection.
+const ARG_ERROR_MAX: usize = 120;
+/// BYTE cap for the same. serde embeds the offending value verbatim, so this echoes attacker text.
+const ARG_ERROR_MAX_BYTES: usize = 120;
+/// CHARACTER cap for a rejected `feed_kind` echoed back in its own rejection.
+const ECHO_MAX: usize = 64;
+/// BYTE cap for the same.
+const ECHO_MAX_BYTES: usize = 64;
+
 /// Allowlisted sensor feed kinds. A prompt-injected free-text `feed_kind` cannot
 /// pass this gate. `GenericScaled` is a deliberately wide escape hatch, still
 /// range-bounded so it cannot express a nonsensical magnitude.
@@ -194,14 +218,14 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedPublish, String> {
         // strip it before it reaches the agent's context.
         format!(
             "invalid arguments: {}",
-            sanitize_onchain(&e.to_string(), 120).text
+            sanitize_onchain_bounded(&e.to_string(), ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES).text
         )
     })?;
 
     let feed_kind = FeedKind::parse(args.feed_kind.trim()).ok_or_else(|| {
         format!(
             "unknown feed_kind (not on the allowlist): {}",
-            sanitize_onchain(&args.feed_kind, 64).text
+            sanitize_onchain_bounded(&args.feed_kind, ECHO_MAX, ECHO_MAX_BYTES).text
         )
     })?;
 
@@ -244,12 +268,22 @@ pub fn parse_and_validate(args_json: &str) -> Result<ValidatedPublish, String> {
         Pubkey::find_program_address(&[b"feed", device.as_bytes()], &oracle_program_id)
             .ok_or_else(|| "could not derive the device feed PDA".to_string())?;
 
+    // DELIBERATELY CHAR-CAPPED ONLY, here and in `parse_pubkey_cfg`. Both read `__config`, which
+    // the host injects after stripping any caller-supplied section, so these strings are the
+    // OPERATOR's and not a path an attacker reaches. A byte cap would buy nothing against anyone
+    // and would cost the operator the `…` marker on a diagnostic they are the sole reader of —
+    // the one signal telling them their own pasted value was truncated rather than mangled. The
+    // echo is bounded either way: the char cap fires first and this is the operator's own text,
+    // not a codepoint flood.
+    //
+    // Not an oversight and not an inconsistency to sweep: the attacker-reachable echoes above use
+    // `sanitize_onchain_bounded`, and the difference in function name is the signal.
     let rpc_url = match cfg.rpc_url {
         Some(u) => {
             if !u.starts_with("https://") {
                 return Err(format!(
                     "rpc_url must be https, got: {}",
-                    sanitize_onchain(&u, 64).text
+                    sanitize_onchain(&u, ECHO_MAX).text
                 ));
             }
             u
@@ -297,10 +331,15 @@ fn parse_pubkey_cfg(v: Option<String>, field: &str, required: bool) -> Result<Pu
         }
         None => unreachable!("required=false unused"),
     };
+    // CHAR-CAPPED ONLY, deliberately. Every caller of this helper reads `__config`
+    // (`nonce_account`, `oracle_program_id`, `agent_session_pubkey`), so the string is the
+    // operator's; see the `rpc_url` site in `parse_and_validate` for the full reason. The
+    // sibling builders' `parse_pubkey_required` IS byte-capped, because there a caller-supplied
+    // argument reaches the same helper — the difference is provenance, not consistency.
     Pubkey::from_base58(s.trim()).map_err(|_| {
         format!(
             "{field} is not valid base58: {}",
-            sanitize_onchain(&s, 64).text
+            sanitize_onchain(&s, ECHO_MAX).text
         )
     })
 }
@@ -550,6 +589,120 @@ mod tests {
     fn unknown_config_key_fails_closed() {
         let e = parse_and_validate(&args("co2_ppm", "400", "0", r#","evil":"x""#)).unwrap_err();
         assert!(e.contains("invalid arguments"));
+    }
+
+    /// The REJECTION paths, which the report ceiling never covers: a report is only composed
+    /// once every field validated, so an argument refused at the door reaches the agent through
+    /// an error string no report ceiling bounds.
+    ///
+    /// The provenance FLIPS here, and that is why this site was missed. On the success path a
+    /// `feed_kind` is an allowlist token and therefore ASCII, which makes a character cap look
+    /// sufficient. This branch fires precisely BECAUSE the value was not on the allowlist, so
+    /// the string being echoed is whatever the caller sent, in whatever encoding.
+    #[test]
+    fn the_rejected_feed_kind_echo_is_byte_bounded() {
+        let flood = "\u{1F600}".repeat(2000);
+        let a = format!(
+            r#"{{"feed_kind":"{flood}","value":400,"scale":0,"observed_at":1,"sequence":1,"__config":{{"signer_seed_hex":"{SEED_HEX}","nonce_account":"{NONCE}","oracle_program_id":"{ORACLE}","agent_session_pubkey":"{SESSION}"}}}}"#
+        );
+
+        const PREFIX: &str = "unknown feed_kind (not on the allowlist): ";
+        let err = parse_and_validate(&a).expect_err("the flood feed_kind must be refused");
+        // FIXTURE CONTROL: a fixture that fails EARLIER takes a different branch, and every size
+        // assertion below would then pass vacuously against some other message.
+        assert!(
+            err.starts_with(PREFIX),
+            "the intended branch was not taken, so this measures some other rejection: {err}"
+        );
+        let echoed = err.len() - PREFIX.len();
+        assert!(
+            echoed > 0,
+            "the echo capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            echoed <= ECHO_MAX_BYTES,
+            "echoed {echoed} bytes, over the {ECHO_MAX_BYTES}-byte budget"
+        );
+
+        // BEFORE/AFTER CONTROL: what the CHARACTER cap alone admitted on this same input.
+        // Without it the bound is equally consistent with a budget loose enough for either form.
+        let char_only = sanitize_onchain(&flood, ECHO_MAX).text.len();
+        assert!(
+            char_only > ECHO_MAX_BYTES,
+            "the char cap alone yields {char_only} bytes, already inside the {ECHO_MAX_BYTES}-byte \
+             budget, so the byte cap is not what holds it"
+        );
+        eprintln!(
+            "MEASURED oracle-publish feed_kind echo: {echoed} bytes (char-capped only: \
+             {char_only} bytes, budget {ECHO_MAX_BYTES})"
+        );
+    }
+
+    /// The same class with a nastier source: serde embeds the offending value VERBATIM in its
+    /// `invalid type` and unknown-field messages, so the caller chooses most of that string and
+    /// none of the crate's field-shaped reasoning applies to it at all.
+    #[test]
+    fn the_malformed_arguments_echo_is_byte_bounded() {
+        let flood = "\u{1F600}".repeat(2000);
+        // A string where a number belongs: serde's `invalid type` quotes the value back.
+        let a = format!(
+            r#"{{"feed_kind":"co2_ppm","value":"{flood}","scale":0,"observed_at":1,"sequence":1,"__config":{{"signer_seed_hex":"{SEED_HEX}","nonce_account":"{NONCE}","oracle_program_id":"{ORACLE}","agent_session_pubkey":"{SESSION}"}}}}"#
+        );
+
+        const PREFIX: &str = "invalid arguments: ";
+        let err = parse_and_validate(&a).expect_err("the fixture must fail to parse");
+        assert!(
+            err.starts_with(PREFIX),
+            "the message no longer opens with the prose this bound subtracts: {err}"
+        );
+        let echoed = err.len() - PREFIX.len();
+        assert!(
+            echoed > 0,
+            "the serde error capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            echoed <= ARG_ERROR_MAX_BYTES,
+            "echoed {echoed} bytes, over the {ARG_ERROR_MAX_BYTES}-byte budget"
+        );
+
+        // CONTROL, measured against what serde ACTUALLY produced rather than an assumed shape:
+        // if the flood never reached the error text, the bound above is satisfied trivially.
+        let raw = match serde_json::from_str::<ExecuteArgs>(&a) {
+            Ok(_) => panic!("the fixture parsed, so there is no serde error to bound"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            raw.len() > 4 * ARG_ERROR_MAX_BYTES,
+            "serde no longer embeds the offending value ({} bytes), so this test measures a \
+             fixed message rather than an attacker-chosen one",
+            raw.len()
+        );
+        let char_only = sanitize_onchain(&raw, ARG_ERROR_MAX).text.len();
+        assert!(
+            char_only > ARG_ERROR_MAX_BYTES,
+            "the char cap alone yields {char_only} bytes, already inside the budget, so the byte \
+             cap is not what holds it"
+        );
+        eprintln!(
+            "MEASURED oracle-publish invalid-arguments echo: {echoed} bytes (raw serde: {} bytes, \
+             char-capped only: {char_only} bytes, budget {ARG_ERROR_MAX_BYTES})",
+            raw.len()
+        );
+    }
+
+    /// The narrowing control: both caps must leave ORDINARY input byte-identical, or "the echo
+    /// is bounded" is equally consistent with a cap that mangles every real rejection message an
+    /// operator has to read.
+    #[test]
+    fn the_byte_cap_leaves_an_ordinary_rejection_untouched() {
+        let a = format!(
+            r#"{{"feed_kind":"co2_ppmm","value":400,"scale":0,"observed_at":1,"sequence":1,"__config":{{"signer_seed_hex":"{SEED_HEX}","nonce_account":"{NONCE}","oracle_program_id":"{ORACLE}","agent_session_pubkey":"{SESSION}"}}}}"#
+        );
+        let err = parse_and_validate(&a).expect_err("a typo'd feed_kind must be refused");
+        assert!(
+            err.ends_with("co2_ppmm"),
+            "an ASCII typo was altered by the byte cap: {err}"
+        );
     }
 
     #[test]

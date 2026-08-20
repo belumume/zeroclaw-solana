@@ -207,11 +207,11 @@ attacker address in the memo never becomes a transaction ACCOUNT (Scenario C). A
 it, the audited on-chain program is the final, uncircumventable cap.
 
 The same guarantees are pinned by the host test suite (`cargo test`, no wasm toolchain, no network).
-40 tests pass. The listing below is abridged to the load-bearing ones, so it shows fewer lines
+43 tests pass. The listing below is abridged to the load-bearing ones, so it shows fewer lines
 than the run reports:
 
 ```
-running 40 tests
+running 43 tests
 test allowance::tests::build_spend_hostile_delegatee_fails_closed ... ok
 test allowance::tests::build_spend_over_cap_fails_closed_with_onchain_note ... ok
 test allowance::tests::build_spend_wrong_owner_delegation_fails_closed ... ok
@@ -227,7 +227,7 @@ test allowance::tests::build_spend_recurring_durable_nonce ... ok
 test allowance::tests::hostile_memo_is_sanitized_in_bytes_and_labeled_in_summary ... ok
 test allowance::tests::output_is_compact_and_carries_the_summary ... ok
 ...
-test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 The RPC-dependent orchestration (getAccountInfo on the delegation, the mint, and the receiver token
@@ -238,29 +238,45 @@ real coverage with no live network.
 
 ## Output size (judges call execute and count tokens)
 
-The output is compact by design, and the sizes below are ASSERTED CEILINGS rather than measured
-figures. This crate prints no size line under `--nocapture`, so a run tells you only that the
-bounds held, never what the output actually weighed. Read them as bounds the suite enforces, not
-as a measurement.
+The output is compact by design, and both a MEASURED figure and the ceiling it sits under are
+printed under `--nocapture`. A run therefore tells you what the output actually weighed, not
+merely that the bound held. An `assert!` message is emitted only when the assertion FAILS, so a
+passing run used to publish no number at all.
 
 What is bounded is the JSON envelope minus the base64 transaction, in two tests, and the wider
 one is the one that covers the crate:
 
-- `output_is_compact_and_carries_the_summary` asserts the envelope under **1160 bytes**. Its
-  fixture carries NO memo, so it never budgets for the one attacker-controlled field that reaches
-  the summary, and it is not a whole-crate ceiling.
+- `output_is_compact_and_carries_the_summary` measures the envelope at **1121 bytes** against a
+  bound of 1160. Its fixture carries NO memo, so it never budgets for the one attacker-controlled
+  field that reaches the summary, and it is not a whole-crate ceiling.
 - `the_envelope_holds_under_a_multibyte_memo_flood` drives the same pipeline with the memo
-  present and flooded to its byte budget with 4-byte codepoints, and asserts the envelope under
-  **1280 bytes**. That is the number that bounds the crate. It carries fixture controls proving
-  the memo was neither dropped nor capped away, plus a before/after control showing the byte cap
-  rather than a loose bound is what holds it.
+  present and flooded to its byte budget with 4-byte codepoints, and measures the envelope at
+  **1250 bytes** against a bound of 1280. That is the number that bounds the crate. It carries
+  fixture controls proving the memo was neither dropped nor capped away, plus a before/after
+  control showing the byte cap rather than a loose bound is what holds it (char-capped only, the
+  same request yields 1609).
+
+Re-derive every figure above rather than trusting it:
+
+```
+cargo test --locked -- --nocapture --test-threads=1 2>&1 | grep MEASURED
+```
 
 The envelope is a little larger than a plain transfer builder's because it also carries the
 structured on-chain `cap` object and the delegation metadata a custody-aware approval gate needs.
 
-The one-line `summary` has **no asserted size bound in this crate**. Nothing in the suite measures
-or asserts one, so no figure is published for it here. The sibling `spl-transfer-build` does bound
-its summary, if you need a comparison point.
+The one-line `summary` has **no asserted size bound in this crate**, so no bound is published for
+it. It is measured and printed alongside the envelope (**460 bytes** on the memo-less fixture) so
+the figure is available, but nothing in the suite constrains it. The sibling `spl-transfer-build`
+does bound its summary, if you need a comparison point.
+
+The rejection paths are bounded separately and are NOT covered by the ceilings above, because an
+envelope is only rendered once every field validated. A `delegation`, `receiver` or `amount`
+refused at the door is echoed back through a byte-capped sanitizer (64 bytes for the pubkey-shaped
+fields, 32 for `amount`, 120 for the serde error, which embeds the offending value verbatim).
+`every_rejected_argument_echo_is_byte_bounded` and `the_malformed_arguments_echo_is_byte_bounded`
+measure all four against a character-capped control, and
+`the_byte_cap_leaves_an_ordinary_rejection_untouched` proves an ASCII typo is returned unaltered.
 
 The base64 transaction itself is the irreducible deliverable: ~0.8 KB for a recent-blockhash
 spend, ~1 KB for a durable-nonce + ATA-create spend. There is no filler.
