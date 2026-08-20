@@ -91,6 +91,26 @@ MIN_W, MIN_H = 1920, 1080
 LUFS_MIN, LUFS_MAX = -24.0, -12.0
 # True peak. -1 dBTP is the ceiling every lossy-encoding platform asks for; above it,
 # transcoding to AAC/Opus introduces intersample clipping the master never had.
+#
+# THE SHIPPED VIDEO FAILS THIS CHECK AND IS DELIBERATELY NOT BEING FIXED. Measured
+# 2026-08-20 on docs/assets/zeroclaw-demo-1080p.mp4: true peak -0.4 dBFS against this -1.0
+# ceiling, integrated -22.5 LUFS (in range). Re-derive rather than trusting the figure:
+#     ffmpeg -nostdin -hide_banner -i docs/assets/zeroclaw-demo-1080p.mp4 #       -af ebur128=peak=true -f null -
+#
+# WHY IT STAYS. That video is a SUBMITTED artifact: the submission deadline passed on
+# 2026-08-07 and judging is still open, which is checkable with .tools/fetch-listing.py --
+# isWinnersAnnounced is False. Re-encoding a graded deliverable mid-judging to recover 0.6 dB
+# is a bad trade, and it is not a free one either: the audio re-encode changes every byte, so
+# the published size and duration figures cited across several documents would all need a
+# sweep behind it.
+#
+# The 0.6 dB is a real risk and a modest one. It threatens intersample clipping only on a
+# lossy re-encode, and the platforms that re-encode also loudness-normalise, which pulls the
+# peak back down.
+#
+# This note exists so a later sweep does not rediscover the failure as new and 'fix' it. If
+# the video is ever re-cut for another reason, clear this at the same time; an undocumented
+# known failure is indistinguishable from an unnoticed one.
 TRUE_PEAK_MAX = -1.0
 # Below this the track is not audio, whatever the container says it is.
 SILENCE_LUFS = -60.0
