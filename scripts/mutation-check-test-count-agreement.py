@@ -8,7 +8,7 @@ Exit 0 = every control behaved. 1 = at least one mutant survived. 2 = the contro
 WHY THE SELFTEST IS NOT ENOUGH. That suite proves the gate returns the right verdict on the
 inputs it is handed. It cannot prove the verdict came from the code that is supposed to
 produce it. A gate that reddened on everything and a gate that reddened on nothing both
-satisfy some of its cases, and a suite of 38 green cases looks identical either way. Each
+satisfy some of its cases, and a fully green suite looks identical either way. Each
 control below disables ONE piece and requires the suite to go RED.
 
 FOUR PROPERTIES EVERY CONTROL HOLDS, each of which has cost this repo a false green before:
@@ -52,8 +52,8 @@ MUTANTS = (
     ),
     (
         "line-level crate attribution",
-        "    if len(named) == 1:",
-        "    if False and len(named) == 1:",
+        "        if len(named) == 1:",
+        "        if False and len(named) == 1:",
         "so a line naming another crate is judged against the wrong one",
     ),
     (
@@ -105,6 +105,29 @@ MUTANTS = (
         "                if m.start() <= edge <= m.end() or True:",
         "so a same-line claim is counted twice by the joined re-scan as well as by the "
         "per-line one, and the wrapped-figure cases stop discriminating",
+    ),
+    (
+        "the joined text reaching attribution at all",
+        "                    scope = (lines[fig - 1], joined)",
+        "                    scope = (lines[fig - 1],)",
+        "so a crate named only on a wrapped claim's CONTINUATION line is invisible and "
+        "the claim drops to the weaker union check, which passes a figure that merely "
+        "matches some other crate's count",
+    ),
+    (
+        "the figure's own line outranking the pair",
+        "    for text in scopes:",
+        "    for text in reversed(scopes):",
+        "so the join is weighed INSTEAD of the figure's line, and a claim whose own line "
+        "names one crate is dragged down to the union by a second name in the sentence "
+        "the wrap happens to reach",
+    ),
+    (
+        "reporting a wrapped claim at its FIGURE's line",
+        "                    fig = lineno if m.start(1) < edge else lineno + 1",
+        "                    fig = lineno",
+        "so a wrapped harness transcript is reported at the line above the number, "
+        "pointing a reader at a line the figure is not on",
     ),
     (
         "the presence short-circuit on a partial union",
