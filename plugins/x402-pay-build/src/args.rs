@@ -16,7 +16,30 @@
 
 use serde::Deserialize;
 
-use crate::pay::PayConfig;
+use crate::pay::{echo_field, PayConfig};
+
+/// The refusal for a `challenge_url` GET that never completed.
+///
+/// It lives in the pure core rather than in the wasm shim that raises it, so it is host-testable;
+/// the shim is the one module with no test coverage by construction. Same reason `lending-health`
+/// keeps `invalid_arguments_message` beside its core.
+///
+/// The URL is bounded and the transport error is not. That split is deliberate: `url` is the
+/// AGENT's argument and reaches this line having passed nothing but a `starts_with("https://")`
+/// prefix test, so `https://` followed by forty kilobytes satisfies it; the transport error is the
+/// host's own `waki` text about a connection it attempted.
+pub fn unreachable_challenge_error(url: &str, transport_error: &str) -> String {
+    format!("could not reach {}: {transport_error}", echo_field(url))
+}
+
+/// The refusal for a `challenge_url` that answered with a status that is not a payment challenge.
+/// Bounded for the same reason as [`unreachable_challenge_error`]; the status is a `u16`.
+pub fn unexpected_challenge_status_error(url: &str, status: u16) -> String {
+    format!(
+        "{} answered {status}, which is not a payment challenge",
+        echo_field(url)
+    )
+}
 
 /// The operator's settings, injected by the host under `__config`. Never agent-supplied.
 ///
@@ -85,8 +108,16 @@ pub struct ParsedArgs {
 const CONFIG_ONLY: [&str; 5] = ["receiver", "mint", "network", "delegation", "max_amount"];
 
 pub fn parse(json: &str) -> Result<ParsedArgs, String> {
-    let raw: RawArgs =
-        serde_json::from_str(json).map_err(|e| format!("arguments are not valid JSON: {e}"))?;
+    // `RawArgs` is a TYPED struct, so this is not a syntax-only failure: serde's `invalid type`
+    // message embeds the offending value VERBATIM. MEASURED on this crate's own `Challenge` shape,
+    // which fails the same way: a 2,000-codepoint value produced an 8,058-byte error. Bounded
+    // rather than trusted.
+    let raw: RawArgs = serde_json::from_str(json).map_err(|e| {
+        format!(
+            "arguments are not valid JSON: {}",
+            crate::pay::sanitize_arg_error(&e.to_string())
+        )
+    })?;
 
     // Shadowing is refused BY NAME, so the message tells the caller exactly what to move.
     let shadowed: Vec<&str> = CONFIG_ONLY
@@ -100,6 +131,9 @@ pub fn parse(json: &str) -> Result<ParsedArgs, String> {
         ])
         .filter_map(|(name, v)| v.map(|_| *name))
         .collect();
+    // NOT ECHO-BOUNDED, deliberately: `shadowed` holds `&'static str` NAMES from `CONFIG_ONLY`,
+    // never the caller's values. The caller chooses WHICH of five literals appear and nothing else,
+    // so the widest this message can be is the five of them joined.
     if !shadowed.is_empty() {
         return Err(format!(
             "{} supplied as a tool argument, and {} operator configuration. These come from \
@@ -123,10 +157,14 @@ pub fn parse(json: &str) -> Result<ParsedArgs, String> {
             ),
             (Some(b), None) if !b.trim().is_empty() => ChallengeSource::Body(b),
             (None, Some(u)) => {
+                // BOUNDED, and this is the site where the inversion is easiest to miss. On the
+                // ACCEPTED path `u` is an https URL and short; this branch fires precisely BECAUSE
+                // it is not one, so nothing has constrained it. The refusal echoed it raw.
                 if !u.starts_with("https://") {
                     return Err(format!(
-                    "challenge_url {u:?} is not https. A 402 challenge names where money goes, so \
-                     reading it over a channel anyone can rewrite defeats the cross-check"
+                    "challenge_url {} is not https. A 402 challenge names where money goes, so \
+                     reading it over a channel anyone can rewrite defeats the cross-check",
+                    echo_field(&u)
                 ));
                 }
                 ChallengeSource::Url(u)
@@ -139,11 +177,22 @@ pub fn parse(json: &str) -> Result<ParsedArgs, String> {
                 operator's receiver, mint, network and delegation",
     )?;
 
+    // NOT ECHO-BOUNDED, deliberately: `name` is one of five string LITERALS this function passes
+    // in, never a caller value.
     let need = |v: Option<String>, name: &str| -> Result<String, String> {
         v.filter(|s| !s.trim().is_empty())
             .ok_or_else(|| format!("`__config.{name}` is missing, and it has no safe default"))
     };
     let max_amount = need(c.max_amount, "max_amount")?;
+    // NOT ECHO-BOUNDED, deliberately, and this is the one refusal in this file where the decision
+    // turned on provenance rather than on shape. `max_amount` is `__config`, which the host injects
+    // from the jailed operator configuration AFTER removing any caller-supplied section (see
+    // `InjectedConfig` above, where that claim is checked against upstream source). So this echoes
+    // the operator's own value back to the operator, who is the only reader of it, and capping it
+    // would cost them the `…` marker that distinguishes a truncated paste from a mistyped one.
+    // Verified per site rather than assumed: there is no path by which an agent or a seller reaches
+    // this string, and if `inject_config` ever stops stripping, EVERY payee check in this crate
+    // becomes decorative long before this echo matters.
     let max_amount = max_amount.parse::<u64>().map_err(|_| {
         format!("`__config.max_amount` is {max_amount:?}, not a decimal count of atomic base units")
     })?;
@@ -290,5 +339,192 @@ mod tests {
         c["rpc_url"] = serde_json::json!("http://rpc.example");
         let body = serde_json::json!({"challenge_body": "{}", "__config": c}).to_string();
         assert_eq!(parse(&body).unwrap().rpc_url, None);
+    }
+
+    // ---- error-path echo bounding -----------------------------------------
+
+    /// A 4-byte codepoint: not a control character, not escaped by `Debug`, and four times its
+    /// character count in bytes. It is what separates a char cap from a byte ceiling.
+    const ASTRAL: &str = "\u{1F600}";
+    /// The char-only form the crate no longer calls. It survives in these tests because the
+    /// controls reconstruct the pre-fix behaviour with it, which is what proves the byte cap is
+    /// load-bearing rather than decorative.
+    use solana_core::sanitize_onchain;
+
+    /// `RawArgs` is a TYPED struct, so a shape mismatch is not a syntax error: serde embeds the
+    /// offending value VERBATIM.
+    #[test]
+    fn the_arguments_parse_error_is_byte_bounded() {
+        let flood = ASTRAL.repeat(2000);
+        // `tier` is typed `Option<usize>`; hand it a string and serde quotes the string back.
+        let json = format!(r#"{{"challenge_body":"{{}}","tier":"{flood}"}}"#);
+
+        const PROSE: &str = "arguments are not valid JSON: ";
+        let err = parse(&json).expect_err("a string where a usize belongs must be refused");
+        assert!(
+            err.starts_with(PROSE),
+            "the message no longer opens with the prose this bound subtracts. Got: {err}"
+        );
+        let echoed = err.len() - PROSE.len();
+        assert!(
+            echoed > 0,
+            "the serde error capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            echoed <= 120,
+            "echoed {echoed} bytes, over the 120-byte budget"
+        );
+
+        // CONTROL, measured against what serde ACTUALLY produced rather than an assumed shape.
+        let raw = serde_json::from_str::<RawArgs>(&json)
+            .expect_err("the fixture parsed, so there is no error to bound")
+            .to_string();
+        assert!(
+            raw.len() > 480,
+            "serde no longer embeds the offending value ({} bytes), so this test is measuring a \
+             fixed message rather than an attacker-chosen one",
+            raw.len()
+        );
+        let char_only = sanitize_onchain(&raw, 120).text.len();
+        assert!(
+            char_only > 120,
+            "the char cap alone yields {char_only} bytes, already inside the budget, so the byte \
+             cap is not what holds it"
+        );
+        eprintln!(
+            "MEASURED x402-pay-build arguments parse echo: {echoed} B (raw serde: {} B, \
+             char-capped only: {char_only} B, budget 120 B)",
+            raw.len()
+        );
+    }
+
+    /// The `challenge_url` refusal is the site where the inversion is easiest to miss: on the
+    /// ACCEPTED path the value is an https URL, and this branch fires precisely because it is not.
+    #[test]
+    fn a_non_https_challenge_url_echo_is_byte_bounded() {
+        let flood = format!("http://evil.example/{}", ASTRAL.repeat(2000));
+
+        // Derive the fixed prose by driving the same branch with a one-byte-per-character value.
+        let short = "http://e";
+        let short_err = parse(&args(serde_json::json!({
+            "challenge_body": serde_json::Value::Null, "challenge_url": short
+        })))
+        .expect_err("plain http must be refused");
+        assert!(short_err.contains("is not https"), "{short_err}");
+        let short_echo = format!("{short:?}");
+        assert!(
+            short_err.contains(&short_echo),
+            "the refused URL never reached the echo, so this case is vacuous: {short_err}"
+        );
+        let prefix = short_err.len() - short_echo.len();
+
+        let err = parse(&args(serde_json::json!({
+            "challenge_body": serde_json::Value::Null, "challenge_url": flood
+        })))
+        .expect_err("plain http must be refused");
+        assert!(err.contains("is not https"), "{err}");
+        let echoed = err.len() - prefix;
+        assert!(echoed > 0, "the echo capped away to nothing");
+        assert!(
+            echoed <= 64,
+            "echoed {echoed} bytes, over the 64-byte budget"
+        );
+
+        let char_only = sanitize_onchain(&format!("{flood:?}"), 64).text.len();
+        assert!(
+            char_only > 64,
+            "the char cap alone yields {char_only} bytes, already inside the budget"
+        );
+        eprintln!(
+            "MEASURED x402-pay-build challenge_url refusal echo: {echoed} B (char-capped only: \
+             {char_only} B, budget 64 B)"
+        );
+    }
+
+    /// The two refusals the wasm shim raises around its GET. They live here, in the pure core, for
+    /// exactly this reason: the shim is the one module with no test coverage by construction, and a
+    /// message built inside it is a message nothing can measure.
+    ///
+    /// The fixed prose is DERIVED by driving each builder with a short URL, not subtracted from a
+    /// pinned string. The first draft of this test subtracted only the SUFFIX and reported 78 bytes
+    /// against a 64-byte budget, which is the accounting failing rather than the bound: the prose
+    /// sits on BOTH sides of the echo here. Deriving it removes the arithmetic entirely.
+    #[test]
+    fn the_shim_url_refusals_are_byte_bounded() {
+        let flood = format!("https://evil.example/{}", ASTRAL.repeat(2000));
+        let short = "https://e";
+        let short_echo = format!("{short:?}");
+
+        type Builder = fn(&str) -> String;
+        let builders: [(&str, Builder); 2] = [
+            ("unreachable", |u| {
+                unreachable_challenge_error(u, "connection refused")
+            }),
+            ("status", |u| unexpected_challenge_status_error(u, 503)),
+        ];
+
+        let mut checked = 0usize;
+        for (name, build) in builders {
+            let short_msg = build(short);
+            assert!(
+                short_msg.contains(&short_echo),
+                "{name}: the URL never reached the echo, so this case is vacuous: {short_msg}"
+            );
+            let prefix = short_msg.len() - short_echo.len();
+
+            let msg = build(&flood);
+            let echoed = msg.len() - prefix;
+            assert!(echoed > 0, "{name}: the echo capped away to nothing");
+            assert!(
+                echoed <= 64,
+                "{name}: echoed {echoed} bytes, over the 64-byte budget"
+            );
+            let char_only = sanitize_onchain(&format!("{flood:?}"), 64).text.len();
+            assert!(
+                char_only > 64,
+                "{name}: the char cap alone yields {char_only} bytes, already inside the budget"
+            );
+            eprintln!(
+                "MEASURED x402-pay-build shim {name} refusal echo: {echoed} B (char-capped only: \
+                 {char_only} B, budget 64 B)"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 2, "a case was skipped");
+    }
+
+    /// An ordinary URL survives its own refusal intact. A cap that mangles a real value is a
+    /// different defect from the one it fixes.
+    #[test]
+    fn an_ordinary_url_is_untouched_by_the_echo_cap() {
+        let url = "http://x402.perfpilot.dev/reading";
+        let err = parse(&args(serde_json::json!({
+            "challenge_body": serde_json::Value::Null, "challenge_url": url
+        })))
+        .expect_err("plain http must be refused");
+        assert!(
+            err.contains(&format!("{url:?}")),
+            "a real URL was altered by the echo cap: {err}"
+        );
+    }
+
+    /// The operator's own `__config.max_amount` is DELIBERATELY not echo-bounded, and that decision
+    /// is pinned here so it reads as a choice rather than as an omission a later sweep should
+    /// "fix". The host strips any caller-supplied `__config` before injecting the operator's, so
+    /// this string is the operator's, read by the operator, and capping it would only cost them the
+    /// `…` marker that distinguishes a truncated paste from a mistyped value.
+    #[test]
+    fn the_operator_config_echo_is_deliberately_not_capped() {
+        let long = "1".repeat(500);
+        let mut cfg: serde_json::Value = serde_json::from_str(&cfg_json()).unwrap();
+        cfg["max_amount"] = serde_json::json!(long);
+        let json = serde_json::json!({"challenge_body": "{}", "__config": cfg}).to_string();
+
+        let err = parse(&json).expect_err("500 digits is not a u64");
+        assert!(
+            err.contains(&long),
+            "the operator's value was truncated; if that is now intended, this test is the record \
+             of the decision it reverses, not a stale assertion to delete: {err}"
+        );
     }
 }

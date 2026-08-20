@@ -60,6 +60,18 @@ const ECHO_MAX_BYTES: usize = 64;
 const ARG_ERROR_MAX: usize = 120;
 /// The same cap in bytes.
 const ARG_ERROR_MAX_BYTES: usize = 120;
+/// The character cap on an `RpcError` echoed back through the shim's rejection.
+///
+/// This is the most REMOTE string this plugin renders, and until now the only one on the error
+/// path with no cap of its own. `solana-core` caps `RpcError::Rpc.message` at 200 CHARACTERS, and
+/// leaves `RpcError::Transport`'s 200-character non-2xx body snippet unsanitized entirely — so an
+/// endpoint answering in astral-plane codepoints reaches the agent at four times the figure either
+/// cap suggests. Bounded HERE, at this plugin's own echo, rather than in the shared crate: widening
+/// a nine-plugin dependency is a different change from bounding one plugin's output, and the
+/// plugin is where the published ceiling lives.
+const RPC_ERROR_MAX: usize = 200;
+/// The same cap in bytes.
+const RPC_ERROR_MAX_BYTES: usize = 200;
 
 /// Sanitize an untrusted field and bound it on BOTH axes: characters, then bytes.
 ///
@@ -78,8 +90,31 @@ fn sanitize_labelled(raw: &str, max_chars: usize, max_bytes: usize) -> String {
     label_untrusted(&sanitize_onchain_bounded(raw, max_chars, max_bytes))
 }
 
+/// The shim's rejection for a failed RPC call, built HERE rather than in the shim so it is
+/// host-testable. The `#[cfg(target_family = "wasm")]` shim cannot be driven by `cargo test`, so a
+/// message assembled inside it is a message nothing can measure — the same reason
+/// `lending-health` keeps `invalid_arguments_message` beside its core.
+///
+/// `{e:?}` rather than Display because `RpcError` has no Display, and Debug is what the shim
+/// rendered before. Bounding the DEBUG rendering rather than the inner message means the bound
+/// holds for every variant, including any added upstream later, instead of holding for the one
+/// variant that happened to be inspected today.
+pub fn rpc_error_message(e: &solana_core::RpcError) -> String {
+    format!(
+        "rpc error: {}",
+        sanitize_to_bytes(&format!("{e:?}"), RPC_ERROR_MAX, RPC_ERROR_MAX_BYTES)
+    )
+}
+
 /// Parse + validate the raw args JSON. Every rejection happens here, before
 /// the shim opens any connection.
+///
+/// PROVENANCE INVERTS ON EACH REJECTION, which is why every echo below is bounded even though the
+/// same values are safely short on the success path. `mint` is a base58 address once
+/// `Pubkey::from_base58` has accepted it; this branch fires precisely BECAUSE it did not, so the
+/// value being echoed has passed no shape check at all. The same applies to `rpc_url`: the https
+/// test is what failed. "It is an address, therefore ASCII and short" is true one line later and
+/// exactly backwards here.
 pub fn parse_and_validate(args_json: &str) -> Result<ValidatedArgs, String> {
     let args: ExecuteArgs = serde_json::from_str(args_json).map_err(|e| {
         // serde's invalid_type / missing-field / unknown-field errors embed the
@@ -770,6 +805,265 @@ mod tests {
             out.len() < 2000,
             "worst-case report was {} bytes (expected bounded < 2000)",
             out.len()
+        );
+    }
+
+    // ---- error-path echo bounding -----------------------------------------
+    //
+    // The three rejections above were ALREADY byte-capped in source before this section existed.
+    // What did not exist was a test that could tell: every error-path fixture in this file is an
+    // ASCII flood (`"A".repeat(4096)`, `"x".repeat(1000)`) measured with `chars().count()`, and an
+    // ASCII flood is bounded IDENTICALLY by a character cap and a byte cap. So the byte half of
+    // each cap could have been deleted and the whole suite would have stayed green. These tests
+    // are the missing control: they drive the same branches with 4-byte codepoints and measure
+    // BYTES, and each one carries the char-capped-only figure beside its own so the two are
+    // comparable rather than merely asserted.
+
+    /// A 4-byte codepoint. Not a control character, so the sanitizer keeps it; four bytes wide, so
+    /// it is what separates a character cap from a byte ceiling.
+    const ASTRAL: &str = "\u{1F600}";
+
+    /// Every argument rejection echoes the value it refused, and each echo is bounded in BYTES.
+    ///
+    /// The fixed prose of each message is DERIVED, by driving the same branch with a one-byte
+    /// value, rather than pinned — rewording a message cannot silently loosen the bound.
+    #[test]
+    fn every_argument_error_echo_is_byte_bounded_not_just_char_bounded() {
+        let flood = ASTRAL.repeat(2000);
+
+        // (field, the branch's own prose, a SHORT value reaching the same branch, builder)
+        type Case = (&'static str, &'static str, &'static str, fn(&str) -> String);
+        let cases: [Case; 2] = [
+            ("mint", "not a valid base58 mint address", "!", |v| {
+                format!(r#"{{"mint":"{v}"}}"#)
+            }),
+            ("rpc_url", "must be https", "h", |v| {
+                format!(r#"{{"mint":"{USDC_MINT}","__config":{{"rpc_url":"{v}"}}}}"#)
+            }),
+        ];
+
+        let mut checked = 0usize;
+        for (field, prose, short, build) in cases {
+            let short_err = parse_and_validate(&build(short))
+                .expect_err("the fixture must be refused, or the bound below measures nothing");
+            assert!(
+                short_err.contains(prose),
+                "{field}: the intended branch was not taken, so the bound below measures some \
+                 other rejection. Got: {short_err}"
+            );
+            assert!(
+                short_err.ends_with(short),
+                "{field}: the refused value never reached the echo, so this case is vacuous. \
+                 Got: {short_err}"
+            );
+            let prefix = short_err.len() - short.len();
+
+            let err =
+                parse_and_validate(&build(&flood)).expect_err("the flood must be refused too");
+            assert!(
+                err.contains(prose),
+                "{field}: the flood took a different branch. Got: {err}"
+            );
+            let echoed = err.len() - prefix;
+            assert!(
+                echoed > 0,
+                "{field}: the echo capped away to nothing, so the byte bound proves nothing"
+            );
+            assert!(
+                echoed <= ECHO_MAX_BYTES,
+                "{field}: echoed {echoed} bytes, over the {ECHO_MAX_BYTES}-byte budget"
+            );
+
+            // BEFORE/AFTER CONTROL: what the CHARACTER cap alone admitted. Without this, the bound
+            // above is equally consistent with a budget loose enough for either form — which is
+            // exactly the state the pre-existing ASCII tests in this file left it in.
+            let char_only = sanitize_onchain(&flood, ECHO_MAX).text.len();
+            assert!(
+                char_only > ECHO_MAX_BYTES,
+                "{field}: the char cap alone yields {char_only} bytes, already inside the \
+                 {ECHO_MAX_BYTES}-byte budget, so the byte cap is not what holds it"
+            );
+
+            eprintln!(
+                "MEASURED token-risk-check {field} error echo: {echoed} B (char-capped only: \
+                 {char_only} B, budget {ECHO_MAX_BYTES} B)"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 2, "a case was skipped");
+    }
+
+    /// The malformed-arguments branch, measured in bytes. `ExecuteArgs` is a TYPED struct, so
+    /// serde's `invalid type` message embeds the offending value VERBATIM.
+    #[test]
+    fn the_malformed_arguments_echo_is_byte_bounded() {
+        let flood = ASTRAL.repeat(2000);
+        // `__config` is typed as a struct; hand it a string instead and serde quotes it back.
+        let json = format!(r#"{{"mint":"{USDC_MINT}","__config":"{flood}"}}"#);
+
+        const PREFIX: &str = "invalid arguments: ";
+        let err = parse_and_validate(&json).expect_err("a non-object __config must be refused");
+        assert!(
+            err.starts_with(PREFIX),
+            "the message no longer opens with the prose this bound subtracts. Got: {err}"
+        );
+        let echoed = err.len() - PREFIX.len();
+        assert!(
+            echoed > 0,
+            "the serde error capped away to nothing, so the bound below proves nothing"
+        );
+        assert!(
+            echoed <= ARG_ERROR_MAX_BYTES,
+            "echoed {echoed} bytes, over the {ARG_ERROR_MAX_BYTES}-byte budget"
+        );
+
+        // CONTROL, measured against what serde ACTUALLY produced rather than an assumed shape.
+        let raw = serde_json::from_str::<ExecuteArgs>(&json)
+            .expect_err("the fixture parsed, so there is no error to bound")
+            .to_string();
+        assert!(
+            raw.len() > 4 * ARG_ERROR_MAX_BYTES,
+            "serde no longer embeds the offending value ({} bytes), so this test is measuring a \
+             fixed message rather than an attacker-chosen one",
+            raw.len()
+        );
+        let char_only = sanitize_onchain(&raw, ARG_ERROR_MAX).text.len();
+        assert!(
+            char_only > ARG_ERROR_MAX_BYTES,
+            "the char cap alone yields {char_only} bytes, already inside the budget, so the byte \
+             cap is not what holds it"
+        );
+        eprintln!(
+            "MEASURED token-risk-check invalid-arguments echo: {echoed} B (raw serde: {} B, \
+             char-capped only: {char_only} B, budget {ARG_ERROR_MAX_BYTES} B)",
+            raw.len()
+        );
+    }
+
+    /// The most REMOTE string this plugin renders, and the one site on its error path that had no
+    /// cap of its own at all. `solana-core` caps `RpcError::Rpc.message` on CHARACTERS and leaves
+    /// `RpcError::Transport`'s body snippet unsanitized, so neither arrives bounded in bytes.
+    #[test]
+    fn an_rpc_error_echo_is_byte_bounded() {
+        let flood = ASTRAL.repeat(2000);
+        const PREFIX: &str = "rpc error: ";
+
+        let mut checked = 0usize;
+        for e in [
+            solana_core::RpcError::Rpc {
+                code: -32000,
+                message: flood.clone(),
+            },
+            solana_core::RpcError::Transport(flood.clone()),
+            solana_core::RpcError::Parse(flood.clone()),
+        ] {
+            let raw = format!("{e:?}");
+            let msg = rpc_error_message(&e);
+            assert!(msg.starts_with(PREFIX), "unexpected prose: {msg}");
+            let echoed = msg.len() - PREFIX.len();
+            assert!(echoed > 0, "the echo capped away to nothing");
+            assert!(
+                echoed <= RPC_ERROR_MAX_BYTES,
+                "echoed {echoed} bytes, over the {RPC_ERROR_MAX_BYTES}-byte budget"
+            );
+
+            // CONTROL: the raw Debug rendering, which is exactly what the shim interpolated before.
+            assert!(
+                raw.len() > 4 * RPC_ERROR_MAX_BYTES,
+                "the fixture never reached the error ({} bytes), so this case is vacuous",
+                raw.len()
+            );
+            let char_only = sanitize_onchain(&raw, RPC_ERROR_MAX).text.len();
+            assert!(
+                char_only > RPC_ERROR_MAX_BYTES,
+                "the char cap alone yields {char_only} bytes, already inside the budget"
+            );
+            eprintln!(
+                "MEASURED token-risk-check rpc error echo: {echoed} B (raw: {} B, char-capped \
+                 only: {char_only} B, budget {RPC_ERROR_MAX_BYTES} B)",
+                raw.len()
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 3, "a variant was skipped");
+    }
+
+    /// The budget is pinned from BOTH sides, ON the boundary rather than comfortably inside it. A
+    /// fixture of a few ASCII bytes passes for any budget above a few bytes and discriminates
+    /// nothing, which is what the pre-existing tests in this file did.
+    #[test]
+    fn the_echo_budget_is_exact_on_both_sides() {
+        let at = "a".repeat(ECHO_MAX_BYTES);
+        assert_eq!(
+            sanitize_to_bytes(&at, ECHO_MAX, ECHO_MAX_BYTES),
+            at,
+            "a value exactly ON the budget was altered; a tighter budget is the only way this fails"
+        );
+
+        let over = "a".repeat(ECHO_MAX_BYTES + 1);
+        let cut = sanitize_to_bytes(&over, ECHO_MAX, ECHO_MAX_BYTES);
+        assert!(
+            cut.len() <= ECHO_MAX_BYTES,
+            "{} bytes, over the {ECHO_MAX_BYTES}-byte budget",
+            cut.len()
+        );
+        assert_ne!(
+            cut, over,
+            "a value one byte over the budget was NOT truncated, so the budget is looser than \
+             {ECHO_MAX_BYTES} and every bound in this module is measured against the wrong number"
+        );
+        eprintln!(
+            "MEASURED token-risk-check echo budget: on-budget {} B unchanged, over-budget {} B \
+             cut from {} B",
+            at.len(),
+            cut.len(),
+            over.len()
+        );
+    }
+
+    /// An ordinary base58 mint survives its own rejection intact. A cap that mangles real values is
+    /// a different defect from the one it fixes.
+    #[test]
+    fn an_ordinary_value_is_untouched_by_the_echo_cap() {
+        // A well-formed base58 string that is not 32 bytes: it reaches the rejection with its
+        // shape intact, which is what makes it a useful control.
+        let almost = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt";
+        let e = parse_and_validate(&format!(r#"{{"mint":"{almost}"}}"#))
+            .expect_err("a 31-byte decode is not a pubkey");
+        assert!(
+            e.ends_with(almost),
+            "a real base58 value was altered by the echo cap: {e}"
+        );
+    }
+
+    /// The echo budgets are PUBLISHED in this crate's README as judge-facing figures, and every
+    /// other assertion in this module reads them as its own budget rather than pinning a value.
+    /// That includes the boundary fixture above, which is built by repeating a character
+    /// `ECHO_MAX_BYTES` times and so MOVES WITH the constant it is meant to hold. The suite
+    /// therefore proves a byte cap EXISTS and, without this test, proves nothing about where any
+    /// of them sits: raising `ECHO_MAX` to 200 or `RPC_ERROR_MAX` to 800 leaves every other test
+    /// green while making the README false.
+    ///
+    /// Pinning the literals is what makes a budget change fail here and force the README to move
+    /// in the same edit. Read a failure as "the README now disagrees", not as "put the number
+    /// back". Convention adopted from `solana-pay-request`, which closed the same class on the
+    /// other five crates.
+    #[test]
+    fn published_echo_budgets_are_pinned_to_their_readme_figures() {
+        assert_eq!(
+            (ECHO_MAX, ECHO_MAX_BYTES),
+            (64, 64),
+            "README publishes 64 B for the rejected mint and rpc_url echoes"
+        );
+        assert_eq!(
+            (ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES),
+            (120, 120),
+            "README publishes a 118 B measurement against this 120 B budget"
+        );
+        assert_eq!(
+            (RPC_ERROR_MAX, RPC_ERROR_MAX_BYTES),
+            (200, 200),
+            "README publishes 198 to 199 B measurements against this 200 B budget"
         );
     }
 }
