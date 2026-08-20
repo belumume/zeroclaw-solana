@@ -880,7 +880,7 @@ jobs:
 
       # check-silent-regressions.py detects identifiers main once declared and then
       # silently lost. Its control was written, calibrated, and wired into NOTHING:
-      # zero hits across all six workflow files and check-all.py, while three sibling
+      # zero hits across EVERY workflow file and check-all.py, while three sibling
       # mutation controls each had one. It passes 5 of 5 including a bogus positive
       # control that correctly REFUSES, so the control worked and simply never ran.
       - name: the silent-regression control can actually fire
