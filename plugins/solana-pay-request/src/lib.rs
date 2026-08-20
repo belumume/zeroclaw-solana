@@ -1,7 +1,7 @@
 //! `solana-pay-request` — a ZeroClaw tool plugin that builds a Solana Pay
 //! transfer-request URL (and a QR-ready payload) for a SOL or SPL-token payment.
 //!
-//! Custody tier T1 (and stricter): this plugin holds **no secrets** and makes
+//! Custody tier T0: this plugin holds **no secrets** and makes
 //! **no network calls**. It is pure computation — validate inputs, construct a
 //! `solana:` URL. The pure core ([`pay`]) is fully host-testable with no wasm
 //! toolchain and no RPC; the `#[cfg(target_family = "wasm")]` shim below only
