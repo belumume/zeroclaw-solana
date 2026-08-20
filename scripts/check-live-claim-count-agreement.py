@@ -145,7 +145,14 @@ PAT_LIVE = re.compile(r"\b" + _NUM + r"\s+live\s+claim", re.I)
 # MEASURED before it was added, over the scope this gate actually reads: 0 hits across 42 tracked
 # prose files and 2 in the operational scope, both correct. Historical records outside the scope
 # (the handoff archive carries 50 of them, each right for its date) are untouched by construction.
-PAT_LIVE_RATIO = re.compile(r"\b\d+\s*/\s*" + _NUM + r"\s+live\b", re.I)
+#
+# THE LOOKAHEAD KEEPS THE COUNT HONEST RATHER THAN THE VERDICT. `5/5 live claims verified`, the full
+# form the verifier prints, satisfies BOTH this and PAT_LIVE, and each would read the same
+# denominator off the same token -- so the verdict is unaffected either way and only the reported
+# total moves. That total is the point of this gate, and a claim counted twice is a crack in it.
+# Excluding the `claim` form here costs no coverage, because PAT_LIVE already owns it; the suite
+# pins exactly that, by requiring the full form to still fail on a wrong denominator.
+PAT_LIVE_RATIO = re.compile(r"\b\d+\s*/\s*" + _NUM + r"\s+live\b(?!\s+claim)", re.I)
 
 # A discovery walk that matches nothing reports a clean sweep. Floor it well below the measured
 # 13 so ordinary editing does not trip it, but high enough that a broken scan cannot pass.
@@ -661,6 +668,40 @@ def selftest() -> int:
             },
         )
         report("a bare ratio near the word 'live' does NOT fire", run(tmp)[0] == 0)
+
+    #      NO DOUBLE COUNT ON THE FULL FORM, and coverage of it is unchanged. The verifier prints
+    #      `N/M live claims verified`, which satisfies both live patterns; the lookahead hands that
+    #      form to PAT_LIVE alone. Both halves are asserted, because dropping the overlap is only
+    #      safe if the form is still CAUGHT: one claim counted once, and a wrong one still failing.
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _fixture(
+            tmp,
+            _agreeing_docs(),
+            ignored={
+                f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md": "prints `5/5 live claims verified` at the end\n"
+            },
+        )
+        rc, out = run(tmp)
+        report("the full `N/M live claims` form passes when correct", rc == 0)
+        report(
+            "and it is counted ONCE, not once per overlapping pattern",
+            any("carrying 1 of those claim(s)" in x for x in out),
+        )
+
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        _fixture(
+            tmp,
+            _agreeing_docs(),
+            ignored={
+                f"{OPERATIONAL_DIR}/DEMO-RUNBOOK.md": "prints `4/4 live claims verified` at the end\n"
+            },
+        )
+        report(
+            "a WRONG full form still fails, so the lookahead cost no coverage",
+            run(tmp)[0] == 1,
+        )
 
     #      AND THE FLOOR DOES NOT COUNT IT. An operational file full of claims must not let a
     #      dead tracked scan pass the floor, which would hand back the false green.

@@ -607,6 +607,17 @@ def runbook_pins_report(price_result):
     # correction sweep draws between a value still being asserted and one quoted to retire it.
     historical = ("was ", "before", "previously", "used to", "prior to", "superseded")
 
+    def current_span(line):
+        """The part of a line that is still being ASSERTED: everything before the first marker.
+
+        Shared by both checks below so the two cannot drift apart on how they read tense, which is
+        the asymmetry review found here: the mirror was matching whole lines while the byte pin was
+        span-scoped.
+        """
+        low = line.lower()
+        cut = min((low.find(h) for h in historical if h in low), default=len(line))
+        return line[:cut], low
+
     for i, line in enumerate(lines, 1):
         if "/price" not in line:
             continue
@@ -617,9 +628,7 @@ def runbook_pins_report(price_result):
         # the runbook pinned /price at 664 B against a live 666 B and this reported "all agree",
         # because the same line carried a historical parenthetical. Everything from the first
         # marker onward is dropped and the prefix is still read.
-        low = line.lower()
-        cut = min((low.find(h) for h in historical if h in low), default=len(line))
-        head = line[:cut]
+        head, low = current_span(line)
         toks = head.replace("**", " ").replace("|", " ").replace(",", "").split()
         for j, tok in enumerate(toks[:-1]):
             if tok.isdigit() and toks[j + 1].rstrip(".,;)").upper() == "B":
@@ -659,11 +668,18 @@ def runbook_pins_report(price_result):
         "one accepts entry",
         "the screen now agrees",
     )
+    # SPAN-SCOPED FOR THE SAME REASON THE BYTE PIN IS, and review is what surfaced that this loop
+    # was not. A whole-line skip would have been the obvious fix and is the wrong one here, measured
+    # on the three sentences that matter: the runbook's own spoken instruction carries `was deployed`
+    # later in the same line, so a line-level skip SILENCES a correct detection, while a past-tense
+    # narration of the tier having once been gone still fires. Reading only the span before the first
+    # marker gets all three right -- the spoken line fires, the retirement line fires, the narration
+    # stays silent.
     if n_live > 1:
         descs = [t.get("description") for t in tiers]
         for i, line in enumerate(lines, 1):
-            low = line.lower()
-            if any(w in low for w in retired):
+            head, low = current_span(line)
+            if any(w in head.lower() for w in retired):
                 problems.append(
                     f"line {i} says the live menu no longer carries the withdrawn tier, or that "
                     f"the screen agrees with a one-tier line; live /price has {n_live} tier(s): "
@@ -806,6 +822,23 @@ def selftest_runbook_pins():
             False,
             "the same spoken instruction while the menu really is one tier",
             fake,
+        ),
+        # THE TENSE PAIR, which review found uncovered. A past-tense narration of the tier having
+        # once been gone is accurate history and must stay silent even on a two-tier menu; the
+        # runbook's real spoken line carries a historical marker LATER in the same line and must
+        # still fire. Only span-scoping gets both, which is why the fix is not a whole-line skip.
+        (
+            "The day-pass tier was briefly gone from the live menu before the redeploy.",
+            False,
+            "mirror: past-tense narration containing a retired phrase, two-tier menu",
+            two_tier,
+        ),
+        (
+            'SAY "ONE PAYMENT, ONE READ". The screen now agrees with you.** '
+            "The gate binary was deployed on 2026-08-20.",
+            True,
+            "mirror: a live assertion whose line ALSO carries a later historical marker",
+            two_tier,
         ),
         ("nothing relevant here at all", False, "unrelated text", fake),
         (
