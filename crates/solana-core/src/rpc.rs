@@ -161,12 +161,15 @@ impl<T: RpcTransport> SolanaRpc<T> {
                 // The endpoint's own error text is untrusted response-path data
                 // (a compromised/hostile RPC can inject unbounded or hidden-framing
                 // text here). Strip control/zero-width/bidi and cap it, matching the
-                // discipline sanitize_onchain applies to on-chain metadata.
-                message: crate::sanitize::sanitize_onchain(
+                // discipline every plugin applies at its own echo. BOTH axes: a character
+                // cap alone admits four bytes per codepoint, so 200 characters of
+                // astral-plane text is 800 bytes into agent context.
+                message: crate::sanitize::sanitize_onchain_bounded(
                     err.get("message")
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or_default(),
-                    200,
+                    RPC_ERROR_MAX,
+                    RPC_ERROR_MAX_BYTES,
                 )
                 .text,
             });
@@ -368,6 +371,30 @@ fn decode_base64_data(d: Option<&serde_json::Value>) -> Result<Vec<u8>, RpcError
     }
 }
 
+/// Character cap on untrusted response-path error text echoed into agent context: a JSON-RPC
+/// endpoint's own `error.message`, and the body snippet of a non-2xx HTTP response.
+pub const RPC_ERROR_MAX: usize = 200;
+/// The same cap in BYTES. A character cap alone admits four bytes per codepoint, so 200
+/// characters of astral-plane text is 800 bytes. Reusing the character cap as a byte budget
+/// leaves every real ASCII message untouched.
+pub const RPC_ERROR_MAX_BYTES: usize = RPC_ERROR_MAX;
+
+/// The snippet an out-of-range HTTP status carries back to the caller.
+///
+/// Lives HERE rather than beside the socket that produces it, because `transport` is
+/// `#[cfg(target_family = "wasm")]` and a host `cargo test` never compiles it. Placed there, the
+/// tests below could not run at all: the suite's count did not move, which is the only reason it
+/// was noticed. Pure string work with no wasm dependency, so it belongs on the host side.
+pub fn body_snippet(status: u16, text: &str) -> String {
+    // A non-2xx BODY is attacker-influenced exactly as the JSON-RPC error text is, and this was
+    // neither sanitized nor byte-bounded: control, bidi and zero-width characters passed through
+    // verbatim. Both axes now. The per-plugin caps STAY, because this is the origin rather than
+    // a replacement, and a plugin is a trust boundary a shared crate cannot see.
+    let snippet =
+        crate::sanitize::sanitize_onchain_bounded(text, RPC_ERROR_MAX, RPC_ERROR_MAX_BYTES).text;
+    format!("HTTP {status}: {snippet}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,5 +473,118 @@ mod tests {
         assert_eq!(bodies.len(), 2);
         assert!(bodies[0].contains("getBalance") && bodies[0].contains("\"id\":1"));
         assert!(bodies[1].contains("getAccountInfo") && bodies[1].contains("\"id\":2"));
+    }
+
+    /// The budget is a PUBLISHED constant other crates read, and every assertion below uses it as
+    /// its own budget, so none of them can notice it moving. Pinning the literal is what makes a
+    /// change to the budget fail here instead of silently widening what reaches an agent.
+    #[test]
+    fn published_response_path_budget_is_pinned() {
+        assert_eq!(
+            (RPC_ERROR_MAX, RPC_ERROR_MAX_BYTES),
+            (200, 200),
+            "the response-path echo budget moved; the published figure must move with it"
+        );
+    }
+
+    #[test]
+    fn a_multibyte_error_body_is_bounded_in_bytes_not_only_characters() {
+        // 4-byte codepoints: a character cap of 200 admits 800 bytes of them.
+        let hostile = "\u{1F600}".repeat(4000);
+        let out = body_snippet(500, &hostile);
+        let prefix = "HTTP 500: ".len();
+
+        // FIXTURE CONTROL: a body dropped or capped away entirely would satisfy the size
+        // assertion below while measuring no body at all.
+        assert!(
+            out.len() > prefix,
+            "the body never reached the snippet, so this measures nothing"
+        );
+
+        // CONTROL ON THE OTHER SIDE: prove the char-only form really does exceed the budget, or
+        // the byte cap is not what holds the bound and this test proves nothing either way.
+        let char_only = crate::sanitize::sanitize_onchain(&hostile, RPC_ERROR_MAX).text;
+        assert!(
+            char_only.len() > RPC_ERROR_MAX_BYTES,
+            "char-only is {} bytes, not over the {RPC_ERROR_MAX_BYTES}-byte budget",
+            char_only.len()
+        );
+
+        assert!(
+            out.len() <= prefix + RPC_ERROR_MAX_BYTES,
+            "snippet is {} bytes, over the {RPC_ERROR_MAX_BYTES}-byte budget",
+            out.len()
+        );
+        eprintln!(
+            "MEASURED solana-core non-2xx body snippet: {} bytes (char-capped only: {} bytes, budget {})",
+            out.len(),
+            char_only.len(),
+            RPC_ERROR_MAX_BYTES
+        );
+    }
+
+    #[test]
+    fn control_and_bidi_characters_do_not_survive_into_the_snippet() {
+        // The half that was missing entirely: this snippet ran no sanitizer at all, so a
+        // right-to-left override reached agent context able to reframe everything after it.
+        let hostile = "ok\u{202E}reversed\u{0007}bell\u{200B}zero";
+        let out = body_snippet(503, hostile);
+        for bad in ['\u{202E}', '\u{0007}', '\u{200B}'] {
+            assert!(
+                !out.contains(bad),
+                "{bad:?} survived into the snippet: {out:?}"
+            );
+        }
+        // It must still carry the readable text, or stripping everything would satisfy the above.
+        assert!(out.contains("reversed"), "the body was destroyed: {out:?}");
+    }
+
+    #[test]
+    fn an_at_budget_ascii_error_is_left_alone() {
+        // NARROWING CONTROL sitting exactly ON the budget rather than comfortably under it: a
+        // short fixture passes for any budget above its own length and discriminates nothing.
+        let body = "e".repeat(RPC_ERROR_MAX_BYTES);
+        let out = body_snippet(429, &body);
+        assert!(
+            out.ends_with(&body),
+            "an at-budget ASCII body was altered: {} bytes out",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn a_multibyte_json_rpc_error_message_is_bounded_in_bytes() {
+        // The sibling site: `error.message` from a hostile endpoint. Same provenance, same axis,
+        // driven through the real client rather than a private helper.
+        let hostile = "\u{1F600}".repeat(4000);
+        let resp = serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": {"code": -32000, "message": hostile},
+            "id": 1
+        })
+        .to_string();
+        let rpc = SolanaRpc::new(MockTransport::single(&resp));
+        let err = rpc
+            .get_account_info(&crate::pubkey::token_program())
+            .expect_err("the error branch did not fire, so this measures nothing");
+        let msg = match err {
+            RpcError::Rpc { message, .. } => message,
+            other => panic!("expected RpcError::Rpc, got {other:?}"),
+        };
+        assert!(
+            !msg.is_empty(),
+            "the message was dropped entirely, so the size assertion below is vacuous"
+        );
+        assert!(
+            msg.len() <= RPC_ERROR_MAX_BYTES,
+            "rpc error message is {} bytes, over the {RPC_ERROR_MAX_BYTES}-byte budget",
+            msg.len()
+        );
+        eprintln!(
+            "MEASURED solana-core rpc error message: {} bytes (raw {} bytes, budget {})",
+            msg.len(),
+            hostile.len(),
+            RPC_ERROR_MAX_BYTES
+        );
     }
 }
