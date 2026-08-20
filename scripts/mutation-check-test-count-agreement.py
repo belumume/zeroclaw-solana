@@ -80,6 +80,24 @@ MUTANTS = (
         "    if compared == -1:",
         "so a run that compared nothing at all reports a pass",
     ),
+    (
+        "lazy expansion, forced always-on",
+        "    if any(v not in union for v in unattributed):",
+        "    if True or any(v not in union for v in unattributed):",
+        "so a satisfied unattributed claim still drags every remaining crate into the build",
+    ),
+    (
+        "lazy expansion, forced always-off",
+        "    if any(v not in union for v in unattributed):",
+        "    if False and any(v not in union for v in unattributed):",
+        "so an unsatisfied unattributed claim is judged against a union that was never grown",
+    ),
+    (
+        "the presence short-circuit on a partial union",
+        "            if value in union:",
+        "            if False and value in union:",
+        "so a figure the union already contains is re-judged as though absence were in doubt",
+    ),
 )
 
 

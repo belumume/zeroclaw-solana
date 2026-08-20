@@ -76,9 +76,14 @@ beside it to be deleted.
     folded into a pass.
 
 COST, and why the shape of this gate bounds it. Cargo dominates the runtime, so the gate
-runs the suites for the crates a doc actually makes a claim about, and reaches for the
-rest only when some claim names no crate and the union is therefore needed. With no test
-count published anywhere it runs cargo zero times. Set CARGO_TARGET_DIR to one shared path
+measures only the crates a doc actually makes a claim about, and grows the union LAZILY:
+an unattributed figure already present in that partial union is decided for good, because
+the union only ever grows, so the remaining crates are never built. They are built only
+when some bare figure is genuinely unrecognised, which is the one run where the extra
+certainty is worth buying before failing. That matters here rather than in the abstract:
+the two e2e crates and the two on-chain programs carry the heaviest dependency trees in
+this repo, and in a healthy tree none of them is compiled at all. With no test count
+published anywhere the gate runs cargo zero times. Set CARGO_TARGET_DIR to one shared path
 before running it, so the common dependency tree compiles once rather than per crate.
 
   python3 scripts/check-test-count-agreement.py             # run the suites, compare
@@ -270,23 +275,46 @@ def check(root: pathlib.Path, provider) -> tuple[int, list[str]]:
         )
         return 0, lines
 
-    # Cost is bounded by the CLAIM surface. The union is only needed when some claim names
-    # no crate, and only then does every crate have to be run.
-    needed = {c for *_, c in found if c}
-    if any(c is None for *_, c in found):
-        needed = set(known)
-
     measured: dict[str, list[int]] = {}
     broken: list[str] = []
-    for rel in sorted(needed):
-        counts, why = provider(rel)
-        if why:
-            broken.append(f"{rel}: {why}")
-        else:
-            measured[rel] = counts
-    union: set[int] = set()
-    for counts in measured.values():
-        union |= accepted(counts)
+
+    def measure(rels: set[str]) -> None:
+        for rel in sorted(rels - set(measured)):
+            counts, why = provider(rel)
+            if why:
+                broken.append(f"{rel}: {why}")
+            else:
+                measured[rel] = counts
+
+    def union_of() -> set[int]:
+        u: set[int] = set()
+        for counts in measured.values():
+            u |= accepted(counts)
+        return u
+
+    # COST IS BOUNDED BY THE CLAIM SURFACE, AND THE UNION IS GROWN LAZILY.
+    #
+    # Cargo dominates the runtime, so the crates a doc actually makes a claim about are
+    # measured first. An unattributed claim needs the union, and the union is what would drag
+    # in every remaining crate -- including the two e2e crates and the two on-chain programs,
+    # whose Solana dependency trees are by far the most expensive thing this repo compiles.
+    #
+    # THE EXPANSION IS AVOIDABLE BECAUSE THE UNION ONLY GROWS. A value already present in the
+    # partial union is present in every superset of it, so a satisfied unattributed claim is
+    # decided for good and measuring more crates cannot change the verdict. Only an
+    # unsatisfied one is genuinely undecided, and only then is the rest of the tree worth
+    # building -- which is exactly the run where the extra certainty is being spent to avoid
+    # failing on an incomplete picture.
+    #
+    # In the steady state, where every published figure is correct, the heavy crates are never
+    # built at all. Naming the crate in the sentence removes even the possibility, which is why
+    # the NOT COMPARED message below says which claim named no crate.
+    measure({c for *_, c in found if c})
+    union = union_of()
+    unattributed = [value for _, _, value, _, crate in found if crate is None]
+    if any(v not in union for v in unattributed):
+        measure(set(known))
+        union = union_of()
     # THE UNION IS ONLY SOUND WHEN IT IS COMPLETE, and this is the half that decides whether
     # a broken crate voids everything or only its own claims. An unattributed claim is judged
     # by ABSENCE from the union, so a union missing a crate can report a correct figure as
@@ -317,6 +345,12 @@ def check(root: pathlib.Path, provider) -> tuple[int, list[str]]:
                     f"(sum {sum(measured[crate])})"
                 )
         else:
+            # PRESENCE is decided by any union; ABSENCE needs a complete one. A value already
+            # in the partial union is in every superset of it, so that verdict is final and
+            # does not depend on whether the rest of the tree was built.
+            if value in union:
+                compared += 1
+                continue
             if not union_complete:
                 skipped.append(
                     f"{where}, and names no crate, so only the union could judge it; "
@@ -324,11 +358,10 @@ def check(root: pathlib.Path, provider) -> tuple[int, list[str]]:
                 )
                 continue
             compared += 1
-            if value not in union:
-                failures.append(
-                    f"{where}, but no crate in this repo prints it "
-                    f"(union over {len(measured)} crate(s))"
-                )
+            failures.append(
+                f"{where}, but no crate in this repo prints it "
+                f"(union over {len(measured)} crate(s))"
+            )
 
     lines.append(
         f"{len(found)} test-count claim(s) across {len(scanned_docs)} of {len(all_docs)} "
@@ -538,6 +571,44 @@ def selftest() -> int:
     report(
         "the same figure with a complete union DOES fail",
         _run({"docs/free.md": "the layer runs 999 tests\n"})[0] == 1,
+    )
+
+    # LAZY EXPANSION. The union only grows, so a satisfied unattributed claim is decided by the
+    # partial union and the rest of the tree never has to be built. This is what keeps the two
+    # e2e crates and the two on-chain programs -- the most expensive compiles in this repo --
+    # out of a healthy run. Asserted on the CALLS the provider received, because a verdict
+    # alone cannot distinguish "did not need it" from "measured it anyway".
+    def recording():
+        calls: list[str] = []
+
+        def p(rel: str):
+            calls.append(rel)
+            return _provider(rel)
+
+        return calls, p
+
+    calls, p = recording()
+    # 7 is fx's, so the attributed crate alone settles it and `other` is never touched.
+    rc, _ = _run(
+        {"fx/README.md": "runs 7 tests\n", "docs/free.md": "and 7 tests there\n"}, p
+    )
+    report(
+        "a satisfied unattributed claim does not expand",
+        rc == 0 and "other" not in calls,
+    )
+    calls, p = recording()
+    # 999 is nobody's, so the gate must reach for every remaining crate before deciding.
+    rc, _ = _run(
+        {"fx/README.md": "runs 7 tests\n", "docs/free.md": "and 999 tests\n"}, p
+    )
+    report("an unsatisfied one does expand", rc == 1 and "other" in calls)
+    calls, p = recording()
+    # 5 is `other`'s, so the partial union misses it and the expansion is what saves a correct
+    # figure from being reported absent.
+    rc, _ = _run({"fx/README.md": "runs 7 tests\n", "docs/free.md": "and 5 tests\n"}, p)
+    report(
+        "and expansion clears a figure the partial union lacked",
+        rc == 0 and "other" in calls,
     )
     # The real provider's own preflight, driven directly. Going through `check()` here would
     # only re-test the branch above; what needs pinning is that `run_suite` REFUSES rather
