@@ -765,6 +765,14 @@ jobs:
       - name: the source-comment controls actually gate
         run: python3 scripts/check-source-comment-leaks.py --selftest
 
+      # This gate's positive control is the only thing proving it can fire: both bases it was
+      # written against are fixed now, so its real run is clean, and a detector that cannot
+      # detect returns exactly that. It lives here rather than beside the gate on the schedule
+      # because it needs the two pre-fix commits reachable, which this job's fetch-depth 0 gives
+      # and a default depth-1 checkout does not.
+      - name: the base-freshness control can actually fire
+        run: python3 scripts/check-pr-base-freshness.py --selftest
+
       # A crate nothing BUILDS can break silently for weeks while a repo-wide formatter sweeps it
       # and reports success. That is not hypothetical here: `e2e-track-a` stopped compiling for 21
       # days exactly that way. Enumerating the class found two more, the on-chain programs, which
