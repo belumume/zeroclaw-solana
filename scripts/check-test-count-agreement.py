@@ -296,9 +296,20 @@ def check(root: pathlib.Path, provider) -> tuple[int, list[str]]:
 
     measured: dict[str, list[int]] = {}
     broken: list[str] = []
+    # ATTEMPTED, not MEASURED, is what bounds the work. A crate that fails to build lands in
+    # `broken` and never in `measured`, so an exclusion keyed on `measured` does not exclude
+    # it, and measure() is called twice: once for attributed crates, once for the full
+    # expansion when an unattributed figure is not covered by the partial union. A crate
+    # that cannot build is therefore built TWICE, each attempt bounded only by run_suite's
+    # 3600s timeout, and it is reported twice for the same reason. That is not theoretical
+    # here: this project's own Windows host cannot build the e2e crates or differential-fuzz
+    # through openssl-sys. Two 3600s attempts is most of the 90-minute ceiling on the CI job
+    # whose whole point is to fail by NAMING the wrong figure rather than by timing out.
+    attempted: set[str] = set()
 
     def measure(rels: set[str]) -> None:
-        for rel in sorted(rels - set(measured)):
+        for rel in sorted(rels - attempted):
+            attempted.add(rel)
             counts, why = provider(rel)
             if why:
                 broken.append(f"{rel}: {why}")
@@ -661,6 +672,29 @@ def selftest() -> int:
     report(
         "and expansion clears a figure the partial union lacked",
         rc == 0 and "other" in calls,
+    )
+    # A crate that FAILS to build lands in `broken` and never in `measured`, so an exclusion
+    # keyed on `measured` does not exclude it and the full expansion ATTEMPTS IT AGAIN. Each
+    # attempt is bounded only by run_suite's 3600s timeout, and two of those is most of the
+    # 90-minute ceiling on the CI job whose whole purpose is to fail by NAMING the wrong
+    # figure rather than by timing out. Not theoretical here: this host cannot build the e2e
+    # crates or differential-fuzz through openssl-sys. Asserted on the CALLS, because the
+    # verdict is identical whether the crate was attempted once or twice.
+    twice: list[str] = []
+
+    def _breaks(rel: str):
+        twice.append(rel)
+        if rel == "other":
+            return [], "cannot build"
+        return _provider(rel)
+
+    _run(
+        {"other/README.md": "runs 3 tests\n", "docs/free.md": "and 999 tests\n"},
+        _breaks,
+    )
+    report(
+        "a crate that cannot build is attempted once, not twice",
+        twice.count("other") == 1,
     )
     # The real provider's own preflight, driven directly. Going through `check()` here would
     # only re-test the branch above; what needs pinning is that `run_suite` REFUSES rather
