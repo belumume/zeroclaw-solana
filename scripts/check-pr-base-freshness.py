@@ -144,6 +144,14 @@ def main() -> int:
     ap.add_argument(
         "--selftest", action="store_true", help="replay the real pre-fix cases"
     )
+    ap.add_argument(
+        "--pr",
+        type=int,
+        default=None,
+        help="check ONLY this pull request. CI passes the PR under test, so a required "
+        "check fails the branch actually at fault rather than reddening every open PR "
+        "because a sibling happens to have a stale base.",
+    )
     ap.add_argument("--base", default="origin/main")
     args = ap.parse_args()
 
@@ -158,17 +166,27 @@ def main() -> int:
         print("cannot check: gh is unavailable, so open PRs cannot be enumerated")
         return CANNOT_CHECK
 
+    # A CI checkout is shallow by default, and on a shallow clone every branch ref fails to
+    # resolve, so the walk would compare nothing and report a clean tree. Deepen first.
+    if run(["git", "rev-parse", "--is-shallow-repository"])[1].strip() == "true":
+        run(["git", "fetch", "--unshallow", "--quiet", "origin"])
     run(["git", "fetch", "origin", "--quiet"])
-    rc, out = run(
-        ["gh", "pr", "list", "--state", "open", "--json", "number,title,headRefName"]
-    )
-    if rc != 0:
-        print("cannot check: could not list open PRs (network or auth)")
-        return CANNOT_CHECK
-
-    prs = json.loads(out or "[]")
+    if args.pr is not None:
+        rc, out = run(["gh", "pr", "view", str(args.pr), "--json", "number,title,headRefName"])
+        if rc != 0:
+            print(f"cannot check: could not read PR #{args.pr} (network or auth)")
+            return CANNOT_CHECK
+        prs = [json.loads(out)] if out else []
+    else:
+        rc, out = run(
+            ["gh", "pr", "list", "--state", "open", "--json", "number,title,headRefName"]
+        )
+        if rc != 0:
+            print("cannot check: could not list open PRs (network or auth)")
+            return CANNOT_CHECK
+        prs = json.loads(out or "[]")
     if not prs:
-        print("PASS  no open pull requests to check")
+        print("PASS  no pull request to check")
         return 0
 
     findings, checked = [], 0
