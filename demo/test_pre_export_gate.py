@@ -919,9 +919,17 @@ check(
 # target string vanished with the refactor and this assertion FIRED, which is the control
 # doing its job: without it, M2 would have silently exec'd an unmodified detector and the
 # green below would have meant nothing.
+# RE-KEYED AGAIN 2026-08-20, and the previous key passed BY COINCIDENCE. It blanked only
+# the 'os account name' needle, but `identity` carries the SAME VALUE twice: the account
+# name AND the home-directory basename. Wherever those match, which is nearly every
+# machine and every CI runner (both 'runner'), blanking one leaves the other catching the
+# planted leak, so the mutant was never disabled. It passed HERE only because this
+# machine's account name and home directory happen to DIFFER. It failed on the first
+# Linux runner it ever saw. Disabling the whole identity list is environment-independent
+# and tests exactly the claim the control is named for.
 _m2 = mutate(
-    '("os account name", account),',
-    '("os account name", ""),',
+    '    needles = identity + [(f"timezone marker {m.strip()!r}", m) for m in TZ_MARKERS]',
+    '    needles = [] + [(f"timezone marker {m.strip()!r}", m) for m in TZ_MARKERS]',
 )
 if USER:
     _leak = f"C:\\path\\{USER}\\DEV out"
