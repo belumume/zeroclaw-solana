@@ -208,7 +208,7 @@ the key, and a `max_amount` of `0` refuses with "authorises nothing" rather than
 ## Build
 
 ```
-cargo test --locked                                  # 57 host tests, no network
+cargo test --locked                                  # 70 host tests, no network
 cargo clippy --all-targets --locked -- -D warnings
 cargo build --target wasm32-wasip2 --release
 ```
