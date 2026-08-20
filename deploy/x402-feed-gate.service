@@ -1,7 +1,19 @@
 # The machine paywall. A TEMPLATE, and the fields below are marked for what is verified.
 #
 # ================================ READ THIS FIRST ================================
-# UNVERIFIED AGAINST THE BOX. Every field marked `UNVERIFIED` below was derived from this
+# RECONCILED AGAINST THE LIVE BOX 2026-08-20 over an OCI Bastion session. This file was written
+# UNVERIFIED, and reconciliation found it WRONG in the way that matters: as originally committed its
+# ExecStart pointed at `%h/.zeroclaw/bin/x402-feed-gate`, WHICH DOES NOT EXIST, so installing it
+# verbatim would have failed 203/EXEC every start and taken the paywall down. That is the whole
+# reason a proposed unit must never be applied before it is read back.
+#
+# The live unit is ALSO less hardened than this file proposes: NoNewPrivileges, PrivateTmp,
+# ProtectSystem, ProtectHome and ReadWritePaths are all ABSENT from what is running. Those lines are
+# kept below as a deliberate IMPROVEMENT to apply at the next deploy, not as a description of today.
+#
+# Everything below now carries the real value with the proposal beside it where they differ.
+#
+# (historical note) Every field marked `UNVERIFIED` below was derived from this
 # repository, not read off the running node, and it MUST be reconciled on first contact. This
 # uses the same convention `deploy/deploy-targets.json` already uses for a `dst` nobody has
 # confirmed: state the uncertainty in the file rather than shipping a confident guess.
@@ -82,7 +94,12 @@ Type=simple
 # ExecStart, so a setting passed as `--flag=value` would publish as `--flag=<redacted>` and be
 # invisible to review, while the same setting as an environment NAME publishes its name and keeps
 # its value private. Prefer the environment for anything a reviewer should be able to enumerate.
-ExecStart=%h/.zeroclaw/bin/x402-feed-gate
+# CORRECTED 2026-08-20. The path below is what the box actually runs, read from the live unit.
+# The proposed `%h/.zeroclaw/bin/x402-feed-gate` does not exist and never did.
+# The binary lives in its BUILD TREE, which is why nothing under %h/.zeroclaw hashes it and why the
+# manifest never noticed it drift. Moving it into %h/.zeroclaw/bin is a good change and is a DEPLOY,
+# not an edit to this file: do both together or the unit points at nothing.
+ExecStart=%h/zc-x402-build-20260804-214627/x402-feed-gate/target/release/x402-feed-gate
 
 # UNVERIFIED. The gate resolves its own state directory from ZEROCLAW_HOME or HOME
 # (x402-feed-gate/src/main.rs), so this is belt-and-braces rather than load-bearing; set it so a
@@ -94,7 +111,10 @@ WorkingDirectory=%h/.zeroclaw
 # about the unit rather than about the missing secrets, which sends the diagnosis to the wrong
 # place. The gate itself refuses to serve what it cannot configure, so a missing file still fails
 # loudly, just at the layer that can say why.
-EnvironmentFile=-%h/.zeroclaw/secrets/x402-feed-gate.env
+# CORRECTED 2026-08-20: the proposed %h/.zeroclaw/secrets/ does not exist. The real file is
+# %h/.zeroclaw/x402.env, 479 bytes, mode 600, which already satisfies this file's stated intent.
+# Note there is NO leading dash on the live unit, so a missing file is fatal rather than optional.
+EnvironmentFile=%h/.zeroclaw/x402.env
 #
 # THE NAMES THAT BELONG IN THAT FILE, enumerated from the crate rather than remembered:
 #
