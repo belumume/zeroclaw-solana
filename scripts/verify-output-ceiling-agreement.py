@@ -56,11 +56,61 @@ spl-transfer-build 750). That is the same one-surface-corrected defect this gate
 catch, surviving in the surface with the widest audience. See uncovered() and
 EXCLUDED_DOCS for what is deliberately left out and why.
 
+IT COULD NOT RUN FOR THE AUDIENCE IT EXISTS TO CONVINCE, and that is what the clone mode
+below fixes. The ledger is gitignored, so it is absent from every clone by construction. A
+stranger who reproduces this repo therefore got `cannot check: docs/COMPLIANCE-AUDIT.md is
+missing`, exit 2 -- the correct refusal, and a check that never runs. `--selftest` was worse:
+it needed the ledger too, so a stranger could not even exercise the controls. Measured in a
+ledgerless checkout before this: the run exited 2 having compared nothing, and the selftest
+exited 2 having run ZERO of its controls. The gate was also wired into NOTHING, and it could
+not be, because it would have exited 2 on every CI run for the same reason.
+
+SO THE CLAIM SOURCE FALLS BACK, and the fallback is DERIVED rather than authored:
+
+  ledger present  ->  claims come from the ledger, exactly as before, AND the tracked
+                      extract is asserted to still mirror it. Full fidelity, plus a
+                      freshness assertion that did not exist before.
+  ledger absent   ->  claims come from `docs/proof-bundle/output-ceilings.json`, which IS
+                      tracked and therefore present in a clone. The suites still run and
+                      are still compared, so a stranger gets a real check.
+  neither         ->  CANNOT_CHECK, unchanged. Nothing is ever compared against nothing.
+
+THE OBVIOUS OBJECTION IS THE ONE ABOVE -- a stored file of numbers is exactly the "THIRD
+surface drifting on its own schedule" this docstring warns against. The answer is that it is
+never hand-maintained and never trusted blind: `--write-extract` derives it from the ledger,
+and every run that CAN read the ledger FAILS while the two disagree. The surface able to
+detect the drift is the one that gates it. The assertion is keyed to the parsed CLAIMS and
+deliberately NOT to the ledger's bytes -- a hash of a 15 KB living document would redden on
+every unrelated edit, which is a gate keyed to an implementation detail punishing the correct
+change, and it would be routed around within a week.
+
+WHAT THE CLONE RUN CANNOT CATCH, which the working-tree run can. Stated here because a
+second mode described as coverage invites the first one to be skipped:
+
+  - LEDGER EDITS ARE INVISIBLE TO IT. It compares the suites against a SNAPSHOT. Publish a
+    bogus figure in the ledger and fail to regenerate, and a clone still passes; only a
+    checkout with the ledger reddens. The clone therefore catches exactly one direction --
+    the CODE moving away from what is published -- which is the direction a stranger
+    actually creates by changing a crate and rebuilding.
+  - IT CANNOT CHECK THE PROSE. That the ceiling row is still discoverable by shape, and
+    still parses to these claims, needs the ledger's text and is unanswerable without it.
+  - THE SNAPSHOT IS ONLY AS FRESH AS THE LAST LEDGER-BEARING RUN. Nothing runs this
+    automatically yet (see the wiring note below), so that cadence is manual today.
+  - EVERY LIMIT OF THE WORKING-TREE RUN STILL APPLIES: a crate printing no `MEASURED` line
+    is NOT COMPARED, and a figure that is right by coincidence still passes.
+
   python3 scripts/verify-output-ceiling-agreement.py            # run the suites, compare
   python3 scripts/verify-output-ceiling-agreement.py --selftest # controls, no cargo needed
+  python3 scripts/verify-output-ceiling-agreement.py --check-extract  # freshness only, ~0s
+  python3 scripts/verify-output-ceiling-agreement.py --write-extract  # regenerate it
 
-Exit: 0 agree, 1 a published figure is not one the suites print, 2 could not check (never
-a pass -- a comparison against nothing is not agreement), 3 a selftest control failed.
+`--check-extract` is the freshness half alone: pure text, no cargo, effectively instant. It
+is split out because an artifact whose only freshness check costs a Rust compile is an
+artifact whose freshness check does not get run.
+
+Exit: 0 agree, 1 a published figure is not one the suites print OR the extract no longer
+mirrors the ledger, 2 could not check (never a pass -- a comparison against nothing is not
+agreement, and `0 of 0` is not agreement either), 3 a selftest control failed.
 
 WHY IT IS NOT NAMED `check-*`, which is a deliberate choice and not an oversight.
 `check-all.py` discovers `scripts/check-*.py` from git's index and runs every one, so that
@@ -85,16 +135,39 @@ is most of the difference between the two numbers above.
 
 To enrol it in check-all.py anyway, rename it to `check-output-ceiling-agreement.py` and
 raise MIN_GATES there by one. Nothing else is required; discovery does the rest.
+
+BOTH OBJECTIONS ABOVE ARE ABOUT THE FULL RUN, AND NEITHER APPLIES TO `--check-extract`.
+That path is pure Python and git, costs no compile, and answers the one question a cheap
+cadence most needs answered: is the snapshot every clone checks against still true. So the
+wiring this file now deserves is two-tier, and it is left as a follow-up rather than done
+here only because `.github/workflows/ci.yml` is being edited concurrently:
+
+  CHEAP TIER -- a `scripts/check-output-ceiling-extract.py` of three lines that imports this
+  module and returns `check_extract()`, plus MIN_GATES += 1 in check-all.py. It is
+  toolchain-free, so it stays green on any machine, and it is CANNOT_CHECK rather than a
+  failure in a clone, which is honest: only a ledger-bearing checkout can answer it.
+  FULL TIER -- the whole run in a CI job that already has a Rust toolchain and rust-cache,
+  with CARGO_TARGET_DIR pointed at one shared path. In a CI clone it now takes the extract
+  branch and produces a real verdict, where before this change it could only have exited 2.
 """
 
+import contextlib
+import io
+import json
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 LEDGER = ROOT / "docs" / "COMPLIANCE-AUDIT.md"
+# The TRACKED extract of the ledger's ceiling claims. It exists so this gate has an operand
+# in a fresh clone, where the gitignored ledger above is absent by construction. It is
+# DERIVED, never hand-maintained: `--write-extract` regenerates it from the ledger, and any
+# run that can see the ledger FAILS when the two disagree. See extract_drift().
+EXTRACT = ROOT / "docs" / "proof-bundle" / "output-ceilings.json"
 CANNOT_CHECK = 2
 
 # Documents deliberately NOT scanned, each with the reason it would be wrong to scan.
@@ -159,6 +232,20 @@ NON_BYTE_UNIT_AFTER = re.compile(
     r"\s*(?:[a-z][a-z-]*\s+){0,2}"
     r"(?:chars?|characters?|lines?|entries|entry|top|codepoints?|%|[KMG]i?B|kB)\b"
 )
+
+
+def rel(p: pathlib.Path) -> str:
+    """A path for humans, which must never be the thing that crashes a message.
+
+    `Path.relative_to` RAISES for anything outside ROOT, and the controls point LEDGER and
+    EXTRACT at a temp directory on purpose, so the bare call turned every pinned-environment
+    control into a ValueError traceback. Found by those controls on their first run: the
+    gate's logic was right and its reporting could not survive being tested.
+    """
+    try:
+        return p.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return p.as_posix()
 
 
 def crates(root: pathlib.Path) -> list[str]:
@@ -257,6 +344,181 @@ def claims_in(text: str, names: list[str]) -> dict[str, dict[str, list]]:
     return found
 
 
+def canon(claimed: dict[str, dict[str, list]]) -> dict[str, dict[str, list]]:
+    """Claims in the only form the verdict can see: deduplicated and ordered.
+
+    compare() already reduces both lists with `sorted(set(...))`, so canonicalising here is
+    lossless with respect to the verdict while making the stored extract byte-stable. A
+    reordered ledger sentence must not produce a diff in a tracked artifact, or the artifact
+    churns for reasons that have nothing to do with the numbers.
+    """
+    return {
+        name: {k: sorted(set(v)) for k, v in sorted(buckets.items())}
+        for name, buckets in sorted(claimed.items())
+    }
+
+
+def extract_payload(claimed: dict[str, dict[str, list]]) -> dict:
+    """The tracked artifact's content. Self-describing, because a stranger meets it first."""
+    return {
+        "_": (
+            "DERIVED, do not hand-edit. The ceiling figures docs/COMPLIANCE-AUDIT.md "
+            "publishes per plugin crate. That ledger is gitignored, so it is absent from "
+            "every clone; this file is what scripts/verify-output-ceiling-agreement.py "
+            "compares the plugin suites against when the ledger cannot be read. The LEDGER "
+            "is authoritative -- regenerate with `--write-extract`, and any run that can "
+            "see the ledger fails while the two disagree."
+        ),
+        "source": rel(LEDGER),
+        "crates": claimed,
+    }
+
+
+def load_extract() -> tuple[dict[str, dict[str, list]] | None, str | None]:
+    """(claims, reason it could not be read). Never guesses a shape it did not find."""
+    if not EXTRACT.is_file():
+        return None, (
+            f"{rel(EXTRACT)} is missing, and so is the gitignored "
+            "ledger, so there is no published claim to compare the suites against. "
+            "Regenerate it from a checkout that has the ledger: --write-extract"
+        )
+    try:
+        blob = json.loads(EXTRACT.read_text(encoding="utf-8"))
+        crates_in = blob["crates"]
+        out = {
+            str(name): {
+                "claims": [int(v) for v in buckets.get("claims", [])],
+                "bounds": [int(v) for v in buckets.get("bounds", [])],
+            }
+            for name, buckets in crates_in.items()
+        }
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        return None, (
+            f"{rel(EXTRACT)} could not be read as a claim "
+            f"extract ({type(exc).__name__}: {exc}). A comparison against nothing is not "
+            "agreement, so this is not a pass."
+        )
+    if not out:
+        return None, (
+            f"{rel(EXTRACT)} names no crate, so nothing would be "
+            "compared. That is a broken or truncated extract, never a clean repo."
+        )
+    return canon(out), None
+
+
+def extract_drift(ledger_claims: dict[str, dict[str, list]]) -> list[str]:
+    """How the tracked extract differs from the ledger it claims to mirror.
+
+    Only a run that can READ the ledger can answer this, which is exactly why the assertion
+    lives here rather than in the clone path: the surface that can detect the drift is the
+    one that gates it. Keyed on the parsed CLAIMS and never on the ledger's bytes -- a hash
+    of a 15 KB living document would redden on every unrelated edit, which is a gate keyed
+    to an implementation detail punishing the correct change, and it would be routed around
+    within a week.
+    """
+    stored, why = load_extract()
+    if why:
+        return [why]
+    problems = []
+    for crate in sorted(set(stored) | set(ledger_claims)):
+        want, got = ledger_claims.get(crate), stored.get(crate)
+        if want is None:
+            problems.append(
+                f"{crate}: the extract carries it, the ledger no longer names it"
+            )
+        elif got is None:
+            problems.append(
+                f"{crate}: the ledger publishes figures for it, the extract has none"
+            )
+        elif want != got:
+            problems.append(
+                f"{crate}: the ledger publishes claims {want['claims']} bounds "
+                f"{want['bounds']}; the extract carries claims {got['claims']} bounds "
+                f"{got['bounds']}"
+            )
+    return problems
+
+
+def write_extract() -> int:
+    """Regenerate the tracked extract from the ledger. Explicit, never a run's side effect.
+
+    The default run is deliberately READ-ONLY with respect to the tree -- that is why
+    CARGO_CMD carries `--locked` -- because other agents work in this repo concurrently and
+    a checker that edits what it is checking cannot be run safely beside them. Auto-writing
+    here would quietly reverse that, so regeneration is a flag you have to mean.
+    """
+    if not LEDGER.is_file():
+        print(
+            f"cannot write: {rel(LEDGER)} is missing. The extract "
+            "is DERIVED from the ledger, so it can only be regenerated in a checkout that "
+            "has one. It must never be authored by hand.",
+            file=sys.stderr,
+        )
+        return CANNOT_CHECK
+    names = crates(ROOT)
+    rows = ceiling_lines(LEDGER.read_text(encoding="utf-8"), names)
+    if not rows:
+        print(
+            "cannot write: no line in the ledger both names a plugin and denominates a "
+            "figure in bytes. Writing an empty extract would hand every clone a "
+            "comparison against nothing.",
+            file=sys.stderr,
+        )
+        return CANNOT_CHECK
+    claimed = canon(claims_in("\n".join(rows), names))
+    EXTRACT.parent.mkdir(parents=True, exist_ok=True)
+    # newline="\n" so the artifact does not acquire the platform's line ending: this is a
+    # tracked file regenerated on both Windows and CI, and a whole-file ending flip would
+    # bury the one number that changed inside a total rewrite.
+    with EXTRACT.open("w", encoding="utf-8", newline="\n") as fh:
+        json.dump(extract_payload(claimed), fh, indent=2, sort_keys=True)
+        fh.write("\n")
+    n = sum(len(b["claims"]) for b in claimed.values())
+    print(
+        f"wrote {rel(EXTRACT)}: {n} published figure(s) across "
+        f"{len(claimed)} crate(s), from {len(rows)} ceiling-publishing line(s)."
+    )
+    return 0
+
+
+def check_extract() -> int:
+    """Assert the tracked extract still mirrors the ledger. Pure text: no cargo, ~instant.
+
+    Split out so the freshness half can be run by anything, on any cadence, without paying
+    the Rust compile the full run needs. That matters because an artifact whose only
+    freshness check is expensive is an artifact whose freshness check does not get run.
+    """
+    if not LEDGER.is_file():
+        print(
+            f"cannot check: {rel(LEDGER)} is missing, so there is "
+            "nothing to compare the extract against. Only a checkout with the ledger can "
+            "answer this; a clone structurally cannot."
+        )
+        return CANNOT_CHECK
+    names = crates(ROOT)
+    rows = ceiling_lines(LEDGER.read_text(encoding="utf-8"), names)
+    if not rows:
+        print("cannot check: the ledger publishes no ceiling line to compare against.")
+        return CANNOT_CHECK
+    drift = extract_drift(canon(claims_in("\n".join(rows), names)))
+    if drift:
+        print(
+            f"FAIL  {rel(EXTRACT)} no longer mirrors the ledger:\n"
+            + "\n".join(f"    {d}" for d in drift)
+            + "\n  A clone compares the suites against this file, so while it is stale "
+            "every\n  stranger is checking a snapshot instead of what we publish. "
+            "Regenerate:\n    python3 scripts/verify-output-ceiling-agreement.py "
+            "--write-extract",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        f"PASS  the tracked extract mirrors {rel(LEDGER)} across "
+        f"{len(names)} crate(s) / {len(rows)} ceiling-publishing line(s)"
+    )
+    return 0
+
+
 def compare(measured: dict[str, set[int]], claimed: dict[str, dict[str, list]]):
     """The whole verdict: (failures, compared, skipped). Pure, so the controls are cheap."""
     failures, compared, skipped = [], [], []
@@ -291,7 +553,7 @@ def compare(measured: dict[str, set[int]], claimed: dict[str, dict[str, list]]):
     return failures, compared, skipped
 
 
-def report(failures, compared, skipped, total, uncov=()) -> int:
+def report(failures, compared, skipped, total, uncov=(), drift=(), absent=()) -> int:
     for crate, claims, bounds in compared:
         figs = ", ".join(f"{c:,}" for c in claims)
         tail = f" (bound {', '.join(f'{b:,}' for b in bounds)})" if bounds else ""
@@ -304,6 +566,14 @@ def report(failures, compared, skipped, total, uncov=()) -> int:
         f"\ncompared {len(compared)} of {total} plugin crate(s); "
         f"{len(skipped)} not compared, each with its reason above."
     )
+    if absent:
+        # A crate in plugins/ that the claim source has never heard of. In extract mode this
+        # is the shape a STALE extract takes when a plugin is added after it was written, and
+        # printing it is what stops a shrinking comparison reading as a steady green.
+        print(
+            f"  {len(absent)} crate(s) exist in plugins/ but are not named by the claim "
+            f"source: {', '.join(sorted(absent))}"
+        )
     for doc, why in sorted(EXCLUDED_DOCS.items()):
         print(f"  excluded {doc}: {why.splitlines()[0]}")
     if uncov:
@@ -318,6 +588,16 @@ def report(failures, compared, skipped, total, uncov=()) -> int:
         for path, n in uncov:
             print(f"    - {path} ({n} byte figure(s))")
 
+    if drift:
+        print(
+            f"\nFAIL  {rel(EXTRACT)} no longer mirrors the "
+            "ledger:\n" + "\n".join(f"    {d}" for d in drift) + "\n"
+            "  That file is what a CLONE compares the suites against, because the ledger\n"
+            "  is gitignored and absent there. While it is stale every stranger is\n"
+            "  checking a snapshot instead of what we publish. Regenerate:\n"
+            "    python3 scripts/verify-output-ceiling-agreement.py --write-extract",
+            file=sys.stderr,
+        )
     if failures:
         print(
             "\nFAIL  the ledger publishes a ceiling figure its own suite does not "
@@ -327,21 +607,77 @@ def report(failures, compared, skipped, total, uncov=()) -> int:
             "  the suites are the source of truth, never this document.",
             file=sys.stderr,
         )
+    if drift or failures:
         return 1
-    print("\nPASS  every published ceiling figure is one the suites actually print")
+    if not compared:
+        # EVERY crate was skipped. Reachable today: reword the ceiling row so its figures
+        # parse as bounds rather than measurements and the gate compares nothing while
+        # printing PASS. Measured on this file before the guard existed -- compared 0 of 9,
+        # exit 0. A comparison against nothing is not agreement in either direction.
+        print(
+            f"cannot check: {total} crate(s) were discovered and NONE was compared, so "
+            "nothing was verified. `0 of 0` is not agreement; see each reason above."
+        )
+        return CANNOT_CHECK
+    print(
+        f"\nPASS  every published ceiling figure is one the suites actually print "
+        f"({len(compared)} of {total} crate(s) compared)"
+    )
     return 0
+
+
+def resolve_claims(names: list[str]):
+    """(claims, where they came from, extract drift, reason none could be read).
+
+    The ledger when this checkout has one, the tracked extract when it does not. The
+    fallback is the whole point: the ledger is gitignored, so in the fresh clone a stranger
+    reproduces from, the authoritative source is absent by construction and refusing there
+    means the gate never runs for the audience it exists to convince.
+    """
+    if LEDGER.is_file():
+        rows = ceiling_lines(LEDGER.read_text(encoding="utf-8"), names)
+        if not rows:
+            return (
+                None,
+                "",
+                [],
+                f"no line in {rel(LEDGER)} both names a plugin "
+                "and denominates a figure in bytes, so there is no published claim to "
+                "compare the suites against. Nothing was compared, so this is not a pass.",
+            )
+        claimed = canon(claims_in("\n".join(rows), names))
+        origin = (
+            f"{rel(LEDGER)} ({len(rows)} ceiling-publishing line(s)) -- authoritative"
+        )
+        # Only THIS branch can see both artifacts, so this is the only place the extract's
+        # freshness is answerable at all.
+        return claimed, origin, extract_drift(claimed), None
+
+    stored, why = load_extract()
+    if why:
+        return None, "", [], why
+    origin = (
+        f"{rel(EXTRACT)} ({len(stored)} crate(s)) -- the "
+        "authoritative ledger is gitignored and absent from this checkout"
+    )
+    return stored, origin, [], None
 
 
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
+    if "--write-extract" in sys.argv:
+        return write_extract()
+    if "--check-extract" in sys.argv:
+        return check_extract()
 
-    if not LEDGER.is_file():
-        print(f"cannot check: {LEDGER.relative_to(ROOT)} is missing")
-        return CANNOT_CHECK
     names = crates(ROOT)
     if not names:
         print("cannot check: no plugins/*/Cargo.toml found, so nothing was measured")
+        return CANNOT_CHECK
+    claimed, origin, drift, why = resolve_claims(names)
+    if why:
+        print(f"cannot check: {why}")
         return CANNOT_CHECK
     if shutil.which("cargo") is None:
         print(
@@ -372,44 +708,52 @@ def main() -> int:
         )
         return CANNOT_CHECK
 
-    rows = ceiling_lines(LEDGER.read_text(encoding="utf-8"), names)
-    if not rows:
-        print(
-            f"cannot check: no line in {LEDGER.relative_to(ROOT)} both names a plugin "
-            "and denominates a figure in bytes, so there is no published claim to "
-            "compare the suites against. Nothing was compared, so this is not a pass."
-        )
-        return CANNOT_CHECK
-    claimed = claims_in("\n".join(rows), names)
-    print(
-        f"ran {len(names)} plugin suite(s) against {len(rows)} ceiling-publishing "
-        f"line(s) in {LEDGER.relative_to(ROOT)}\n"
-    )
+    print(f"ran {len(names)} plugin suite(s) against claims from {origin}\n")
     return report(
         *compare(measured, claimed),
         total=len(names),
         uncov=uncovered(ROOT, names),
+        drift=drift,
+        absent=[c for c in names if c not in claimed],
     )
 
 
 def selftest() -> int:
     """Controls. A gate that has never produced the opposite verdict certifies nothing."""
-    failed = []
+    failed, ran = [], []
 
     def check(label: str, ok: bool, detail: str = "") -> None:
+        # Counting every control gives the summary a DENOMINATOR. `0 failures` out of a
+        # collapsed control set reads exactly like `0 failures` out of a full one, and the
+        # count is the only thing that separates them.
+        ran.append(label)
         print(f"  {'ok  ' if ok else 'FAIL'} {label}{'' if ok else '  <- ' + detail}")
         if not ok:
             failed.append(label)
 
     names = crates(ROOT)
-    text = LEDGER.read_text(encoding="utf-8") if LEDGER.is_file() else ""
-    if not names or not text:
-        print("cannot selftest: needs plugins/ and the ledger present")
+    if not names:
+        print("cannot selftest: needs plugins/*/Cargo.toml present")
         return CANNOT_CHECK
+    # THE CONTROLS MUST RUN WHERE THE NEW CODE PATH RUNS, which is a clone -- and a clone
+    # has no ledger, so sourcing the prose only from the ledger made `--selftest` exit
+    # CANNOT_CHECK for exactly the audience the clone path was added to serve. Measured
+    # before this fallback existed: `--selftest` in a ledgerless checkout printed "cannot
+    # selftest" and exited 2. LEDGER_SHAPE is a parser fixture like SAMPLE and NOISE, not a
+    # copy of any published number: its figures are deliberately outside every value the
+    # suites print, so a control passing against it can never be passing by coincidence.
+    prose_from = "the real ledger"
+    text = LEDGER.read_text(encoding="utf-8") if LEDGER.is_file() else ""
+    if not text:
+        prose_from = (
+            "LEDGER_SHAPE (no ledger in this checkout: clone, runner or worktree)"
+        )
+        text = LEDGER_SHAPE
+    print(f"  ..  ledger prose sourced from {prose_from}")
     rows = ceiling_lines(text, names)
     check("the ceiling row is discoverable by shape", bool(rows), "found no such line")
     text = "\n".join(rows)
-    claimed = claims_in(text, names)
+    claimed = canon(claims_in(text, names))
 
     # The real thing, as the gate sees it today: every published figure must be printable.
     truth = {c: set(claimed[c]["claims"]) | {9_999_991} for c in names}
@@ -429,6 +773,15 @@ def selftest() -> int:
         "512",
         text,
         count=1,
+    )
+    # ASSERT THE SUBSTITUTION APPLIED before trusting what follows. A mutation control whose
+    # mutant is byte-identical to the original tests the unmodified code while looking green
+    # from every angle; `512` is also a different LENGTH from every real claim, so nothing
+    # downstream can match on size alone.
+    check(
+        "the planted mutation actually changed the text",
+        planted != text,
+        f"re.sub matched nothing for {real:,}; the control below would test the original",
     )
     f1, _, _ = compare(truth, claims_in(planted, names))
     check("planted mismatch fails", bool(f1), "a stale figure passed")
@@ -529,38 +882,227 @@ def selftest() -> int:
     # END TO END, with the cargo step stubbed. A zero-match parse must reach the caller as
     # CANNOT_CHECK; if it ever returned 0 the gate would certify agreement having compared
     # nothing, which is the precise false-green it was built to prevent.
-    def drive(stub) -> int:
-        saved = (sys.argv, shutil.which, globals()["run_suite"])
+    # EVERY control below pins BOTH artifacts under a temp dir rather than using whichever
+    # of them this checkout happens to carry. That is what makes the verdicts identical in
+    # the trunk and in a clone -- the two environments the gate now has to work in -- rather
+    # than silently exercising a different code path in each.
+    def drive(stub, ledger=None, extract=None) -> int:
+        saved = (
+            sys.argv,
+            shutil.which,
+            globals()["run_suite"],
+            globals()["LEDGER"],
+            globals()["EXTRACT"],
+        )
         try:
             sys.argv = ["gate"]
             shutil.which = lambda _n: "cargo"
             globals()["run_suite"] = stub
+            if ledger is not None:
+                globals()["LEDGER"] = ledger
+            if extract is not None:
+                globals()["EXTRACT"] = extract
             return main()
         finally:
             sys.argv, shutil.which = saved[0], saved[1]
             globals()["run_suite"] = saved[2]
+            globals()["LEDGER"], globals()["EXTRACT"] = saved[3], saved[4]
 
-    print("\n  -- end-to-end, cargo stubbed --")
-    rc_silent = drive(lambda crate, root: (set(), None))
-    check(
-        "suites that print NO figure exit CANNOT_CHECK, never 0",
-        rc_silent == CANNOT_CHECK,
-        f"rc={rc_silent}",
-    )
-    rc_broken = drive(lambda crate, root: (set(), "the suite failed (rc=101)"))
-    check(
-        "a suite that fails to build exits CANNOT_CHECK, never 0",
-        rc_broken == CANNOT_CHECK,
-        f"rc={rc_broken}",
-    )
-    rc_good = drive(lambda crate, root: (set(claimed[crate]["claims"]) or {1}, None))
-    check(
-        "and a healthy stub still reaches a verdict",
-        rc_good == 0,
-        f"rc={rc_good}",
-    )
+    def with_paths(fn, ledger, extract) -> int:
+        saved = (globals()["LEDGER"], globals()["EXTRACT"])
+        try:
+            globals()["LEDGER"], globals()["EXTRACT"] = ledger, extract
+            return fn()
+        finally:
+            globals()["LEDGER"], globals()["EXTRACT"] = saved
 
-    print(f"\n{len(failed)} selftest failure(s)" if failed else "\nselftest: all pass")
+    def dump(path: pathlib.Path, cl: dict) -> None:
+        with path.open("w", encoding="utf-8", newline="\n") as fh:
+            json.dump(extract_payload(cl), fh, indent=2, sort_keys=True)
+            fh.write("\n")
+
+    def copy_of(cl: dict) -> dict:
+        return {c: {k: list(v) for k, v in b.items()} for c, b in cl.items()}
+
+    def honest(crate, root):
+        """A suite that prints exactly what the pinned claims say it prints.
+
+        Returns run_suite's own (figures, reason-it-could-not-run) shape. A stub that does
+        not match the signature it replaces is a bug in the harness that reads as a bug in
+        the code under test.
+        """
+        return set(claimed[crate]["claims"]) or {1}, None
+
+    # 7,654,321 is a DIFFERENT DIGIT LENGTH from every figure the ledger publishes, and the
+    # controls assert that rather than assuming it, so no downstream comparison can match on
+    # size alone. It is also far outside anything a suite prints, so a mutant can never pass
+    # by coincidence.
+    PLANT = 7_654_321
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = pathlib.Path(td)
+        pinned = tmp / "ledger.md"
+        pinned.write_text(text, encoding="utf-8")
+        mirror = tmp / "mirror.json"
+        dump(mirror, claimed)
+        no_ledger = tmp / "no-such-ledger.md"  # precisely what a fresh clone looks like
+        no_extract = tmp / "no-such-extract.json"
+
+        print("\n  -- end-to-end, cargo stubbed, WORKING TREE (ledger present) --")
+        rc = drive(lambda c, r: (set(), None), ledger=pinned, extract=mirror)
+        check(
+            "suites that print NO figure exit CANNOT_CHECK, never 0",
+            rc == CANNOT_CHECK,
+            f"rc={rc}",
+        )
+        rc = drive(
+            lambda c, r: (set(), "the suite failed (rc=101)"),
+            ledger=pinned,
+            extract=mirror,
+        )
+        check(
+            "a suite that fails to build exits CANNOT_CHECK, never 0",
+            rc == CANNOT_CHECK,
+            f"rc={rc}",
+        )
+        rc = drive(honest, ledger=pinned, extract=mirror)
+        check("and a healthy stub still reaches a verdict", rc == 0, f"rc={rc}")
+
+        # THE FRESHNESS ASSERTION, which is what stops the extract becoming the third
+        # drifting surface this gate's own docstring warns against. Only a run that can read
+        # the ledger can make it, so the surface able to detect the drift is the one that
+        # gates it. Without it the extract could rot indefinitely while the trunk stayed
+        # green and every clone quietly checked a snapshot.
+        stale = tmp / "stale.json"
+        drifted = copy_of(claimed)
+        v_drift = max(names, key=lambda c: (len(drifted[c]["claims"]), c))
+        drifted[v_drift]["claims"] = sorted(set(drifted[v_drift]["claims"]) | {PLANT})
+        check(
+            "the drift mutation actually changed the claims",
+            drifted != claimed,
+            "the stale fixture is identical to the fresh one; the control below is inert",
+        )
+        dump(stale, drifted)
+        rc = drive(honest, ledger=pinned, extract=stale)
+        check(
+            "working tree: a STALE extract FAILS, it is not merely noted",
+            rc == 1,
+            f"rc={rc}",
+        )
+        rc = drive(honest, ledger=pinned, extract=no_extract)
+        check(
+            "working tree: a MISSING extract FAILS (a clone would have nothing to use)",
+            rc == 1,
+            f"rc={rc}",
+        )
+        rc = with_paths(check_extract, pinned, mirror)
+        check("--check-extract passes on a faithful extract", rc == 0, f"rc={rc}")
+        rc = with_paths(check_extract, pinned, stale)
+        check("--check-extract fails on a stale one", rc == 1, f"rc={rc}")
+        rc = with_paths(check_extract, no_ledger, mirror)
+        check(
+            "--check-extract is CANNOT_CHECK without a ledger, never a pass",
+            rc == CANNOT_CHECK,
+            f"rc={rc}",
+        )
+        rc = with_paths(write_extract, no_ledger, tmp / "would-be.json")
+        check(
+            "--write-extract refuses to author an extract with no ledger to derive from",
+            rc == CANNOT_CHECK and not (tmp / "would-be.json").exists(),
+            f"rc={rc}",
+        )
+
+        print(
+            "\n  -- end-to-end, cargo stubbed, CLONE (no ledger, as it is gitignored) --"
+        )
+        rc = drive(honest, ledger=no_ledger, extract=mirror)
+        check(
+            "clone: an honest extract reaches a verdict with no ledger at all",
+            rc == 0,
+            f"rc={rc}",
+        )
+
+        # THE CONTROL THE CLONE PATH HAS TO EARN. A published figure the suites never print
+        # must FAIL here exactly as it does in the trunk. A new path that can only ever pass
+        # is decoration, and a clean run over it would certify nothing.
+        planted_x = tmp / "planted.json"
+        pl = copy_of(claimed)
+        v_clone = max(
+            (c for c in names if pl[c]["claims"]),
+            key=lambda c: (len(pl[c]["claims"]), c),
+            default="",
+        )
+        check(
+            "clone: the fixture publishes a figure to plant over",
+            bool(v_clone),
+            "no crate carries a claim, so the control below cannot be built",
+        )
+        if v_clone:
+            was = max(pl[v_clone]["claims"])
+            pl[v_clone]["claims"] = sorted(
+                (set(pl[v_clone]["claims"]) - {was}) | {PLANT}
+            )
+            check(
+                "clone: the planted mutation applied, and differs in length from the original",
+                pl != claimed and len(str(PLANT)) != len(str(was)),
+                f"planted {PLANT} over {was}; mutated={pl != claimed}",
+            )
+            dump(planted_x, pl)
+            rc = drive(honest, ledger=no_ledger, extract=planted_x)
+            check(
+                "clone: a planted disagreement FAILS against the extract",
+                rc == 1,
+                f"rc={rc}; a stale published figure passed in a clone",
+            )
+
+        # THE DENOMINATOR HAS TO NAME WHAT IT LOST. A plugin added after the extract was
+        # last regenerated is invisible to it, and the comparison silently covers one crate
+        # fewer while still printing PASS -- a shrinking check that reads as a steady green.
+        # Asserted on the OUTPUT rather than the exit code, because the exit code is 0 in
+        # both the healthy and the degraded case; the message is the only thing that differs.
+        short = tmp / "short.json"
+        dropped = max(names)
+        dump(short, {c: b for c, b in claimed.items() if c != dropped})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = drive(honest, ledger=no_ledger, extract=short)
+        said = buf.getvalue()
+        check(
+            "clone: a crate the extract has never heard of is NAMED, not silently dropped",
+            rc == 0 and dropped in said and "not named by the claim source" in said,
+            f"rc={rc}; the summary did not name {dropped}",
+        )
+
+        rc = drive(honest, ledger=no_ledger, extract=no_extract)
+        check(
+            "clone: with NEITHER artifact it exits CANNOT_CHECK, never a pass",
+            rc == CANNOT_CHECK,
+            f"rc={rc}",
+        )
+        bad = tmp / "bad.json"
+        bad.write_text("{ this is not json", encoding="utf-8")
+        rc = drive(honest, ledger=no_ledger, extract=bad)
+        check(
+            "clone: a malformed extract exits CANNOT_CHECK; it neither crashes nor passes",
+            rc == CANNOT_CHECK,
+            f"rc={rc}",
+        )
+        # `0 of 0` IS NOT AGREEMENT. report() is shared by both paths, so proving the guard
+        # once proves it for both. Before it existed this exact input printed PASS having
+        # compared 0 of 9 crates -- measured on this file, not hypothesised.
+        empty = tmp / "empty.json"
+        dump(empty, {c: {"claims": [], "bounds": [9_000_001]} for c in names})
+        rc = drive(honest, ledger=no_ledger, extract=empty)
+        check(
+            "an extract publishing no measurement exits CANNOT_CHECK, never PASS",
+            rc == CANNOT_CHECK,
+            f"rc={rc}; `compared 0 of N` was reported as agreement",
+        )
+
+    verdict = f"{len(failed)} failure(s)" if failed else "all pass"
+    print(
+        f"\nselftest: {verdict} across {len(ran)} control(s), prose from {prose_from}"
+    )
     return 3 if failed else 0
 
 
@@ -570,6 +1112,21 @@ report: 300 bytes
 MEASURED depin-attest report (4-byte): 301 bytes, device_id 48 bytes / 12 chars
 """
 NOISE = "test result: ok. 18 passed; 0 failed\nCompiling depin-attest v0.1.0\n"
+# A ceiling row with the real PROSE SHAPE and deliberately unreal FIGURES, used by the
+# controls when this checkout has no ledger -- a clone, a CI runner, a fresh worktree. It is
+# a parser fixture like SAMPLE and NOISE above, not a copy of anything published: every
+# value here sits far outside the range the suites print (their largest is in the thousands),
+# so a control passing against it cannot be passing because it collided with a real figure.
+# It carries the shapes the parser guards exist for -- a thousands separator, a hyphenated
+# fixture size, a date, a bound cue and a non-byte unit -- so the guards are exercised
+# everywhere rather than only in a checkout that happens to hold the ledger.
+LEDGER_SHAPE = (
+    "| Context flooding | MEASURED worst-case ceilings on all NINE plugins. "
+    "**ASCII / 4-byte-codepoint worst case against ceiling:** "
+    "token-risk-check 7,101 / 7,102 bytes against 9,000 (200-entry flood); "
+    "lending-health 7,103 / 7,104 bytes against 9,001 (300-position flood) 2026-08-19; "
+    "depin-attest 7,105 bytes over 16 detail lines. All hard-bounded. |"
+)
 
 
 if __name__ == "__main__":

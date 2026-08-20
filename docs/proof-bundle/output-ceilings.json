@@ -1,0 +1,82 @@
+{
+  "_": "DERIVED, do not hand-edit. The ceiling figures docs/COMPLIANCE-AUDIT.md publishes per plugin crate. That ledger is gitignored, so it is absent from every clone; this file is what scripts/verify-output-ceiling-agreement.py compares the plugin suites against when the ledger cannot be read. The LEDGER is authoritative -- regenerate with `--write-extract`, and any run that can see the ledger fails while the two disagree.",
+  "crates": {
+    "allowance-spend-build": {
+      "bounds": [
+        1160
+      ],
+      "claims": [
+        1121
+      ]
+    },
+    "depin-attest": {
+      "bounds": [
+        301
+      ],
+      "claims": [
+        300,
+        301
+      ]
+    },
+    "lending-health": {
+      "bounds": [
+        6500
+      ],
+      "claims": [
+        5474,
+        5602
+      ]
+    },
+    "oracle-publish": {
+      "bounds": [],
+      "claims": [
+        530,
+        1930
+      ]
+    },
+    "payment-watch": {
+      "bounds": [],
+      "claims": [
+        504,
+        505,
+        569,
+        570
+      ]
+    },
+    "solana-pay-request": {
+      "bounds": [
+        3367
+      ],
+      "claims": [
+        1970,
+        3026
+      ]
+    },
+    "spl-transfer-build": {
+      "bounds": [],
+      "claims": [
+        400,
+        820
+      ]
+    },
+    "token-risk-check": {
+      "bounds": [
+        2000
+      ],
+      "claims": [
+        1334,
+        1337
+      ]
+    },
+    "x402-pay-build": {
+      "bounds": [
+        1283
+      ],
+      "claims": [
+        1277,
+        1280
+      ]
+    }
+  },
+  "source": "docs/COMPLIANCE-AUDIT.md"
+}
