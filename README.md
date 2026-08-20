@@ -315,7 +315,7 @@ idempotence, which is the property sanitizers most often fail. See [`TESTING.md`
 rustup target add wasm32-wasip2
 
 cd crates/solana-core
-cargo test --locked                                   # 127 tests, four suites
+cargo test --locked                                   # 150 tests, four suites
 cargo test --test properties                          # 23 properties, 1024 cases each
 
 cd plugins/<name>

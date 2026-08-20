@@ -497,7 +497,7 @@ checker, from naming it to say it is there. The way through is to reword the sen
 carve out an exception, since the exception would blind the gate to the real case it exists for.
 
 `ci.yml` runs every layer above on a clean Ubuntu runner on each push: `cargo test --locked`
-in `crates/solana-core`, which executes all four suites there for 127 tests, clippy with
+in `crates/solana-core`, which executes all four suites there for 150 tests, clippy with
 warnings as errors on both the host and `wasm32-wasip2`, the release build of the shipped
 wasm target, the fail-closed certification self-test, then all nine plugin components in a
 matrix.

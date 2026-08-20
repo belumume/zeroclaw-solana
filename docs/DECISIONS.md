@@ -277,8 +277,8 @@ third party returned, including the case where it returns nothing.
 **Consequence.** Both fail closed rather than downward, which is the property the tier buys.
 `lending-health` turns a non-finite ratio into `Unknown` instead of letting it slide to `Safe`,
 and caps every symbol at 24 characters so a minted name cannot flood the context window the
-brief warns about. Both bounds are measured by a test that prints the figure: 1,355 bytes for
-the risk lens under a 200-entry hostile flood, 5,810 for the positions lens under 300 hostile
+brief warns about. Both bounds are measured by a test that prints the figure: 1,337 bytes for
+the risk lens under a 200-entry hostile flood, 5,474 for the positions lens under 300 hostile
 positions carrying 40 symbols each. The tests assert a ceiling rather than those exact numbers,
 so re-run them rather than quoting these if the shaping changes.
 
