@@ -258,7 +258,7 @@ def source_tier_fails(plugin_dir: pathlib.Path, name: str, tier: str | None) -> 
                 fails.append(
                     f"{where} declares {'/'.join(stated)}, which is two tiers, not one"
                 )
-            elif tier and stated[0] != tier:
+            elif tier and stated[0].upper() != tier.upper():
                 fails.append(
                     f"{where} says {stated[0]} but the manifest declares {tier}"
                 )
@@ -491,6 +491,23 @@ def main() -> int:
         all_fails.extend(fails)
         audited += 1
 
+    if missing:
+        print(f"\n  not built, so not audited: {', '.join(missing)}")
+
+    # A REAL disagreement outranks cannot-check, and the order here is the point. The text
+    # comparisons (manifest against README against source) need no compiled artifact, so they
+    # are collected for every plugin. Returning cannot-check first drops them whenever NOTHING
+    # is built, which is a fresh clone and any CI run staged before the build, and check-all
+    # reads exit 2 as a skip. That is the same swallow this file was just changed to remove one
+    # level down, so it must not be reintroduced here.
+    if all_fails:
+        print(
+            f"\nFAIL  {len(all_fails)} custody declaration(s) disagree:\n"
+        )
+        for f in all_fails:
+            print(f"  - {f}")
+        return 1
+
     if audited == 0:
         print(
             f"cannot check: none of {len(manifests)} components are built.\n"
@@ -499,17 +516,6 @@ def main() -> int:
             f"cargo build --target wasm32-wasip2 --release"
         )
         return CANNOT_CHECK
-
-    if missing:
-        print(f"\n  not built, so not audited: {', '.join(missing)}")
-
-    if all_fails:
-        print(
-            f"\nFAIL  {len(all_fails)} custody declaration(s) disagree with the binary:\n"
-        )
-        for f in all_fails:
-            print(f"  - {f}")
-        return 1
 
     print(f"\nall {audited} built component(s) match their declared custody tier")
     return 0
