@@ -17,6 +17,19 @@
 //! (`Signer`) and must equal the `device` recorded at registration. The agent's
 //! capped session key (the fee payer) can pay for the transaction but can never
 //! forge the reading — it is not the device.
+//!
+//! Registration is bound the same way: `register_device` also requires the
+//! device to sign, so a feed exists only where its device consented to it. That
+//! matters because the slot is front-runnable otherwise. The PDA is seeded on
+//! the device pubkey alone, which is public, so with a non-signing `device`
+//! anyone could register a feed for a key they do not hold. `init` and the
+//! absence of any close instruction make that permanent: the real device is
+//! locked out of its own address forever, and a squatter who picks the wrong
+//! `feed_kind` makes every genuine reading fail the kind check. No reading can
+//! be forged either way, because `publish_reading` has always required the
+//! device signature; what the squatter takes is the address, not the data.
+//! The `authority` still pays and can be a separate admin key, so co-signing
+//! is the only thing this asks of the device.
 
 use anchor_lang::prelude::*;
 
@@ -39,9 +52,11 @@ declare_id!("EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn");
 pub mod zeroclaw_oracle {
     use super::*;
 
-    /// One-time: bind a device key to its feed PDA. Admin-only (the `authority`
-    /// signs and pays). The device does not sign registration; only its key
-    /// seeds the PDA and is recorded as the sole future publisher.
+    /// One-time: bind a device key to its feed PDA. Both parties sign: the
+    /// `authority` pays for the account, and the `device` consents to being
+    /// registered. The device key seeds the PDA and is recorded as the sole
+    /// future publisher. Requiring the device signature is what stops a third
+    /// party front-running the slot for a device pubkey it does not hold.
     pub fn register_device(ctx: Context<RegisterDevice>, feed_kind: u8) -> Result<()> {
         let feed = &mut ctx.accounts.feed;
         feed.authority = ctx.accounts.authority.key();
@@ -111,8 +126,7 @@ pub struct RegisterDevice<'info> {
         bump
     )]
     pub feed: Account<'info, DeviceFeed>,
-    /// CHECK: only the pubkey is used, as a PDA seed and the recorded publisher.
-    pub device: UncheckedAccount<'info>,
+    pub device: Signer<'info>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,

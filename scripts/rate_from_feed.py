@@ -24,8 +24,9 @@ table, an order id resolved against a store, or a merchant confirmation. This is
 the end of the road.
 
 NETWORK NOTE. The feed is DEVNET and the settlement is MAINNET. Devnet SOL is free and
-`register_device` is permissionless, so a devnet feed is cheap for anyone to stand up and a
-devnet reset deletes it. A rate carrying mainnet weight must come from a mainnet feed.
+anyone can register a feed for a device key they hold, so a devnet feed is cheap for anyone to
+stand up and a devnet reset deletes it. A rate carrying mainnet weight must come from a mainnet
+feed.
 
 FAIL CLOSED, EVERYWHERE. Unreachable RPC, undecodable account, wrong owner, wrong PDA, wrong
 device, wrong kind, wrong unit, implausible value, stale publish: every one refuses. There is
@@ -92,9 +93,11 @@ ORACLE_PROGRAM = "EFCRmE5wFLoo5zJ4cu4J6rbQjmkiok8FmDekTGGXrCKn"
 RPC = "https://api.devnet.solana.com"
 MAX_AGE_SECONDS = 30 * 60
 
-# THE PIN. Owner alone proves "a DeviceFeed", never "OUR rate feed": `register_device` has an
-# unconstrained `authority: Signer` and a non-signing `device`, so anyone can stand up a feed
-# genuinely owned by the oracle program and publish any number into it.
+# THE PIN. Owner alone proves "a DeviceFeed", never "OUR rate feed": `register_device` puts no
+# constraint on WHO registers, only on the device consenting, so anyone holding a device key of
+# their own can stand up a feed genuinely owned by the oracle program and publish any number into
+# it. Requiring the device signature stops a third party squatting OUR device's address; it does
+# nothing about a stranger's own feed, which is what this pin is for.
 #
 # EXPECTED_DEVICE is deliberately None. There is no rate feed to point at yet, and inventing a
 # constant here would produce a guard that looks like a control and gates nothing. Set all four

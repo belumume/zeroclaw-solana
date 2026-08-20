@@ -3,7 +3,8 @@
 //! Reuses the plugin's REAL `publish::compile_and_device_sign` (so the bytes
 //! exercised here are exactly what the wasm plugin emits) against a live
 //! `solana-test-validator`, proving on-chain behavior nothing else can:
-//!   register -> publish -> replay rejected (durable nonce)
+//!   unsigned registration rejected (the device must consent to its own feed)
+//!   -> register -> publish -> replay rejected (durable nonce)
 //!   -> stale rejected (program sequence guard) -> consumer reads the typed feed.
 //! A successful submit also byte-validates the partial tx (it must be a valid,
 //! solana-sdk-parseable, chain-accepted transaction).
@@ -17,7 +18,7 @@ use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::{Keypair, Signer};
+use solana_sdk::signature::{keypair_from_seed, Keypair, Signer};
 #[allow(deprecated)]
 use solana_sdk::system_instruction;
 use solana_sdk::transaction::Transaction;
@@ -81,7 +82,16 @@ fn main() {
         }
         s
     };
-    let device = Pubkey::new_from_array(solana_core::pubkey_from_seed(&device_seed));
+    // The device co-signs its own registration, so the harness needs its
+    // keypair and not just its pubkey. `keypair_from_seed` derives the same key
+    // `solana_core::pubkey_from_seed` does: both are ed25519 from these 32 bytes.
+    let device_kp = keypair_from_seed(&device_seed).expect("device keypair from seed");
+    let device = device_kp.pubkey();
+    assert_eq!(
+        device.to_bytes(),
+        solana_core::pubkey_from_seed(&device_seed),
+        "device keypair must match the plugin's derived pubkey"
+    );
 
     fund(&rpc, &funder, &admin.pubkey(), 2);
     fund(&rpc, &funder, &session.pubkey(), 2);
@@ -115,13 +125,38 @@ fn main() {
         program_id: oracle,
         accounts: vec![
             AccountMeta::new(feed_pda, false),
-            AccountMeta::new_readonly(device, false),
+            // The device signs its own registration: see `RegisterDevice`.
+            AccountMeta::new_readonly(device, true),
             AccountMeta::new(admin.pubkey(), true),
             AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
         ],
         data: reg_data,
     };
-    send(&rpc, &[reg], &[&admin], &admin.pubkey());
+
+    // CONTROL, and it is the whole point of the signer requirement: the same
+    // registration with the device NOT signing must be refused by the program.
+    // Without this the success below is equally consistent with a program that
+    // never checks, so one half of the pair proves nothing on its own.
+    let unsigned_reg = Instruction {
+        accounts: vec![
+            AccountMeta::new(feed_pda, false),
+            AccountMeta::new_readonly(device, false),
+            AccountMeta::new(admin.pubkey(), true),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ],
+        // FRU keeps program_id and data byte-identical to the real
+        // instruction, so the signer bit is the only variable between the two.
+        ..reg.clone()
+    };
+    match try_send(&rpc, &[unsigned_reg], &[&admin], &admin.pubkey()) {
+        Ok(s) => panic!("registration WITHOUT the device signature landed: {s}"),
+        Err(e) => println!(
+            "registration without the device signature REJECTED as expected: {}",
+            short(&e)
+        ),
+    }
+
+    send(&rpc, &[reg], &[&admin, &device_kp], &admin.pubkey());
     let feed = read_feed(&rpc, &feed_pda);
     assert_eq!(feed.feed_kind, feed_kind, "registered feed_kind");
     assert_eq!(feed.sequence, 0, "fresh feed sequence 0");
@@ -218,7 +253,9 @@ fn main() {
         );
         println!("  each tx above: https://explorer.solana.com/tx/<sig>?cluster=devnet");
     }
-    println!("\nE2E PASS: register -> publish -> stale-sequence rejected -> higher-seq lands -> consumer reads");
+    println!(
+        "\nE2E PASS: unsigned-registration rejected -> register -> publish -> stale-sequence rejected -> higher-seq lands -> consumer reads"
+    );
 }
 
 fn short(s: &str) -> String {
@@ -252,9 +289,26 @@ fn send(
     signers: &[&Keypair],
     payer: &Pubkey,
 ) -> solana_sdk::signature::Signature {
-    let bh = rpc.get_latest_blockhash().unwrap();
-    let tx = Transaction::new_signed_with_payer(ixs, Some(payer), signers, bh);
-    rpc.send_and_confirm_transaction(&tx).unwrap()
+    try_send(rpc, ixs, signers, payer).unwrap()
+}
+
+/// `send` without the unwrap, for the cases where the REFUSAL is the assertion.
+fn try_send(
+    rpc: &RpcClient,
+    ixs: &[Instruction],
+    signers: &[&Keypair],
+    payer: &Pubkey,
+) -> Result<solana_sdk::signature::Signature, String> {
+    let bh = rpc
+        .get_latest_blockhash()
+        .map_err(|e| format!("blockhash: {e}"))?;
+    // `new_signed_with_payer` panics when a required signer is absent from the
+    // slice, so an unsigned-account case has to be built unsigned and signed by
+    // exactly the keys provided. The chain, not the client, does the rejecting.
+    let mut tx = Transaction::new_with_payer(ixs, Some(payer));
+    tx.try_sign(signers, bh).map_err(|e| format!("sign: {e}"))?;
+    rpc.send_and_confirm_transaction(&tx)
+        .map_err(|e| format!("send: {e}"))
 }
 
 fn read_feed(rpc: &RpcClient, feed_pda: &Pubkey) -> DeviceFeed {

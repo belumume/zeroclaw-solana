@@ -20,7 +20,7 @@ use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::{read_keypair_file, Signer};
+use solana_sdk::signature::{keypair_from_seed, read_keypair_file, Signer};
 #[allow(deprecated)]
 use solana_sdk::system_instruction;
 use solana_sdk::transaction::Transaction;
@@ -63,7 +63,16 @@ fn main() {
         }
         s
     };
-    let device = Pubkey::new_from_array(solana_core::pubkey_from_seed(&device_seed));
+    // The device co-signs its own registration (see `RegisterDevice`), so the
+    // publisher needs its keypair. `keypair_from_seed` derives the same key
+    // `solana_core::pubkey_from_seed` does: both are ed25519 from these 32 bytes.
+    let device_kp = keypair_from_seed(&device_seed).expect("device keypair from seed");
+    let device = device_kp.pubkey();
+    assert_eq!(
+        device.to_bytes(),
+        solana_core::pubkey_from_seed(&device_seed),
+        "device keypair must match the plugin's derived pubkey"
+    );
     let nonce_kp = read_keypair_file(env("FEED_NONCE")).expect("read nonce keypair");
     let value: i64 = env("FEED_VALUE").parse().expect("FEED_VALUE i64");
     let observed_at: i64 = env("FEED_OBSERVED_AT")
@@ -101,15 +110,20 @@ fn main() {
             program_id: oracle,
             accounts: vec![
                 AccountMeta::new(feed_pda, false),
-                AccountMeta::new_readonly(device, false),
+                // The device signs its own registration: see `RegisterDevice`.
+                AccountMeta::new_readonly(device, true),
                 AccountMeta::new(session.pubkey(), true),
                 AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
             ],
             data,
         };
         let bh = rpc.get_latest_blockhash().unwrap();
-        let tx =
-            Transaction::new_signed_with_payer(&[reg], Some(&session.pubkey()), &[&session], bh);
+        let tx = Transaction::new_signed_with_payer(
+            &[reg],
+            Some(&session.pubkey()),
+            &[&session, &device_kp],
+            bh,
+        );
         rpc.send_and_confirm_transaction(&tx)
             .expect("register device");
         eprintln!("registered device feed {feed_pda} (device {device})");
