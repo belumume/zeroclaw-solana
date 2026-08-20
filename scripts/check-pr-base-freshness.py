@@ -46,6 +46,12 @@ CANNOT_CHECK = 2
 # would have reverted work already on main. If either stops being reachable the self-test says so
 # rather than passing quietly.
 CONTROL_CASES = [
+    # THESE TWO COMMITS ARE KEPT ALIVE BY TAGS, NOT BY BRANCHES. Both branches were merged
+    # and their remotes deleted; 0e1cf92 then sat on ZERO refs, so a fetch-depth:0 clone no
+    # longer fetched it and this selftest failed in CI while passing locally, where the objects
+    # still existed. Tags control/base-freshness-register-device and control/base-freshness-pay-page
+    # pin them. DELETING EITHER TAG DISARMS THIS CONTROL, and the gate would then certify with
+    # nothing proving it can fire.
     ("0e1cf92", "fix/register-device-requires-device-signature (pre-fix head)"),
     ("c4650bb", "fix/pay-page-requires-reference (pre-fix head)"),
 ]
