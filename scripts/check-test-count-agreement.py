@@ -373,12 +373,10 @@ def _fixture(tmp: pathlib.Path, docs_map: dict[str, str]) -> pathlib.Path:
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body, encoding="utf-8")
-    for args in (
-        ("init", "-q"),
-        ("config", "user.email", "s@e.invalid"),
-        ("config", "user.name", "selftest"),
-        ("add", "-A"),
-    ):
+    # `init` and `add` only. The fixture is never committed, so no identity is needed, and
+    # configuring one would put a synthetic address in a tracked file for the identifier gate
+    # to find. This matches the sibling gates' fixtures.
+    for args in (("init", "-q"), ("add", "-A")):
         subprocess.run(
             ["git", "-C", str(root), *args], capture_output=True, text=True, check=False
         )
