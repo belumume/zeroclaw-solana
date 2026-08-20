@@ -75,11 +75,12 @@ This plugin is the safest tier in the suite:
   shipped `.wasm` imports no `wasi:http`, no `wasi:sockets` and no
   `wasi:filesystem`, so there is no host function through which it could reach any
   of them. Re-derive with
-`python3 ../../scripts/check-custody-tier.py --wasm solana_pay_request.wasm`. The
-`--wasm` argument is load-bearing: this workspace builds to a shared target directory,
-so without it the script looks for the component under this crate's own `target/`, finds
-nothing, prints `not built, so not audited` and still exits 0. Green there would mean it
-audited some other plugin.
+`python3 ../../scripts/check-custody-tier.py --wasm solana_pay_request.wasm`, and read the
+printed import table rather than the exit code. That branch prints what it found and
+returns 0 whatever it finds, so the claim is the `network reachable: False` line, never a
+green run. The `--wasm` argument is load-bearing for a separate reason: this workspace
+builds to a shared target directory, so without it the script looks for the component
+under this crate's own `target/` and audits some other plugin, or none.
 - The output is a payment REQUEST, not a signed transaction. Nothing it emits can
   authorize a transfer; the payer's own wallet builds, signs, and sends the
   transaction after scanning the QR.

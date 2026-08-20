@@ -1297,15 +1297,48 @@ mod tests {
     /// Without it, "the echo is bounded" is equally consistent with a cap that mangles every real
     /// rejection an operator has to read. One case per SITE, since a reword at any of them would
     /// otherwise go unnoticed, plus the boundary case that makes this discriminate.
+    /// The three echo budgets are PUBLISHED in this crate's README as judge-facing figures, and
+    /// every other assertion in this module reads them as its own budget rather than pinning a
+    /// value. That includes the boundary fixture below, which is built by repeating a character
+    /// `ECHO_MAX_BYTES` times and so moves with the constant it is meant to hold. The suite
+    /// therefore proves a byte cap EXISTS and, without this test, proves nothing about where any
+    /// of them sits: raising `ECHO_MAX` to 200, `AMOUNT_ECHO_MAX` to 400 or `ARG_ERROR_MAX` to
+    /// 400 each leaves every other test green while making three published numbers false.
+    ///
+    /// Pinning the literals is what makes a budget change fail here and force the README to move
+    /// in the same edit. Read a failure as "the README now disagrees", not as "lower the number
+    /// back".
+    #[test]
+    fn published_echo_budgets_are_pinned_to_their_readme_figures() {
+        assert_eq!(
+            (ECHO_MAX, ECHO_MAX_BYTES),
+            (64, 64),
+            "README publishes 64 bytes for an echoed pubkey-shaped value"
+        );
+        assert_eq!(
+            (AMOUNT_ECHO_MAX, AMOUNT_ECHO_MAX_BYTES),
+            (32, 32),
+            "README publishes 32 bytes for an echoed amount"
+        );
+        assert_eq!(
+            (ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES),
+            (120, 120),
+            "README publishes 120 bytes for serde's own error text"
+        );
+    }
+
     #[test]
     fn the_byte_cap_leaves_an_ordinary_rejection_untouched() {
         // BOUNDARY CASE, and it is what turns this test into a control rather than a formality.
         // Every short case below runs 2 to 10 ASCII bytes against budgets of 32 and 64, so byte
         // truncation could not fire on them whatever the budget were, and they would pass for any
         // budget above about ten. This one sits exactly ON the budget: 64 ASCII characters are 64
-        // bytes, neither cap fires, and one character more would truncate. It fails for any
-        // budget below the declared one. 'l' is outside the base58 alphabet, so the value still
-        // reaches the recipient rejection rather than parsing.
+        // bytes, neither cap fires, and one character more would truncate. What it discriminates
+        // is an IMPLEMENTATION whose effective cap sits below the declared constant; it cannot
+        // notice the constant itself moving, because the fixture is built from that same
+        // constant. `published_echo_budgets_are_pinned_to_their_readme_figures` above is what
+        // holds the value. 'l' is outside the base58 alphabet, so the value still reaches the
+        // recipient rejection rather than parsing.
         let at_budget = "l".repeat(ECHO_MAX_BYTES);
 
         let mut checked = 0;
