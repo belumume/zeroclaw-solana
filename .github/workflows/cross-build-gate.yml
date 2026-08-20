@@ -14,8 +14,17 @@
 
 name: cross-build-gate
 
+# pull_request as well as push, deliberately. A cross-build that only runs AFTER a merge tells
+# you it is broken too late, and the whole point of this job is that the artifact is available
+# when someone needs to deploy. Running it on the PR is also what makes it verifiable before it
+# is trusted.
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "x402-feed-gate/**"
+      - "crates/**"
+      - ".github/workflows/cross-build-gate.yml"
   push:
     branches: [main]
     paths:
