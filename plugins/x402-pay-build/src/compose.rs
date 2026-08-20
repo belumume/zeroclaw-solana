@@ -91,6 +91,8 @@ pub fn atomic_to_ui(atomic: u64, decimals: u8) -> Result<String, String> {
     if decimals == 0 {
         return Ok(atomic.to_string());
     }
+    // NOT ECHO-BOUNDED, deliberately: `decimals` is a `u8` read from the mint account, so the
+    // widest this renders is three characters. No caller or seller string reaches this message.
     if decimals > 18 {
         return Err(format!(
             "a mint reporting {decimals} decimals is implausible; refusing to convert"

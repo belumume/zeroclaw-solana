@@ -41,19 +41,25 @@ const MARKET_MAX: usize = 44;
 const MARKET_MAX_BYTES: usize = 44;
 
 /// The character cap on a value echoed back through an error string.
-pub const ECHO_MAX: usize = 64;
+///
+/// PROVENANCE INVERTS ON THE REJECTION THAT USES THIS. On the accepted path the wallet is a base58
+/// address, so "it is ASCII and at most 44 bytes" holds — MEASURED against `Pubkey::from_base58`,
+/// which requires exactly 32 decoded bytes and admits nothing longer than 44 characters. The branch
+/// that echoes it fires precisely BECAUSE that decode failed, so on that path the value has passed
+/// no shape check at all and the reasoning is exactly backwards.
+const ECHO_MAX: usize = 64;
 /// The same cap in bytes, so a rejected multibyte payload cannot reflect four times its
 /// character count into the agent's context.
-pub const ECHO_MAX_BYTES: usize = 64;
+const ECHO_MAX_BYTES: usize = 64;
 /// The character cap on serde's own error text, which embeds the offending value verbatim.
 const ARG_ERROR_MAX: usize = 120;
 /// The same cap in bytes.
 const ARG_ERROR_MAX_BYTES: usize = 120;
 /// The character cap on an echoed HTTP error body (a WAF or gateway block page).
-pub const BODY_SNIPPET_MAX: usize = 200;
+const BODY_SNIPPET_MAX: usize = 200;
 /// The same cap in bytes. This is the widest echo in the crate, so it is also the one where a
 /// character cap understates the worst case most: 200 astral-plane codepoints are 800 bytes.
-pub const BODY_SNIPPET_MAX_BYTES: usize = 200;
+const BODY_SNIPPET_MAX_BYTES: usize = 200;
 
 /// Sanitize an untrusted field and bound it on BOTH axes: characters, then bytes.
 ///
@@ -159,6 +165,15 @@ pub struct HealthReport {
 
 impl HealthReport {
     /// Parse a Kamino `/portfolio/{wallet}` JSON body into a health report.
+    /// NOT ECHO-BOUNDED, deliberately, and MEASURED rather than assumed. The target type is
+    /// `serde_json::Value`, which accepts every well-formed JSON document, so this can only be a
+    /// SYNTAX error, and a syntax error is positional rather than quoting. Measured on this
+    /// toolchain: 33 bytes (`expected value at line 1 column 7`) from a body carrying a
+    /// 2,000-codepoint flood. The contrast is what makes that a finding rather than a hope — the
+    /// same crate deserializing into a TYPED struct produced 8,058 bytes from the same flood, which
+    /// is the case [`invalid_arguments_message`] exists for. Pinned by
+    /// `an_untyped_value_parse_error_does_not_echo_the_body`, so if serde ever starts quoting the
+    /// input here, that test fails rather than this comment quietly becoming false.
     pub fn from_kamino_portfolio(json: &str) -> Result<Self, String> {
         let root: Value = serde_json::from_str(json).map_err(|e| format!("bad JSON: {e}"))?;
         Ok(Self::from_value(&root))
@@ -381,6 +396,37 @@ pub fn invalid_arguments_message(err: &str) -> String {
     format!(
         "invalid arguments: {}",
         sanitize_to_bytes(err, ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES)
+    )
+}
+
+/// Format the rejected-wallet error the shim hands back to the agent.
+///
+/// Here for the same reason as [`invalid_arguments_message`]: the shim is
+/// `#[cfg(target_family = "wasm")]`, so a message assembled inside it is a message no host test
+/// can measure. The cap already existed at the shim's call site; what did not exist was anything
+/// that could tell whether it was still there.
+pub fn invalid_wallet_message(wallet: &str) -> String {
+    format!(
+        "not a valid base58 wallet address: {}",
+        sanitize_to_bytes(wallet, ECHO_MAX, ECHO_MAX_BYTES)
+    )
+}
+
+/// Format the non-2xx error the shim hands back after a Kamino call.
+///
+/// An error-response body is the most REMOTE string this crate renders and the widest echo it
+/// carries: a WAF or gateway block page is chosen by whoever answers, not by Kamino, and it can
+/// carry control, bidi and zero-width framing as easily as it can carry length.
+///
+/// The pre-cap lives INSIDE this function rather than at the call site so the whole path is
+/// testable in one call. It counts CHARACTERS, which is why the byte cap below is not redundant
+/// with it: 200 astral-plane codepoints pass a `.take(200)` and are 800 bytes.
+pub fn http_error_message(status: u16, body: &str) -> String {
+    // Cheap head-cap first so a multi-megabyte error page is never walked in full by the sanitizer.
+    let head: String = body.chars().take(BODY_SNIPPET_MAX).collect();
+    format!(
+        "HTTP {status}: {}",
+        sanitize_to_bytes(&head, BODY_SNIPPET_MAX, BODY_SNIPPET_MAX_BYTES)
     )
 }
 
@@ -788,6 +834,254 @@ mod tests {
             out.len() < 6500,
             "worst-case report was {} bytes (expected bounded < 6500)",
             out.len()
+        );
+    }
+
+    // ---- error-path echo bounding -----------------------------------------
+    //
+    // The REPORT path already had byte ceilings and the tests to prove them. The ERROR path had
+    // the caps in source and NOTHING that could tell whether they were still there:
+    // `hostile_serde_error_value_is_capped_in_the_rejection` measures `chars().count()`, and the
+    // wallet echo and the HTTP body snippet had no test at all because both were assembled inside
+    // the `#[cfg(target_family = "wasm")]` shim, where `cargo test` cannot reach them. Moving the
+    // two message builders into this module is what makes them measurable; these are the
+    // measurements.
+
+    /// A 4-byte codepoint. Not a control character, so the sanitizer keeps it; four bytes wide, so
+    /// it is what separates a character cap from a byte ceiling.
+    const ASTRAL: &str = "\u{1F600}";
+
+    /// Every error-path echo in the crate, bounded in BYTES, each with the char-capped-only figure
+    /// beside it so the two are comparable rather than merely asserted.
+    ///
+    /// The fixed prose of each message is DERIVED, by driving the same builder with a one-byte
+    /// value, rather than pinned — rewording a message cannot silently loosen the bound.
+    #[test]
+    fn every_error_path_echo_is_byte_bounded_not_just_char_bounded() {
+        let flood = ASTRAL.repeat(2000);
+
+        type Builder = fn(&str) -> String;
+        // (site, builder, char cap, byte budget)
+        let cases: [(&str, Builder, usize, usize); 3] = [
+            ("wallet", invalid_wallet_message, ECHO_MAX, ECHO_MAX_BYTES),
+            (
+                "arguments",
+                invalid_arguments_message,
+                ARG_ERROR_MAX,
+                ARG_ERROR_MAX_BYTES,
+            ),
+            (
+                "http-body",
+                |b| http_error_message(503, b),
+                BODY_SNIPPET_MAX,
+                BODY_SNIPPET_MAX_BYTES,
+            ),
+        ];
+
+        let mut checked = 0usize;
+        for (site, build, char_cap, budget) in cases {
+            // `!` is one byte and is not stripped by the sanitizer, so it reaches the echo intact.
+            let short_msg = build("!");
+            assert!(
+                short_msg.ends_with('!'),
+                "{site}: the value never reached the echo, so this case is vacuous. \
+                 Got: {short_msg}"
+            );
+            let prefix = short_msg.len() - 1;
+
+            let msg = build(&flood);
+            let echoed = msg.len() - prefix;
+            assert!(
+                echoed > 0,
+                "{site}: the echo capped away to nothing, so the byte bound proves nothing"
+            );
+            assert!(
+                echoed <= budget,
+                "{site}: echoed {echoed} bytes, over the {budget}-byte budget"
+            );
+
+            // BEFORE/AFTER CONTROL: what the CHARACTER cap alone admitted. Without this the bound
+            // above is equally consistent with a budget loose enough for either form, which is
+            // exactly the state the ASCII-fixture test in this file left the crate in.
+            let char_only = sanitize_onchain(&flood, char_cap).text.len();
+            assert!(
+                char_only > budget,
+                "{site}: the char cap alone yields {char_only} bytes, already inside the \
+                 {budget}-byte budget, so the byte cap is not what holds it"
+            );
+
+            eprintln!(
+                "MEASURED lending-health {site} error echo: {echoed} B (char-capped only: \
+                 {char_only} B, budget {budget} B)"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 3, "a case was skipped");
+    }
+
+    /// The arguments echo again, driven through the REAL serde failure rather than through a
+    /// hand-written string, so the fixture is an attacker-chosen message rather than one this test
+    /// invented.
+    ///
+    /// THE FLOOD IS THE KEY, NOT THE VALUE, and the first draft of this test had it the other way
+    /// round and MEASURED 62 bytes. `ShimArgs` has one field and it is a `String`, so a flooded
+    /// VALUE parses cleanly and no error exists to bound; what serde quotes verbatim here is the
+    /// unknown FIELD NAME, and a JSON key is as attacker-chosen as a JSON value.
+    #[test]
+    fn the_serde_arguments_echo_is_byte_bounded_on_a_real_serde_error() {
+        let flood = ASTRAL.repeat(2000);
+        let json = format!(r#"{{"wallet":"x","{flood}":1}}"#);
+        let raw = serde_json::from_str::<ShimArgs>(&json)
+            .expect_err("an unknown field must be refused")
+            .to_string();
+
+        const PREFIX: &str = "invalid arguments: ";
+        let msg = invalid_arguments_message(&raw);
+        assert!(msg.starts_with(PREFIX), "unexpected prose: {msg}");
+        let echoed = msg.len() - PREFIX.len();
+        assert!(echoed > 0, "the echo capped away to nothing");
+        assert!(
+            echoed <= ARG_ERROR_MAX_BYTES,
+            "echoed {echoed} bytes, over the {ARG_ERROR_MAX_BYTES}-byte budget"
+        );
+        assert!(
+            raw.len() > 4 * ARG_ERROR_MAX_BYTES,
+            "serde no longer embeds the offending value ({} bytes), so this is measuring a fixed \
+             message rather than an attacker-chosen one",
+            raw.len()
+        );
+        let char_only = sanitize_onchain(&raw, ARG_ERROR_MAX).text.len();
+        assert!(
+            char_only > ARG_ERROR_MAX_BYTES,
+            "the char cap alone yields {char_only} bytes, already inside the budget"
+        );
+        eprintln!(
+            "MEASURED lending-health real-serde arguments echo: {echoed} B (raw serde: {} B, \
+             char-capped only: {char_only} B, budget {ARG_ERROR_MAX_BYTES} B)",
+            raw.len()
+        );
+    }
+
+    /// The premise `from_kamino_portfolio` and the shim's `invalid JSON body:` line are left
+    /// uncapped ON, pinned so it fails loudly rather than quietly becoming false.
+    ///
+    /// An UNTYPED `serde_json::Value` accepts every well-formed document, so its parse can only
+    /// fail on SYNTAX, and a syntax error is positional. The control is the TYPED parse in the same
+    /// test: same crate, same flood, and it quotes the value back. Without that side by side, "an
+    /// untyped error is small" is an assertion about a library rather than a measurement.
+    #[test]
+    fn an_untyped_value_parse_error_does_not_echo_the_body() {
+        let flood = ASTRAL.repeat(2000);
+
+        let untyped = HealthReport::from_kamino_portfolio(&format!("{{\"a\": {flood}}}"))
+            .expect_err("the fixture must not parse");
+        assert!(untyped.starts_with("bad JSON: "), "unexpected: {untyped}");
+        assert!(
+            !untyped.contains(ASTRAL),
+            "an untyped Value parse error now quotes the body, so this site needs the same cap \
+             the typed sites have: {untyped}"
+        );
+        assert!(
+            untyped.len() < 120,
+            "the untyped parse error is {} bytes, no longer small enough to leave uncapped",
+            untyped.len()
+        );
+
+        // CONTROL: the TYPED parse, which is the case that DOES echo, on the same flood. The key
+        // rather than the value, for the reason given on the test above.
+        let typed = serde_json::from_str::<ShimArgs>(&format!(r#"{{"wallet":"x","{flood}":1}}"#))
+            .expect_err("the fixture must not parse")
+            .to_string();
+        assert!(
+            typed.len() > 8 * untyped.len(),
+            "the typed and untyped errors are the same size ({} vs {}), so this test cannot \
+             distinguish the two cases and the uncapped site above is unproven",
+            typed.len(),
+            untyped.len()
+        );
+        eprintln!(
+            "MEASURED lending-health untyped-Value parse error: {} B (typed struct, same input: \
+             {} B)",
+            untyped.len(),
+            typed.len()
+        );
+    }
+
+    /// The budget is pinned from BOTH sides, ON the boundary rather than comfortably inside it. A
+    /// fixture of a few ASCII bytes passes for any budget above a few bytes and discriminates
+    /// nothing.
+    #[test]
+    fn the_echo_budget_is_exact_on_both_sides() {
+        let at = "a".repeat(ECHO_MAX_BYTES);
+        assert_eq!(
+            sanitize_to_bytes(&at, ECHO_MAX, ECHO_MAX_BYTES),
+            at,
+            "a value exactly ON the budget was altered; a tighter budget is the only way this fails"
+        );
+
+        let over = "a".repeat(ECHO_MAX_BYTES + 1);
+        let cut = sanitize_to_bytes(&over, ECHO_MAX, ECHO_MAX_BYTES);
+        assert!(
+            cut.len() <= ECHO_MAX_BYTES,
+            "{} bytes, over the {ECHO_MAX_BYTES}-byte budget",
+            cut.len()
+        );
+        assert_ne!(
+            cut, over,
+            "a value one byte over the budget was NOT truncated, so the budget is looser than \
+             {ECHO_MAX_BYTES} and every bound in this module is measured against the wrong number"
+        );
+        eprintln!(
+            "MEASURED lending-health echo budget: on-budget {} B unchanged, over-budget {} B cut \
+             from {} B",
+            at.len(),
+            cut.len(),
+            over.len()
+        );
+    }
+
+    /// A real wallet survives its own rejection intact. A cap that mangles real values is a
+    /// different defect from the one it fixes.
+    #[test]
+    fn an_ordinary_wallet_is_untouched_by_the_echo_cap() {
+        // Well-formed base58 that decodes to 31 bytes, so it reaches the rejection with its shape
+        // intact, which is what makes it a useful control.
+        let almost = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt";
+        let msg = invalid_wallet_message(almost);
+        assert!(
+            msg.ends_with(almost),
+            "a real base58 value was altered by the echo cap: {msg}"
+        );
+    }
+
+    /// The echo budgets are PUBLISHED in this crate's README as judge-facing figures, and every
+    /// other assertion in this module reads them as its own budget rather than pinning a value.
+    /// That includes the boundary fixture above, which is built by repeating a character
+    /// `ECHO_MAX_BYTES` times and so MOVES WITH the constant it is meant to hold. The suite
+    /// therefore proves a byte cap EXISTS and, without this test, proves nothing about where any
+    /// of them sits: raising `ECHO_MAX` to 200 or `BODY_SNIPPET_MAX` to 800 leaves every other
+    /// test green while making the README false.
+    ///
+    /// Pinning the literals is what makes a budget change fail here and force the README to move
+    /// in the same edit. Read a failure as "the README now disagrees", not as "put the number
+    /// back". Convention adopted from `solana-pay-request`, which closed the same class on the
+    /// other five crates.
+    #[test]
+    fn published_echo_budgets_are_pinned_to_their_readme_figures() {
+        assert_eq!(
+            (ECHO_MAX, ECHO_MAX_BYTES),
+            (64, 64),
+            "README publishes 64 B for the rejected wallet echo"
+        );
+        assert_eq!(
+            (ARG_ERROR_MAX, ARG_ERROR_MAX_BYTES),
+            (120, 120),
+            "README publishes 120 B for serde's own error text"
+        );
+        assert_eq!(
+            (BODY_SNIPPET_MAX, BODY_SNIPPET_MAX_BYTES),
+            (200, 200),
+            "README publishes 200 B for the non-2xx Kamino body snippet"
         );
     }
 }
