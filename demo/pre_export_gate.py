@@ -95,7 +95,7 @@ LUFS_MIN, LUFS_MAX = -24.0, -12.0
 # THE SHIPPED VIDEO FAILS THIS CHECK AND IS DELIBERATELY NOT BEING FIXED. Measured
 # 2026-08-20 on docs/assets/zeroclaw-demo-1080p.mp4: true peak -0.4 dBFS against this -1.0
 # ceiling, integrated -22.5 LUFS (in range). Re-derive rather than trusting the figure:
-#     ffmpeg -nostdin -hide_banner -i docs/assets/zeroclaw-demo-1080p.mp4 #       -af ebur128=peak=true -f null -
+#     ffmpeg -nostdin -hide_banner -i docs/assets/zeroclaw-demo-1080p.mp4 -af ebur128=peak=true -f null -
 #
 # WHY IT STAYS. That video is a SUBMITTED artifact: the submission deadline passed on
 # 2026-08-07 and judging is still open, which is checkable with .tools/fetch-listing.py --
@@ -271,9 +271,9 @@ def superseded_blob_ids() -> tuple[list[str], str]:
             ["git", "-C", str(REPO), "rev-parse", "--is-shallow-repository"]
         ).stdout.strip() == "true"
         if shallow:
-            return [], "unreachable in git: this is a SHALLOW clone, which cannot reach them"
+            return [], "this is a SHALLOW clone, which cannot reach them"
         return [], (
-            "unreachable in git: full history here, and no commit in it contains that "
+            "full history here, and no commit in it contains that "
             "path, so the path is wrong or this is not the repository that held it"
         )
     return ids, "git history"
