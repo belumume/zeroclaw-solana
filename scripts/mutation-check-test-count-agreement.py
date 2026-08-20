@@ -93,6 +93,20 @@ MUTANTS = (
         "so an unsatisfied unattributed claim is judged against a union that was never grown",
     ),
     (
+        "the joined re-scan that sees a wrapped claim at all",
+        '        nxt = lines[lineno] if lineno < len(lines) else ""',
+        '        nxt = ""',
+        "so a figure split across a hard wrap goes back to being invisible and the gate "
+        "returns a clean verdict over it",
+    ),
+    (
+        "the straddle test on a wrapped claim",
+        "                if m.start() < edge < m.end():",
+        "                if m.start() <= edge <= m.end() or True:",
+        "so a same-line claim is counted twice by the joined re-scan as well as by the "
+        "per-line one, and the wrapped-figure cases stop discriminating",
+    ),
+    (
         "the presence short-circuit on a partial union",
         "            if value in union:",
         "            if False and value in union:",

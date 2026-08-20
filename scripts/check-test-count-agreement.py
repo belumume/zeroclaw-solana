@@ -509,14 +509,26 @@ def selftest() -> int:
     wrapped_ok = "the core carries 11 host\ntests today.\n"
     across_blank = "the core carries 12 host\n\ntests today.\n"
     report("a WRAPPED wrong number fails", _run({"fx/README.md": wrapped_bad})[0] == 1)
-    report("a WRAPPED correct number passes", _run({"fx/README.md": wrapped_ok})[0] == 0)
+    report(
+        "a WRAPPED correct number passes", _run({"fx/README.md": wrapped_ok})[0] == 0
+    )
     report(
         "a blank line is never joined across",
         _run({"fx/README.md": across_blank})[0] != 1,
     )
+    # THE FIXTURE HAS TO HAVE A SUCCESSOR LINE, or this control cannot fail. A single line
+    # is followed by "" once split, the join is skipped for an empty successor, and the
+    # joined re-scan never runs at all -- so a one-line fixture asserts nothing about
+    # double counting however the straddle test is broken. Two claim-carrying lines put the
+    # join in play, which is what makes the count discriminating.
+    two_claims = "cargo test   # 11 tests\nand also 7 tests here\n"
     report(
         "a same-line claim is not counted twice by the join",
-        len(claims_in("cargo test   # 11 tests\n")) == 1,
+        len(claims_in(two_claims)) == 2,
+    )
+    report(
+        "and each of those is the value on its own line",
+        sorted(v for _, v, _ in claims_in(two_claims)) == [7, 11],
     )
 
     # The embedded harness transcript is a quotation of the toolchain and is gated as one.
