@@ -62,7 +62,7 @@ Madinah, signs it with a key generated on that box, and lands it in a typed acco
 oracle program, where a separate consumer program reads it and acts. A `systemd` timer keeps it
 publishing with no laptop involved. The same node also sells that reading per request over x402,
 so the machine earns the gas it spends: `curl https://x402.perfpilot.dev/price` returns an HTTP
-402 challenge with two price tiers and a single-use nonce, and the nonce changes on every request.
+402 challenge with a single price tier and a single-use nonce, and the nonce changes on every request.
 Three limits. That ARM box is an Ampere A1 on Oracle's free tier, measured at 0.00 EUR. Nobody
 owns that board; it is rented. Ampere Altra is genuinely ARM, so the word is accurate, and naming
 which kind costs nothing. The reading comes from a
