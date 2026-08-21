@@ -390,11 +390,25 @@ if "--check" in sys.argv:
         raise SystemExit(1)
 
     def without_payload(page):
-        """The page with the base64 wasm replaced by its length, so toolchains cannot differ."""
+        """The page with the base64 wasm replaced by a CONSTANT, so toolchains cannot differ.
+
+        The substitute must not encode the payload's LENGTH. Doing so leaks the toolchain back
+        into the compared text: a different rustc emits a different-sized wasm, and while the
+        marker keeps the same WIDTH whenever the digit count is unchanged, its CONTENT differs.
+        That produced the confusing `committed 14,464 template bytes, regenerated 14,464`
+        signature -- equal lengths, unequal strings -- and the failure text blamed the page.
+
+        MEASURED 2026-08-21: this gate passed on main at 13:47:50Z on 2026-08-20 and failed on an
+        unrelated two-line markdown PR hours later, with no change to this directory. Cause was a
+        Rust stable release: the channel flipped to 1.98.0 that day, while the page had been
+        generated with 1.97.1, which still reproduces it byte for byte. `--locked` pins the
+        dependencies and `dtolnay/rust-toolchain@<sha>` pins the ACTION, not the rustc it installs,
+        so `stable` moves under both and every Rust release would have re-broken this.
+        """
         m = re.search(r'const WASM_B64 = "([A-Za-z0-9+/=]*)";', page)
         if not m:
             return None
-        return page[: m.start(1)] + f"<{len(m.group(1))} b64 chars>" + page[m.end(1) :]
+        return page[: m.start(1)] + "<wasm payload>" + page[m.end(1) :]
 
     committed = io.open(OUT, encoding="utf-8").read()
     a, b = without_payload(committed), without_payload(html)
