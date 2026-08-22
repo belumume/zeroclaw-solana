@@ -456,7 +456,7 @@ def clone_reachable_refs():
 def scan_history_blobs(findings):
     """Surface 4: the CONTENT of every file version any clone-reachable ref carries.
 
-    Returns (n_blobs, n_bytes, accepted_seen, stale_entries).
+    Returns (n_blobs, n_bytes, accepted_seen, stale_entries, scope).
 
     Findings whose blob is in ACCEPTED_HISTORY do not go into `findings`; they are counted
     and reported separately, because folding a known exposure into a silent PASS would
