@@ -116,8 +116,13 @@ ACCEPTED_HISTORY = {
             "the windows-home and macos-home shapes. Introduced by 70de5645, removed by "
             "0618d54b ('Derive the Pass CLI path instead of shipping the author's home "
             "directory') -- so the identifier is in history precisely BECAUSE a commit "
-            "took it out of the tree. Reachable only from submission/demo-human, which is "
-            "frozen until winners are announced. The sole entry here carrying an account."
+            "took it out of the tree. The sole entry here carrying an account.\n"
+            "HAS A REMEDIATION THAT IS NOT A REWRITE, and it is already planned: this blob "
+            "is reachable ONLY from submission/demo-human (plus a local stash, which no "
+            "clone receives), so deleting that remote branch once winners are announced "
+            "removes it from every future clone. This gate will then report the entry as "
+            "no longer reachable and ask for it to be dropped, so the register cannot rot "
+            "into a list of exposures that stopped existing."
         ),
     },
     "3e3e4d2ef67752e77f0aefedfd3265848a0b505e": {
