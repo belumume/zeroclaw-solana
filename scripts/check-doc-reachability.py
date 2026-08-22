@@ -167,7 +167,7 @@ def selftest() -> int:
     sibling test, no mutation script. That is worse than a silent gap, because the claim
     discourages the next auditor from looking.
 
-    The cases are the regressions that actually happened, not invented ones. Two of them are
+    The cases are the regressions that actually happened, not invented ones. Five of them are
     the FALSE-POSITIVE direction, which matters more here than the false-negative: the naive
     version of this check called 21 of 32 documents unreachable and "fixing" that would have
     added 19 pointless links. A control set that only proves the gate can FAIL would have
@@ -181,7 +181,9 @@ def selftest() -> int:
     import subprocess as sp
     import tempfile
 
-    real = sorted(ROOT.glob("*.md"))
+    # EVERY tracked doc, not just top-level. Review noted the narrower glob made this
+    # docstring claim wider than the check behind it.
+    real = sorted(ROOT / r for r in tracked_docs())
     before = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in real}
     cases: list[tuple[str, int, int]] = []
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="doc-reach-selftest-"))
@@ -283,7 +285,7 @@ def selftest() -> int:
         )
     print(
         f"    {'ok  ' if untouched else 'FAIL'} real tree unwritten "
-        f"({len(real)} top-level doc(s) digested before and after)"
+        f"({len(real)} tracked doc(s) digested before and after)"
     )
     if failed or not untouched:
         return 1
