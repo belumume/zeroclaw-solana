@@ -805,6 +805,15 @@ jobs:
       - name: the two rate copies agree
         run: python3 scripts/check-pay-link-rate-agreement.py
 
+      # And that gate's own controls. It had none until 2026-08-22, which mattered more here than
+      # for most: it is on the money path, and its careful construction (it reads the ORIGINAL's
+      # values out of source rather than restating them) is exactly what makes an uncontrolled
+      # green believable. Five cases, both verdicts, plus a digest proving the real tree is never
+      # written. Two mutants -- neutering the value comparison, and neutering the missing-name
+      # check -- were each verified to turn this red.
+      - name: the rate-agreement gate can still fail
+        run: python3 scripts/check-pay-link-rate-agreement.py --selftest
+
       # The demo video is frozen and submitted, so its claims cannot be corrected and the claims
       # map is the only remaining way to make them checkable. That makes the MAP judge-facing: a
       # claim pointing at a renamed script reads as a verification route and is a dead end, which

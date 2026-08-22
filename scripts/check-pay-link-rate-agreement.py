@@ -73,16 +73,18 @@ def read_consts(path: pathlib.Path) -> dict[str, str]:
     return out
 
 
-def main() -> int:
-    original = read_consts(ORIGINAL)
-    jailed = read_consts(JAILED)
+def main(
+    original_path: pathlib.Path = ORIGINAL, jailed_path: pathlib.Path = JAILED
+) -> int:
+    original = read_consts(original_path)
+    jailed = read_consts(jailed_path)
 
     missing = [n for n in SHARED if n not in original or n not in jailed]
     if missing:
         print(
             f"FAIL  constant(s) not found in both files: {missing}\n"
             f"      A rename or deletion in one copy is a disagreement, not an exemption.\n"
-            f"      original={ORIGINAL.name} jailed={JAILED.name}",
+            f"      original={original_path.name} jailed={jailed_path.name}",
             file=sys.stderr,
         )
         return 1
@@ -95,7 +97,7 @@ def main() -> int:
         print(
             "\nFAIL  the two copies price differently:\n"
             + "\n".join(
-                f"    {n}\n      {ORIGINAL.name}: {a}\n      {JAILED.name}: {b}"
+                f"    {n}\n      {original_path.name}: {a}\n      {jailed_path.name}: {b}"
                 for n, a, b in bad
             )
             + "\n  The jailed copy is what a customer is priced by. Reconcile before shipping.",
@@ -109,5 +111,120 @@ def main() -> int:
     return 0
 
 
+def selftest() -> int:
+    """Prove this gate can FAIL, which nothing did until 2026-08-22.
+
+    The gate was carefully built -- it reads the ORIGINAL's values out of source rather than
+    restating them, and lists constant names explicitly so a rename cannot silently drop out of
+    the comparison. That care is exactly why an uncontrolled green here would be believed. A
+    checker is a hypothesis until it has produced the opposite verdict on a known input.
+
+    Every case runs against COPIES in a temp dir. The real tree is never written, and the last
+    case asserts that by digesting both real files before and after.
+    """
+    import hashlib
+    import shutil
+    import tempfile
+
+    before = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in (ORIGINAL, JAILED)}
+    cases: list[tuple[str, int, int]] = []  # (name, expected_rc, actual_rc)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="rate-agreement-selftest-"))
+    try:
+        orig = tmp / "rate_crosscheck.py"
+        jail = tmp / "pay_link.py"
+
+        # 1. UNMODIFIED copies must PASS. This is the over-correction control: without it, a
+        #    gate that failed on everything would satisfy every must-fail case below.
+        shutil.copyfile(ORIGINAL, orig)
+        shutil.copyfile(JAILED, jail)
+        cases.append(("unmodified copies agree", 0, main(orig, jail)))
+
+        # 2. A PLANTED DISAGREEMENT on the constant that decides what a customer pays.
+        #    MAX_DIVERGENCE is the tolerance between two rate sources; widening it in the jailed
+        #    copy alone is the shape that prices a customer off an uncorroborated rate.
+        text = jail.read_text(encoding="utf-8")
+        planted = re.sub(
+            r"^MAX_DIVERGENCE\s*=\s*[^\n]+$",
+            "MAX_DIVERGENCE = 0.99",
+            text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if planted == text:
+            print(
+                "FAIL  selftest could not plant a MAX_DIVERGENCE disagreement; the constant's "
+                "spelling changed and this case is now vacuous.",
+                file=sys.stderr,
+            )
+            return 1
+        jail.write_text(planted, encoding="utf-8", newline="")
+        cases.append(("planted value disagreement", 1, main(orig, jail)))
+
+        # 3. A RENAME in one copy must FAIL too, not silently drop from the comparison. This is
+        #    the case the SHARED list exists for, so it needs its own control.
+        jail.write_text(
+            re.sub(
+                r"^MAX_DIVERGENCE\b",
+                "MAX_DIVERGENCE_RENAMED",
+                text,
+                count=1,
+                flags=re.MULTILINE,
+            ),
+            encoding="utf-8",
+            newline="",
+        )
+        cases.append(("renamed constant", 1, main(orig, jail)))
+
+        # 4. Restoring agreement must return to PASS, proving case 2 failed on the PLANT rather
+        #    than on anything the copying did.
+        jail.write_text(text, encoding="utf-8", newline="")
+        cases.append(("restored copies agree", 0, main(orig, jail)))
+
+        # 5, 6. A missing file is a failure, not a skip -- on EITHER side. read_consts is used
+        #    symmetrically for both paths, so testing only one leaves the other's branch
+        #    unexercised, and an asymmetric control is the shape that reads as covered.
+        cases.append(
+            ("missing jailed file", 1, _rc_of_missing(orig, tmp / "absent.py"))
+        )
+        cases.append(
+            ("missing original file", 1, _rc_of_missing(tmp / "absent.py", jail))
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    after = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in (ORIGINAL, JAILED)}
+    untouched = before == after
+
+    failed = [c for c in cases if c[1] != c[2]]
+    print(
+        f"\n  selftest: {len(cases) - len(failed)}/{len(cases)} cases behaved as required"
+    )
+    for name, want, got in cases:
+        print(
+            f"    {'ok  ' if want == got else 'FAIL'} {name}: wanted rc={want}, got rc={got}"
+        )
+    print(
+        f"    {'ok  ' if untouched else 'FAIL'} real tree unwritten (2 files digested before and after)"
+    )
+    if failed or not untouched:
+        return 1
+    print("\nPASS  the gate produces BOTH verdicts on known inputs")
+    return 0
+
+
+def _rc_of_missing(original: pathlib.Path, jailed: pathlib.Path) -> int:
+    """read_consts exits rather than returning, so the missing-file case needs its own harness.
+
+    Named for the two SIDES rather than for which one is absent, because either may be: the
+    missing-file branch is symmetric and testing only one side leaves the other unexercised.
+    """
+    try:
+        return main(original, jailed)
+    except SystemExit as e:
+        return int(e.code or 0)
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv[1:]:
+        sys.exit(selftest())
     sys.exit(main())
