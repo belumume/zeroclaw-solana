@@ -45,9 +45,9 @@ ACCEPTED = {
 }
 
 
-def tracked_docs():
+def tracked_docs(root: pathlib.Path = ROOT):
     out = subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "*.md"],
+        ["git", "-C", str(root), "ls-files", "*.md"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -56,11 +56,11 @@ def tracked_docs():
     return [f for f in out.split("\n") if f.strip()]
 
 
-def collect_links(docs):
+def collect_links(docs, root: pathlib.Path = ROOT):
     """Every link target any tracked doc points at, split into files and directories."""
     files, dirs = set(), set()
     for rel in docs:
-        p = ROOT / rel
+        p = root / rel
         if not p.exists():
             continue
         base = pathlib.PurePosixPath(rel).parent
@@ -100,11 +100,14 @@ def why_reachable(rel, files, dirs):
     return None
 
 
-def main() -> int:
-    docs = tracked_docs()
-    if len(docs) < MIN_DOCS:
+def main(
+    root: pathlib.Path = ROOT, accepted: dict | None = None, min_docs: int = MIN_DOCS
+) -> int:
+    accepted = ACCEPTED if accepted is None else accepted
+    docs = tracked_docs(root)
+    if len(docs) < min_docs:
         print(
-            f"FAIL  walk found {len(docs)} tracked document(s); expected at least {MIN_DOCS}."
+            f"FAIL  walk found {len(docs)} tracked document(s); expected at least {min_docs}."
         )
         print(
             "      The discovery step is broken, so a clean result would mean nothing."
@@ -114,7 +117,7 @@ def main() -> int:
     # An exception list is itself a claim, and it rots. An ACCEPTED entry naming an untracked
     # path pre-excuses a document that does not exist, so if one is ever added there it is
     # exempt by an entry nobody remembers writing. That is this gate's own thesis, one level up.
-    stale = [rel for rel in sorted(ACCEPTED) if rel not in set(docs)]
+    stale = [rel for rel in sorted(accepted) if rel not in set(docs)]
     if stale:
         print(
             f"\n{len(stale)} ACCEPTED entr(ies) name a document that is not tracked:\n"
@@ -127,16 +130,16 @@ def main() -> int:
         )
         return 1
 
-    files, dirs = collect_links(docs)
+    files, dirs = collect_links(docs, root)
     orphans = [r for r in sorted(docs) if why_reachable(r, files, dirs) is None]
-    undeclared = [r for r in orphans if r not in ACCEPTED]
+    undeclared = [r for r in orphans if r not in accepted]
 
     print(
         f"walked {len(docs)} tracked document(s); "
         f"{len(files)} file link(s), {len(dirs)} directory link(s)"
     )
 
-    for rel, reason in sorted(ACCEPTED.items()):
+    for rel, reason in sorted(accepted.items()):
         if rel in orphans:
             print(f"  accepted  {rel}\n            {reason}")
 
@@ -157,5 +160,140 @@ def main() -> int:
     return 1
 
 
+def selftest() -> int:
+    """Make the docstring's "ships with controls rather than confidence" true.
+
+    It was not. Until 2026-08-22 this file asserted controls and had none: no --selftest, no
+    sibling test, no mutation script. That is worse than a silent gap, because the claim
+    discourages the next auditor from looking.
+
+    The cases are the regressions that actually happened, not invented ones. Five of them are
+    the FALSE-POSITIVE direction, which matters more here than the false-negative: the naive
+    version of this check called 21 of 32 documents unreachable and "fixing" that would have
+    added 19 pointless links. A control set that only proves the gate can FAIL would have
+    passed the naive version too.
+
+    Every case runs against a throwaway git repo in a temp dir. The real tree is never written,
+    and the last assertion proves it rather than intending it.
+    """
+    import hashlib
+    import shutil
+    import subprocess as sp
+    import tempfile
+
+    # EVERY tracked doc, not just top-level. Review noted the narrower glob made this
+    # docstring claim wider than the check behind it.
+    real = sorted(ROOT / r for r in tracked_docs())
+    before = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in real}
+    cases: list[tuple[str, int, int]] = []
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="doc-reach-selftest-"))
+
+    def fixture(files: dict[str, str]) -> pathlib.Path:
+        """A real git repo, because tracked_docs shells out to `git ls-files`."""
+        d = pathlib.Path(tempfile.mkdtemp(dir=tmp))
+        for rel, body in files.items():
+            f = d / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(body, encoding="utf-8", newline="")
+        for cmd in (["init", "-q"], ["add", "-A"]):
+            sp.run(["git", "-C", str(d)] + cmd, capture_output=True, check=False)
+        return d
+
+    # A hub linking everything, plus filler so the MIN_DOCS floor is not what is being tested.
+    def with_filler(extra: dict[str, str], hub_links: str = "") -> dict[str, str]:
+        files = {"README.md": "# hub\n" + hub_links}
+        for i in range(12):
+            files[f"filler{i}.md"] = "# f\n"
+            files["README.md"] += f"[f]( filler{i}.md )\n".replace(" ", "")
+        files.update(extra)
+        return files
+
+    try:
+        # 1. THE REAL TREE PASSES. Over-correction control: without it, a gate that failed on
+        #    everything would satisfy every must-fail case below.
+        cases.append(("the real tree passes", 0, main()))
+
+        # 2. A genuinely unreachable doc must FAIL. This is the defect the gate exists for.
+        d = fixture(with_filler({"docs/orphan.md": "# nobody links me\n"}))
+        cases.append(("planted unreachable doc", 1, main(d, {}, 5)))
+
+        # 3. Reachable ONLY through a ../ segment must PASS. This is the resolver bug that kept
+        #    reporting the SOPs orphaned AFTER they were linked.
+        d = fixture(
+            with_filler(
+                {
+                    "docs/hub.md": "# h\n[sop](../sops/x.md)\n",
+                    "sops/x.md": "# sop\n",
+                },
+                hub_links="[d](docs/hub.md)\n",
+            )
+        )
+        cases.append(("reachable only via a ../ link", 0, main(d, {}, 5)))
+
+        # 4. Reachable ONLY because its DIRECTORY is linked must PASS. This is the route whose
+        #    absence produced the 21-of-32 false report.
+        d = fixture(
+            with_filler(
+                {"transcripts/a.md": "# t\n"}, hub_links="[dir](transcripts/)\n"
+            )
+        )
+        cases.append(("reachable only via a linked directory", 0, main(d, {}, 5)))
+
+        # 4b. DEEPER than the linked directory, which only the prefix loop can satisfy. Case 4
+        #    alone cannot distinguish the two directory routes: for a doc whose IMMEDIATE parent
+        #    is linked, both the exact-parent branch and the prefix loop match, so removing
+        #    either one leaves the other covering it and the mutation escapes. Measured exactly
+        #    that -- remove either alone and the suite still passed; remove both and case 4
+        #    failed. This fixture links `docs/` and buries the doc one level below it, so the
+        #    parent `docs/sub` is NOT in dirs and only the prefix loop can reach it.
+        #    (The exact-parent branch stays subsumed by construction: if a parent is linked the
+        #    prefix loop matches too. It is a fast path, not a distinct route, so it has no
+        #    fixture of its own and a mutation removing it is equivalent rather than escaped.)
+        d = fixture(
+            with_filler({"docs/sub/deep.md": "# deep\n"}, hub_links="[dir](docs/)\n")
+        )
+        cases.append(("reachable only by the prefix route", 0, main(d, {}, 5)))
+
+        # 5. A nested README is rendered when a reader browses in, so it needs no link.
+        d = fixture(with_filler({"sub/README.md": "# nested\n"}))
+        cases.append(("nested README needs no link", 0, main(d, {}, 5)))
+
+        # 6. An ACCEPTED entry naming an UNTRACKED path must be reported, because it pre-excuses
+        #    whatever is added there later. The gate's own thesis, one level up.
+        d = fixture(with_filler({}))
+        cases.append(
+            ("ACCEPTED names an untracked path", 1, main(d, {"ghost.md": "why"}, 5))
+        )
+
+        # 7. Too few docs is rc=2, a THIRD state. Folding it into pass would report clean over a
+        #    broken walk; folding it into fail would read as a real finding.
+        d = fixture({"only.md": "# one\n"})
+        cases.append(("below the discovery floor", 2, main(d, {}, 10)))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    after = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in real}
+    untouched = before == after
+
+    failed = [c for c in cases if c[1] != c[2]]
+    print(
+        f"\n  selftest: {len(cases) - len(failed)}/{len(cases)} cases behaved as required"
+    )
+    for name, want, got in cases:
+        print(
+            f"    {'ok  ' if want == got else 'FAIL'} {name}: wanted rc={want}, got rc={got}"
+        )
+    print(
+        f"    {'ok  ' if untouched else 'FAIL'} real tree unwritten "
+        f"({len(real)} tracked doc(s) digested before and after)"
+    )
+    if failed or not untouched:
+        return 1
+    print("\nPASS  the gate produces all three verdicts on known inputs")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--selftest" in sys.argv[1:]:
+        sys.exit(selftest())
     sys.exit(main())
