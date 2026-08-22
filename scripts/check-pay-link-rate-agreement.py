@@ -180,9 +180,14 @@ def selftest() -> int:
         jail.write_text(text, encoding="utf-8", newline="")
         cases.append(("restored copies agree", 0, main(orig, jail)))
 
-        # 5. A missing file is a failure, not a skip.
+        # 5, 6. A missing file is a failure, not a skip -- on EITHER side. read_consts is used
+        #    symmetrically for both paths, so testing only one leaves the other's branch
+        #    unexercised, and an asymmetric control is the shape that reads as covered.
         cases.append(
             ("missing jailed file", 1, _rc_of_missing(orig, tmp / "absent.py"))
+        )
+        cases.append(
+            ("missing original file", 1, _rc_of_missing(tmp / "absent.py", jail))
         )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -207,10 +212,14 @@ def selftest() -> int:
     return 0
 
 
-def _rc_of_missing(orig: pathlib.Path, absent: pathlib.Path) -> int:
-    """read_consts exits rather than returning, so the missing-file case needs its own harness."""
+def _rc_of_missing(original: pathlib.Path, jailed: pathlib.Path) -> int:
+    """read_consts exits rather than returning, so the missing-file case needs its own harness.
+
+    Named for the two SIDES rather than for which one is absent, because either may be: the
+    missing-file branch is symmetric and testing only one side leaves the other unexercised.
+    """
     try:
-        return main(orig, absent)
+        return main(original, jailed)
     except SystemExit as e:
         return int(e.code or 0)
 
