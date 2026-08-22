@@ -286,7 +286,7 @@ are internal tooling paths and an env-var name.
 
 It scans BLOBS rather than patch text, because a clone receives objects. `git log -p` renders
 nothing for a binary file, nothing for a merge commit by default, and reports one blob twice
-when one commit adds it and another removes it — measured, the patch view showed two
+when one commit adds it and another removes it. Measured, the patch view showed two
 occurrences where the truth is one blob. Scope is `refs/remotes/origin/*` plus `refs/tags/*`,
 not the raw object store: the store here held three needle-carrying blobs and only one was
 clone-reachable, so scanning it would have produced two false findings about a developer's own
