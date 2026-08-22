@@ -257,13 +257,14 @@ python3 scripts/check-pay-link-rate-agreement.py   # the pay path's copy still m
 </p>
 <pre><code>python demo/verify-merchant-invariant.py</code></pre>
 <p>
-  That harness covers the swapped recipient. Six more cover the rest of the page, each written
+  That harness covers the swapped recipient. Seven more cover the rest of the page, each written
   after a failure we actually hit rather than one we imagined, and each drives the live page:
 </p>
 <pre><code>python demo/verify_wallet_picker.py       # the customer can choose a wallet, at no layout cost
 python demo/verify_qr_scannable.py        # the QR decodes, under two independent decoders
 python demo/verify_no_cdn_dependency.py   # the pay path loads its code from this origin, never a CDN
 python demo/verify_paid_link_refused.py   # a reference that already settled is refused, both directions
+python demo/verify_reference_required.py  # a link with no reference cannot be checked, so it is refused
 python demo/verify_pay_path_rpc.py        # the desktop path reaches its RPC from a browser
 python demo/verify_settlement_poll.py     # the page polls for settlement, not only on load</code></pre>
 <p>
