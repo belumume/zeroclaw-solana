@@ -469,7 +469,17 @@ def verify_one(path: Path, verbose: bool) -> int:
     print(
         f"bundle captured {bundle.get('captured_utc')} from {bundle.get('source_rpc')}"
     )
-    print(f"{len(captured)} captured of {len(entries)} recorded signatures\n")
+    print(f"{len(captured)} captured of {len(entries)} recorded signatures")
+    # PASS is a verdict on the BYTES, not on the transaction outcome. Three lines below read
+    # "PASS ... FAILED ON CHAIN", which is self-contradictory to a reader who does not know the
+    # on-chain rejection IS the thing being proven: an over-cap transfer the allowance program
+    # refused. Said here rather than by rewording the per-transaction line, because demo/take.py
+    # parses that wording and two PROOF docs quote the line verbatim, frozen copies included.
+    print(
+        "PASS means the bytes verify, not that the transaction succeeded. A transaction marked\n"
+        "FAILED ON CHAIN can still be a PASS: an over-cap transfer that the allowance program\n"
+        "rejected is the custody proof, and its refusal is the expected result.\n"
+    )
 
     if not captured:
         print("FAIL  bundle contains no captured transactions")
