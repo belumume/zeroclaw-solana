@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Proves the identifier-leak controls can FAIL.
 #
-# 18/18 green says the suite agrees with the gate. It does not say the suite would notice
+# A green suite says the suite agrees with the gate. It does not say the suite would notice
 # the gate breaking, and those are different claims. This neuters one detector at a time
 # and requires the suite to go red for each, so a green result upstream means the
 # detectors are load-bearing rather than that the cases happen to agree.
@@ -79,9 +79,56 @@ mutate "tracked-file floor removed" \
        "    if len(files) < MIN_TRACKED:" \
        "    if False:"
 
+# 5. The whole history-blob surface. Silencing it must break INCIDENT 5, which is the case
+#    where the tree is clean and only a history blob carries the identifier.
+#
+#    ANCHORED ON THE PREFILTER, deliberately. The obvious anchor is the ACCEPTED_HISTORY
+#    membership test, and it is wrong: flipping it to `if True` makes the reporting loop
+#    raise KeyError on an unregistered sha, and a CRASH exits non-zero, which is the same
+#    code a real finding produces. The must-fire cases then still match their expected rc
+#    and the mutation reads as caught while having tested nothing. Silencing the prefilter
+#    is what a broken detector actually looks like: no findings, no crash.
+mutate "history-blob scan silenced" \
+       "        if not any(rx.search(body) for rx in _PREFILTER):" \
+       "        if True:"
+
+# 6. The history floor, which is what a SHALLOW clone trips. Without it a depth-1 checkout
+#    scans a handful of blobs and prints a PASS about a history it never read.
+mutate "history-blob floor removed" \
+       "    if len(blobs) < MIN_HISTORY_BLOBS:" \
+       "    if False:"
+
+# 7. The accepted-register DRIFT guard. This is the one hole a bare content-addressed key
+#    would leave: a blob cannot change, so a changed finding count means a detector was
+#    widened and that blob is cleared under a rule that no longer describes it. Neutering
+#    the comparison must break the case that registers a deliberately wrong count.
+mutate "accepted-register drift guard removed" \
+       "        if n != ACCEPTED_HISTORY[sha][\"findings\"]" \
+       "        if False"
+
+# 8. The clone-reachability SCOPE. Widening it to the raw object store must break a case,
+#    because the store holds unreachable blobs a clone never receives -- reporting those is
+#    a false finding, which is the direction that gets a real gate loosened.
+mutate "clone-reachability scope widened to every local ref" \
+       "    if refs:" \
+       "    if False:"
+
+# 9. The drift block's ABSENT early return. Restoring it must break the case proving a
+#    drifted register entry does not swallow a concurrent real finding.
+mutate "drift verdict returns early again, hiding real findings" \
+       '            print(f"  {sha[:12]}  reviewed {was}, now {now}")' \
+       '            print(f"  {sha[:12]}  reviewed {was}, now {now}"); return 1'
+
+# 10. Presence recording for accepted blobs. Neutering it sends a still-reachable blob
+#     whose detector stopped matching into the stale list, where the run announces the
+#     exposure is GONE about a blob that is sitting right there.
+mutate "accepted-blob presence no longer recorded independently of detection" \
+       "        is_accepted = sha in ACCEPTED_HISTORY" \
+       "        is_accepted = False"
+
 echo
 if [ "$fail" -eq 0 ]; then
-  echo "RESULT: all 4 mutations were caught by the suite."
+  echo "RESULT: all 10 mutations were caught by the suite."
   exit 0
 fi
 echo "RESULT: $fail mutation(s) went unnoticed. The suite is not proving what it claims."
