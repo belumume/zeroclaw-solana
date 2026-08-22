@@ -947,6 +947,16 @@ jobs:
       - name: every tracked document is reachable by a reader
         run: python3 scripts/check-doc-reachability.py
 
+      # And that gate's own controls. Its docstring claimed it "ships with controls rather than
+      # confidence" and it had none until 2026-08-22 -- worse than a silent gap, because the
+      # claim discourages the next auditor from looking. Eight cases covering all THREE verdicts
+      # (reachable, unreachable, and the rc=2 broken-discovery floor), five of them the
+      # FALSE-POSITIVE direction, which is the one that matters here: the naive version of this
+      # check called 21 of 32 documents unreachable and "fixing" that would have added 19
+      # pointless links.
+      - name: the doc-reachability gate can still fail
+        run: python3 scripts/check-doc-reachability.py --selftest
+
   pre-export-gate:
     name: the pre-export gate can fail in every direction
     runs-on: ubuntu-latest
