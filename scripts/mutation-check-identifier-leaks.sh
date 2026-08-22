@@ -113,9 +113,22 @@ mutate "clone-reachability scope widened to every local ref" \
        "    if refs:" \
        "    if False:"
 
+# 9. The drift block's ABSENT early return. Restoring it must break the case proving a
+#    drifted register entry does not swallow a concurrent real finding.
+mutate "drift verdict returns early again, hiding real findings" \
+       '            print(f"  {sha[:12]}  reviewed {was}, now {now}")' \
+       '            print(f"  {sha[:12]}  reviewed {was}, now {now}"); return 1'
+
+# 10. Presence recording for accepted blobs. Neutering it sends a still-reachable blob
+#     whose detector stopped matching into the stale list, where the run announces the
+#     exposure is GONE about a blob that is sitting right there.
+mutate "accepted-blob presence no longer recorded independently of detection" \
+       "        is_accepted = sha in ACCEPTED_HISTORY" \
+       "        is_accepted = False"
+
 echo
 if [ "$fail" -eq 0 ]; then
-  echo "RESULT: all 8 mutations were caught by the suite."
+  echo "RESULT: all 10 mutations were caught by the suite."
   exit 0
 fi
 echo "RESULT: $fail mutation(s) went unnoticed. The suite is not proving what it claims."

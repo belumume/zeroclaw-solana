@@ -388,6 +388,37 @@ case(
     accept_count=99,
     expect_in_output="CANNOT CHECK",
 )
+# A DRIFTED ENTRY MUST NOT HIDE A REAL LEAK. Returning as soon as drift is seen would exit
+# before the findings block, so a registered blob drifting would swallow an unrelated
+# tracked-file leak sitting in the same run. That pairing is the LIKELY one rather than a
+# contrived one: widening a shape is the usual cause of drift, and the same widening
+# re-scans every other surface with the same patterns, so the two arrive together.
+case(
+    "a drifted register entry does not swallow a concurrent real finding",
+    FIRE,
+    {
+        "deploy/deploy.py": f"PASS_EXE = Path(r'C:/Users/{_ACCT}/AppData/pass-cli.exe')\n",
+        "CONTRIBUTING.md": "reach the maintainer at realperson@protonmail.com\n",
+    },
+    then_clean={"deploy/deploy.py": _CLEAN_BODY},
+    accept_blob_of="deploy/deploy.py",
+    accept_count=99,
+    expect_in_output="identifier finding(s)",
+)
+# "UNREACHABLE" AND "THE DETECTOR STOPPED MATCHING" ARE DIFFERENT CLAIMS, and only the
+# first is good news. If presence were recorded after the detectors ran, a narrowed shape
+# would drop a still-reachable accepted blob into the stale list and the run would announce
+# that the exposure is GONE about a blob sitting right there unchanged. Here the registered
+# blob is present and carries nothing, so it must read as drift, never as gone.
+case(
+    "an accepted blob that is present but no longer matches is drift, not GONE",
+    FIRE,
+    {"deploy/deploy.py": _CLEAN_BODY},
+    then_clean={"deploy/deploy.py": "PASS_EXE = Path(os.environ['PASS_CLI'])  # v2\n"},
+    accept_blob_of="deploy/deploy.py",
+    accept_count=1,
+    expect_in_output="CANNOT CHECK",
+)
 
 # --------------------------------------------------------------------- the FLOORS
 # These deliberately do NOT lower the floors. Without them the floor itself is untested,

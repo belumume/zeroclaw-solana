@@ -251,7 +251,7 @@ python3 scripts/test_check_shadowed_scripts.py  # that gate's controls, in three
 python3 scripts/mutation-check-crash-vs-catch.py # proves the three mutation harnesses above
                                              # report a crashed mutant as a crash, not a catch
 python3 scripts/check-repo-paths.py          # every repo path a doc names is itself tracked
-python3 scripts/check-identifier-leaks.py    # no personal identifier on any surface a clone gets
+python3 scripts/check-identifier-leaks.py    # no NEW personal identifier on any clone-visible surface
 python3 scripts/test_check_identifier_leaks.py  # that gate's controls, in both directions
 ./scripts/mutation-check-identifier-leaks.sh    # proves those controls can fail
 ```
@@ -315,7 +315,7 @@ the moment the repo is public.
 Its controls run in both directions for a reason visible in this tree: a container image home
 path, WhatsApp group JIDs shaped exactly like addresses, and 218 commits under a noreply
 identity are all legitimate, and a gate that flagged them would be ignored inside a day. Cases
-1 and 2 are the two real incident shapes. `mutation-check-identifier-leaks.sh` removes each
+1, 2, 4 and 5 are the real incident shapes. `mutation-check-identifier-leaks.sh` removes each
 detector in turn and requires the suite to go red, so a green result means the detectors carry
 weight rather than that the cases agree with them.
 

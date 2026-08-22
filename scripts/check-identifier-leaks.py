@@ -501,11 +501,18 @@ def scan_history_blobs(findings):
     i = 0
     while i < len(stream):
         nl = stream.find(b"\n", i)
-        if nl < 0:
-            break
-        header = stream[i:nl].split()
-        if len(header) != 3:
-            break
+        header = stream[i:nl].split() if nl >= 0 else []
+        # RAISE rather than break. A silent stop here would leave the remaining blobs
+        # unscanned with nothing in the output to say so, which is a smaller copy of the
+        # overclaim this surface exists to fix. Every other unexpected-scope condition in
+        # this file refuses loudly, and a future edit to the offset arithmetic below is
+        # exactly the kind of bug that would otherwise fail open.
+        if len(header) != 3 or header[1] != b"blob":
+            raise SystemExit(
+                f"cat-file --batch stream lost alignment after {n_blobs} blob(s) at byte "
+                f"{i} of {len(stream)}: header {header[:2]!r}. Refusing to report a "
+                f"result over a surface that was only partly read."
+            )
         sha, size = header[0].decode("ascii", "replace"), int(header[2])
         body = stream[nl + 1 : nl + 1 + size]
         i = nl + 1 + size + 1
@@ -520,9 +527,21 @@ def scan_history_blobs(findings):
         if where and where <= SELF_PATHS:
             continue
 
+        # PRESENCE IS RECORDED BEFORE ANY DETECTION RUNS, for accepted blobs only.
+        # `accepted_seen` answers "was this blob in the scanned object set", and it must
+        # NOT also depend on whether a detector still matches it. Recorded after the
+        # prefilter instead, a narrowed shape or a new ROLE_ACCOUNTS entry would drop a
+        # still-reachable blob out of `accepted_seen` and into `stale`, and the run would
+        # then report "the exposure is GONE" about a blob sitting right there unchanged.
+        # A present blob whose count moved is drift, which is CANNOT CHECK; an absent one
+        # is genuinely gone. Those are different claims and only absence is good news.
+        is_accepted = sha in ACCEPTED_HISTORY
+
         if b"\0" in body[:8192]:
             body = body.translate(_PRINTABLE)
         if not any(rx.search(body) for rx in _PREFILTER):
+            if is_accepted:
+                accepted_seen[sha] = 0
             continue
 
         text = body.decode("utf-8", "replace")
@@ -531,11 +550,12 @@ def scan_history_blobs(findings):
             for line in text.split("\n")
             for shape, detail in scan_line(line)
         ]
-        if not hits:
+
+        if is_accepted:
+            accepted_seen[sha] = len(hits)
             continue
 
-        if sha in ACCEPTED_HISTORY:
-            accepted_seen[sha] = len(hits)
+        if not hits:
             continue
 
         shown = sorted({s for s, _ in hits})
@@ -603,9 +623,16 @@ def main():
         )
         for sha, was, now in drifted:
             print(f"  {sha[:12]}  reviewed {was}, now {now}")
-        return 1
+        # DELIBERATELY NO `return` HERE. Returning would exit before the findings block
+        # below, so a drifted register entry would HIDE a concurrent real leak behind a
+        # bare CANNOT CHECK. That is not a contrived pairing: widening a shape is the
+        # likeliest cause of drift, and the same widening re-scans every other surface
+        # with the same patterns, so the two arrive together. Swallowing one verdict
+        # inside another is the exact defect this whole surface was added to fix.
 
     if not findings:
+        if drifted:
+            return 1
         if accepted_seen:
             print(
                 f"\nPASS  no NEW personal identifier. Tracked tree and commit metadata "
