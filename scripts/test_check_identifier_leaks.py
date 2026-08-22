@@ -45,8 +45,50 @@ def case(
     n_commits=3,
     lower_floors=True,
     expect_refusal=False,
+    then_clean=None,
+    accept_blob_of=None,
+    accept_count=None,
+    expect_in_output=None,
+    env_floors=None,
+    local_only_files=None,
 ):
-    cases.append((name, want, files, author, n_commits, lower_floors, expect_refusal))
+    """One fixture repo, one gate run, one expected exit code.
+
+    `then_clean` overwrites the named files in a SECOND commit, which is what separates
+    the history surface from the tree surface: after it, the tree is spotless and the
+    only carrier of the planted identifier is a blob in history.
+
+    `accept_blob_of` is a path whose FIRST-commit blob sha gets injected into the temp
+    gate copy's ACCEPTED_HISTORY, so the register can be exercised hermetically. Pass
+    `accept_count` to register a deliberately wrong finding count and prove the drift
+    guard fires instead of staying silently cleared.
+
+    `env_floors` sets individual floors AFTER `lower_floors` has lowered the rest. Floors
+    refuse in order, so a case that lowers none of them only ever exercises the FIRST one
+    and every later floor is untestable -- which is how the history floor was shadowed by
+    the tracked-file floor and its mutation went unnoticed.
+
+    `local_only_files` land on a branch that exists only locally, with a real bare remote
+    set up alongside. A clone never receives them, so they must stay invisible: this is
+    what proves the scan is scoped to clone-reachable refs rather than to `--all`.
+    """
+    cases.append(
+        (
+            name,
+            want,
+            files,
+            author,
+            n_commits,
+            lower_floors,
+            expect_refusal,
+            then_clean,
+            accept_blob_of,
+            accept_count,
+            expect_in_output,
+            env_floors,
+            local_only_files,
+        )
+    )
 
 
 # ------------------------------------------------------------------ must fire (rc=1)
@@ -180,6 +222,31 @@ case(
     CLEAN,
     {"docs/QUICKSTART.md": "set it to you@example.com or admin@yourdomain.com\n"},
 )
+# RFC 2606 reserves these four labels as TOP-level, so an address under them can never
+# reach a person. Found by the history surface: a git fixture line configuring a test
+# identity was being reported as a personal e-mail, which is the false-positive class that
+# gets a gate routed around. The pre-existing rule matched `invalid` only as the SECOND
+# level in front of a real TLD, so it missed the form that actually occurs.
+case(
+    "an RFC 2606 reserved TLD is a placeholder, not a person",
+    CLEAN,
+    {
+        "scripts/test_thing.py": (
+            '    ("config", "user.email", "x@e.invalid"),\n'
+            '    ("config", "alt.email", "someone@fixture.test"),\n'
+        )
+    },
+)
+# OVER-CORRECTION CONTROL for the case above. The reserved labels are cleared as TLDs; a
+# real address at a real domain must still fire. If this goes CLEAN the arm was widened
+# into a hole and the e-mail detector has stopped working.
+case(
+    "a real address at a real domain still fires after the reserved-TLD fix",
+    FIRE,
+    {
+        "scripts/test_thing.py": '    ("config", "user.email", "realperson@fastmail.com"),\n'
+    },
+)
 case(
     "noreply commit identity, which is this repo's deliberate posture",
     CLEAN,
@@ -233,24 +300,167 @@ case(
     {"deploy/thing.py": 'RECIPIENT = "5511987654321@s.whatsapp.net"\n'},
 )
 
+# ------------------------------------------------ surface 4: HISTORY BLOB CONTENT
+# INCIDENT 5, and the reason surface 4 exists. Every case above plants its identifier in
+# the tree, so the tree scan alone satisfies them and none of them can tell the two
+# surfaces apart. Here the second commit makes the TREE spotless while history keeps the
+# original blob -- which is the exact state the repo was in when the PASS line was
+# measured to be overclaiming, and the state a clone still receives.
+
+_CLEAN_BODY = "PASS_EXE = Path(os.environ['PASS_CLI'])\n"
+
+case(
+    "INCIDENT 5: identifier committed then removed from the tree, history keeps the blob",
+    FIRE,
+    {
+        "deploy/deploy.py": f"PASS_EXE = Path(r'C:/Users/{_ACCT}/AppData/pass-cli.exe')\n"
+    },
+    then_clean={"deploy/deploy.py": _CLEAN_BODY},
+    expect_in_output="history blob",
+)
+# CONTROL FOR THE CONTROL. Same two commits, same clean-up, and nothing planted. If this
+# ever goes FIRE, the case above is passing because two-commit fixtures always fail rather
+# than because a blob was found, and it would prove nothing at all.
+case(
+    "the same two-commit shape with nothing planted stays clean",
+    CLEAN,
+    {"deploy/deploy.py": _CLEAN_BODY},
+    then_clean={"deploy/deploy.py": "PASS_EXE = Path(os.environ['PASS_CLI'])  # v2\n"},
+)
+# A binary artifact carrying an identifier, committed and then deleted. `git log -p` prints
+# "Binary files differ" and shows NO content for this, so a patch-based history scan misses
+# it by construction. Scanning blobs is what reaches it.
+case(
+    "INCIDENT 5b: a committed BINARY carrying the identifier, later removed",
+    FIRE,
+    {
+        "assets/build.bin": f"\x00\x00MZ\x00fixture C:/Users/{_ACCT}/DEV/x\x00\x00trailer\n"
+    },
+    then_clean={
+        "assets/build.bin": "\x00\x00MZ\x00fixture rebuilt clean\x00\x00trailer\n"
+    },
+    expect_in_output="history blob",
+)
+
+# ------------------------------------------- the ACCEPTED-EXPOSURE register, all 3 ways
+# The register must clear the exposure it names, must SAY it did, and must not clear
+# anything else. Silent clearance would reintroduce the overclaim one layer down.
+case(
+    "an ACCEPTED history blob passes, and the run says so out loud",
+    CLEAN,
+    {
+        "deploy/deploy.py": f"PASS_EXE = Path(r'C:/Users/{_ACCT}/AppData/pass-cli.exe')\n"
+    },
+    then_clean={"deploy/deploy.py": _CLEAN_BODY},
+    accept_blob_of="deploy/deploy.py",
+    accept_count=2,  # windows home + macos home both match the one path
+    expect_in_output="ACCEPTED historical exposure",
+)
+# OVER-CORRECTION CONTROL. Accepting one blob must not clear a DIFFERENT one. If this goes
+# CLEAN the register is a blanket amnesty rather than a per-blob judgement.
+case(
+    "accepting one blob does not clear a second, unregistered one",
+    FIRE,
+    {
+        "deploy/deploy.py": f"PASS_EXE = Path(r'C:/Users/{_ACCT}/AppData/pass-cli.exe')\n",
+        "tools/other.sh": f"cd /home/{_ACCT}/src\n",
+    },
+    then_clean={
+        "deploy/deploy.py": _CLEAN_BODY,
+        "tools/other.sh": 'cd "$SRC"\n',
+    },
+    accept_blob_of="deploy/deploy.py",
+    accept_count=2,
+    expect_in_output="history blob",
+)
+# THE DRIFT GUARD, which is the whole reason an entry carries a count rather than being a
+# bare sha. A blob is immutable, so a changed finding count means a DETECTOR changed and
+# this blob was cleared under a rule that no longer describes it. Registering the wrong
+# count here stands in for that: the gate must refuse rather than stay silently cleared.
+case(
+    "an accepted blob whose finding count no longer matches is CANNOT CHECK, not a pass",
+    FIRE,
+    {
+        "deploy/deploy.py": f"PASS_EXE = Path(r'C:/Users/{_ACCT}/AppData/pass-cli.exe')\n"
+    },
+    then_clean={"deploy/deploy.py": _CLEAN_BODY},
+    accept_blob_of="deploy/deploy.py",
+    accept_count=99,
+    expect_in_output="CANNOT CHECK",
+)
+
 # --------------------------------------------------------------------- the FLOORS
 # These deliberately do NOT lower the floors. Without them the floor itself is untested,
 # because every case above overrides it to run against a small fixture -- which is exactly
 # the shape of defect this gate exists to catch one level up.
 
+# EACH FLOOR ASSERTS ITS OWN MESSAGE, and that is the whole point of `expect_in_output`
+# here. Floors refuse in order, so a case that only asks "did something refuse" is
+# satisfied by whichever floor happens to fire first, and every later floor is untestable.
+# Measured: with these cases asserting only a generic refusal, removing the tracked-file
+# floor left the COMMIT floor refusing instead, the case still passed, and the mutation
+# control reported the floor as load-bearing when it had just been deleted.
 case(
     "FLOOR: a tree too small to trust is REFUSED, not passed",
     FIRE,
     {"README.md": "tiny\n"},
     lower_floors=False,
     expect_refusal=True,
+    expect_in_output="discovery found",
+)
+# The commit floor, in isolation. This is the one a SHALLOW clone trips, and it is why CI
+# checks out with fetch-depth 0; it had no case of its own until the floors were separated.
+case(
+    "FLOOR: a history too short to trust is REFUSED, not passed",
+    FIRE,
+    {"README.md": "ordinary content\n"},
+    env_floors={"CHECK_IDENT_MIN_COMMITS": "50"},
+    expect_refusal=True,
+    expect_in_output="history walk found",
+)
+# The history surface needs its own floor, and it is the one a SHALLOW clone trips. A
+# depth-1 checkout carries a handful of blobs, which would otherwise scan clean and print
+# a PASS asserting something about a history it never read.
+#
+# THE OTHER TWO FLOORS ARE LOWERED HERE ON PURPOSE. Floors refuse in order, so a case that
+# lowers none of them only ever exercises the tracked-file floor and every later floor is
+# untestable. Written that way first, this case passed while proving nothing: its mutation
+# went unnoticed because the tracked floor refused before the history floor was reached.
+case(
+    "FLOOR: a history too small to trust is REFUSED, not passed",
+    FIRE,
+    {
+        "deploy/deploy.py": f"PASS_EXE = Path(r'C:/Users/{_ACCT}/AppData/pass-cli.exe')\n"
+    },
+    then_clean={"deploy/deploy.py": _CLEAN_BODY},
+    env_floors={"CHECK_IDENT_MIN_HISTORY_BLOBS": "400"},
+    expect_refusal=True,
+    expect_in_output="history blob walk found",
+)
+
+# ------------------------------------------------- SCOPE: what a clone actually receives
+# The scan reads `refs/remotes/origin/*` plus `refs/tags/*`, NOT `--all` and emphatically
+# not the raw object store. A local-only branch, a stash and a dangling object all live in
+# the store and none of them reaches a clone, so reporting one is a FALSE finding -- the
+# direction that gets a real gate loosened rather than the direction that leaks.
+#
+# Measured on the live repo when this landed: three needle-carrying blobs existed in the
+# object store and exactly one was clone-reachable. Scanning the store would have reported
+# two exposures no clone can receive.
+case(
+    "an identifier on a LOCAL-ONLY branch is not a surface a clone receives",
+    CLEAN,
+    {"README.md": "ordinary content\n"},
+    local_only_files={
+        "wip/scratch.py": f"SCRATCH = r'C:/Users/{_ACCT}/DEV/notes.txt'\n"
+    },
 )
 
 
 # ------------------------------------------------------------------------- harness
 
 
-def build_repo(tmp, files, author, n_commits):
+def build_repo(tmp, files, author, n_commits, then_clean=None, local_only_files=None):
     subprocess.run(
         ["git", "init", "-q", "-b", "main", tmp], check=True, capture_output=True
     )
@@ -286,18 +496,96 @@ def build_repo(tmp, files, author, n_commits):
             "GIT_COMMITTER_EMAIL": author,
         },
     )
+    if then_clean:
+        # The second commit is what makes the TREE clean while HISTORY still carries the
+        # first commit's blob. Without it, a fixture cannot tell the two surfaces apart.
+        for rel, body in then_clean.items():
+            p = Path(tmp) / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body, encoding="utf-8")
+        g("add", "-A")
+        g("commit", "-q", "-m", "clean it up in the tree, history keeps the blob")
+
+    if local_only_files:
+        # A real bare remote, so `refs/remotes/origin/*` exists and means something. main
+        # is pushed; the side branch never is. A clone of that remote therefore cannot
+        # receive the side branch's blobs, and neither should the gate see them.
+        bare = Path(tmp).parent / (Path(tmp).name + "-origin.git")
+        subprocess.run(
+            ["git", "init", "-q", "--bare", str(bare)], check=True, capture_output=True
+        )
+        g("remote", "add", "origin", str(bare))
+        g("push", "-q", "origin", "main")
+        g("checkout", "-q", "-b", "local-only-work")
+        for rel, body in local_only_files.items():
+            p = Path(tmp) / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(body, encoding="utf-8")
+        g("add", "-A")
+        g("commit", "-q", "-m", "work that was never pushed")
+        g("checkout", "-q", "main")
 
 
-def run_case(name, want, files, author, n_commits, lower_floors, expect_refusal):
+def run_case(
+    name,
+    want,
+    files,
+    author,
+    n_commits,
+    lower_floors,
+    expect_refusal,
+    then_clean=None,
+    accept_blob_of=None,
+    accept_count=None,
+    expect_in_output=None,
+    env_floors=None,
+    local_only_files=None,
+):
     with tempfile.TemporaryDirectory() as tmp:
-        build_repo(tmp, files, author, n_commits)
+        build_repo(tmp, files, author, n_commits, then_clean, local_only_files)
         gate_copy = Path(tmp) / "scripts" / GATE.name
         gate_copy.parent.mkdir(parents=True, exist_ok=True)
-        gate_copy.write_text(GATE.read_text(encoding="utf-8"), encoding="utf-8")
+        source = GATE.read_text(encoding="utf-8")
+
+        if accept_blob_of:
+            # Blob shas are content-addressed, so the fixture can compute the exact key the
+            # gate will see and register it. That is what makes the accepted-exposure path
+            # testable without depending on this repo's real history.
+            # Hash the FIRST-commit content, taken from `files`. Hashing the path on disk
+            # would hash whatever `then_clean` left there, which is the clean body -- the
+            # register would then name a blob that carries nothing and clear nothing, and
+            # the case would fail for a reason that has nothing to do with the gate.
+            #
+            # BYTES, not text=True. On Windows `write_text` emits CRLF while `hash-object`
+            # normalises under core.autocrlf, so a text-mode stdin hashes a different byte
+            # sequence than the object store holds and the key silently never matches.
+            sha = (
+                subprocess.run(
+                    ["git", "hash-object", "--stdin"],
+                    input=files[accept_blob_of].encode("utf-8"),
+                    capture_output=True,
+                    check=True,
+                )
+                .stdout.decode("ascii")
+                .strip()
+            )
+            n = accept_count if accept_count is not None else 1
+            source = source.replace(
+                "ACCEPTED_HISTORY = {",
+                "ACCEPTED_HISTORY = {\n"
+                f'    "{sha}": {{"path": "{accept_blob_of}", "findings": {n},'
+                f' "why": "fixture"}},',
+                1,
+            )
+        gate_copy.write_text(source, encoding="utf-8")
+
         env = dict(os.environ)
         if lower_floors:
             env["CHECK_IDENT_MIN_TRACKED"] = "1"
             env["CHECK_IDENT_MIN_COMMITS"] = "1"
+            env["CHECK_IDENT_MIN_HISTORY_BLOBS"] = "1"
+        # Applied last, so a case can raise ONE floor back up and exercise it in isolation.
+        env.update(env_floors or {})
         out = subprocess.run(
             [sys.executable, str(gate_copy)],
             capture_output=True,
@@ -307,7 +595,10 @@ def run_case(name, want, files, author, n_commits, lower_floors, expect_refusal)
             env=env,
         )
         blob = (out.stdout or "") + (out.stderr or "")
-        refused = "refusing to report" in blob
+        # Case-INSENSITIVE. Two of the three floors open the sentence with "Refusing" and
+        # one has it mid-sentence after a semicolon, so a case-sensitive match silently
+        # reads a real refusal as an ordinary failure and the floor reads as untested.
+        refused = "refusing to report" in blob.lower()
         if expect_refusal and not refused:
             return (
                 False,
@@ -320,16 +611,22 @@ def run_case(name, want, files, author, n_commits, lower_floors, expect_refusal)
                 False,
                 f"want rc={want}, got rc={out.returncode}\n      {blob.strip()[:300]}",
             )
+        if expect_in_output and expect_in_output not in blob:
+            return (
+                False,
+                f"rc was right but the output never said {expect_in_output!r}; a gate "
+                f"that reaches the right exit code by the wrong route is not controlled"
+                f"\n      {blob.strip()[:300]}",
+            )
         return True, ""
 
 
 def main():
     print(f"gate under test: {GATE}")
     npass = nfail = 0
-    for name, want, files, author, n_commits, lower_floors, expect_refusal in cases:
-        ok, why = run_case(
-            name, want, files, author, n_commits, lower_floors, expect_refusal
-        )
+    for spec in cases:
+        name, want = spec[0], spec[1]
+        ok, why = run_case(*spec)
         if ok:
             npass += 1
             print(f"  PASS  [{'fire ' if want == FIRE else 'clean'}] {name}")

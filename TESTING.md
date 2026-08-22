@@ -269,10 +269,42 @@ this class was caught by a hand audit rather than by anything that runs. An abso
 carrying the author's account name sat in a tracked script, and fixing it meant two operations,
 one on the working tree and one on the history. Nothing was added afterwards to notice the next
 one, and the surfaces are wider than the file that was fixed: tracked text, printable strings
-inside committed binaries, and the identity recorded on every commit. That third one is the
-reason this gate reads history at all. A content scrub rewrites blobs and leaves author and
-committer fields alone, so an identity configured before the repo adopted its noreply posture
-survives every tree-level fix and appears in `git log` on the day the repo goes public.
+inside committed binaries, the identity recorded on every commit, and the CONTENT of every
+historical version of every file. That third one is why this gate reads history at all. A
+content scrub rewrites blobs and leaves author and committer fields alone, so an identity
+configured before the repo adopted its noreply posture survives every tree-level fix and
+appears in `git log` on the day the repo goes public.
+
+The fourth was added after the gate's own PASS line was measured to be overclaiming. It read
+`no personal identifier on any surface a clone receives` while reading only the CURRENT tree
+and commit IDENTITY, never a historical blob's CONTENT, which a clone receives in full. So the
+ordinary sequence of committing something and then fixing it left the gate green with the
+original blob still in every clone. That is not hypothetical here: eight such blobs carry
+twenty-five findings, and sixteen of eighteen carriers are reachable from `origin/main` itself,
+so squash-merging does not prevent it. Only one of the eight carries an account name; the rest
+are internal tooling paths and an env-var name.
+
+It scans BLOBS rather than patch text, because a clone receives objects. `git log -p` renders
+nothing for a binary file, nothing for a merge commit by default, and reports one blob twice
+when one commit adds it and another removes it — measured, the patch view showed two
+occurrences where the truth is one blob. Scope is `refs/remotes/origin/*` plus `refs/tags/*`,
+not the raw object store: the store here held three needle-carrying blobs and only one was
+clone-reachable, so scanning it would have produced two false findings about a developer's own
+stash. Cost is roughly eight seconds over seventy-five megabytes, and it grows with total
+history, which is the honest scaling answer.
+
+Because history is immutable by a settled decision, those eight are recorded in
+`ACCEPTED_HISTORY` and re-checked every run. The register is keyed on BLOB SHA, and the
+alternatives were measured rather than assumed: a `(commit, path)` key needs two entries for
+the one known exposure and neither points at the content, and a `(blob, shape)` key needs two
+as well because `windows home` and `macos home` both match the same path. Each entry also
+carries the finding COUNT it was reviewed at. A blob cannot change, so a changed count means a
+detector was widened and that blob is cleared under a rule that no longer describes it; the
+gate reports `CANNOT CHECK` and asks for a re-audit rather than staying silently cleared.
+
+An accepted exposure is never swallowed into a bare PASS. The run prints each one with its
+reason and the line reads `PASS  no NEW personal identifier`, because a register that passed
+silently would reintroduce, one layer down, the exact overclaim this surface was added to fix.
 
 It keys on the shape an identifier leaves rather than on any name. A sweep keyed on a name
 finds only the person it was told about, and misses a file that identifies the same person
