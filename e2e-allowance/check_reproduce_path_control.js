@@ -24,6 +24,24 @@ const DEMO = path.join(__dirname, "demo.js");
 const pristine = fs.readFileSync(DEMO, "utf8");
 const tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), "zc-e2e-allowance-control-"));
 
+// The five documents the gate reads.
+const ALL_DOCS = ["README.md", "TESTING.md", "docs/DEVNET-PROOF.md",
+                  "docs/MAINNET-PROOF.md", "e2e-allowance/README.md"];
+
+// THE DOC MUTANTS RUN ON COPIES. They used to be planted in the TRACKED documents in the live
+// working tree and restored in a `finally`, which is clean for a run that completes and unsafe
+// for one that does not: a SIGINT, an OOM or a CI step timeout between the write and the restore
+// leaves a planted WRONG PROGRAM ID sitting in five published documents, where the next reader --
+// or the next gate, or a concurrent agent sharing this tree -- meets it as real. The demo side
+// already had this seam via ZC_DEMO_OVERRIDE; the doc side did not, so it got one. Nothing here
+// writes inside the repository any more.
+const DOCS_SANDBOX = path.join(tmpdir, "docs-root");
+for (const rel of ALL_DOCS) {
+  const dst = path.join(DOCS_SANDBOX, rel);
+  fs.mkdirSync(path.dirname(dst), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, rel), dst);
+}
+
 function runGate(demoSource) {
   const p = path.join(tmpdir, "demo.js");
   fs.writeFileSync(p, demoSource, "utf8");
@@ -41,23 +59,36 @@ function runGate(demoSource) {
 // probing the untested direction, not by anything failing, which is the whole argument for
 // mutating both sides rather than the convenient one.
 function runGateWithDocEdit(relDoc, from, to) {
-  const abs = path.join(ROOT, relDoc);
+  const abs = path.join(DOCS_SANDBOX, relDoc);
   const original = fs.readFileSync(abs, "utf8");
   if (!original.includes(from)) {
     return { code: null, out: `anchor ${from} absent from ${relDoc}` };
   }
   try {
     fs.writeFileSync(abs, original.split(from).join(to), "utf8");
-    const r = spawnSync(process.execPath, [GATE], { encoding: "utf8" });
+    const r = spawnSync(process.execPath, [GATE], {
+      env: { ...process.env, ZC_DOCS_ROOT: DOCS_SANDBOX },
+      encoding: "utf8",
+    });
     return { code: r.status, out: `${r.stdout || ""}${r.stderr || ""}` };
   } finally {
-    // Restore unconditionally. A harness that mutates tracked files and throws would leave the
-    // working tree edited, and the next reader would meet a planted defect as if it were real.
+    // Restore the SANDBOX copy so the next mutant starts from a clean one. The tracked document
+    // it was copied from is never touched, so an interrupt here costs nothing.
     fs.writeFileSync(abs, original, "utf8");
   }
 }
 
 let bad = 0;
+// Counted rather than computed from `mutants.length`. The failure line used to print
+// `${bad} of ${mutants.length}` while `bad` could be incremented from ten places, so seven
+// failures rendered as "7 of 6" -- and that line is the ONE a reader only ever sees when
+// something is already broken. A counter incremented beside every verdict cannot drift when a
+// mutant or a control is added, which an expression assembled by hand can and did.
+let checked = 0;
+
+// Byte state of the tracked documents BEFORE anything runs. Asserted again at the end: the doc
+// mutants are supposed to touch only the sandbox copies now, and "supposed to" is not evidence.
+const trackedBefore = ALL_DOCS.map((rel) => fs.readFileSync(path.join(ROOT, rel), "utf8"));
 
 // --- baseline: the harness itself must be able to produce a PASS ---------------------
 const base = runGate(pristine);
@@ -109,10 +140,76 @@ const mutants = [
       "const fs = require('fs');\nconst x = require('@solana/not-a-declared-package');"),
     expect: "absent from package.json dependencies",
   },
+
+  // --- the constants are WIRED, not merely present -----------------------------------
+  // These four are the direction every check above was blind to. Each keeps the constant the
+  // doc-agreement checks read, so all of those still print ok while the script proves nothing.
+  {
+    name: "the whole wrong-reason guard is deleted while `const CAP_ERROR` stays",
+    src: pristine.replace(/ {2}if \(custom !== CAP_ERROR\) \{[\s\S]*?\n {2}\}\n/, ""),
+    expect: "never COMPARED against anything",
+  },
+  {
+    name: "the wrong-reason branch stops refusing (comparison kept, exit removed)",
+    src: pristine.replace(/(if \(custom !== CAP_ERROR\) \{[\s\S]*?)\n {4}process\.exit\(1\);/, "$1"),
+    expect: "does not exit non-zero",
+  },
+  {
+    name: "the transfer is addressed to an undeclared program instead of the audited one",
+    src: pristine.replace(
+      "programId: SF, data: Buffer.concat([Buffer.from([4])",
+      "programId: NOT_THE_AUDITED_PROGRAM, data: Buffer.concat([Buffer.from([4])"),
+    expect: "undeclared program",
+  },
+  {
+    // Discriminates the DERIVED family prefix from the hardcoded `De1eg` it replaced: against the
+    // old literal this mutant reported a doc mismatch (`cites ... which is not`), which reads as
+    // the docs being wrong. Only a derived prefix reports the truth -- the id demo.js now signs
+    // against is cited by nobody.
+    name: "the program id moves to a different base58 family (only a DERIVED prefix says why)",
+    src: pristine.replace(
+      /const SF = new web3\.PublicKey\('[1-9A-HJ-NP-Za-km-z]{32,44}'\);/,
+      "const SF = new web3.PublicKey('Xyz9uKpQmT4vR7sLwN2hFbGdJc5aE8zYkM3nPqSt6Uv');"),
+    expect: "no published document cites",
+  },
+
+  // --- the module scan is not blind ----------------------------------------------------
+  {
+    // THE FAIL-OPEN THIS FILE EXISTS TO PIN. Before the fix this printed
+    // `ok all 0 third-party requires are declared` and exited 0 -- a green over a scan that had
+    // read nothing. Note it re-supplies NO anchor: that is the point, since a mutant that hands
+    // the gate a replacement to find cannot detect a scan that stopped finding anything.
+    name: "every third-party module load stops matching (the fail-open that printed `all 0`)",
+    src: pristine
+      .replace("const web3 = require('@solana/web3.js');", "const web3 = globalThis.__web3;")
+      .replace("const spl = require('@solana/spl-token');", "const spl = globalThis.__spl;"),
+    expect: "SCAN BLIND",
+  },
+  {
+    name: "an undeclared package is loaded by dynamic import() rather than require()",
+    src: pristine.replace(
+      "const fs = require('fs');",
+      "const fs = require('fs');\nasync function lazy() { return await import('@solana/not-a-declared-package'); }"),
+    expect: "absent from package.json dependencies",
+  },
+  {
+    name: "module resolution is indirected through createRequire",
+    src: pristine.replace(
+      "const web3 = require('@solana/web3.js');",
+      "const { createRequire } = require('node:module');\nconst _r = createRequire(__filename);\nconst web3 = _r('@solana/web3.js');"),
+    expect: "cannot see what it loads",
+  },
 ];
 
 // --- doc-side mutants: the OTHER half of the agreement -------------------------------
-const REAL_ID = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44";
+// Derived from demo.js, not written out. A literal here is a second copy of the id that outlives
+// the thing it describes, which is the same defect this pass removed from the gate's doc scan.
+const REAL_ID = (pristine.match(/const SF = new web3\.PublicKey\('([1-9A-HJ-NP-Za-km-z]{32,44})'\)/) || [])[1];
+if (!REAL_ID) {
+  console.error("FAIL  cannot read the program id out of demo.js; every doc mutant below would be");
+  console.error("      planted against an anchor that is not there, and would report a false miss.");
+  process.exit(2);
+}
 const docMutants = [
   {
     name: "a document cites a MALFORMED wrong id (the case that once slipped through)",
@@ -142,13 +239,9 @@ const docMutants = [
   },
 ];
 
-// The five documents the gate reads, so a "*" mutant can edit them together.
-const ALL_DOCS = ["README.md", "TESTING.md", "docs/DEVNET-PROOF.md",
-                  "docs/MAINNET-PROOF.md", "e2e-allowance/README.md"];
-
 function runGateWithAllDocsEdited(from, to) {
   const saved = ALL_DOCS.map((rel) => {
-    const abs = path.join(ROOT, rel);
+    const abs = path.join(DOCS_SANDBOX, rel);
     return { abs, text: fs.readFileSync(abs, "utf8") };
   });
   try {
@@ -157,7 +250,10 @@ function runGateWithAllDocsEdited(from, to) {
       if (s.text.includes(from)) { fs.writeFileSync(s.abs, s.text.split(from).join(to), "utf8"); touched++; }
     }
     if (touched === 0) return { code: null, out: `anchor ${from} absent from every document` };
-    const r = spawnSync(process.execPath, [GATE], { encoding: "utf8" });
+    const r = spawnSync(process.execPath, [GATE], {
+      env: { ...process.env, ZC_DOCS_ROOT: DOCS_SANDBOX },
+      encoding: "utf8",
+    });
     return { code: r.status, out: `${r.stdout || ""}${r.stderr || ""}` };
   } finally {
     for (const s of saved) fs.writeFileSync(s.abs, s.text, "utf8");
@@ -165,6 +261,7 @@ function runGateWithAllDocsEdited(from, to) {
 }
 
 for (const m of docMutants) {
+  checked++;
   const r = m.doc === "*"
     ? runGateWithAllDocsEdited(m.from, m.to)
     : runGateWithDocEdit(m.doc, m.from, m.to);
@@ -185,12 +282,59 @@ for (const m of docMutants) {
 // OVER-CORRECTION CONTROL. A legitimate truncated prefix is how these ids are written in prose,
 // and a check that rejects one would be worse than the hole it closes.
 {
+  checked++;
   const r = runGateWithDocEdit("e2e-allowance/README.md", REAL_ID, "De1egAFMkMWZ");
   if (r.code === 0) console.log("  ok    control: a truncated prefix is still accepted");
   else { console.error("  FAIL  control: a legitimate truncated prefix was rejected (over-correction)"); bad++; }
 }
 
+// OVER-CORRECTION CONTROL for the programId wiring check. A demo.js that grows a direct SPL
+// instruction during setup is CORRECT, and a rule demanding every instruction be addressed to the
+// audited program would go red on it and blame the change. The allowlist exists for exactly this,
+// and this control is what stops it being asserted rather than demonstrated.
+{
+  checked++;
+  const legit = pristine.replace(
+    "  const transferIx = amount =>",
+    "  const setupIx = new web3.TransactionInstruction({ programId: spl.TOKEN_PROGRAM_ID, data: Buffer.from([0]), keys: [] });\n  const transferIx = amount =>");
+  if (legit === pristine) {
+    console.error("  FAIL  control: could not plant a legitimate support instruction; the anchor moved");
+    bad++;
+  } else {
+    const r = runGate(legit);
+    if (r.code === 0) console.log("  ok    control: a declared support program is still accepted");
+    else { console.error("  FAIL  control: a legitimate spl.TOKEN_PROGRAM_ID instruction was rejected (over-correction)"); bad++; }
+  }
+}
+
+// CORRECTNESS CONTROL for check 1's anchor, and it is here because it caught a wrong fix rather
+// than because it was foreseen. The anchor used to take the first pubkey literal in the file; the
+// first repair anchored on "a const binding", which sounds equivalent and is not -- with a decoy
+// `const USDC = ...` one line above `const SF`, a shape-anchored regex still resolved to the MINT
+// and the gate went on to report the docs as citing the wrong program. Only anchoring on the name
+// works, and this is what proves it stays that way. Exit code alone would not discriminate, so
+// the id in the output is what is asserted.
+{
+  checked++;
+  const decoy = pristine.replace(
+    "const SF = new web3.PublicKey('",
+    "const USDC = new web3.PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');\nconst SF = new web3.PublicKey('");
+  if (decoy === pristine) {
+    console.error("  FAIL  control: could not plant a decoy pubkey const; the anchor moved");
+    bad++;
+  } else {
+    const r = runGate(decoy);
+    if (r.code === 0 && r.out.includes(`signs against ${REAL_ID}`)) {
+      console.log("  ok    control: a decoy pubkey const above SF does not re-point check 1");
+    } else {
+      console.error("  FAIL  control: a decoy pubkey const above SF re-pointed check 1 at the wrong key");
+      bad++;
+    }
+  }
+}
+
 for (const m of mutants) {
+  checked++;
   if (m.src === pristine) {
     console.error(`  FAIL  mutant "${m.name}" changed nothing; its pattern no longer matches demo.js`);
     bad++;
@@ -209,11 +353,29 @@ for (const m of mutants) {
   }
 }
 
+// THE CONTROL ON THE CONTROL. Every doc mutant above is supposed to have edited a sandbox copy
+// and left the published documents alone. That is a claim about this harness, so it is checked
+// rather than trusted: a regression that pointed a mutant back at ROOT would otherwise be
+// invisible here and visible only as an unexplained diff in someone's working tree.
+{
+  checked++;
+  const drifted = ALL_DOCS.filter((rel, i) => fs.readFileSync(path.join(ROOT, rel), "utf8") !== trackedBefore[i]);
+  if (drifted.length) {
+    console.error(`  FAIL  this harness modified tracked document(s): ${drifted.join(", ")}.` +
+      " A doc mutant is writing to the working tree instead of the sandbox copy.");
+    bad++;
+  } else {
+    console.log(`  ok    control: all ${ALL_DOCS.length} published documents are byte-identical; nothing was planted in the tree`);
+  }
+}
+
 fs.rmSync(tmpdir, { recursive: true, force: true });
 
 if (bad) {
-  console.error(`\n${bad} of ${mutants.length} planted defect(s) went undetected.` +
+  console.error(`\n${bad} of ${checked} calibration check(s) failed.` +
     " check_reproduce_path.js is not calibrated and its green is not evidence.");
   process.exit(1);
 }
-console.log(`\nok  all ${mutants.length + docMutants.length} planted defects detected on BOTH sides (${mutants.length} in demo.js, ${docMutants.length} in the docs), over a passing baseline.`);
+console.log(`\nok  ${checked} calibration checks pass: ${mutants.length} planted defects in demo.js and ` +
+  `${docMutants.length} in the docs all detected, over a passing baseline, with ` +
+  `${checked - mutants.length - docMutants.length} over-correction/integrity controls still green.`);

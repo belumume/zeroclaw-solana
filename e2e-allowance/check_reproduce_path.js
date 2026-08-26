@@ -32,6 +32,15 @@ const ROOT = path.join(__dirname, "..");
 const DEMO = process.env.ZC_DEMO_OVERRIDE || path.join(__dirname, "demo.js");
 const src = fs.readFileSync(DEMO, "utf8");
 
+// The DOC root is overridable for the same reason, and it is not symmetry for its own sake. This
+// gate is an AGREEMENT check, so calibrating it means planting a defect on the doc side too --
+// and without this seam the control could only do that by editing the published documents IN THE
+// WORKING TREE. A full control run restores them, but a SIGINT, an OOM or a step timeout between
+// write and restore would leave a planted wrong program id sitting in five tracked documents,
+// where the next reader or gate meets it as real. The demo side already had this seam; the doc
+// side ran on the live tree. Nothing in CI sets either.
+const DOCS_ROOT = process.env.ZC_DOCS_ROOT || ROOT;
+
 // The documents that hand a stranger this reproduce path. If one is added later and is not
 // listed, its claims go unchecked -- which is the failure this whole file is about, so the
 // existence of each is asserted rather than tolerated.
@@ -49,7 +58,7 @@ const ok = (m) => console.log(`  ok    ${m}`);
 
 const docText = {};
 for (const rel of DOCS) {
-  const p = path.join(ROOT, rel);
+  const p = path.join(DOCS_ROOT, rel);
   if (!fs.existsSync(p)) { fail(`${rel} is listed as a reproduce surface but does not exist`); continue; }
   docText[rel] = fs.readFileSync(p, "utf8");
 }
@@ -63,10 +72,30 @@ const allDocs = Object.values(docText).join("\n");
 // the id the script actually uses. A drift here would leave every document citing a program the
 // demo never touches, and no test anywhere would notice.
 // ---------------------------------------------------------------------------
-const idMatch = src.match(/new web3\.PublicKey\('([1-9A-HJ-NP-Za-km-z]{32,44})'\)/);
+// Anchor on the NAME, exactly as check 2 anchors on `CAP_ERROR`. This used to take the FIRST
+// `new web3.PublicKey('...')` in the file, which is unique TODAY only because demo.js's other two
+// PublicKeys take a variable. Any literal constant added above `const SF` -- a mint address, a
+// second program -- silently re-points this entire check at that key instead, and it then reports
+// four CORRECT documents as citing a wrong id. A legitimate edit turning the gate red and blaming
+// the docs is the worst failure shape available here.
+//
+// MEASURED while fixing this, because the near-miss is instructive: anchoring on "a const binding"
+// rather than on the name does NOT close it. With `const USDC = new web3.PublicKey('EPjFW...')`
+// inserted one line above, a shape-anchored regex still resolved to USDC and the gate reported the
+// mint as the program the docs must cite. Only the name works.
+//
+// The cost is that renaming SF trips ANCHOR MISSING rather than following the rename. That is the
+// same deliberate trade check 2 makes: a gate that loudly cannot find its anchor is worth far more
+// than one that quietly finds the wrong thing.
+const ID_BINDING = "SF";
+const idMatch = src.match(
+  new RegExp(`const ${ID_BINDING} = new web3\\.PublicKey\\('([1-9A-HJ-NP-Za-km-z]{32,44})'\\)`));
+let idName = null;
 if (!idMatch) {
-  fail("ANCHOR MISSING: cannot find the SF program id in demo.js; this gate is blind, fix the anchor");
+  fail(`ANCHOR MISSING: cannot find \`const ${ID_BINDING} = new web3.PublicKey('...')\` in demo.js; ` +
+    "this gate is blind, fix the anchor");
 } else {
+  idName = ID_BINDING;
   const programId = idMatch[1];
 
   // Scan with a DELIBERATELY BROAD character class rather than a base58 one. A drifted id is
@@ -78,11 +107,25 @@ if (!idMatch) {
   // Truncated prefixes are legitimate and common in prose (`De1egAFMk...`), so the test is
   // PREFIX-OF rather than equality: anything long enough to identify a program must be the start
   // of the real one. That accepts every honest abbreviation and rejects every substitution.
+  //
+  // The family prefix is DERIVED from the id rather than written out. A literal `De1eg` here
+  // would be a second place the truth has to be maintained, in the one file whose whole premise
+  // is that it maintains none -- and it outlives the id it describes, so the day `demo.js` points
+  // at a different program the scan goes on hunting the retired family.
+  //
+  // HONEST BOUND, because deriving it does NOT close what it looks like it closes: this scan only
+  // ever inspects tokens in the id's OWN family, so a document citing a wholly DIFFERENT program
+  // (`Xyz99...`) is still invisible to it. Closing that would mean treating every base58-shaped
+  // token in the docs as a candidate program id, and these documents are full of mints,
+  // addresses and signatures -- an over-correction that would fire on correct prose. What the
+  // whole-file checks below do catch is the case that matters most: if NO document cites the id
+  // demo.js actually signs against, the audited-program claim is unsourced and this fails.
   const MIN = 10;
+  const family = new RegExp(programId.slice(0, 5).replace(/[^0-9A-Za-z]/g, "") + "[0-9A-Za-z]*", "g");
   let citedAnywhere = false;
   const before = failures;
   for (const rel of Object.keys(docText)) {
-    for (const tok of docText[rel].match(/De1eg[0-9A-Za-z]*/g) || []) {
+    for (const tok of docText[rel].match(family) || []) {
       if (tok.length < MIN) continue;
       if (programId.startsWith(tok)) { citedAnywhere = true; continue; }
       fail(`${rel} cites ${tok}, which is not ${programId} that demo.js signs against`);
@@ -123,6 +166,66 @@ if (!errMatch) {
 }
 
 // ---------------------------------------------------------------------------
+// 2b. Those constants are WIRED, not merely present.
+//
+// THE GAP THIS CLOSES, and it is the one that makes the four checks above weaker than they read.
+// Every one of them binds a CONSTANT in demo.js to a CONSTANT in the docs. None of them asks
+// whether the constant reaches anything. So the whole `if (custom !== CAP_ERROR) { ... exit(1) }`
+// block can be deleted while `const CAP_ERROR = 300;` stays, and every check above still agrees:
+// the number is defined, the docs publish it, the notations match. `node --check` passes too --
+// it parses, it just no longer proves anything. demo.js's own words for that block are that a
+// wrong-reason rejection "cannot be published as evidence", and deleting it silently converts
+// every failed transaction into a cap proof.
+//
+// The same question applies to the program id, and there it IS the custody claim: "the audited
+// third-party program, not our code, enforces the cap" is false the moment an instruction is
+// built against some other programId, however faithfully the docs cite this one.
+//
+// HONEST BOUND: this asks whether the wiring EXISTS in the source text, not whether it executes.
+// A comparison sitting in unreachable code would satisfy it. Whether that branch is reached on a
+// live cluster is exactly the half that needs funds and a network, and it stays out.
+// ---------------------------------------------------------------------------
+if (errMatch) {
+  const cmpAt = src.search(/(?:!==|===|!=|==)\s*CAP_ERROR|CAP_ERROR\s*(?:!==|===|!=|==)/);
+  if (cmpAt < 0) {
+    fail("CAP_ERROR is defined in demo.js but never COMPARED against anything, so the published " +
+      "rejection code is decoration and a wrong-reason failure would be published as cap evidence");
+  } else if (!/process\.exit\(\s*[1-9]/.test(src.slice(cmpAt, cmpAt + 700))) {
+    // 700 chars: the real refusal sits 413 chars past the comparison and the next unrelated
+    // non-zero exit is 949 past it, so the window sees this block and not its neighbour.
+    fail("demo.js compares against CAP_ERROR but that branch does not exit non-zero; a rejection " +
+      "for the WRONG REASON would be reported as a successful cap proof");
+  } else {
+    ok("CAP_ERROR is compared, and a wrong-reason rejection exits non-zero rather than publishing");
+  }
+}
+
+// Programs that are legitimately NOT the audited one. This is an ALLOWLIST rather than an
+// exact-match rule on purpose: a demo.js that grows a direct SPL or System instruction during
+// setup would be perfectly correct, and a check demanding every instruction be addressed to the
+// SF program would go red on that and blame a correct change. A newcomer must still be DECLARED
+// here, which is what keeps this a check rather than a widening.
+const NON_SF_PROGRAMS = new Set([
+  "spl.TOKEN_PROGRAM_ID",
+  "spl.TOKEN_2022_PROGRAM_ID",
+  "spl.ASSOCIATED_TOKEN_PROGRAM_ID",
+  "web3.SystemProgram.programId",
+]);
+if (idName) {
+  const uses = [...src.matchAll(/programId:\s*([A-Za-z_$][\w$.]*)/g)].map((m) => m[1]);
+  const undeclaredProgram = [...new Set(uses.filter((u) => u !== idName && !NON_SF_PROGRAMS.has(u)))];
+  if (!uses.some((u) => u === idName)) {
+    fail(`demo.js binds the audited program as ${idName} but addresses no instruction to it; ` +
+      "the cap the docs attribute to that program is not the one this script exercises");
+  } else if (undeclaredProgram.length) {
+    fail(`demo.js builds instruction(s) against an undeclared program: ${undeclaredProgram.join(", ")}. ` +
+      `If that is intended, declare it beside ${idName} in NON_SF_PROGRAMS with the reason`);
+  } else {
+    ok(`every instruction demo.js builds is addressed to ${idName} or a declared support program`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 3. Every env var the docs tell a stranger to set is one the script actually reads.
 //
 // A documented variable the script ignores is the quietest way a reproduce path dies: the reader
@@ -147,15 +250,39 @@ if (documentedVars.size === 0) {
 // declare fails at that first step, for the reader and never for us, because our own tree has a
 // gitignored node_modules that happens to contain it.
 // ---------------------------------------------------------------------------
+// THIS CHECK USED TO FAIL OPEN, alone among the four. Checks 1 and 2 report ANCHOR MISSING and
+// check 3 guards on an empty scan; this one had nothing. An empty `required` yielded an empty
+// `undeclared` and printed `ok all 0 third-party requires are declared`, exit 0 -- a green over a
+// scan that had read nothing. Anything that stops the literal `require(...)` form matching does
+// it: an ESM migration, `createRequire`, requires moved inside a function, or `await import()`.
+// `node --check` passes on all of them too, so BOTH steps of the CI job go green over a gate
+// covering nothing. Measured before the fix: hiding BOTH of demo.js's packages behind
+// `createRequire` and a dynamic `import()` printed `all 0 third-party requires` and exited 0.
+//
+// So: scan both literal forms, and treat an EMPTY result as a blind scan rather than a pass.
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
 const declared = new Set(Object.keys(pkg.dependencies || {}));
 const builtin = new Set(["fs", "path", "os", "crypto", "buffer", "util", "assert"]);
-const required = (src.match(/require\(['"]([^'"]+)['"]\)/g) || [])
-  .map((m) => m.match(/require\(['"]([^'"]+)['"]\)/)[1])
+const LOADS = /(?:require|import)\(\s*['"]([^'"]+)['"]\s*\)/g;
+const required = [...src.matchAll(LOADS)]
+  .map((m) => m[1])
   .filter((m) => !m.startsWith(".") && !builtin.has(m) && !m.startsWith("node:"));
 const undeclared = [...new Set(required)].filter((m) => !declared.has(m));
-if (undeclared.length) fail(`demo.js requires ${undeclared.join(", ")}, absent from package.json dependencies`);
-else ok(`all ${new Set(required).size} third-party requires are declared in package.json`);
+if (/createRequire/.test(src)) {
+  // A createRequire alias resolves modules through a local binding (`_r('pkg')`), which this
+  // scan cannot follow without becoming an interpreter. Say so rather than reporting a count
+  // that silently excludes whatever it loads. Either drop the indirection or extend this scan.
+  fail("demo.js resolves modules through createRequire; this scan cannot see what it loads, so " +
+    "its result would be a number that excludes them rather than a check");
+} else if (!required.length) {
+  fail("SCAN BLIND: demo.js declares no third-party module by literal require() or import(), " +
+    "which for a Solana script means the module scan stopped matching rather than that it loads " +
+    "nothing; a reader's `npm install` step is now unchecked");
+} else if (undeclared.length) {
+  fail(`demo.js loads ${undeclared.join(", ")}, absent from package.json dependencies`);
+} else {
+  ok(`all ${new Set(required).size} third-party modules loaded by demo.js are declared in package.json`);
+}
 
 // ---------------------------------------------------------------------------
 if (failures) {

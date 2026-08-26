@@ -20,11 +20,27 @@ money has already moved, so a wrong verdict here is a lie about a settled transf
 matters most is the one a live run cannot produce on demand: TIMEOUT, which is neither paid nor
 failed and must never render as either.
 
-The confirmed case uses a REAL finalized mainnet signature, discovered from the same settled
-reference key the already-paid harness uses rather than pinned here, so it cannot go stale and
-cannot be a fixture that quietly stopped meaning what it did. The other two are driven by
-intercepting the endpoint, because a chain failure and a network that never answers are not things
-that can be arranged on request.
+THE CONFIRMED CASE NEEDS A SIGNATURE THAT IS STILL INSIDE THE NODE'S WINDOW, WHICH IS WHY IT IS
+DISCOVERED FRESH ON EVERY RUN. The page's RPC is a keyless shared node holding a rolling slice of
+history: getFirstAvailableBlock reports a floor that advances continuously, and a signature below
+that floor resolves as null from then on, however alive it is on chain. Any fixture pinned to one
+past payment therefore carries an expiry that is written down nowhere. So this harness asks the
+page's own endpoint for a signature it listed seconds ago and polls that. Mainnet emits thousands
+of free confirmed signatures a second, so a fresh fixture costs two reads -- no key, no funds, no
+broadcast, and nothing that can age.
+
+TWO of them, because awaitConfirmation accepts confirmationStatus 'confirmed' OR 'finalized' and
+one signature can only be one of the two. Covering a single arm leaves the other free to break.
+
+THE SETTLED REFERENCE STAYS, doing the job it can still do: it is the LIVE control for the
+synthetic "endpoint answers not seen" interception below. It names a real mainnet payment that now
+sits below the node's floor, so the endpoint genuinely answers null for it, and the page must
+render that as neither paid nor failed. Its expected verdict is READ from the endpoint on each run
+rather than assumed, so it reports what the poll and the chain actually disagree about and can
+never go red merely for getting older.
+
+The remaining two states are driven by intercepting the endpoint, because a chain failure and a
+network that never answers are not things that can be arranged on request.
 
 NOTHING HERE BROADCASTS. Every call is a read.
 
@@ -75,7 +91,25 @@ ORIGIN_HOSTILE_RPC = "https://api.mainnet-beta.solana.com"
 # The settled reference from the operator's real mainnet payment on 2026-08-06. The signature that
 # settled it is DISCOVERED from this rather than pinned, so this file carries one fixture instead of
 # two that can disagree.
+#
+# ITS SIGNATURE CANNOT BE MADE TO RESOLVE, and no escalation rescues it, so do not reach for one.
+# The proxy above answers `getSignaturesForAddress` (which is why the discovery finds the reference
+# at all) and refuses `getSignatureStatuses` outright -- measured, verbatim: `{"error":{"code":
+# -32601,"message":"method not proxied: getSignatureStatuses"}}`, and `rpc-proxy/src/index.js`
+# allows exactly getSignaturesForAddress and getTransaction. app.js passes SETTLEMENT_PROXY to
+# those two by name and to nothing else, so awaitConfirmation is primary-only by construction.
+# The poll therefore has exactly one
+# endpoint that can answer about a signature, the page's own, and that endpoint's floor has long
+# passed this one. That is not a gap: an endpoint answering null for a signature it no longer
+# indexes is the live shape of the interception below, which is the job this fixture now holds.
 PAID_REFERENCE = "9TNKoCvVow1ktRgMMapJ9d9GWhgTYCA9i3r3MZ71FUT2"
+
+# Where a FRESH fixture comes from. USDC rather than an arbitrary busy address, because it is the
+# mint this shop settles in: the signature polled is then a real transfer of the same instrument a
+# customer moves, not a stranger's unrelated transaction. It is read from the page's OWN endpoint,
+# since a signature that node has never indexed would prove nothing about the poll, and one it
+# listed a second ago is inside its window by construction.
+FRESH_SOURCE_LIMIT = 25
 
 # The page must be loaded with a VALID, UNSETTLED pay link for any of this to mean anything. With no
 # ?u= the page replaces the whole card with "no valid Solana Pay request in this link", which
@@ -104,38 +138,98 @@ def read_pin(marker: str) -> str:
     return src[i : src.index("'", i)]
 
 
-def _signatures_from(endpoint: str) -> list[dict]:
-    """Raw getSignaturesForAddress result for the fixture reference, or [] on any failure.
+def _rpc(endpoint: str, method: str, params: list) -> tuple[bool, object]:
+    """(answered, result) for one JSON-RPC read. Never raises, never broadcasts.
+
+    THE BOOL IS NOT DECORATION. An endpoint that answers null and an endpoint that never answered
+    are the same `None` to a caller reading only the result, and they are not the same fact: the
+    first is a statement about the chain, the second is a statement about this machine's network.
+    Folding them together is how a transport failure gets reported as a finding about the page.
+    """
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        ).encode(),
+        headers={"content-type": "application/json", "User-Agent": "Mozilla/5.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            body = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # A by-design 4xx carries a body worth nothing here, but it is an ANSWER, not a crash.
+        e.read()
+        return False, None
+    except (OSError, ValueError):
+        return False, None
+    if not isinstance(body, dict) or "error" in body:
+        # A JSON-RPC error is an answer about ACCESS, not a result we may reason from.
+        return False, None
+    return True, body.get("result")
+
+
+def _signatures_from(
+    endpoint: str, address: str, commitment: str = "confirmed", limit: int = 20
+) -> list[dict]:
+    """Raw getSignaturesForAddress result, or [] on any failure.
 
     Collapses every failure mode to an empty list -- HTTP error, timeout, malformed JSON -- so the
     caller escalates on "no answer" exactly as app.js does, rather than only on "empty answer".
     Those two are the same condition for a keyless endpoint and treating them differently is what
     reopened the hole the proxy exists to close.
     """
-    req = urllib.request.Request(
+    ok, res = _rpc(
         endpoint,
-        data=json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getSignaturesForAddress",
-                "params": [PAID_REFERENCE, {"limit": 20, "commitment": "confirmed"}],
-            }
-        ).encode(),
-        headers={"content-type": "application/json", "User-Agent": "Mozilla/5.0"},
+        "getSignaturesForAddress",
+        [address, {"limit": limit, "commitment": commitment}],
     )
-    try:
-        with urllib.request.urlopen(req, timeout=25) as r:
-            return json.loads(r.read()).get("result") or []
-    except urllib.error.HTTPError as e:
-        # A by-design 4xx carries a body worth nothing here, but it is an ANSWER, not a crash.
-        e.read()
-        return []
-    except (OSError, ValueError):
-        return []
+    return res if ok and isinstance(res, list) else []
 
 
-def settled_signature(endpoint: str, proxy: str | None = None) -> tuple[str | None, str]:
+def fresh_signature(endpoint: str, commitment: str) -> dict | None:
+    """The newest non-errored mainnet signature `endpoint` will name at the commitment asked for.
+
+    One read. Returns the whole entry rather than the signature alone, so the caller can PRINT the
+    slot and confirmationStatus it was chosen for -- a fixture whose provenance is not shown is a
+    fixture nobody can check.
+    """
+    for e in _signatures_from(endpoint, MINT, commitment, FRESH_SOURCE_LIMIT):
+        if not e.get("err") and e.get("signature"):
+            return e
+    return None
+
+
+def live_status(endpoint: str, sig: str) -> tuple[bool, dict | None]:
+    """(answered, status) -- the exact getSignatureStatuses call the page's own poll makes."""
+    ok, res = _rpc(
+        endpoint, "getSignatureStatuses", [[sig], {"searchTransactionHistory": True}]
+    )
+    if not ok or not isinstance(res, dict):
+        return False, None
+    return True, (res.get("value") or [None])[0]
+
+
+def endpoint_verdict(st: dict | None) -> str:
+    """What awaitConfirmation MUST return for the status the endpoint is serving right now.
+
+    Three lines mirroring the page's own gate, so a live fixture's expected verdict is MEASURED
+    rather than assumed. That is what lets a real signature stay useful after the node stops
+    indexing it: the expectation follows the endpoint instead of a date in a comment.
+    """
+    if not st:
+        return "unknown"
+    if st.get("err"):
+        return "failed"
+    return (
+        "confirmed"
+        if st.get("confirmationStatus") in ("confirmed", "finalized")
+        else "unknown"
+    )
+
+
+def settled_signature(
+    endpoint: str, proxy: str | None = None
+) -> tuple[str | None, str]:
     """The signature that settled the fixture reference, oldest-first -- the same gate the page and
     plugins/payment-watch/src/watch.rs both use.
 
@@ -143,11 +237,11 @@ def settled_signature(endpoint: str, proxy: str | None = None) -> tuple[str | No
     via the proxy is still a valid fixture, but it means the primary has pruned the reference, and
     that is worth printing rather than hiding behind a bare signature.
     """
-    got = [e for e in _signatures_from(endpoint) if not e.get("err")]
+    got = [e for e in _signatures_from(endpoint, PAID_REFERENCE) if not e.get("err")]
     if got:
         return got[-1]["signature"], "primary"
     if proxy:
-        deep = [e for e in _signatures_from(proxy) if not e.get("err")]
+        deep = [e for e in _signatures_from(proxy, PAID_REFERENCE) if not e.get("err")]
         if deep:
             return deep[-1]["signature"], "proxy (primary has pruned it)"
     return None, "neither the primary nor the proxy"
@@ -259,15 +353,31 @@ def main() -> int:
     ap.add_argument("--viewport", choices=sorted(VIEWPORTS), default="desktop")
     args = ap.parse_args()
 
+    # THREE THINGS CAN GO WRONG HERE AND ONLY ONE OF THEM IS A FINDING. A missing local dependency,
+    # an unbuilt page and an unreachable endpoint all mean this harness could not look; a page that
+    # classifies a payment wrongly is the defect it exists to catch. Every could-not-look branch
+    # therefore says CANNOT CHECK and exits 2, and every one of them names WHAT was missing, because
+    # a reader who cannot tell which of the three they have will treat the next real red the same way
+    # they treated this one. Only a genuine finding prints FAIL and exits 1.
     if not (PAGE_DIR / "index.html").exists():
-        print(f"FAIL  no built page at {PAGE_DIR / 'index.html'}", file=sys.stderr)
-        print("      run: python webshop-pay/build.py", file=sys.stderr)
+        print(
+            f"CANNOT CHECK  no built page at {PAGE_DIR / 'index.html'}, so there is nothing to "
+            "drive; this is a missing local artifact, not a finding about the page.",
+            file=sys.stderr,
+        )
+        print("              build it: python webshop-pay/build.py", file=sys.stderr)
         return 2
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         print(
-            "FAIL  playwright is not installed:  pip install playwright",
+            "CANNOT CHECK  the local dependency `playwright` is not importable, so the browser "
+            "leg cannot run at all. Every assertion here needs a real page origin, which no Python "
+            "request can supply, so this is a missing tool rather than a finding about the page.",
+            file=sys.stderr,
+        )
+        print(
+            f"              install it: {sys.executable} -m pip install playwright",
             file=sys.stderr,
         )
         return 2
@@ -279,16 +389,66 @@ def main() -> int:
     print(f"settlement proxy: {proxy}   (the page's own escalation)")
     print(f"origin-hostile  : {ORIGIN_HOSTILE_RPC}   (the control)")
 
-    real_sig, found_via = settled_signature(endpoint, proxy)
-    if not real_sig:
+    # The two fresh fixtures, one per arm of awaitConfirmation's confirmed/finalized gate.
+    fresh = fresh_signature(endpoint, "confirmed")
+    final = fresh_signature(endpoint, "finalized")
+    if not fresh or not final:
+        # WHICH KIND OF NOTHING THIS IS. The proxy is a second, unrelated provider, so asking it the
+        # same question separates "this machine cannot reach mainnet" from "the page's own endpoint
+        # would not answer". Neither is a finding about the PAGE -- the poll uses getSignatureStatuses
+        # and this is getSignaturesForAddress, so a refusal here says nothing about the poll -- but a
+        # reader has to be able to tell them apart to know whether to look at the network or the node.
+        control = fresh_signature(proxy, "confirmed")
         print(
-            f"CANNOT CHECK  reference {PAID_REFERENCE} returned no confirmed non-errored "
-            f"signature from {found_via}; the confirmed direction would pass for the wrong "
-            "reason, so this is a refusal to report rather than a finding about the page.",
+            "CANNOT CHECK  no fresh mainnet signature to poll: "
+            + (
+                "the page's own RPC named none while the settlement proxy did, so this is about "
+                "that endpoint rather than about this machine"
+                if control
+                else "neither the page's RPC nor the settlement proxy answered, so this machine "
+                "could not reach mainnet at all"
+            )
+            + ". The confirmed direction would pass for the wrong reason, so this is a refusal to "
+            "report rather than a finding about the page.",
             file=sys.stderr,
         )
         return 2
-    print(f"confirmed fixture: {real_sig}  (via {found_via})")
+    print(
+        f"fresh fixture   : {fresh['signature']}\n"
+        f"                  slot {fresh['slot']}, {fresh['confirmationStatus']}, "
+        f"named by the page's own RPC seconds ago"
+    )
+    print(
+        f"finalized twin  : {final['signature']}\n"
+        f"                  slot {final['slot']}, {final['confirmationStatus']}, "
+        f"the other arm of the confirmed/finalized gate"
+    )
+
+    # The settled reference, kept as the LIVE control for the 'not seen' interception. Its expected
+    # verdict is READ from the endpoint, so this stays a measurement rather than a pinned guess.
+    aged_sig, found_via = settled_signature(endpoint, proxy)
+    aged_want: str | None = None
+    skipped: list[str] = []
+    if not aged_sig:
+        skipped.append(
+            f"the live 'not seen' control: {PAID_REFERENCE} named no non-errored signature from "
+            f"{found_via}"
+        )
+    else:
+        answered, st = live_status(endpoint, aged_sig)
+        if not answered:
+            skipped.append(
+                f"the live 'not seen' control: {endpoint} did not answer getSignatureStatuses for "
+                f"{aged_sig}, so there is no measured verdict to hold the poll to"
+            )
+        else:
+            aged_want = endpoint_verdict(st)
+            print(
+                f"settled control : {aged_sig}\n"
+                f"                  found via {found_via}; the page's RPC serves "
+                f"{'status ' + json.dumps(st) if st else 'null'} for it, "
+                f"so the poll must return {aged_want!r}"
+            )
 
     profile = VIEWPORTS[args.viewport]
     print(f"viewport        : {args.viewport}")
@@ -322,12 +482,42 @@ def main() -> int:
             # --- 2. the poll, all three terminal states -----------------------------------------
             print("\n--- confirmation poll ---")
 
-            got = page.evaluate(POLL_LIVE, real_sig)
-            print(f"  live, real settled signature   -> {got}")
+            # The page's REAL loop -- 45 attempts at 2s, untouched -- against a signature the same
+            # endpoint named seconds ago. This one runs first because POLL_FAST below shortens those
+            # globals for the rest of the session.
+            got = page.evaluate(POLL_LIVE, fresh["signature"])
+            print(f"  live, fresh confirmed sig      -> {got}")
             if got != "confirmed":
                 failures.append(
-                    f"poll on a real finalized signature returned {got!r}, want 'confirmed'"
+                    f"poll on {fresh['signature']}, which {endpoint} itself listed as "
+                    f"{fresh['confirmationStatus']} at slot {fresh['slot']}, returned {got!r} "
+                    "rather than 'confirmed'; a settled payment would render as 'still confirming'"
                 )
+
+            got = page.evaluate(POLL_FAST, final["signature"])
+            print(f"  live, fresh finalized sig      -> {got}")
+            if got != "confirmed":
+                failures.append(
+                    f"poll on {final['signature']}, which {endpoint} itself listed as "
+                    f"{final['confirmationStatus']} at slot {final['slot']}, returned {got!r} "
+                    "rather than 'confirmed'; the finalized arm of the gate is broken"
+                )
+
+            # The live twin of the 'not seen' interception below: a REAL signature the endpoint
+            # really does answer null for, held to the verdict that endpoint's own answer requires.
+            if aged_want:
+                got = page.evaluate(POLL_FAST, aged_sig)
+                print(
+                    f"  live, real sig below the floor -> {got}   "
+                    f"(the endpoint's own answer requires {aged_want!r})"
+                )
+                if got != aged_want:
+                    failures.append(
+                        f"poll on {aged_sig} returned {got!r} while {endpoint} serves an answer "
+                        f"that requires {aged_want!r}. The page and the chain disagree about a real "
+                        "signature, and 'failed' here would claim no transfer happened when nothing "
+                        "at all is known about it"
+                    )
 
             for label, body, status, want in (
                 ("endpoint answers 'not seen'", NEVER, 200, "unknown"),
@@ -340,7 +530,7 @@ def main() -> int:
                     page.route(f"**{host}**", lambda route: route.abort())
                 else:
                     page.route(f"**{host}**", fulfiller(body, status))
-                got = page.evaluate(POLL_FAST, real_sig)
+                got = page.evaluate(POLL_FAST, fresh["signature"])
                 print(f"  {label:30s} -> {got}")
                 if got != want:
                     failures.append(
@@ -387,23 +577,38 @@ def main() -> int:
         srv.shutdown()
 
     print()
+    for s in skipped:
+        print(f"CANNOT CHECK  {s}", file=sys.stderr)
     if failures:
         for f in failures:
             print(f"FAIL  {f}", file=sys.stderr)
         return 1
-    print(
-        "PASS  the pay path's endpoint answers from a real page origin while the host it"
+
+    # THE BANNER NAMES ONLY WHAT RAN. A sub-check that could not look is a third state, not a pass,
+    # so the line that would have claimed it is dropped and the heading says PARTIAL instead. The
+    # exit code stays 0 because everything reachable was checked and did hold -- returning 2 here
+    # would discard a real result to report a missing control.
+    claims = [
+        "the pay path's endpoint answers from a real page origin while the host it",
+        "replaced still refuses one; the poll returns 'confirmed' for a signature that",
+        "endpoint named seconds ago, at both commitments the page's gate accepts;",
+    ]
+    if aged_want:
+        claims.append(
+            "it agrees with that endpoint about a real signature below its retention"
+        )
+        claims.append("floor rather than calling one paid or failed;")
+    claims.append(
+        "it returns 'unknown' on both a silent and an aborted endpoint and 'failed'"
     )
-    print(
-        "      replaced still refuses one; the poll returns confirmed on a real settled"
+    claims.append(
+        "only when the chain says so; and no outcome but a confirmation reads as paid"
     )
-    print(
-        "      signature, 'unknown' on both a silent and an aborted endpoint, and 'failed'"
-    )
-    print(
-        "      only when the chain says so; and no outcome but a confirmation reads as paid"
-    )
-    print("      or hands back the Pay button.")
+    claims.append("or hands back the Pay button.")
+    head = "PASS   " if not skipped else "PARTIAL"
+    print(f"{head}  {claims[0]}")
+    for line in claims[1:]:
+        print(f"         {line}")
     return 0
 
 
