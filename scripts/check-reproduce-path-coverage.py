@@ -551,8 +551,8 @@ def selftest() -> int:
             ["scripts/thing.py"],
         )
     # THE SCANNER CONTROL, which is why dynamic dispatch is declared instead of inferred. The
-    # harness globs and READS every .py; that must create no edge at all. An earlier draft
-    # inferred the edge from the `ls-files` call and swept in four commands nothing runs.
+    # harness globs and READS every .py; that must create no edge at all. Inferring an edge
+    # from a bare `ls-files` call sweeps in commands that nothing actually runs.
     check(
         "a harness that globs and reads does not reach what it reads",
         classify(

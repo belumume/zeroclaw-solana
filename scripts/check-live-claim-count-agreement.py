@@ -265,7 +265,9 @@ def check(root: Path) -> tuple[int, list[str]]:
     lines: list[str] = []
     verifier = root / VERIFIER
     if not verifier.is_file():
-        return 2, [f"FAIL  {VERIFIER} is missing; nothing to derive the ceilings from."]
+        return 2, [
+            f"CANNOT CHECK  {VERIFIER} is missing; nothing to derive the ceilings from."
+        ]
     try:
         static_ceiling, live_ceiling = derive_ceilings(
             verifier.read_text(encoding="utf-8")

@@ -183,7 +183,7 @@ def main() -> int:
 
     mine, theirs = git_files(ROOT), git_files(OTHER)
     if mine is None or theirs is None:
-        print("FAIL  git could not list one of the roots; nothing was compared")
+        print("CANNOT CHECK  git could not list one of the roots; nothing was compared")
         return 2
 
     shared = sorted(mine & theirs)

@@ -620,7 +620,7 @@ def main() -> int:
     import importlib.util
 
     if importlib.util.find_spec("PIL") is None:
-        print("FAIL  Pillow is required to render. pip install Pillow")
+        print("CANNOT CHECK  Pillow is required to render. pip install Pillow")
         return 2
     render(out)
     return 0

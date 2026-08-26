@@ -458,7 +458,7 @@ def self_test(raw: bytes, recorded_digest: str) -> tuple[bool, list[str]]:
 def verify_one(path: Path, verbose: bool) -> int:
     """Verify ONE bundle. 0 pass, 1 failures, 2 unusable, 3 self-test failed."""
     if not path.exists():
-        print(f"FAIL  bundle not found: {path}")
+        print(f"CANNOT CHECK  bundle not found: {path}")
         return 2
     bundle = json.loads(path.read_text(encoding="utf-8"))
     entries = bundle.get("transactions", {})
@@ -482,7 +482,9 @@ def verify_one(path: Path, verbose: bool) -> int:
     )
 
     if not captured:
-        print("FAIL  bundle contains no captured transactions")
+        print(
+            "CANNOT CHECK  bundle contains no captured transactions; nothing to verify"
+        )
         return 2
 
     first_sig, first_entry = next(iter(sorted(captured.items())))
