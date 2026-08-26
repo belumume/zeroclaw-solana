@@ -52,6 +52,13 @@ echo ""
 echo "wit/v0 tool-plugin world (the one that silently breaks registration)"
 
 # interface name -> the basename of the .wit declaring it, in the host's tree
+world_kind() {
+  for _p in $KINDMAP; do
+    case "$_p" in "$1="*) printf '%s' "${_p#*=}"; return ;; esac
+  done
+  printf 'unknown'
+}
+
 iface_file() {
   basename "$(grep -lE "^[[:space:]]*interface[[:space:]]+$1[[:space:]]*\{" \
                "$HOST"/wit/v0/*.wit 2>/dev/null | head -1)" 2>/dev/null
@@ -60,14 +67,20 @@ iface_file() {
 seed="$(grep -lE "^[[:space:]]*world[[:space:]]+tool-plugin[[:space:]]*\{" \
         "$HOST"/wit/v0/*.wit 2>/dev/null | head -1)"
 WORLD=""
+KINDMAP=""
 if [ -n "$seed" ]; then
   WORLD="$(basename "$seed")"
   members="$(sed -n "/^[[:space:]]*world[[:space:]]\+tool-plugin[[:space:]]*{/,/^[[:space:]]*}/p" "$seed" \
              | grep -oE "^[[:space:]]*(import|export)[[:space:]]+[a-z][a-z0-9-]*" \
-             | awk '{print $2}')"
-  for m in $members; do
+             | awk '{print $1 ":" $2}')"
+  for mk in $members; do
+    k="${mk%%:*}"
+    m="${mk#*:}"
     g="$(iface_file "$m")"
-    [ -n "$g" ] && WORLD="$WORLD $g"
+    if [ -n "$g" ]; then
+      WORLD="$WORLD $g"
+      KINDMAP="$KINDMAP $g=$k"
+    fi
   done
   # `types` reaches the world through `use types.{json-string}` inside the members rather
   # than through the world body, so a members-only read would drop the file every other
@@ -111,10 +124,21 @@ for f in $WORLD; do
     continue
   fi
   if [ ! -f "$ours" ]; then
-    # The host's world names an interface we do not vendor at all. Every plugin here fails
-    # to instantiate against it, and nothing local can observe that.
-    bad "$f is in the host's tool-plugin world and we do not vendor it"
-    fix "copy $theirs into $REPO/wit/v0/$f, then rebuild every plugin"
+    # WHICH WAY THE INTERFACE POINTS DECIDES THE CONSEQUENCE, so the world's own
+    # import/export kind is carried here rather than assumed.
+    _k="$(world_kind "$f")"
+    if [ "$_k" = "export" ]; then
+      # The host REQUIRES this FROM the component. A plugin that does not export it cannot
+      # instantiate, and nothing local can observe that.
+      bad "$f is EXPORTED by the host's tool-plugin world and we do not vendor it"
+      fix "copy $theirs into $REPO/wit/v0/$f, then rebuild every plugin"
+    else
+      # The host OFFERS this TO the component. A component that imports a SUBSET of what the
+      # host offers still instantiates, so this is drift rather than a break: our vendored WIT
+      # is behind, and a plugin that wanted this interface could not build against what we have.
+      bad "$f is in the host's tool-plugin world ($_k) and we do not vendor it: our WIT is behind"
+      fix "copy $theirs into $REPO/wit/v0/$f when a plugin needs it; no rebuild is required today"
+    fi
     continue
   fi
   if diff -q <(tr -d '\r' < "$ours") <(tr -d '\r' < "$theirs") >/dev/null 2>&1; then
