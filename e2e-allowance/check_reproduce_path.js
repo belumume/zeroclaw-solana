@@ -68,18 +68,35 @@ if (!idMatch) {
   fail("ANCHOR MISSING: cannot find the SF program id in demo.js; this gate is blind, fix the anchor");
 } else {
   const programId = idMatch[1];
+
+  // Scan with a DELIBERATELY BROAD character class rather than a base58 one. A drifted id is
+  // usually mistyped rather than validly re-encoded, and a base58 class silently truncates at the
+  // first illegal character -- `De1egWRONG...` stops at `De1egWR`, falls under any length filter,
+  // and the drift reads as clean. The scan has to be able to see a MALFORMED id, because that is
+  // the shape a real drift takes.
+  //
+  // Truncated prefixes are legitimate and common in prose (`De1egAFMk...`), so the test is
+  // PREFIX-OF rather than equality: anything long enough to identify a program must be the start
+  // of the real one. That accepts every honest abbreviation and rejects every substitution.
+  const MIN = 10;
+  let citedAnywhere = false;
+  const before = failures;
   for (const rel of Object.keys(docText)) {
-    // Not every document has to cite the id; the ones that cite AN id must cite THIS one.
-    const cited = docText[rel].match(/De1eg[1-9A-HJ-NP-Za-km-z]*/g) || [];
-    const full = cited.filter((c) => c.length >= 32);
-    if (full.length && !full.includes(programId)) {
-      fail(`${rel} cites ${full.join(", ")} but demo.js signs against ${programId}`);
+    for (const tok of docText[rel].match(/De1eg[0-9A-Za-z]*/g) || []) {
+      if (tok.length < MIN) continue;
+      if (programId.startsWith(tok)) { citedAnywhere = true; continue; }
+      fail(`${rel} cites ${tok}, which is not ${programId} that demo.js signs against`);
     }
   }
-  if (!allDocs.includes(programId)) {
+  if (failures > before) {
+    // A per-document mismatch was already reported above; do not also print a pass for the
+    // same check, which would put a FAIL and an ok side by side for one question.
+  } else if (!citedAnywhere) {
     fail(`no published document cites ${programId}; the audited-program claim is unsourced`);
+  } else if (!allDocs.includes(programId)) {
+    fail(`the docs only ever abbreviate ${programId}; at least one must give it in full to be auditable`);
   } else {
-    ok(`demo.js signs against ${programId}, and the docs cite that same id`);
+    ok(`demo.js signs against ${programId}, cited in full and consistently across the docs`);
   }
 }
 
