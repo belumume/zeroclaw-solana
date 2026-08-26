@@ -1383,20 +1383,28 @@ jobs:
       - name: that reproduce-path check can actually fail
         run: node e2e-allowance/check_reproduce_path_control.js
 
-      # STEP ONE OF THE PUBLISHED COMMAND IS `npm ci`, AND NOTHING HAS EVER RUN IT. Measured:
+      # STEP ONE OF THE PUBLISHED COMMAND, AND NOTHING HAS EVER RUN IT. Measured:
       # `grep -n "npm ci\|npm install" .github/workflows/*.yml` returns nothing at all, against a
       # control of five `node ` invocations in this file, so the files are being read and the
       # install genuinely appears in none of them. There is no dependabot config and no renovate
       # config either, so nothing else covers the dependency graph.
       #
       # The check above proves `package.json` DECLARES each require by name. Nothing proved the
-      # install RESOLVES. A lockfile out of sync with the manifest, a yanked version, or a range
-      # that no longer resolves all pass that check and all break the first line a stranger runs.
+      # install RESOLVES. A yanked version, or a range that no longer resolves, passes that check
+      # and breaks the first line a stranger runs.
       #
-      # `--ignore-scripts` because resolution is the question here; lifecycle scripts are not.
+      # THE COMMAND RUN HERE IS THE ONE `e2e-allowance/README.md` PUBLISHES, which is a plain
+      # install rather than the locked form. `package-lock.json` is gitignored in this directory,
+      # so a fresh clone carries no lockfile and the locked form exits 1 BY DESIGN rather than by
+      # breakage. Verified both ways against a clean clone of the public repo: the locked form
+      # rc=1 "can only install with an existing package-lock.json", the published form rc=0
+      # resolving 70 packages. A gate has to run the command the reader was given, not a stricter
+      # one this repository cannot satisfy.
+      #
+      # Lifecycle scripts are skipped because resolution is the question here.
       - name: the e2e-allowance install a stranger runs first still resolves
         working-directory: e2e-allowance
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       # THE THIRD NON-CRATE REPRODUCE PATH, and the second one found in exactly the state
       # `e2e-allowance` was in: `scripts/x402-validator` is published as a reproduce command in
