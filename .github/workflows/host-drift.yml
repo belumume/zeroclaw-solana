@@ -182,3 +182,64 @@ jobs:
           fi
 
           ./scripts/check-host-compat.sh /tmp/pinned-host
+
+      # HOW TO READ A RED HERE, printed at the moment it goes red rather than left in a document
+      # nobody opens while triaging.
+      #
+      # This workflow is a NOTIFICATION, not a build gate: it is deliberately separate from ci.yml
+      # because a red means the OUTSIDE WORLD moved. But a canary that stays red gets learned
+      # around, and then it says nothing on the day it is right, so the red needs to carry its own
+      # triage instead of leaving every reader to re-derive the same classification.
+      #
+      # The two steps above answer DIFFERENT questions and only one of them is urgent:
+      #
+      #   HEAD parity  (the step that usually reddens)  upstream moved. Our components are compiled
+      #                                                 against the vendored copy and keep working.
+      #   PIN parity   (the step below it)              our own DOCUMENTED reproduction broke. A
+      #                                                 stranger following QUICKSTART gets
+      #                                                 `registered: 0`. This one is urgent.
+      #
+      # And within HEAD parity, the classes are not equal:
+      #
+      #   ADDITIVE     the host's world gained a member we do not import, or a comment changed.
+      #                Our components import a SUBSET of what the host offers, which still
+      #                instantiates. Re-vendor when convenient, not urgently.
+      #   BREAKING     a type or enum we DO consume changed shape -- a variant added to
+      #                `plugin-action` is the known case, and it is what makes every plugin fail to
+      #                register while `cargo build` stays green.
+      #
+      # THE DISCRIMINATOR, and it is one command against the clone this job already made:
+      #   diff <(sed -n '/enum plugin-action/,/}/p' wit/v0/logging.wit) \
+      #        <(sed -n '/enum plugin-action/,/}/p' /tmp/zeroclaw-host/crates/zeroclaw-plugins/wit/v0/logging.wit)
+      # Identical means ADDITIVE. Any difference means BREAKING, and re-vendoring is then urgent.
+      #
+      # DO NOT re-vendor HEAD reflexively to make this green. The step below asserts our
+      # `logging.wit` is byte-identical to the PINNED host after QUICKSTART's patch, so syncing to
+      # HEAD turns a passing check red and changes what a reader reproduces. Moving the pin and the
+      # QUICKSTART instructions together is the whole job, not a side effect of silencing this one.
+      - name: how to triage this red
+        if: failure()
+        run: |
+          echo "::notice::host-drift is a NOTIFICATION workflow. Red here means UPSTREAM moved."
+          echo "Classify before acting -- the comment block above this step has the full ladder."
+          H=/tmp/zeroclaw-host/crates/zeroclaw-plugins/wit/v0/logging.wit
+          if [ -f "$H" ] && [ -f wit/v0/logging.wit ]; then
+            OURS=$(sed -n '/enum plugin-action/,/}/p' wit/v0/logging.wit)
+            THEIRS=$(sed -n '/enum plugin-action/,/}/p' "$H")
+            # DENOMINATOR. If the pattern matches nothing in BOTH files -- the enum was renamed,
+            # or the file moved -- the two extractions are equal and the comparison below would
+            # report ADDITIVE, which is the reassuring direction and the wrong one. Refuse instead.
+            echo "enum lines: ours=$(printf %s "$OURS" | grep -c . || true), upstream=$(printf %s "$THEIRS" | grep -c . || true)"
+            if [ -z "$OURS" ] || [ -z "$THEIRS" ]; then
+              echo "::warning::CANNOT CHECK: the plugin-action enum was not found in one or both files."
+              echo "::warning::The anchor moved; classify by hand rather than trusting this step."
+              exit 0
+            fi
+            if [ "$OURS" = "$THEIRS" ]; then
+              echo "::notice::plugin-action enum is IDENTICAL to upstream -- drift is ADDITIVE, components still register."
+            else
+              echo "::error::plugin-action enum DIFFERS from upstream -- this is the BREAKING class. Re-vendor before shipping anything."
+            fi
+          else
+            echo "::warning::CANNOT CHECK: no upstream logging.wit at $H, so the enum could not be compared."
+          fi

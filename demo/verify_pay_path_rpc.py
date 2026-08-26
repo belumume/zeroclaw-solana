@@ -42,6 +42,7 @@ import json
 import socketserver
 import sys
 import threading
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -51,6 +52,20 @@ PAGE_DIR = REPO / "webshop-pay"
 # Read the endpoint out of the shipped page rather than restating it. A second copy here would
 # drift from the page, and the drifted copy is the one a future reader trusts.
 RPC_MARKER = "var RPC='"
+
+# The page's own settlement escalation, read from the page for the same reason as RPC above.
+#
+# WHY THE FIXTURE DISCOVERY NEEDS IT. The primary is a keyless shared endpoint that PRUNES its
+# address index, and the fixture reference settled on 2026-08-07. Once that fell outside the
+# retention window, `getSignaturesForAddress` on the primary began returning an empty list for a
+# transaction that is perfectly alive on chain, and this harness read that empty list as "no
+# settlement to test against" and refused to run.
+#
+# That is precisely the failure app.js was fixed for: escalating to the proxy on an empty or absent
+# answer is what closes the settled-but-pruned hole. The page escalates; this script did not, so
+# the verifier was a step behind the page it verifies. Mirroring it here is not a workaround --
+# querying the primary alone asks a question the page stopped asking on purpose.
+PROXY_MARKER = "var SETTLEMENT_PROXY='"
 
 # The host the page must NOT be able to use from a browser. Named here as the control: if this ever
 # stops returning 403 to an Origin-bearing request, the defect this harness was written for has gone
@@ -89,9 +104,14 @@ def read_pin(marker: str) -> str:
     return src[i : src.index("'", i)]
 
 
-def settled_signature(endpoint: str) -> str | None:
-    """The signature that settled the fixture reference, from the chain, oldest-first -- the same
-    gate the page and plugins/payment-watch/src/watch.rs both use."""
+def _signatures_from(endpoint: str) -> list[dict]:
+    """Raw getSignaturesForAddress result for the fixture reference, or [] on any failure.
+
+    Collapses every failure mode to an empty list -- HTTP error, timeout, malformed JSON -- so the
+    caller escalates on "no answer" exactly as app.js does, rather than only on "empty answer".
+    Those two are the same condition for a keyless endpoint and treating them differently is what
+    reopened the hole the proxy exists to close.
+    """
     req = urllib.request.Request(
         endpoint,
         data=json.dumps(
@@ -104,10 +124,33 @@ def settled_signature(endpoint: str) -> str | None:
         ).encode(),
         headers={"content-type": "application/json", "User-Agent": "Mozilla/5.0"},
     )
-    with urllib.request.urlopen(req, timeout=25) as r:
-        got = json.loads(r.read()).get("result") or []
-    ok = [e for e in got if not e.get("err")]
-    return ok[-1]["signature"] if ok else None
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return json.loads(r.read()).get("result") or []
+    except urllib.error.HTTPError as e:
+        # A by-design 4xx carries a body worth nothing here, but it is an ANSWER, not a crash.
+        e.read()
+        return []
+    except (OSError, ValueError):
+        return []
+
+
+def settled_signature(endpoint: str, proxy: str | None = None) -> tuple[str | None, str]:
+    """The signature that settled the fixture reference, oldest-first -- the same gate the page and
+    plugins/payment-watch/src/watch.rs both use.
+
+    Returns (signature, where) so the caller can REPORT which leg answered. A fixture found only
+    via the proxy is still a valid fixture, but it means the primary has pruned the reference, and
+    that is worth printing rather than hiding behind a bare signature.
+    """
+    got = [e for e in _signatures_from(endpoint) if not e.get("err")]
+    if got:
+        return got[-1]["signature"], "primary"
+    if proxy:
+        deep = [e for e in _signatures_from(proxy) if not e.get("err")]
+        if deep:
+            return deep[-1]["signature"], "proxy (primary has pruned it)"
+    return None, "neither the primary nor the proxy"
 
 
 def pay_url() -> str:
@@ -230,26 +273,22 @@ def main() -> int:
         return 2
 
     endpoint = read_pin(RPC_MARKER)
+    proxy = read_pin(PROXY_MARKER)
     host = endpoint.split("//", 1)[1].split("/")[0]
     print(f"page rpc        : {endpoint}")
+    print(f"settlement proxy: {proxy}   (the page's own escalation)")
     print(f"origin-hostile  : {ORIGIN_HOSTILE_RPC}   (the control)")
 
-    try:
-        real_sig = settled_signature(endpoint)
-    except (OSError, ValueError) as e:
-        print(
-            f"FAIL  could not reach {endpoint} to discover the fixture: {e}",
-            file=sys.stderr,
-        )
-        return 2
+    real_sig, found_via = settled_signature(endpoint, proxy)
     if not real_sig:
         print(
-            f"FAIL  reference {PAID_REFERENCE} has no confirmed non-errored signature; "
-            "the confirmed direction would pass for the wrong reason",
+            f"CANNOT CHECK  reference {PAID_REFERENCE} returned no confirmed non-errored "
+            f"signature from {found_via}; the confirmed direction would pass for the wrong "
+            "reason, so this is a refusal to report rather than a finding about the page.",
             file=sys.stderr,
         )
         return 2
-    print(f"confirmed fixture: {real_sig}")
+    print(f"confirmed fixture: {real_sig}  (via {found_via})")
 
     profile = VIEWPORTS[args.viewport]
     print(f"viewport        : {args.viewport}")

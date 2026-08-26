@@ -136,7 +136,10 @@ jobs:
           EXCLUDED = {
               "check-doc-links.py":
                   "fetches external URLs and a devnet RPC; a third-party outage must never "
-                  "turn a required gate red. Runs manually and on proof-check.yml's schedule.",
+                  "turn a required gate red. Runs manually, and on THIS workflow's own "
+                  "`live smoke (never required)` job, which is scheduled and non-blocking. "
+                  "It is NOT in proof-check.yml: "
+                  "`grep -c check-doc-links .github/workflows/proof-check.yml` returns 0.",
               "check-config-drift.py":
                   "compares against ~/.zeroclaw/config.toml, which no runner has; it "
                   "self-reports exit 2 (cannot check) rather than passing vacuously.",
@@ -291,16 +294,49 @@ jobs:
       - run: python -m pip install --upgrade pip && python -m pip install playwright
       - run: python -m playwright install --with-deps chromium chrome
 
+      # EVERY LIVE STEP RUNS, because one that cannot look must not silence the rest.
+      #
+      # These four checks are INDEPENDENT questions about the live system, and under default step
+      # semantics the first non-zero killed the job. That is not hypothetical: from 2026-08-09 the
+      # RPC step below could not reach its fixture and returned 2 (cannot check), so the two steps
+      # after it were reported `skipped` on every scheduled run from 2026-08-09 until this change
+      # landed -- 35 consecutive runs, against 1 green before it. `check-doc-links.py`
+      # is invoked by NO other workflow, so it simply stopped running, and nothing said so -- the
+      # job was already red for the first step's reason, which is the shape that hides the loss.
+      #
+      # `if: always()` here buys coverage and costs nothing: the job is `continue-on-error` and
+      # attaches to no required context, so a red step gates nothing either way.
+      #
+      # EXIT 2 IS RENDERED AS A WARNING, NOT AS FAILURE, and that distinction is the point. These
+      # scripts already emit three states -- 0 pass, 1 a real finding about the live system, 2 we
+      # could not look -- and GitHub collapses 1 and 2 into the same red X, which is exactly the
+      # two-state collapse that makes a permanently-red canary get ignored. Folding "could not
+      # check" into "broken" also fails in the harmful direction: it trains a reader to wave away a
+      # red that will one day be real. A yellow annotation says we could not look; a red still means
+      # the live system moved.
       - name: a settled reference is refused, an unsettled one stays payable
-        run: python3 demo/verify_paid_link_refused.py
+        if: always()
+        run: |
+          python3 demo/verify_paid_link_refused.py && exit 0; rc=$?
+          [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): verify_paid_link_refused.py could not reach what it needed. Not a finding about the page."; exit 0; }
+          exit "$rc"
 
       - name: the pay path's RPC classifies every outcome correctly
-        run: python3 demo/verify_pay_path_rpc.py
+        if: always()
+        run: |
+          python3 demo/verify_pay_path_rpc.py && exit 0; rc=$?
+          [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): verify_pay_path_rpc.py could not discover its on-chain fixture. Not a finding about the page."; exit 0; }
+          exit "$rc"
 
       - name: the deployed page renders the three links as specified
-        run: python3 demo/verify_shoot_links_live.py
+        if: always()
+        run: |
+          python3 demo/verify_shoot_links_live.py && exit 0; rc=$?
+          [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): verify_shoot_links_live.py could not reach the deployed page. Not a finding about the page."; exit 0; }
+          exit "$rc"
 
       - name: every URL and signature a doc names still resolves
+        if: always()
         # GH_TOKEN is load-bearing, not hygiene. The script resolves github.com issue/PR/blob
         # links through `gh api` because GitHub's WEB frontend answers a throttled anonymous
         # client with 404, which is byte-identical to a dead link. An unauthenticated `gh`

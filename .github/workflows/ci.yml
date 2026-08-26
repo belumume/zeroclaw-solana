@@ -1334,3 +1334,31 @@ jobs:
       # always fails cannot satisfy it. Offline: it reads the generated file and runs node.
       - name: the microworld's win condition can actually say BEATEN
         run: node sanitizer-microworld/check_verdict.js
+
+      # THE THIRD REPRODUCE PATH FOUND BY THE SAME ENUMERATION, and the only one that is not a
+      # crate, which is exactly why the crate-shaped sweeps above never surfaced it. `e2e-allowance`
+      # is a Node script, so a search for `Cargo.toml` or a workspace member walks straight past it,
+      # and it was referenced by ZERO of the seven workflows here.
+      #
+      # It backs the half of the custody claim the injection transcript cannot show: that a
+      # COMPLYING agent is still stopped by the audited on-chain cap. Four published documents point
+      # a stranger at it as a reproduce command.
+      #
+      # THE LIVE RUN STAYS OUT, deliberately. It needs a funded keypair via `E2E_FUNDER` and a live
+      # cluster; handing a funded key to a publicly-triggerable workflow is the shape this repo
+      # removed elsewhere, and it would spend real devnet SOL on every push. What follows is the
+      # subset that needs neither funds nor network, which is the part the exclusion silently took
+      # with it: syntax, and whether the constants the docs publish are the ones the script uses.
+      - name: the e2e-allowance reproduce path is not a dead end
+        run: |
+          # Syntax first and separately: the checker below reads demo.js as TEXT, so it would
+          # happily report agreement on a file that cannot parse.
+          node --check e2e-allowance/demo.js
+          node e2e-allowance/check_reproduce_path.js
+
+      # The checker is four regex anchors into demo.js, which is the shape that stops matching
+      # silently when the file it reads is edited. This plants one real defect per check over a
+      # passing baseline and requires each to be caught, so a green above is evidence rather than
+      # a possibly-blind gate agreeing with itself.
+      - name: that reproduce-path check can actually fail
+        run: node e2e-allowance/check_reproduce_path_control.js
