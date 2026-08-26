@@ -45,7 +45,25 @@ REPO = Path(__file__).resolve().parent.parent
 
 # check-all.py reads this exit code as COULD NOT CHECK and refuses to count it as a
 # pass, which is the only honest verdict when the gate cannot see its own inputs.
+# It does NOT block, because the reasons that reach it are all about the MACHINE: no .git
+# because the tree arrived as an archive, git absent from PATH, a sparse checkout. Nothing
+# in the repo is wrong and running it elsewhere fixes it.
 CANNOT_CHECK = 2
+
+# Read by check-all.py as CANNOT PROVE IT CAN FAIL, which BLOCKS the run.
+#
+# This gate's whole job is proving the trace patterns still FIRE. When a positive control
+# stops firing, the pattern behind it is dead: the scan above it still walks every surface,
+# still finds nothing, and still prints a clean line, so the gate certifies BLIND and its
+# silence reads downstream exactly like a pass. Measured before this existed: killing one
+# control sample made the gate print "that pattern is dead" and exit 2, and check-all
+# reported `n/a ... reported it cannot check` and returned 0. A control that can no longer
+# fail is worse than no control, because it now certifies.
+#
+# SCOPE, deliberately narrow. This code means the gate cannot produce the OPPOSITE verdict.
+# It is used for the CONTROLS -- the must-fire probes and the must-not-fire pins -- and not
+# for anything the controls DETECT, which is an ordinary finding and belongs at 1.
+CONTROL_DEAD = 3
 
 # A floor rather than a zero test, matching every sibling gate here (MIN_DOCS in
 # check-claim-coherence and check-doc-reachability, MIN_GATES in check-all). A floor
@@ -696,15 +714,22 @@ def main() -> int:
                 f"an untested pattern cannot be trusted to fire.",
                 file=sys.stderr,
             )
-            return 2
+            return CONTROL_DEAD
         if not re.search(pat, normalise(probe), re.I):
             print(
                 f"FAIL  positive control for {name!r} did not fire; that pattern is dead.",
                 file=sys.stderr,
             )
-            return 2
+            return CONTROL_DEAD
 
     # And prove no pattern has been widened into the product-honesty it must never touch.
+    #
+    # NOT CONTROL_DEAD, and the line matters. Reaching this branch means the over-correction
+    # control WORKED: it caught a widened pattern eating a sentence the listing scores. That is
+    # a finding about the repo, so its honest code is 1, and it sits at 2 today, which means
+    # check-all reads a real defect as a non-blocking n/a. Promoting it to 1 turns a currently
+    # silent path into one that can redden CI, which is a decision for whoever owns the release
+    # rather than a side effect of adding a state.
     for sample in MUST_NOT_FIRE:
         for name, pat in TRACE:
             if re.search(pat, normalise(sample), re.I):
@@ -730,11 +755,15 @@ def main() -> int:
             f"the file; a pin nobody can trace is proving nothing.\n      {pin[:150]}",
             file=sys.stderr,
         )
-        return 2
+        return CONTROL_DEAD
 
     # An exclusion that waives nothing is the failure this file names in its own docstring:
     # invisible to --all, so it cannot be audited by the mechanism that is supposed to audit it.
     # Reported rather than tolerated, so a carve-out whose target text moves fails loudly.
+    # NOT CONTROL_DEAD either, by the same line. An inert carve-out is an EXCLUSION nobody can
+    # audit, not a control; every pattern still fires and the gate can still fail. The docstring
+    # promises this makes the gate "refuse to pass", and at exit 2 check-all does not enforce
+    # that -- so the honest code here is also 1, and it is the same release-owner decision.
     inert = inert_carve_outs(ALLOW, fired)
     if inert:
         for i in inert:
