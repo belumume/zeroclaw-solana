@@ -332,9 +332,14 @@ def main() -> int:
     merchant, endpoint = read_pin(MERCHANT_MARKER), read_pin(RPC_MARKER)
     print(f"pinned merchant : {merchant}")
     print(f"pinned rpc      : {endpoint}")
+    # EXIT 1, NOT 2, AND THE DIFFERENCE IS LOAD-BEARING. This reads a local file and compares a
+    # pinned constant, so it cannot fail for an environmental reason: there is no network, no
+    # dependency and no built artifact involved. A mismatch is a finding ABOUT THE PAGE. The
+    # workflow wrapping this script converts exit 2 into a `::warning::` and exit 0, which is
+    # right for a genuine cannot-check and would silently swallow this one on a money path.
     if MINT not in (PAGE_DIR / "src" / "app.js").read_text(encoding="utf-8"):
         print(f"FAIL  the page does not know mint {MINT}", file=sys.stderr)
-        return 2
+        return 1
 
     drift = check_fixtures(endpoint)
     if drift:
@@ -378,13 +383,15 @@ def main() -> int:
         "primary": endpoint.split("//", 1)[1].split("/")[0],
         "proxy": proxy.split("//", 1)[1].split("/")[0],
     }
+    # EXIT 1 for the same reason as the mint check above: both pins are read from local files and
+    # compared to each other, with nothing environmental that could make this fire spuriously.
     if hosts["primary"] == hosts["proxy"]:
         print(
             "FAIL  the page names the same host for RPC and the settlement proxy, so the "
             "single-host cases below cannot distinguish an escalation from the primary answering.",
             file=sys.stderr,
         )
-        return 2
+        return 1
 
     srv, port = serve()
     failures: list[str] = []
