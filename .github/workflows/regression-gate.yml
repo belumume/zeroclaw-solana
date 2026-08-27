@@ -106,11 +106,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install playwright pyzbar opencv-python-headless numpy pillow
 
-      # Two browsers on purpose. Four of the six checks call pw.chromium.launch() (bundled
-      # chromium); demo/verify-merchant-invariant.py and demo/verify_reference_required.py
-      # call pw.chromium.launch(channel="chrome"), which resolves the Google Chrome channel
-      # and fails with a launch error if only bundled chromium is present.
-      # Re-derive rather than trusting this count: grep -c 'chromium.launch' demo/*.py
+      # Two browsers on purpose. Four of the seven checks call pw.chromium.launch() (bundled
+      # chromium); demo/verify-merchant-invariant.py, demo/verify_reference_required.py and
+      # demo/verify_click_time_settlement_check.py call pw.chromium.launch(channel="chrome"),
+      # which resolves the Google Chrome channel and fails with a launch error if only bundled
+      # chromium is present.
+      # Re-derive rather than trusting this count: grep -ln 'channel="chrome"' demo/*.py
       - name: Browsers
         run: python -m playwright install --with-deps chromium chrome
 
@@ -248,6 +249,23 @@ jobs:
       # again. If the control stops firing, the cases above are measuring something else.
       - name: a link the page cannot check for settlement is refused, and a good one is not
         run: python3 demo/verify_reference_required.py
+
+      # The render-time answer is stale by the time a customer clicks. checkAlreadyPaid() runs at
+      # load and again on a timer, so what the card knows at click time is as old as the gap
+      # between two lookups -- POLL_MS plus a lookup that rpc() bounds at 6s per call with up to
+      # two calls, so roughly eighteen seconds. app.js re-asks immediately before the call that
+      # signs AND broadcasts, and this drives that line.
+      #
+      # Belongs in the REQUIRED job for the same reason its sibling above does: every JSON-RPC
+      # response is stubbed by method, the page is assembled by the project's own build.py into a
+      # temp tree, and nothing reaches a third party, so no pruning window or rate limit can turn
+      # it red. Measured 11s here.
+      #
+      # It also carries its own mutation control -- the same page with the guard line deleted,
+      # which must sign a settled order. Without that, the three scenarios are equally consistent
+      # with a harness that cannot see the guard at all.
+      - name: settlement is re-checked at the instant funds move, and a good order still pays
+        run: python3 demo/verify_click_time_settlement_check.py
 
       # ----------------------------------------------------------------------------
       # Hermetic suites that no workflow currently runs.
