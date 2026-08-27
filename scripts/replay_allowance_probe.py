@@ -45,7 +45,11 @@ DEFAULT_RPC = {
     "devnet": "https://api.devnet.solana.com",
 }
 
-# `transferFixed` instruction data is: disc(1) || amount(u64 le) || operator(32) || mint(32).
+# `transferFixed` instruction data is: disc(1) || amount(u64 le) || delegator(32) || mint(32).
+# The delegator is whose allowance is drawn. In this deployment that is the same key as the
+# operator who pays the fee and created the delegation, which is what makes the two easy to
+# conflate; upstream names the field delegator, and the roles stay distinct even where one
+# key fills both.
 TRANSFER_FIXED_DISC = 4
 TRANSFER_FIXED_DATA_LEN = 73
 # The delegation account's last sixteen bytes are two little-endian u64s: the remaining
