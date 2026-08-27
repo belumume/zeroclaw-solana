@@ -723,6 +723,14 @@ jobs:
       - name: the rate reader accepts a rate blob and rejects the rest
         run: python3 scripts/rate_from_feed.py --selftest
 
+      # The DePIN feed's acquisition half. Only the OFFLINE selftest runs here: it proves the
+      # scaling against the one feed_publish.rs documents, and proves the parser refuses a
+      # malformed payload rather than substituting a number a device would then sign. The live
+      # fetch is a third party and lives in the non-required live-smoke job instead, so an
+      # open-meteo outage can never redden a required gate.
+      - name: the sensor reader scales correctly and refuses a malformed payload
+        run: python3 scripts/read_sensor.py --selftest
+
       # check-config-drift was the ONE tracked gate never shown to fail. It compares the
       # documented posture against the LIVE agent config, and no runner and no developer
       # machine has that config, so it returns 2 (cannot check) everywhere and its pass and

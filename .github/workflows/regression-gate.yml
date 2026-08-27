@@ -328,6 +328,16 @@ jobs:
           [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): verify_pay_path_rpc.py could not discover its on-chain fixture. Not a finding about the page."; exit 0; }
           exit "$rc"
 
+      # QUICKSTART tells a reader to run this to see the value their device will sign, so the
+      # promise is that it still returns one. Exit 2 is its unreachable path, which is open-meteo
+      # having a bad day rather than anything about this repo.
+      - name: the sensor reader still returns a live reading
+        if: always()
+        run: |
+          python3 scripts/read_sensor.py && exit 0; rc=$?
+          [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): read_sensor.py could not reach open-meteo. Not a finding about the reader."; exit 0; }
+          exit "$rc"
+
       - name: the deployed page renders the three links as specified
         if: always()
         run: |
