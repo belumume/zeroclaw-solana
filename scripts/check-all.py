@@ -36,7 +36,11 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MIN_GATES = 32  # below this the discovery walk is broken; see the docstring.
+MIN_GATES = 33  # below this the discovery walk is broken; see the docstring.
+# Raised from 32 to 33 on 2026-08-27: check-reproduce-path-coverage landed on this branch and
+# the floor was not raised with it, leaving it slack by one against a tracked set of 34. A floor
+# slack by one detects nothing, which is this file's own stated argument, and this is the THIRD
+# time the same drift has happened here.
 # Raised from 31 to 32 on 2026-08-20 when check-test-count-agreement joined, per this file's own
 # rule two lines down. That gate is the only one here that needs a Rust toolchain: with cargo on
 # PATH it RUNS the suites and is by some distance the slowest gate in this walk, and without cargo
