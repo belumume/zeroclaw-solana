@@ -16,9 +16,9 @@ down is signing over a lie, and the one thing this feed asserts is that the numb
 from somewhere. `scripts/verify-proof.py` treats a feed older than 90 minutes as stale,
 which is the margin that lets a refused reading pass without reading as a dead node.
 
-THE EXIT CODES ARE THREE-STATE ON PURPOSE, because "could not reach it" and "the payload
-changed shape" need opposite responses and a caller cannot recover the difference from a
-single failure code:
+THE EXIT CODES ARE THREE-STATE ON PURPOSE, because "could not reach it" and "it answered
+and the answer is unusable" need opposite responses, and a caller cannot recover the
+difference from a single failure code:
 
     0   a reading was obtained
     1   the upstream answered and the answer is unusable: no temperature_2m in the body, or
