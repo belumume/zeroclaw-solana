@@ -155,7 +155,10 @@ def check_fixtures(endpoint: str) -> tuple[list[str], list[str]]:
         # OSError covers URLError and socket timeouts; ValueError covers a body that is not JSON.
         # Every one of them means the same thing here: the fixtures are unchecked, so nothing
         # below can be trusted and the run must stop rather than report a verdict it cannot back.
-        return [f"could not reach {endpoint} to check the fixtures: {e}"]
+        # Returned as (unresolved, findings) like every other exit from this function. An
+        # unreachable endpoint is the cannot-check case by definition: nothing was looked at,
+        # so there is nothing to report about the page.
+        return [f"could not reach {endpoint} to check the fixtures: {e}"], []
 
     settled = [e for e in (paid or []) if not e.get("err")]
     if not settled:
