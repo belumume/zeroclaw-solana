@@ -21,8 +21,8 @@ changed shape" need opposite responses and a caller cannot recover the differenc
 single failure code:
 
     0   a reading was obtained
-    1   a response arrived with no usable temperature_2m; the upstream contract moved,
-        which is a defect to fix and no number of retries will help
+    1   the upstream answered and the answer is unusable: no temperature_2m in the body, or
+        a 4xx that is not a throttle. Both are defects to fix, and no number of retries helps
     2   the upstream was unreachable after retries; transient, and the scheduler simply
         publishes nothing this cycle
 
@@ -62,6 +62,16 @@ TIMEOUT_S = 20
 BACKOFF_S = 4
 
 
+class UpstreamRejected(Exception):
+    """A 4xx that is not a throttle: the request is wrong, so the answer will not change.
+
+    Kept distinct from ConnectionError because the caller maps them to different exit codes,
+    and that distinction is the whole reason this script has three of them. Folding a
+    malformed coordinate into "unreachable" tells the reader to wait for an outage to pass
+    when what they actually have is a typo in FEED_LAT.
+    """
+
+
 def endpoint(lat: str, lon: str) -> str:
     return f"{API}?latitude={lat}&longitude={lon}&current=temperature_2m"
 
@@ -92,7 +102,11 @@ def fetch(lat: str, lon: str) -> dict:
             body = exc.read()[:200].decode("utf-8", "replace")
             last = f"HTTP {exc.code}: {body}"
             if exc.code < 500 and exc.code != 429:
-                break
+                # This will not fix itself: a malformed coordinate, a renamed parameter, a
+                # removed endpoint. Retrying pays for it three times and then reports it as an
+                # outage, sending the reader to the wrong problem entirely. QUICKSTART invites
+                # exactly this shape by documenting the FEED_LAT and FEED_LON override.
+                raise UpstreamRejected(last)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
             # Named rather than blanket-caught. These are what this call can actually
             # raise: URLError and OSError cover DNS, refused connections and socket
@@ -155,6 +169,12 @@ def main() -> int:
 
     try:
         payload = fetch(lat, lon)
+    except UpstreamRejected as exc:
+        print(
+            f"FAIL  the upstream refused the request, which retrying will not change: {exc}",
+            file=sys.stderr,
+        )
+        return 1
     except ConnectionError as exc:
         print(
             f"CANNOT READ  unreachable after {ATTEMPTS} attempts: {exc}",
