@@ -1135,6 +1135,14 @@ jobs:
       - name: Declared custody tier matches the compiled component
         run: python3 scripts/check-custody-tier.py
 
+      # Its control, which the comment above has named as "the control" while nothing ran it. That
+      # is the exact distinction check-gate-wiring.py draws: a gate named only in a comment is not
+      # invoked by it. This job is the right home because the control needs the wasm32-wasip2
+      # target, which this job already adds; without it the script self-reports exit 2 rather than
+      # passing vacuously.
+      - name: the custody-tier control can still fail
+        run: python3 scripts/mutation-check-custody-tier.py
+
   x402-gate:
     name: the x402 gate binary compiles and its tests run
     runs-on: ubuntu-latest

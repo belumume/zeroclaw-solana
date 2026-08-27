@@ -215,6 +215,28 @@ jobs:
       - name: the chain-history walk pages past the first page, and says when it is capped
         run: python3 demo/test_chain_history.py
 
+      # THE THREE BELOW WERE SURFACED BY WIDENING check-gate-wiring.py's globs, and every one is
+      # a real gate with its own controls that no workflow named. They are grouped here because
+      # all three are hermetic and fast: measured 1s, 1s and under a second respectively.
+
+      # The wit-parity checker's own controls. Its MAIN mode needs a host checkout and belongs on
+      # the host-drift schedule, but --self-test is hermetic and is what proves the checker can
+      # still tell a 37-variant enum from a 38-variant one. That mismatch cost this project every
+      # plugin failing to instantiate for its whole early life.
+      - name: the wit-parity checker can still tell the enums apart
+        run: python3 demo/check_wit_parity.py --self-test
+
+      # The output-ceiling gate's controls. --selftest needs no cargo and no ledger, and says so:
+      # it runs its 35 controls against LEDGER_SHAPE when the gitignored ledger is absent, which
+      # is exactly a runner's situation. The full comparison needs cargo and stays out of here.
+      - name: the output-ceiling controls hold without a ledger or a toolchain
+        run: python3 scripts/verify-output-ceiling-agreement.py --selftest
+
+      # And the mutation control proving that gate's clone path can FAIL. A clone path that can
+      # only ever pass is worse than the honest refusal it replaced, because it carries a green.
+      - name: the output-ceiling clone-path controls are load-bearing
+        run: python3 scripts/mutation-check-output-ceiling-clone.py
+
       - name: the proof-transport predicate's controls actually gate
         run: python3 scripts/test_verify_proof_transport.py
 

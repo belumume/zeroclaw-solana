@@ -61,10 +61,35 @@ CANNOT_CHECK = 2
 # check-all.py's equivalent constant has drifted below its own rule several separate times.
 FAMILIES: dict[str, tuple[tuple[str, ...], int]] = {
     # scripts/check-all.py itself is the local aggregate runner and is declared below.
-    "scripts": (("scripts/check-*.py",), 10),
+    "scripts": (
+        (
+            "scripts/check-*.py",
+            "scripts/verify*.py",
+            "scripts/mutation-check-*.py",
+            "scripts/test_*.py",
+        ),
+        40,
+    ),
     # verify* catches both spellings the repo uses, verify_foo.py and verify-foo.py.
-    "demo": (("demo/verify*.py", "demo/test_*.py"), 8),
+    "demo": (("demo/verify*.py", "demo/test_*.py", "demo/check_*.py"), 10),
 }
+# THE GLOB LIST IS THE WHOLE CLAIM, and the first version of this file got it wrong in a way worth
+# recording, because the failure is this gate's own subject matter. It globbed `scripts/check-*.py`
+# and `demo/{verify*,test_*}.py`, which are the conventions its author happened to notice, and
+# called the result a floor over "every tracked gate". The repo names gates four other ways.
+#
+# Two reviewers caught it independently, from different ends: one found
+# scripts/verify-output-ceiling-agreement.py, the other demo/check_wit_parity.py. Widening to the
+# conventions the repo actually uses surfaced FOUR orphans rather than the two named, and every one
+# is a real gate with its own controls. So the narrow globs were not a cosmetic gap: they let this
+# file claim a class was closed while four instances of that exact class sat open, which is worse
+# than not having claimed it.
+#
+# The lesson for anyone adding a fifth convention: a name-based discovery walk encodes a GUESS
+# about how other people name things, and the guess is invisible because everything it does find
+# looks correct. Re-derive the corpus rather than trusting this list:
+#   git ls-files 'scripts/*.py' 'demo/*.py' | grep -vE '<the globs above>'
+# and read what falls out, asking of each whether it is a gate or a producer.
 
 # Declared, each with the reason it is not invoked by a workflow. Inherited from the inline floor
 # in regression-gate.yml, with one row dropped and one added, both noted below. Neither changes a
@@ -82,23 +107,19 @@ EXCLUDED: dict[str, str] = {
     # live-smoke invocation ever been deleted, this floor would have gone on reporting green over
     # a genuinely orphaned checker. Dropping it changes no verdict today and closes that trapdoor.
     # The redundancy control in the selftest now fails any entry that drifts into the same state.
-    "scripts/check-config-drift.py":
-        "compares against the box's own config.toml, which no runner has; it self-reports exit 2 "
-        "(cannot check) rather than passing vacuously.",
-    "scripts/check-all.py":
-        "the local aggregate runner, not a gate; it would pull check-doc-links.py onto the runner.",
-    "scripts/check-root-divergence.py":
-        "compares the two WORKING ROOTS, and a runner clones exactly one, so it would SKIP on "
-        "every run. A step that can only ever skip is a green check asserting nothing. Its "
-        "control, test_check_root_divergence.py, builds its own synthetic pair in a temp dir and "
-        "DOES run in ci.yml, so the checker's behaviour is verified on a runner even though the "
-        "checker cannot run there.",
-    "scripts/check-untracked-root-divergence.py":
-        "same reason one layer down: it compares the UNTRACKED internal documents the two working "
-        "roots share, and a runner clones one root and none of those gitignored documents, so it "
-        "would report not-applicable on every run. Its control, "
-        "test_check_untracked_root_divergence.py, builds its own synthetic pair in a temp dir and "
-        "DOES run in ci.yml, with both mutation controls.",
+    "scripts/check-config-drift.py": "compares against the box's own config.toml, which no runner has; it self-reports exit 2 "
+    "(cannot check) rather than passing vacuously.",
+    "scripts/check-all.py": "the local aggregate runner, not a gate; it would pull check-doc-links.py onto the runner.",
+    "scripts/check-root-divergence.py": "compares the two WORKING ROOTS, and a runner clones exactly one, so it would SKIP on "
+    "every run. A step that can only ever skip is a green check asserting nothing. Its "
+    "control, test_check_root_divergence.py, builds its own synthetic pair in a temp dir and "
+    "DOES run in ci.yml, so the checker's behaviour is verified on a runner even though the "
+    "checker cannot run there.",
+    "scripts/check-untracked-root-divergence.py": "same reason one layer down: it compares the UNTRACKED internal documents the two working "
+    "roots share, and a runner clones one root and none of those gitignored documents, so it "
+    "would report not-applicable on every run. Its control, "
+    "test_check_untracked_root_divergence.py, builds its own synthetic pair in a temp dir and "
+    "DOES run in ci.yml, with both mutation controls.",
     # NEW ENTRY, 2026-08-27, and the reason is the file's OWN rather than one invented to reach a
     # green. verify_qr_in_encoded_cut.py carries a paragraph headed "DELIBERATELY NOT WIRED INTO
     # ci.yml", written before this floor existed, whose argument is that a CI gate earns its place
@@ -110,18 +131,25 @@ EXCLUDED: dict[str, str] = {
     # them: the cv2 import sits inside decode_both with no ImportError handling, so on a runner
     # missing any one of them it raises and exits 1, which this repo reads as a FINDING ABOUT THE
     # VIDEO. Wiring it without provisioning all five would therefore manufacture a false finding
-    # against a judged artifact, in the alarming direction. And it decodes a 22 MB file frame by
-    # frame, which is the cost the file's own note objects to paying on every push.
+    # against a judged artifact, in the alarming direction.
+    #
+    # AND THE COST IS SMALLER THAN THE FILE'S OWN NOTE IMPLIES, which is recorded here because it
+    # is the fact most likely to change this decision later and it would otherwise have to be
+    # rediscovered. Run against the shipped cut it takes 18 SECONDS and passes: 4 frames decoded
+    # by both readers against 121 where both correctly stayed silent, so its negative control is
+    # live. Of the five dependencies, regression-gate.yml already installs FOUR for its sibling
+    # verify_qr_scannable.py, and ci.yml already installs ffmpeg elsewhere, so the gap is one apt
+    # line rather than a new toolchain. What survives all of that is the file's PRIMARY argument,
+    # which none of these measurements touches: a frozen artifact cannot regress, so 18 seconds of
+    # re-answering a settled question catches nothing on an ordinary push.
     #
     # WHAT RETIRES THIS ENTRY: the video changing. Its answer cannot move for any other reason. If
-    # the shipped cut under docs/assets is replaced, either wire this gate behind a paths filter on
-    # that file, in a job that installs all five dependencies, or run it by hand and record the
-    # result. Do not simply extend this reason to a new cut.
-    "demo/verify_qr_in_encoded_cut.py":
-        "its subject is a frozen shipped artifact that cannot regress, so a per-push run "
-        "re-answers a settled question; it also needs cv2, numpy, PIL, pyzbar and ffmpeg and "
-        "guards none of them, so an under-provisioned job would exit 1 and read as a finding "
-        "about the video. Retired the moment the video is replaced; see the note above.",
+    # the shipped cut under docs/assets is replaced, wire this gate behind a paths filter on that
+    # file, in a job that installs all five dependencies. The figures above are what that costs.
+    "demo/verify_qr_in_encoded_cut.py": "its subject is a frozen shipped artifact that cannot regress, so a per-push run "
+    "re-answers a settled question; it also needs cv2, numpy, PIL, pyzbar and ffmpeg and "
+    "guards none of them, so an under-provisioned job would exit 1 and read as a finding "
+    "about the video. Retired the moment the video is replaced; see the note above.",
 }
 
 
