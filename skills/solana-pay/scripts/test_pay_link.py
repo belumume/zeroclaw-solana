@@ -676,6 +676,224 @@ def main():
                 f"from somewhere else: rc={rc} out={out.strip()[:220]!r}"
             )
 
+    # ------------------------------------------------------ THE REPORTING CHANNEL IS A CONTRACT
+    # SKILL.md tells the model to quote the rate and date this script actually used. The model
+    # receives this command's STDOUT and nothing else, so which sink the provenance lands on
+    # decides whether that instruction is followable or impossible. These cases pin the sink.
+    #
+    # THE STUB HERE PLANTS THE TWO SOURCES SEPARATELY, which the shared stub above cannot do: it
+    # plants one figure for both, so it can never produce a divergence, a date disagreement, or a
+    # run where the BCB figure and the ECB figure differ. Those are the cases that decide whether
+    # the model is handed the rate that PRICED the order or the one that merely corroborated it,
+    # so they need their own planting rather than a widening of a stub 48 cases depend on.
+    _CHAN_STUB = """
+import json, sys, urllib.request
+BCB, BCB_DATE, ECB, ECB_DATE = __BCB__, __BCB_DATE__, __ECB__, __ECB_DATE__
+SCRIPT = __SCRIPT__
+
+class _Resp:
+    def __init__(self, text):
+        self._b = text.encode("utf-8")
+        self.status = 200
+    def read(self):
+        return self._b
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+def _planted(req, timeout=None):
+    url = getattr(req, "full_url", None) or str(req)
+    if "olinda" in url:
+        if BCB == "FAIL":
+            raise OSError("planted: BCB unreachable")
+        if BCB is None:
+            return _Resp(json.dumps({"value": []}))
+        return _Resp(json.dumps({"value": [{"cotacaoVenda": BCB,
+                                            "dataHoraCotacao": BCB_DATE + " 13:00:00"}]}))
+    if ECB == "FAIL":
+        raise OSError("planted: ECB unreachable")
+    return _Resp(json.dumps({"rates": {"BRL": ECB}, "date": ECB_DATE}))
+
+urllib.request.urlopen = _planted
+sys.argv = [SCRIPT] + sys.argv[1:]
+exec(compile(open(SCRIPT, encoding="utf-8").read(), SCRIPT, "exec"), {"__name__": "__main__"})
+"""
+
+    def run_split(url, extra, bcb, bcb_date, ecb, ecb_date, script=None):
+        """(rc, stdout, stderr) kept SEPARATE.
+
+        `run` above merges the two streams on purpose, and merged output cannot answer the only
+        question these cases ask, which is which sink a line arrived on.
+        """
+        body = (
+            _CHAN_STUB.replace("__BCB_DATE__", repr(bcb_date))
+            .replace("__ECB_DATE__", repr(ecb_date))
+            .replace("__BCB__", repr(bcb))
+            .replace("__ECB__", repr(ecb))
+            .replace("__SCRIPT__", repr(str(script or SCRIPT)))
+        )
+        fh = tempfile.NamedTemporaryFile(
+            "w", suffix="_chanstub.py", delete=False, encoding="utf-8"
+        )
+        fh.write(body)
+        fh.close()
+        p = subprocess.run(
+            [sys.executable, fh.name, url] + list(extra),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        return p.returncode, (p.stdout or ""), (p.stderr or "")
+
+    def _chan_check(desc, cond, detail):
+        print(f"{'PASS' if cond else 'FAIL'}  channel: {desc}")
+        if not cond:
+            failures.append(f"channel/{desc}: {detail}")
+
+    def _rate_lines(text):
+        return [ln for ln in text.splitlines() if ln.startswith("rate: ")]
+
+    # THE PRIMARY CASE, and the one the whole change exists for. The two sources are planted with
+    # DIFFERENT figures, both inside the divergence band, so an implementation that reported the
+    # corroborator instead of the source of truth would still produce a link and still look right.
+    # 5.0827 is the BCB figure and priced the order; 5.11 is the ECB figure and priced nothing.
+    rc, so, se = run_split(
+        URL_80,
+        ["--brl", "80", "--quote", "R$ 80"],
+        5.0827,
+        "2026-08-26",
+        5.11,
+        "2026-08-26",
+    )
+    so_lines = [ln for ln in so.splitlines() if ln.strip()]
+    got = _rate_lines(so)
+    _chan_check(
+        "an accepted BRL order puts the provenance on STDOUT, where the model can read it",
+        rc == 0 and len(got) == 1,
+        f"rc={rc} stdout={so!r}",
+    )
+    _chan_check(
+        "the STDOUT provenance names the BCB figure that priced the order, not the corroborator",
+        bool(got)
+        and "5.0827" in got[0]
+        and "5.11" not in got[0]
+        and "BCB PTAX" in got[0]
+        and "2026-08-26" in got[0],
+        f"stdout rate line={got[:1]!r}",
+    )
+    _chan_check(
+        "the LAST line of stdout is still the pay link, so a caller reading only it is unaffected",
+        bool(so_lines)
+        and so_lines[-1].startswith("https://")
+        and PAGE_OK(so_lines[-1], URL_80),
+        f"stdout last line={so_lines[-1:]!r}",
+    )
+    _chan_check(
+        "the operator's stderr trace still carries the rate line it always carried",
+        bool(_rate_lines(se)),
+        f"stderr={se!r}",
+    )
+    _chan_check(
+        "both sinks carry a BYTE-IDENTICAL rate line, so the operator's copy and the model's "
+        "cannot drift into disagreeing about which rate priced an order",
+        bool(got) and _rate_lines(se) == got,
+        f"stdout={got!r} stderr={_rate_lines(se)!r}",
+    )
+
+    # THE OVER-CORRECTION CONTROLS. This script's whole design is that it REFUSES rather than
+    # falling back, so the failure mode of moving a reporting channel is a run that hands the model
+    # a rate it could not corroborate. That would be worse than the prose defect it fixes. Every
+    # refusal path must leave STDOUT completely empty: no rate line to quote, and no link.
+    for desc, bcb, bcb_date, ecb, ecb_date in [
+        ("BCB unreachable", "FAIL", "2026-08-26", 5.0827, "2026-08-26"),
+        (
+            "BCB published nothing in the walkback window",
+            None,
+            "2026-08-26",
+            5.0827,
+            "2026-08-26",
+        ),
+        (
+            "the ECB corroborator unreachable",
+            5.0827,
+            "2026-08-26",
+            "FAIL",
+            "2026-08-26",
+        ),
+        (
+            "the sources report different dates",
+            5.0827,
+            "2026-08-26",
+            5.0827,
+            "2026-08-27",
+        ),
+        ("the sources diverge past the band", 5.0827, "2026-08-26", 6.0, "2026-08-26"),
+        (
+            "the published rate is outside the plausible band",
+            30.5,
+            "2026-08-26",
+            30.5,
+            "2026-08-26",
+        ),
+    ]:
+        rc, so, se = run_split(
+            URL_80, ["--brl", "80", "--quote", "R$ 80"], bcb, bcb_date, ecb, ecb_date
+        )
+        _chan_check(
+            f"REFUSAL leaves stdout empty: {desc}",
+            rc != 0 and "REFUSED" in se and so.strip() == "",
+            f"rc={rc} stdout={so!r} stderr={se.strip()[:160]!r}",
+        )
+
+    # THE NO-FLAG PATH MUST NOT GAIN A LINE. Nothing was priced, so there is no provenance to
+    # report, and the live shop's plain URL-and-language call has to stay exactly one line.
+    rc, so, se = run_split(base, ["pt"], 5.0827, "2026-08-26", 5.0827, "2026-08-26")
+    so_lines = [ln for ln in so.splitlines() if ln.strip()]
+    _chan_check(
+        "the no-flag path still emits exactly one stdout line and no provenance",
+        rc == 0
+        and len(so_lines) == 1
+        and so_lines[0].startswith("https://")
+        and not _rate_lines(so),
+        f"rc={rc} stdout={so!r}",
+    )
+
+    # MUTATION CONTROL. The accept cases above would still pass if the provenance reached stdout
+    # by some other route, and the refusal cases are satisfied by a script that refuses everything.
+    # So restore the stderr-only behaviour in a copy and require the stdout case to go RED. The
+    # anchor is asserted before the copy runs: a drifted anchor leaves the mutant byte-identical to
+    # the real script, and the control would then pass while testing nothing.
+    CHAN_ANCHOR = "    print(rate_line)\n"
+    chan_src = SCRIPT.read_text(encoding="utf-8")
+    if chan_src.count(CHAN_ANCHOR) != 1:
+        failures.append(
+            "channel mutation control: anchor not found exactly once in pay_link.py, so the "
+            "mutant is the real script and this control proves nothing. Update CHAN_ANCHOR."
+        )
+        print("FAIL  channel: mutation control anchor is stale")
+    else:
+        chan_mutant = Path(tempfile.mkdtemp()) / "pay_link.py"
+        chan_mutant.write_text(
+            chan_src.replace(CHAN_ANCHOR, "    print(rate_line, file=sys.stderr)\n", 1),
+            encoding="utf-8",
+        )
+        rc, so, se = run_split(
+            URL_80,
+            ["--brl", "80", "--quote", "R$ 80"],
+            5.0827,
+            "2026-08-26",
+            5.11,
+            "2026-08-26",
+            script=chan_mutant,
+        )
+        _chan_check(
+            "mutation control, sending the provenance back to stderr alone makes it unreachable "
+            "on stdout again",
+            rc == 0 and not _rate_lines(so) and bool(_rate_lines(se)),
+            f"rc={rc} stdout={so!r} stderr_has_rate={bool(_rate_lines(se))}",
+        )
+
     # usage errors must also fail closed, not fall through to a link
     for bad in ["", "https://example.com/", "solana", "not-a-url"]:
         rc, out = run(bad)
