@@ -116,9 +116,23 @@ def rpc(endpoint: str, method: str, params: list) -> object:
         return json.loads(r.read()).get("result")
 
 
-def check_fixtures(endpoint: str) -> list[str]:
-    """Both references, asserted against the chain before anything is rendered."""
-    problems = []
+def check_fixtures(endpoint: str) -> tuple[list[str], list[str]]:
+    """Both references, asserted against the chain before anything is rendered.
+
+    Returns (unresolved, findings), separated HERE rather than by reading the text back
+    later, because the two demand opposite responses and the caller cannot recover the
+    difference from a string. `unresolved` means this check could not decide: a reference
+    the pinned RPC pruned and the archival cross-check could not reach, or a fixture that
+    has rotted so the direction it tests proves nothing. `findings` means the page is
+    wrong, and the only member is the double-payment case, which is established AFTER a
+    successful archival lookup rather than by failing to look.
+
+    Collapsing them loses money. The workflow step renders exit 2 as a warning and exit 0,
+    which is right for a third-party outage and turns a customer being able to pay twice
+    into a green run.
+    """
+    problems: list[str] = []
+    findings: list[str] = []
     try:
         paid = rpc(
             endpoint,
@@ -199,7 +213,7 @@ def check_fixtures(endpoint: str) -> list[str]:
                         "ARCHIVAL_RPC, so the card still refuses"
                     )
                 else:
-                    problems.append(
+                    findings.append(
                         f"MONEY BUG: the pinned RPC {endpoint} can no longer see the settlement "
                         f"for {PAID_REFERENCE} (finalized on chain), and the page has NO archival "
                         "fallback. settledSignature() returns null, checkAlreadyPaid() returns "
@@ -226,7 +240,7 @@ def check_fixtures(endpoint: str) -> list[str]:
         )
     else:
         print(f"unpaid fixture  : {UNPAID_REFERENCE}  (0 signatures)")
-    return problems
+    return problems, findings
 
 
 def pay_url(reference: str, amount: str, lang: str = "pt") -> str:
@@ -341,10 +355,14 @@ def main() -> int:
         print(f"FAIL  the page does not know mint {MINT}", file=sys.stderr)
         return 1
 
-    drift = check_fixtures(endpoint)
-    if drift:
-        for d in drift:
-            print(f"FAIL  {d}", file=sys.stderr)
+    unresolved, fixture_findings = check_fixtures(endpoint)
+    for d in fixture_findings:
+        print(f"FAIL  {d}", file=sys.stderr)
+    for d in unresolved:
+        print(f"CANNOT CHECK  {d}", file=sys.stderr)
+    if fixture_findings:
+        return 1
+    if unresolved:
         return 2
 
     profile = VIEWPORTS[args.viewport]
