@@ -723,6 +723,23 @@ jobs:
       - name: the rate reader accepts a rate blob and rejects the rest
         run: python3 scripts/rate_from_feed.py --selftest
 
+      # The DePIN feed's acquisition half. Only the OFFLINE selftest runs here: it proves the
+      # scaling against the one feed_publish.rs documents, and proves the parser refuses a
+      # malformed payload rather than substituting a number a device would then sign. The live
+      # fetch is a third party and lives in the non-required live-smoke job instead, so an
+      # open-meteo outage can never redden a required gate.
+      - name: the sensor reader scales correctly and refuses a malformed payload
+        run: python3 scripts/read_sensor.py --selftest
+
+      # The host-compat gate's own 21-case harness. It is hermetic (generated fixture under
+      # mktemp, no repo wit, no host clone, no network), which is why it can run here rather
+      # than in the drift workflow that does the real comparison. Wired because the argument
+      # that gate makes for having a selftest applies to the selftest: run once by hand and
+      # never again, it is a hypothesis. Note check-all.py excludes that script by name, so
+      # this step is the only thing keeping the harness honest.
+      - name: the host-compat gate's controls actually gate
+        run: bash scripts/check-host-compat.sh --selftest
+
       # check-config-drift was the ONE tracked gate never shown to fail. It compares the
       # documented posture against the LIVE agent config, and no runner and no developer
       # machine has that config, so it returns 2 (cannot check) everywhere and its pass and
@@ -1334,3 +1351,121 @@ jobs:
       # always fails cannot satisfy it. Offline: it reads the generated file and runs node.
       - name: the microworld's win condition can actually say BEATEN
         run: node sanitizer-microworld/check_verdict.js
+
+      # THE THIRD REPRODUCE PATH FOUND BY THE SAME ENUMERATION, and the only one that is not a
+      # crate, which is exactly why the crate-shaped sweeps above never surfaced it. `e2e-allowance`
+      # is a Node script, so a search for `Cargo.toml` or a workspace member walks straight past it,
+      # and it was referenced by ZERO of the seven workflows here.
+      #
+      # It backs the half of the custody claim the injection transcript cannot show: that a
+      # COMPLYING agent is still stopped by the audited on-chain cap. Four published documents point
+      # a stranger at it as a reproduce command.
+      #
+      # THE LIVE RUN STAYS OUT, and the reason is NOT that funding is hard to come by.
+      #
+      # `demo.js` does require `E2E_FUNDER` and exits 1 without it, so the operational statement
+      # is true; the inference from it was not. On devnet a keypair is one `solana airdrop` away,
+      # instantly and for free, and that is enough to drive `createMint`, the two
+      # `getOrCreateAssociatedTokenAccount` calls and the `mintTo`. The third-party program clones
+      # onto a local validator in seconds with one flag. None of that is a wall, and a note
+      # claiming otherwise sends whoever reads it next down a road that is not the blocker.
+      #
+      # THE ACTUAL WALL is that the audited program does not behave the same way on a cloned
+      # validator. Its PDA's rent-exempt funding computes as 1,628,640 lamports on mainnet and as
+      # ZERO on a `solana-test-validator` clone of the identical bytecode for the identical
+      # instruction -- surviving both rent parity (the sysvar is byte-identical) and feature
+      # parity (21 features deactivated, same failure). Prefunding gets past that and the next
+      # instruction panics with a memory error. So an engineer following the old note would have
+      # installed the toolchain, stood up a validator, cloned the program, and ended up
+      # reverse-engineering someone else's audited binary against a runtime it demonstrably
+      # behaves differently on. Re-derive before trusting either figure:
+      #   solana-test-validator --clone <program> --url mainnet-beta, then compare the
+      #   rent-exempt minimum the instruction computes against `solana rent <account-size>`.
+      #
+      # The POLICY reason is separate and unchanged: handing a funded key to a publicly
+      # triggerable workflow is the shape this repo removed elsewhere. What follows is the subset
+      # that needs neither funds nor network, which is the part the exclusion silently took with
+      # it: syntax, and whether the constants the docs publish are the ones the script uses.
+      - name: the e2e-allowance reproduce path is not a dead end
+        run: |
+          # Syntax first and separately: the checker below reads demo.js as TEXT, so it would
+          # happily report agreement on a file that cannot parse.
+          node --check e2e-allowance/demo.js
+          node e2e-allowance/check_reproduce_path.js
+
+      # The checker is four regex anchors into demo.js, which is the shape that stops matching
+      # silently when the file it reads is edited. This plants one real defect per check over a
+      # passing baseline and requires each to be caught, so a green above is evidence rather than
+      # a possibly-blind gate agreeing with itself.
+      - name: that reproduce-path check can actually fail
+        run: node e2e-allowance/check_reproduce_path_control.js
+
+      # STEP ONE OF THE PUBLISHED COMMAND, AND NOTHING HAS EVER RUN IT. Measured:
+      # `grep -n "npm ci\|npm install" .github/workflows/*.yml` returns nothing at all, against a
+      # control of five `node ` invocations in this file, so the files are being read and the
+      # install genuinely appears in none of them. There is no dependabot config and no renovate
+      # config either, so nothing else covers the dependency graph.
+      #
+      # The check above proves `package.json` DECLARES each require by name. Nothing proved the
+      # install RESOLVES. A yanked version, or a range that no longer resolves, passes that check
+      # and breaks the first line a stranger runs.
+      #
+      # THE COMMAND RUN HERE IS THE ONE `e2e-allowance/README.md` PUBLISHES, which is a plain
+      # install rather than the locked form. `package-lock.json` is gitignored in this directory,
+      # so a fresh clone carries no lockfile and the locked form exits 1 BY DESIGN rather than by
+      # breakage. Verified both ways against a clean clone of the public repo: the locked form
+      # rc=1 "can only install with an existing package-lock.json", the published form rc=0
+      # resolving 70 packages. A gate has to run the command the reader was given, not a stricter
+      # one this repository cannot satisfy.
+      #
+      # Lifecycle scripts are skipped because resolution is the question here.
+      - name: the e2e-allowance install a stranger runs first still resolves
+        working-directory: e2e-allowance
+        run: npm install --ignore-scripts
+
+      # THE THIRD NON-CRATE REPRODUCE PATH, and the second one found in exactly the state
+      # `e2e-allowance` was in: `scripts/x402-validator` is published as a reproduce command in
+      # six tracked documents and was referenced by ZERO workflows.
+      #
+      # THE PUBLISHED COMMAND ITSELF CANNOT BE A REQUIRED STEP, and that is why it was never
+      # wired. `validate-challenge.mjs` needs a SUBJECT: with no argument it fetches the live
+      # endpoint, so it is a live check by construction and a third-party outage would turn a
+      # required job red. What CAN be answered here is the half that makes its PASS mean
+      # anything -- that `npm ci` resolves the pinned reference grader at all, and that the
+      # grader demonstrably rejects as well as accepts. Until now nothing on a runner had ever
+      # loaded @x402/core.
+      - name: the pinned x402 reference grader installs
+        working-directory: scripts/x402-validator
+        run: npm ci --ignore-scripts
+
+      - name: the published validator still parses
+        run: node --check scripts/x402-validator/validate-challenge.mjs
+
+      # Four cases over one 2x2 grid, because the pre-cutover body fails for TWO independent
+      # reasons and each is varied alone: a missing top-level `resource`, and a v1 friendly
+      # `network` instead of CAIP-2. A grader that rejects everything fails the accept case; one
+      # that accepts everything fails the three reject cases; one that checks a single field
+      # fails one of the two middle cases. Verified against both mutants before it shipped.
+      - name: that grader can produce both verdicts, not just green
+        working-directory: scripts/x402-validator
+        run: node check_schema_control.mjs
+
+      # THE ENUMERATOR, rather than a fourth hand-written step. `e2e-allowance` was found by hand
+      # and fixed by hand; `scripts/x402-validator` was in the identical state and the enumerator
+      # that missed the first could never have found the second, because it walks tracked crates.
+      # This walks PUBLISHED REPRODUCE COMMANDS instead and asserts each is exercised, so the
+      # fourth instance is caught by a machine instead of by whoever happens to look.
+      - name: every published reproduce command is exercised by some workflow
+        run: python3 scripts/check-reproduce-path-coverage.py
+
+      # And it can fail: the resolver, both legs, the closure, and the declared-dispatch
+      # discrimination each carry a control, including the over-correction cases that would go
+      # green if a matcher were loosened back to a substring.
+      - name: that enumerator can actually fail
+        run: python3 scripts/check-reproduce-path-coverage.py --selftest
+
+      # README publishes this as the way to regenerate the one image carrying the whole argument.
+      # `--selftest` needs no Pillow, no font and no network: it proves the added phone pattern
+      # can fire and can stay silent, which is the part that can rot without anyone noticing.
+      - name: the field card's identifier detector is still calibrated
+        run: python3 scripts/build-field-card.py --selftest

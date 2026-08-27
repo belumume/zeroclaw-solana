@@ -639,13 +639,43 @@ anchor idl init --provider.cluster devnet \
 `anchor idl init` publishes the IDL on-chain so the explorer decodes instruction names instead of
 "Unknown"; it ignores the ANCHOR_* env vars, so pass `--provider.cluster devnet` and keep the payer
 at the default `~/.config/solana/id.json`.
-Then register a device feed and schedule the publisher:
+Then register a device feed and schedule the publisher. Two paths publish the same bytes.
+
+**Deterministic, with no model in the loop.** Take a reading, then sign and broadcast it:
+
+```
+eval "$(python3 scripts/read_sensor.py --export)"
+cargo run --release --bin feed_publish --manifest-path e2e-localnet/Cargo.toml
+```
+
+The two steps are separate because `feed_publish` reads `FEED_VALUE` and `FEED_OBSERVED_AT`
+from the environment and fetches nothing itself: it is the signing half. Its remaining
+variables (`FEED_RPC`, `FEED_SESSION`, `FEED_DEVICE_SEED_HEX`, `FEED_NONCE`,
+`FEED_ORACLE_ID`) are documented in the header of `e2e-localnet/src/bin/feed_publish.rs`.
+
+**Where the number comes from.** `scripts/read_sensor.py` reads ambient temperature from
+open-meteo and scales it to the hundredths the program stores. It needs no API key and no
+account, which is the point: the whole feed reproduces without asking anyone for anything.
+Run it alone to see the value your device will sign:
+
+```
+python3 scripts/read_sensor.py            # 44.90 C  ->  FEED_VALUE=4490 (scale -2)
+python3 scripts/read_sensor.py --selftest # offline, proves the scaling and that it refuses
+```
+
+Point it somewhere else with `FEED_LAT` and `FEED_LON`, or replace it with a physical probe:
+anything that prints the same JSON drops in. When the upstream cannot be reached it exits
+non-zero and nothing is published, because a node that invents a reading is signing over a
+lie rather than reporting one.
+
+**Through the agent instead:**
 - the agent turn calls `oracle_publish_reading` (device key signs inside the sandbox, durable nonce,
   range/kind/sequence gates)
-- the host completes the fee-payer slot and broadcasts (the `.tools` completion pattern)
-- schedule it every 20 minutes with your OS scheduler or `zeroclaw cron`
-  (`scripts/verify-proof.py` treats a feed older than 90 minutes as stale, so a slower
-  cadence will report your own node as dead)
+- the host completes the fee-payer slot and broadcasts (`scripts/broadcast_certified.py`)
+
+Either way, schedule it every 20 minutes with your OS scheduler or `zeroclaw cron`
+(`scripts/verify-proof.py` treats a feed older than 90 minutes as stale, so a slower
+cadence will report your own node as dead).
 
 Verify on explorer: the feed account's sequence increments with each run; the consumer
 program (`act_on_feed`) proves the feed is consumable, not a memo.

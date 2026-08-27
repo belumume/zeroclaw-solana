@@ -100,10 +100,34 @@ jobs:
       # a prompt-injected agent and an arbitrary payee, and no plugin can defend itself against
       # its removal. The WIT arrived out of parity three times; this is the same class with a
       # worse blast radius, so it gets watched rather than trusted.
+      # `if: always()` IS LOAD-BEARING HERE, NOT HYGIENE. Without it this step inherits default
+      # step semantics and never runs once the parity step above goes red -- and that step reddens
+      # on ORDINARY UPSTREAM MOVEMENT, which is the resting state of a drift canary rather than an
+      # incident. Measured: this step was reported `skipped` on every red run from 2026-08-23 to
+      # 2026-08-26 inclusive, so the one check in this file that is about SECURITY rather than
+      # about interface drift was dark for the entire window in which the interface check was
+      # doing its job. The two are independent questions and neither may silence the other. It
+      # costs nothing: this workflow is a notification, attaches to no required context, and gates
+      # nothing either way. Re-derive rather than trusting that sentence:
+      #   gh run list --workflow=host-drift.yml --limit 10 --json databaseId,conclusion -q '.[].databaseId' \
+      #     | while read -r r; do gh api "repos/{owner}/{repo}/actions/runs/$r/jobs" \
+      #         --jq '.jobs[].steps[] | select(.name|test("__config")) | .conclusion'; done
+      #
+      # A MISSING CLONE IS `CANNOT CHECK`, NOT A FINDING. With `always()` this step also runs when
+      # the clone step itself failed, and "the file is not there" would then read as "upstream
+      # deleted the strip" -- a security alarm manufactured by a network blip, in the alarming
+      # direction. The two states are separated before either verdict is printed.
       - name: The host still strips a caller-supplied __config
+        if: always()
         run: |
           set -euo pipefail
-          F=/tmp/zeroclaw-host/crates/zeroclaw-plugins/src/runtime.rs
+          H=/tmp/zeroclaw-host
+          F="$H/crates/zeroclaw-plugins/src/runtime.rs"
+          if [ ! -d "$H" ]; then
+            echo "::warning::CANNOT CHECK: the upstream clone at $H is absent, so nothing was read."
+            echo "::warning::That is a failed clone, NOT evidence the strip was removed. Re-run this workflow."
+            exit 0
+          fi
           test -f "$F" || { echo "::error::$F is gone; the injection point moved and this check is blind"; exit 1; }
           # Assert on the CODE, not the comment beside it: a docstring can keep promising this
           # after the line is deleted.
@@ -182,3 +206,199 @@ jobs:
           fi
 
           ./scripts/check-host-compat.sh /tmp/pinned-host
+
+      # HOW TO READ A RED HERE, printed at the moment it goes red rather than left in a document
+      # nobody opens while triaging.
+      #
+      # This workflow is a NOTIFICATION, not a build gate: it is deliberately separate from ci.yml
+      # because a red means the OUTSIDE WORLD moved. But a canary that stays red gets learned
+      # around, and then it says nothing on the day it is right, so the red needs to carry its own
+      # triage instead of leaving every reader to re-derive the same classification.
+      #
+      # The two steps above answer DIFFERENT questions and only one of them is urgent:
+      #
+      #   HEAD parity  (the step that usually reddens)  upstream moved. Our components are compiled
+      #                                                 against the vendored copy and keep working.
+      #   PIN parity   (the step below it)              our own DOCUMENTED reproduction broke. A
+      #                                                 stranger following QUICKSTART gets
+      #                                                 `registered: 0`. This one is urgent.
+      #
+      # And within HEAD parity the classes are not equal. The step below prints exactly these four,
+      # one label per difference, because a single red is routinely made of several unrelated
+      # changes and collapsing them is how the urgent one gets waved through with the noise:
+      #
+      #   COSMETIC      a doc comment moved. Comments are not part of a component type, so nothing
+      #                 about registration changes. This is most of the traffic.
+      #   ADDITIVE      the host's world gained an IMPORT we never ask for. The host SATISFIES
+      #                 imports, so offering one that no component imports leaves every component's
+      #                 type alone. Re-vendor when convenient, not urgently.
+      #   BREAKING      any of three, and they are genuinely different failures: a type we vendor
+      #                 changed SHAPE (a variant added to `plugin-action` is the known case); the
+      #                 world gained an EXPORT we do not provide, which is looked up ON the
+      #                 component at instantiation and is simply absent; or OUR world imports
+      #                 something the host no longer offers, leaving an import nothing can resolve.
+      #   CANNOT CHECK  an anchor moved and nothing was compared. This is NOT an all-clear, and the
+      #                 step refuses rather than falling through to the reassuring class.
+      #
+      # WHY THE CLASSIFIER IS NOT JUST THE ENUM. `plugin-action` is the drift that bit us, so it
+      # was the only thing classified. Today's red contains no enum change at all: it is one
+      # world-membership change (`import secrets;`, added upstream 2026-08-22) and one doc comment
+      # in `logging.wit`. An enum comparison sees neither, so it could not classify any part of the
+      # red it was standing in front of.
+      #
+      # BY HAND, against the clone this job already made. Upstream's WIT lives at the REPO ROOT,
+      # `wit/v0/`, NOT under `crates/zeroclaw-plugins/` -- that directory holds only AGENTS.md,
+      # Cargo.toml, src and tests. `scripts/check-host-compat.sh` reads `$HOST/wit/v0` for the same
+      # reason. The authority, which is what the parity step above runs:
+      #   ZC_SKIP_HOST_BINARY=1 ./scripts/check-host-compat.sh /tmp/zeroclaw-host
+      # And the `plugin-action` case alone, on one line so it survives a copy-paste:
+      #   diff <(sed -n '/enum plugin-action/,/}/p' wit/v0/logging.wit | tr -d '\r') <(sed -n '/enum plugin-action/,/}/p' /tmp/zeroclaw-host/wit/v0/logging.wit | tr -d '\r')
+      # `tr -d '\r'` matches what check-host-compat.sh already does; without it a CRLF checkout
+      # reports BREAKING on a byte-identical enum, which is the alarming direction.
+      #
+      # THREE SEPARATE THINGS, kept apart because only one of them is a deferral:
+      #
+      #   1. THE RE-VENDOR IS DEFERRED ON MECHANISM, not on effort. Taking the host's current
+      #      `tool.wit` means taking `import secrets;` with it, which narrows the compatibility
+      #      envelope onto hosts at or after 2026-08-22 and OFF the pinned commit that QUICKSTART,
+      #      the frozen submission branch, the demo and the proof bundle all name. And
+      #      `check-host-compat.sh` derives the world from the HOST with no subset allowance, so
+      #      there is no partial re-vendor available: it is all of it or none of it.
+      #   2. THE COMPENSATING CONTROL IS THE PIN-PARITY STEP ABOVE. It asserts our `logging.wit`
+      #      is byte-identical to the PINNED host after QUICKSTART's REQUIRED patch, so the path a
+      #      reader actually walks is checked on every run. That is what makes the deferral safe
+      #      rather than merely convenient, and it is why syncing to HEAD would turn a passing
+      #      check red. Moving the pin and the QUICKSTART instructions together is the whole job.
+      #   3. THE `__config` CANARY IS UNRELATED TO EITHER. It watches a host-side SECURITY
+      #      behaviour, not an interface. Re-vendoring would not affect it, and its verdict says
+      #      nothing about whether to re-vendor. It shares this workflow only because it happens to
+      #      need the same upstream clone.
+      - name: how to triage this red
+        if: failure()
+        run: |
+          set -uo pipefail
+          H=/tmp/zeroclaw-host
+          echo "::notice::host-drift is a NOTIFICATION workflow. Red here means UPSTREAM moved."
+          echo "Classify before acting -- the comment block above this step has the full ladder."
+
+          if [ ! -d "$H/wit/v0" ]; then
+            echo "::warning::CANNOT CHECK: $H/wit/v0 does not exist, so nothing was compared."
+            echo "::warning::Either the clone step failed or upstream moved wit/v0. Classify by hand."
+            echo "::warning::Do NOT read this as ADDITIVE -- no comparison happened."
+            exit 0
+          fi
+          echo "denominator: wit files ours=$(ls wit/v0/*.wit 2>/dev/null | wc -l), upstream=$(ls "$H"/wit/v0/*.wit 2>/dev/null | wc -l)"
+
+          # SCOPE comes from check-host-compat.sh's OWN derivation rather than a second copy of it.
+          # Re-deriving the tool-plugin world here is exactly how the two drift apart, and drift is
+          # the thing being triaged. Comparing the whole directory instead would drag in
+          # channel/memory/sockets/ws-client, which cannot affect a tool plugin and whose noise is
+          # what trains people to ignore a canary. A wording change over there yields an EMPTY
+          # parse, which lands on CANNOT CHECK below rather than on a reassuring verdict.
+          MEMBERS=$(ZC_SKIP_HOST_BINARY=1 ./scripts/check-host-compat.sh "$H" 2>&1 \
+                    | sed -n 's/^ *world members (derived from the host): *//p' | head -1)
+          if [ -z "${MEMBERS// /}" ]; then
+            echo "::warning::CANNOT CHECK: could not read the derived tool-plugin world out of"
+            echo "::warning::check-host-compat.sh. Its derivation failed, or its output wording moved."
+            exit 0
+          fi
+          echo "world members in scope (derived, not listed): $MEMBERS"
+
+          world_pairs() {
+            sed -n "/^[[:space:]]*world[[:space:]]\+tool-plugin[[:space:]]*{/,/^[[:space:]]*}/p" "$1" 2>/dev/null \
+              | tr -d '\r' | grep -oE "^[[:space:]]*(import|export)[[:space:]]+[a-z][a-z0-9-]*" \
+              | awk '{print $1" "$2}' | sort -u
+          }
+          # Three normalizations, and the middle one is what stops a membership change being
+          # reported twice under two different labels. raw -> nonworld is exactly the world block,
+          # which section 1 owns. nonworld -> code is exactly the comments, which is what separates
+          # COSMETIC from BREAKING.
+          nonworld() {
+            tr -d '\r' < "$1" \
+              | sed '/^[[:space:]]*world[[:space:]]\+tool-plugin[[:space:]]*{/,/^[[:space:]]*}$/d'
+          }
+          code() { nonworld "$1" | sed -e 's://.*::' -e 's/[[:space:]]*$//' | grep -v '^$'; }
+
+          OURSEED=$(grep -lE "^[[:space:]]*world[[:space:]]+tool-plugin[[:space:]]*\{" wit/v0/*.wit 2>/dev/null | head -1)
+          THEIRSEED=$(grep -lE "^[[:space:]]*world[[:space:]]+tool-plugin[[:space:]]*\{" "$H"/wit/v0/*.wit 2>/dev/null | head -1)
+          BREAKING=0; ADDITIVE=0; COSMETIC=0; UNKNOWN=0
+
+          echo ""
+          echo "1. WORLD MEMBERSHIP  (what the host offers vs what our components were compiled to ask for)"
+          if [ -z "$OURSEED" ] || [ -z "$THEIRSEED" ]; then
+            echo "  ::warning::CANNOT CHECK: 'world tool-plugin' not found in one or both trees"
+            echo "            (ours='${OURSEED:-none}' upstream='${THEIRSEED:-none}'). The anchor moved."
+            UNKNOWN=$((UNKNOWN + 1))
+          else
+            OP=$(world_pairs "$OURSEED"); TP=$(world_pairs "$THEIRSEED")
+            echo "  members: ours=$(printf %s "$OP" | grep -c . || true), upstream=$(printf %s "$TP" | grep -c . || true)"
+            if [ -z "$OP" ] || [ -z "$TP" ]; then
+              echo "  ::warning::CANNOT CHECK: a world block was found but yielded no import/export lines."
+              UNKNOWN=$((UNKNOWN + 1))
+            else
+              while read -r kind name; do
+                [ -z "${name:-}" ] && continue
+                if [ "$kind" = export ]; then
+                  echo "  ::error::BREAKING  upstream's world now EXPORTS '$name' and our components do not."
+                  echo "            An export is looked up ON the component at instantiation. It is absent, so nothing registers."
+                  BREAKING=$((BREAKING + 1))
+                else
+                  echo "  ADDITIVE  upstream's world now IMPORTS '$name', which our components never ask for."
+                  echo "            The host satisfies imports; offering one nobody imports changes no component's type."
+                  ADDITIVE=$((ADDITIVE + 1))
+                fi
+              done <<< "$(comm -13 <(printf '%s\n' "$OP") <(printf '%s\n' "$TP"))"
+              while read -r kind name; do
+                [ -z "${name:-}" ] && continue
+                if [ "$kind" = import ]; then
+                  echo "  ::error::BREAKING  our world IMPORTS '$name' and upstream's no longer offers it."
+                  echo "            Our components carry an import the host cannot resolve; instantiation fails."
+                  BREAKING=$((BREAKING + 1))
+                else
+                  echo "  ADDITIVE  our world EXPORTS '$name' and upstream's no longer asks for it. An unused export is inert."
+                  ADDITIVE=$((ADDITIVE + 1))
+                fi
+              done <<< "$(comm -23 <(printf '%s\n' "$OP") <(printf '%s\n' "$TP"))"
+            fi
+          fi
+
+          echo ""
+          echo "2. TYPE SHAPE  (per world member we vendor: does the code differ, or only the prose around it)"
+          for f in $MEMBERS; do
+            ours="wit/v0/$f"; theirs="$H/wit/v0/$f"
+            if [ ! -f "$theirs" ]; then
+              echo "  ::warning::CANNOT CHECK  $f: named by the world, absent from the host clone"
+              UNKNOWN=$((UNKNOWN + 1)); continue
+            fi
+            if [ ! -f "$ours" ]; then
+              echo "  (not vendored) $f -- membership above already classified this"; continue
+            fi
+            if diff -q <(code "$ours") <(code "$theirs") >/dev/null 2>&1; then
+              if diff -q <(nonworld "$ours") <(nonworld "$theirs") >/dev/null 2>&1; then
+                if diff -q <(tr -d '\r' < "$ours") <(tr -d '\r' < "$theirs") >/dev/null 2>&1; then
+                  echo "  identical $f"
+                else
+                  echo "  (world block only) $f -- section 1 owns this, it is not a comment change"
+                fi
+              else
+                echo "  COSMETIC  $f: comments or blank lines only. Not part of the component type."
+                COSMETIC=$((COSMETIC + 1))
+              fi
+            else
+              echo "  ::error::BREAKING  $f: the CODE differs, so this is a different type and nothing registers."
+              diff <(code "$ours") <(code "$theirs") | head -8 | sed 's/^/            /'
+              BREAKING=$((BREAKING + 1))
+            fi
+          done
+
+          echo ""
+          echo "VERDICT  breaking=$BREAKING additive=$ADDITIVE cosmetic=$COSMETIC cannot-check=$UNKNOWN"
+          if [ "$BREAKING" -gt 0 ]; then
+            echo "::error::BREAKING drift. Re-vendor and move the pin before shipping anything."
+          elif [ "$UNKNOWN" -gt 0 ]; then
+            echo "::warning::PARTIALLY CLASSIFIED: $UNKNOWN check(s) could not look. Not an all-clear."
+          elif [ "$ADDITIVE" -gt 0 ] || [ "$COSMETIC" -gt 0 ]; then
+            echo "::notice::ADDITIVE/COSMETIC only -- our components still register. Re-vendor when convenient."
+          else
+            echo "::notice::no interface drift found here; the red came from another step."
+          fi

@@ -541,7 +541,11 @@ def main():
 
     for tool in ("ffmpeg", "magick"):
         if not shutil.which(tool):
-            print(f"FAIL  {tool} not on PATH", file=sys.stderr)
+            print(
+                f"CANNOT CHECK  {tool} is not on PATH, so no beat can be captured; "
+                "install it or add it to PATH.",
+                file=sys.stderr,
+            )
             return 2
 
     OUT.mkdir(parents=True, exist_ok=True)

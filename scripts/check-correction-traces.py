@@ -45,7 +45,25 @@ REPO = Path(__file__).resolve().parent.parent
 
 # check-all.py reads this exit code as COULD NOT CHECK and refuses to count it as a
 # pass, which is the only honest verdict when the gate cannot see its own inputs.
+# It does NOT block, because the reasons that reach it are all about the MACHINE: no .git
+# because the tree arrived as an archive, git absent from PATH, a sparse checkout. Nothing
+# in the repo is wrong and running it elsewhere fixes it.
 CANNOT_CHECK = 2
+
+# Read by check-all.py as CANNOT PROVE IT CAN FAIL, which BLOCKS the run.
+#
+# This gate's whole job is proving the trace patterns still FIRE. When a positive control
+# stops firing, the pattern behind it is dead: the scan above it still walks every surface,
+# still finds nothing, and still prints a clean line, so the gate certifies BLIND and its
+# silence reads downstream exactly like a pass. Measured before this existed: killing one
+# control sample made the gate print "that pattern is dead" and exit 2, and check-all
+# reported `n/a ... reported it cannot check` and returned 0. A control that can no longer
+# fail is worse than no control, because it now certifies.
+#
+# SCOPE, deliberately narrow. This code means the gate cannot produce the OPPOSITE verdict.
+# It is used for the CONTROLS -- the must-fire probes and the must-not-fire pins -- and not
+# for anything the controls DETECT, which is an ordinary finding and belongs at 1.
+CONTROL_DEAD = 3
 
 # A floor rather than a zero test, matching every sibling gate here (MIN_DOCS in
 # check-claim-coherence and check-doc-reachability, MIN_GATES in check-all). A floor
@@ -450,16 +468,21 @@ def _selftest_wiring() -> tuple[int, int]:
         encoding="utf-8",
     )
     live = ("planted.md", "THE ANCHOR SPAN", "control")
+    # Each case carries the substring its refusal must print, because an exit code alone cannot
+    # say WHICH check refused once several of them share one. The inert case is the reason: its
+    # planted corpus also holds a real trace, so deleting the inert check drops it to the
+    # ordinary finding path, which returns the same code. The message is what discriminates.
     cases = [
-        ("an unwaived trace is a finding", [], 1),
-        ("a LIVE carve-out waives it and passes", [live], 0),
+        ("an unwaived trace is a finding", [], 1, "correction trace"),
+        ("a LIVE carve-out waives it and passes", [live], 0, None),
         (
             "an INERT carve-out fails the gate",
             [("planted.md", "TEXT THAT MOVED", "c")],
-            2,
+            1,
+            "waived nothing",
         ),
         # Index 0 specifically: a bare `if idx` would route carve-out 0's spans into findings.
-        ("carve-out at index 0 waives rather than falling through", [live], 0),
+        ("carve-out at index 0 waives rather than falling through", [live], 0, None),
     ]
 
     # The OVER-CORRECTION control, which is what stops a pattern being widened until it eats the
@@ -471,13 +494,14 @@ def _selftest_wiring() -> tuple[int, int]:
 
     failed = 0
     try:
-        for label, allow, expect, trace, samples in [
-            (lbl, a, e, saved[3], saved[4]) for lbl, a, e in cases
+        for label, allow, expect, need, trace, samples in [
+            (lbl, a, e, nd, saved[3], saved[4]) for lbl, a, e, nd in cases
         ] + [
             (
                 "a pattern widened onto product honesty is refused",
                 [],
-                2,
+                1,
+                "must stay silent",
                 over_broad,
                 over_broad_samples,
             )
@@ -501,11 +525,12 @@ def _selftest_wiring() -> tuple[int, int]:
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
                 rc = main()
-            ok = rc == expect
+            said = buf.getvalue()
+            ok = rc == expect and (need is None or need in said)
             failed += not ok
             print(
                 f"  {'ok  ' if ok else 'FAIL'}  {label}"
-                + ("" if ok else f"  (rc={rc}, expected {expect})")
+                + ("" if ok else f"  (rc={rc}, expected {expect}; need={need!r})")
             )
     finally:
         (
@@ -696,15 +721,20 @@ def main() -> int:
                 f"an untested pattern cannot be trusted to fire.",
                 file=sys.stderr,
             )
-            return 2
+            return CONTROL_DEAD
         if not re.search(pat, normalise(probe), re.I):
             print(
                 f"FAIL  positive control for {name!r} did not fire; that pattern is dead.",
                 file=sys.stderr,
             )
-            return 2
+            return CONTROL_DEAD
 
     # And prove no pattern has been widened into the product-honesty it must never touch.
+    #
+    # NOT CANNOT_CHECK and NOT CONTROL_DEAD. Reaching this branch means the over-correction
+    # control WORKED: it caught a widened pattern eating a sentence the listing scores at 25%.
+    # That is a finding about the repo, so its code is 1. At 2 the aggregate would report a real
+    # defect as a non-blocking n/a, which is the one reading this gate must never produce.
     for sample in MUST_NOT_FIRE:
         for name, pat in TRACE:
             if re.search(pat, normalise(sample), re.I):
@@ -714,7 +744,7 @@ def main() -> int:
                     f"honesty this listing scores.\n      {sample[:150]}",
                     file=sys.stderr,
                 )
-                return 2
+                return 1
 
     # A pin that no longer appears in the surface it claims to quote is testing a sentence the repo
     # does not ship, and it says nothing about the text a judge actually reads. Reported rather
@@ -730,11 +760,14 @@ def main() -> int:
             f"the file; a pin nobody can trace is proving nothing.\n      {pin[:150]}",
             file=sys.stderr,
         )
-        return 2
+        return CONTROL_DEAD
 
     # An exclusion that waives nothing is the failure this file names in its own docstring:
     # invisible to --all, so it cannot be audited by the mechanism that is supposed to audit it.
     # Reported rather than tolerated, so a carve-out whose target text moves fails loudly.
+    # NOT CANNOT_CHECK and NOT CONTROL_DEAD either. An inert carve-out is an EXCLUSION nobody
+    # can audit, not a control; every pattern still fires and the gate can still fail. The
+    # docstring promises this makes the gate "refuse to pass", and only a finding code says so.
     inert = inert_carve_outs(ALLOW, fired)
     if inert:
         for i in inert:
@@ -745,7 +778,7 @@ def main() -> int:
                 f"Delete it, or re-anchor it on the span it is meant to protect.",
                 file=sys.stderr,
             )
-        return 2
+        return 1
 
     print(
         f"scanned {len(JUDGE_FACING) - len(missing)} judge-facing surface(s) and "

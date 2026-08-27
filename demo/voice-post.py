@@ -156,11 +156,18 @@ def main():
     args = ap.parse_args()
 
     if not shutil.which("ffmpeg"):
-        print("FAIL  ffmpeg not on PATH", file=sys.stderr)
+        print(
+            "CANNOT CHECK  ffmpeg is not on PATH, so nothing can be mastered; "
+            "install ffmpeg or add it to PATH.",
+            file=sys.stderr,
+        )
         return 2
     src = Path(args.source)
     if not src.exists():
-        print(f"FAIL  no such file: {src}", file=sys.stderr)
+        print(
+            f"CANNOT CHECK  no such source file: {src}; pass an existing path.",
+            file=sys.stderr,
+        )
         return 2
     dst = Path(args.out) if args.out else src.with_name(src.stem + "-mastered.m4a")
 

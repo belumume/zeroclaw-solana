@@ -10,14 +10,20 @@ which is the one path here that touches funds and sits behind a human checkpoint
 A refusal alone proves nothing -- a page that refused everything would look identical on the paid
 case. So this drives four directions and fails unless the page DISCRIMINATES:
 
-  PAID       a reference with a real settlement   -> refused, no Pay button, amount + signature
-  UNPAID     a reference with no history at all   -> payable, Pay button, QR
-  RPC DEAD   the PAID reference, endpoint aborted -> payable  (fail open on the network)
-  RPC 429    the PAID reference, rate-limited     -> payable  (fail open on a throttle)
+  paid               a reference with a real settlement    -> refused, no Pay button, amount + sig
+  unpaid             a reference with no history at all     -> payable, Pay button, QR
+  paid-rpc-dead      the PAID reference, primary aborted    -> refused, via the settlement proxy
+  paid-rpc-429       the PAID reference, primary throttled  -> refused, via the settlement proxy
+  paid-all-rpc-dead  the PAID reference, every host broken  -> payable  (fail open on the network)
 
-The last two are the point of the design and the easiest thing to get backwards: an RPC failure
-must never refuse a good link, because that failure is invisible to the shop while the untaken
-second payment simply does not happen.
+Fail-open in the safe direction is the point of the design and the easiest thing to get
+backwards: a network failure must never refuse a good link, because that failure is invisible to
+the shop while the untaken second payment simply does not happen. `unpaid` and `paid-all-rpc-dead`
+are what carry it.
+
+A dead PRIMARY is not that case. The page escalates to the proxy, which answers and sees the
+settlement, so ignorance was never the state and the card correctly refuses. Expecting a payable
+card there would be asserting that the double-payment hole stays open.
 
 The PAID case also composes its link with a DELIBERATELY WRONG amount. The card must show what the
 CHAIN says was paid (0.39 USDC), not what the link asked for, or the figure on a receipt is an echo
@@ -41,6 +47,7 @@ import re
 import socketserver
 import sys
 import threading
+import time
 import urllib.request
 from base64 import urlsafe_b64encode
 from pathlib import Path
@@ -116,9 +123,23 @@ def rpc(endpoint: str, method: str, params: list) -> object:
         return json.loads(r.read()).get("result")
 
 
-def check_fixtures(endpoint: str) -> list[str]:
-    """Both references, asserted against the chain before anything is rendered."""
-    problems = []
+def check_fixtures(endpoint: str) -> tuple[list[str], list[str]]:
+    """Both references, asserted against the chain before anything is rendered.
+
+    Returns (unresolved, findings), separated HERE rather than by reading the text back
+    later, because the two demand opposite responses and the caller cannot recover the
+    difference from a string. `unresolved` means this check could not decide: a reference
+    the pinned RPC pruned and the archival cross-check could not reach, or a fixture that
+    has rotted so the direction it tests proves nothing. `findings` means the page is
+    wrong, and the only member is the double-payment case, which is established AFTER a
+    successful archival lookup rather than by failing to look.
+
+    Collapsing them loses money. The workflow step renders exit 2 as a warning and exit 0,
+    which is right for a third-party outage and turns a customer being able to pay twice
+    into a green run.
+    """
+    problems: list[str] = []
+    findings: list[str] = []
     try:
         paid = rpc(
             endpoint,
@@ -134,7 +155,10 @@ def check_fixtures(endpoint: str) -> list[str]:
         # OSError covers URLError and socket timeouts; ValueError covers a body that is not JSON.
         # Every one of them means the same thing here: the fixtures are unchecked, so nothing
         # below can be trusted and the run must stop rather than report a verdict it cannot back.
-        return [f"could not reach {endpoint} to check the fixtures: {e}"]
+        # Returned as (unresolved, findings) like every other exit from this function. An
+        # unreachable endpoint is the cannot-check case by definition: nothing was looked at,
+        # so there is nothing to report about the page.
+        return [f"could not reach {endpoint} to check the fixtures: {e}"], []
 
     settled = [e for e in (paid or []) if not e.get("err")]
     if not settled:
@@ -199,7 +223,7 @@ def check_fixtures(endpoint: str) -> list[str]:
                         "ARCHIVAL_RPC, so the card still refuses"
                     )
                 else:
-                    problems.append(
+                    findings.append(
                         f"MONEY BUG: the pinned RPC {endpoint} can no longer see the settlement "
                         f"for {PAID_REFERENCE} (finalized on chain), and the page has NO archival "
                         "fallback. settledSignature() returns null, checkAlreadyPaid() returns "
@@ -226,7 +250,7 @@ def check_fixtures(endpoint: str) -> list[str]:
         )
     else:
         print(f"unpaid fixture  : {UNPAID_REFERENCE}  (0 signatures)")
-    return problems
+    return problems, findings
 
 
 def pay_url(reference: str, amount: str, lang: str = "pt") -> str:
@@ -312,14 +336,19 @@ def main() -> int:
     args = ap.parse_args()
 
     if not (PAGE_DIR / "index.html").exists():
-        print(f"FAIL  no built page at {PAGE_DIR / 'index.html'}", file=sys.stderr)
+        print(
+            f"CANNOT CHECK  no built page at {PAGE_DIR / 'index.html'}, so there is "
+            "nothing to drive; a missing local artifact, not a finding about the page.",
+            file=sys.stderr,
+        )
         print("      run: python webshop-pay/build.py", file=sys.stderr)
         return 2
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         print(
-            "FAIL  playwright is not installed:  pip install playwright",
+            "CANNOT CHECK  the local dependency `playwright` is not importable, so the "
+            "browser leg cannot run at all:  pip install playwright",
             file=sys.stderr,
         )
         return 2
@@ -327,14 +356,23 @@ def main() -> int:
     merchant, endpoint = read_pin(MERCHANT_MARKER), read_pin(RPC_MARKER)
     print(f"pinned merchant : {merchant}")
     print(f"pinned rpc      : {endpoint}")
+    # EXIT 1, NOT 2, AND THE DIFFERENCE IS LOAD-BEARING. This reads a local file and compares a
+    # pinned constant, so it cannot fail for an environmental reason: there is no network, no
+    # dependency and no built artifact involved. A mismatch is a finding ABOUT THE PAGE. The
+    # workflow wrapping this script converts exit 2 into a `::warning::` and exit 0, which is
+    # right for a genuine cannot-check and would silently swallow this one on a money path.
     if MINT not in (PAGE_DIR / "src" / "app.js").read_text(encoding="utf-8"):
         print(f"FAIL  the page does not know mint {MINT}", file=sys.stderr)
-        return 2
+        return 1
 
-    drift = check_fixtures(endpoint)
-    if drift:
-        for d in drift:
-            print(f"FAIL  {d}", file=sys.stderr)
+    unresolved, fixture_findings = check_fixtures(endpoint)
+    for d in fixture_findings:
+        print(f"FAIL  {d}", file=sys.stderr)
+    for d in unresolved:
+        print(f"CANNOT CHECK  {d}", file=sys.stderr)
+    if fixture_findings:
+        return 1
+    if unresolved:
         return 2
 
     profile = VIEWPORTS[args.viewport]
@@ -346,6 +384,13 @@ def main() -> int:
     shots = Path(args.shots).resolve() if args.shots else None
     if shots:
         shots.mkdir(parents=True, exist_ok=True)
+
+    # A refusal is asynchronous and its cost is not constant: the paid path makes up to four RPC
+    # calls once the primary has been pruned, so the time to refuse moves with proxy load. These
+    # bound the wait rather than guessing a budget that happens to work today.
+    REFUSE_DEADLINE_S = 25.0  # the page stops escalating well inside this
+    POLL_MS = 250
+    DWELL_MS = 4000  # for a card that must STAY payable, where there is nothing to wait FOR
 
     # name, reference, how to break the RPC, which hosts to break, must the Pay button survive?
     #
@@ -373,13 +418,15 @@ def main() -> int:
         "primary": endpoint.split("//", 1)[1].split("/")[0],
         "proxy": proxy.split("//", 1)[1].split("/")[0],
     }
+    # EXIT 1 for the same reason as the mint check above: both pins are read from local files and
+    # compared to each other, with nothing environmental that could make this fire spuriously.
     if hosts["primary"] == hosts["proxy"]:
         print(
             "FAIL  the page names the same host for RPC and the settlement proxy, so the "
             "single-host cases below cannot distinguish an escalation from the primary answering.",
             file=sys.stderr,
         )
-        return 2
+        return 1
 
     srv, port = serve()
     failures: list[str] = []
@@ -399,13 +446,43 @@ def main() -> int:
                         page.route(f"**{hosts[which]}**", handler)
 
                 page.goto(f"http://127.0.0.1:{port}{pay_url(reference, LINK_AMOUNT)}")
-                # Long enough for two round trips on the paid path; the check is asynchronous
-                # precisely so a slow endpoint cannot hold the card back.
-                page.wait_for_timeout(4000)
-                r = page.evaluate(PROBE)
+                # ASYMMETRIC ON PURPOSE, and collapsing the two directions is what made this
+                # gate intermittently red against a page that was behaving correctly.
+                #
+                # A card that must REFUSE has something to wait for, so wait for THAT and stop
+                # at the first refusal. A fixed budget here is a race: the refusal arrives after
+                # up to four RPC calls, and a loaded proxy pushes it past any constant, which
+                # reads as a broken page rather than as a slow endpoint. Polling is also
+                # normally faster, because it leaves as soon as the card refuses.
+                #
+                # A card that must STAY payable has nothing to wait for. The assertion is that
+                # a refusal never arrives, so the only instrument is a fixed dwell; polling
+                # would exit early and weaken it into asserting nothing.
+                refused_ms = None
+                if want_payable:
+                    page.wait_for_timeout(DWELL_MS)
+                    r = page.evaluate(PROBE)
+                else:
+                    t0 = time.monotonic()
+                    while True:
+                        r = page.evaluate(PROBE)
+                        if not r["payable"]:
+                            refused_ms = int((time.monotonic() - t0) * 1000)
+                            break
+                        if time.monotonic() - t0 >= REFUSE_DEADLINE_S:
+                            break
+                        page.wait_for_timeout(POLL_MS)
 
                 print(f"\n--- {name} ---")
                 print(f"  class={r['cardClass']}  payable={r['payable']}  qr={r['qr']}")
+                if not want_payable:
+                    # Printed so a closing margin is visible while it is still passing, rather
+                    # than arriving later as an intermittent red nobody can reproduce.
+                    print(
+                        f"  refused after: {refused_ms} ms"
+                        if refused_ms is not None
+                        else f"  NEVER refused within {REFUSE_DEADLINE_S:.0f}s"
+                    )
                 if breakage:
                     print(f"  rpc {breakage}: {calls['n']} request(s) intercepted")
                 cb = r["cardBox"]

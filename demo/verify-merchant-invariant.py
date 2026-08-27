@@ -317,7 +317,11 @@ def main() -> int:
     args = ap.parse_args()
 
     if not (PAGE_DIR / "index.html").exists():
-        print(f"FAIL  no built page at {PAGE_DIR / 'index.html'}", file=sys.stderr)
+        print(
+            f"CANNOT CHECK  no built page at {PAGE_DIR / 'index.html'}, so there is "
+            "nothing to drive; a missing local artifact, not a finding about the page.",
+            file=sys.stderr,
+        )
         print("      run: python webshop-pay/build.py", file=sys.stderr)
         return 2
 
@@ -325,7 +329,8 @@ def main() -> int:
         from playwright.sync_api import sync_playwright
     except ImportError:
         print(
-            "FAIL  playwright is not installed:  pip install playwright",
+            "CANNOT CHECK  the local dependency `playwright` is not importable, so the "
+            "browser leg cannot run at all:  pip install playwright",
             file=sys.stderr,
         )
         return 2
