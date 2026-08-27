@@ -729,6 +729,16 @@ def build_manifest(
         "prose_scan": prose_scan,
         "pinned_scripts": pinned_scripts,
         "units": [u["unit"] for u in (targets.get("units") or []) if u.get("unit")],
+        # Per-unit directive assertions, carried through so box_selfcheck can ASSERT on a
+        # definition it already collects. Emitted as its own top-level key rather than by
+        # widening `units`, because `units` is consumed as a list of STRINGS by both
+        # check_services and check_unit_definitions and changing its shape would break two
+        # readers to add a field neither of them wants.
+        "required_directives": {
+            u["unit"]: u["require_directives"]
+            for u in (targets.get("units") or [])
+            if u.get("unit") and u.get("require_directives")
+        },
         "provenance": provenance,
         "not_checked": not_checked,
     }

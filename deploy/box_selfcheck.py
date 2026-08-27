@@ -819,6 +819,99 @@ def check_unit_definitions(inv: dict, r: Result, reader=None) -> None:
     r.add("service-definitions", bool(defs), detail)
 
 
+
+def _directive_key(entry: object) -> str:
+    """The directive NAME out of one `parse_unit_definition` entry.
+
+    THE SECTION PREFIX IS THE WHOLE REASON THIS IS A FUNCTION. Entries come back as
+    `"[Service] ExecStartPre=/path"`, not `"ExecStartPre=/path"`, so the obvious
+    `entry.split("=", 1)[0]` yields `"[Service] ExecStartPre"` and matches nothing. Written that
+    obvious way first, it reported `no ExecStartPre= line at all` against a definition that
+    plainly had one -- a FALSE FAILURE on a safety row, which is the direction that gets a real
+    guard removed for crying wolf. It was caught by running the parser and printing what it
+    returns, never by re-reading the line.
+    """
+    if not isinstance(entry, str) or "=" not in entry:
+        return ""
+    head = entry.split("=", 1)[0].strip()
+    if head.startswith("["):
+        head = head.split("]", 1)[-1].strip()
+    return head
+
+def check_required_directives(inv: dict, r: Result) -> None:
+    """Assert that a unit DECLARES a directive it is supposed to declare.
+
+    WHY THIS EXISTS SEPARATELY FROM THE TWO CHECKS BESIDE IT, so nobody folds it back in.
+    `check_services` owns LIVENESS and is structurally blind here: a shop running with no
+    pre-check at all is ACTIVE, so it is green. `check_unit_definitions` owns PUBLICATION and
+    stops at publishing -- it has collected `ExecStartPre` into the /selfcheck payload since it
+    was written, and nothing ever read the value back. So the fact that zc-shop.service carried
+    ZERO `ExecStartPre` lines was sitting in a published document for anyone to grep, with two
+    green checks either side of it and a durable record asserting the opposite.
+
+    MEASURED 2026-08-27: `ExecStartPre` count 0 in zc-shop.service, `ExecStart` count 1 as the
+    positive control proving the unit was readable. The guard script existed, was executable,
+    and PASSED when run by hand -- which is precisely why nobody noticed. A script that agrees
+    with the current config looks exactly like a gate, and this one had never refused a start.
+
+    SUBSTRING, NOT EQUALITY, and the choice is deliberate in both directions. A full-path pin
+    goes red when the script is relocated or gains an argument, which punishes a correct change
+    and trains a reader to ignore the row -- this repo already has a recorded case of a gate
+    keyed to an implementation detail rather than the invariant. A substring keyed on the
+    script's own filename stays green across a move and goes red on the thing that matters:
+    the directive being absent. What it cannot catch is a directive that names the right file
+    and has been defanged with a leading `-`, so the drop-in refuses that form in prose instead.
+
+    A DEFINITION THAT COULD NOT BE READ IS `CANNOT CHECK`, NEVER A PASS. There is no third
+    verdict in `Result`, so it fails closed and says `CANNOT CHECK` in its own detail line: a
+    reader can tell an instrument that could not look from a unit that is genuinely missing the
+    directive, and neither one is allowed to read as clean. Folding an unreadable definition
+    into a pass would make this row report green on exactly the box where nothing can be
+    verified at all.
+    """
+    required = inv.get("required_directives") or {}
+    if not required:
+        return
+    defs = r.data.get("unit_definitions") or {}
+    violations: list[str] = []
+    cannot: list[str] = []
+    checked = 0
+    for unit in sorted(required):
+        wants = required[unit] or {}
+        parsed = defs.get(unit)
+        if not isinstance(parsed, dict):
+            cannot.append(unit)
+            continue
+        # `parse_unit_definition` yields directives as "Key=value" strings; a directive may
+        # legitimately appear more than once, so every occurrence is joined and searched.
+        lines = parsed.get("directives") or []
+        for key in sorted(wants):
+            checked += 1
+            needle = str(wants[key])
+            hay = " ".join(d for d in lines if _directive_key(d) == key)
+            if not hay:
+                violations.append(f"{unit}: no {key}= line at all (want {needle!r})")
+            elif needle not in hay:
+                violations.append(f"{unit}: {key}= does not mention {needle!r}")
+
+    total = checked + len(cannot)
+    if cannot and not checked:
+        r.add(
+            "required-directives",
+            False,
+            f"CANNOT CHECK 0 of {total}: no definition was readable for "
+            + ", ".join(cannot)
+            + "; this is the instrument failing, NOT a clean box",
+        )
+        return
+    detail = f"{checked - len(violations)} of {checked} required directive(s) present"
+    if violations:
+        detail += "; MISSING: " + "; ".join(violations)
+    if cannot:
+        detail += "; CANNOT CHECK (definition unreadable): " + ", ".join(cannot)
+    r.add("required-directives", not violations and not cannot, detail)
+
+
 def unit_verdict(
     unit: str, active_state: str, result: str, utype: str
 ) -> tuple[bool, str]:
@@ -920,6 +1013,10 @@ def run_checks() -> Result:
     check_pins(inv, r)
     check_services(inv, r)
     check_unit_definitions(inv, r)
+    # AFTER check_unit_definitions, which is what populates r.data["unit_definitions"].
+    # Ordering is load-bearing: reversed, this reads an empty dict and reports CANNOT CHECK
+    # for every unit on a perfectly healthy box.
+    check_required_directives(inv, r)
     return r
 
 
@@ -1568,6 +1665,103 @@ def self_test() -> int:
         report(
             "unit defs: no units configured FAILS and says nothing was published",
             r.checks[0]["ok"] is False and "0 of 0" in r.checks[0]["detail"],
+        )
+
+        # ------------------------------------------------------------------------------
+        # REQUIRED DIRECTIVES, both directions. Only-must-fail is satisfied by a check that
+        # refuses everything, which would wedge the box; only-must-pass by one that refuses
+        # nothing, which is the fail-open this row exists to close. Case 1 is the MEASURED
+        # 2026-08-27 state: zc-shop.service with no ExecStartPre at all, while the guard
+        # script sat on the box executable and passing when run by hand.
+        _req = {
+            "required_directives": {
+                "zc-shop.service": {"ExecStartPre": "whatsapp_posture_guard.sh"}
+            }
+        }
+        _with = parse_unit_definition(
+            "[Service]@Type=simple@ExecStart=/usr/bin/zeroclaw run@"
+            "ExecStartPre=%h/.zeroclaw/bin/whatsapp_posture_guard.sh@".replace("@", chr(10))
+        )
+        _without = parse_unit_definition(
+            "[Service]@Type=simple@ExecStart=/usr/bin/zeroclaw run@".replace("@", chr(10))
+        )
+        _other = parse_unit_definition(
+            "[Service]@ExecStart=/usr/bin/zeroclaw run@ExecStartPre=/usr/bin/true@".replace(
+                "@", '\\n'
+            )
+        )
+        _moved = parse_unit_definition(
+            "[Service]@ExecStart=/x@"
+            "ExecStartPre=/opt/guards/whatsapp_posture_guard.sh --strict@".replace("@", chr(10))
+        )
+
+        def _req_row(defs: dict, inv: dict = _req):
+            rr = Result()
+            rr.attach("unit_definitions", defs)
+            check_required_directives(inv, rr)
+            return rr
+
+        rr = _req_row({"zc-shop.service": _with})
+        report("required directives: the wired unit PASSES", rr.checks[0]["ok"] is True)
+        rr = _req_row({"zc-shop.service": _moved})
+        report(
+            "required directives: a relocated guard with an argument still passes "
+            "(keyed on the invariant, not on a path)",
+            rr.checks[0]["ok"] is True,
+        )
+        rr = _req_row({"zc-shop.service": _without})
+        report(
+            "required directives: THE MEASURED STATE (no ExecStartPre) FAILS and says MISSING",
+            rr.checks[0]["ok"] is False and "MISSING" in rr.checks[0]["detail"],
+        )
+        rr = _req_row({"zc-shop.service": _other})
+        report(
+            "required directives: an ExecStartPre naming another script FAILS "
+            "(present is not the same as correct)",
+            rr.checks[0]["ok"] is False,
+        )
+        rr = _req_row({})
+        report(
+            "required directives: an unreadable definition is CANNOT CHECK, never a pass",
+            rr.checks[0]["ok"] is False and "CANNOT CHECK" in rr.checks[0]["detail"],
+        )
+        rr = _req_row({"zc-shop.service": _with}, inv={})
+        report(
+            "required directives: nothing configured emits NO ROW "
+            "(a check with nothing to assert must not manufacture a green)",
+            rr.checks == [],
+        )
+
+        # MUTATION CONTROL on the one line the whole row depends on. `parse_unit_definition`
+        # returns "[Service] ExecStartPre=..." WITH a section prefix, so the obvious
+        # `split("=")[0]` matches nothing. Written that way first, it reported the directive
+        # ABSENT on a unit that plainly had it: a FALSE FAILURE on a safety row, which is the
+        # direction that gets a working guard torn out for crying wolf. It was caught by
+        # printing what the parser returns, never by re-reading the line. Gutting the prefix
+        # strip must turn the must-PASS case red.
+        _src = Path(__file__).read_text(encoding="utf-8")
+        _anchor = (
+            '    if head.startswith("["):@'
+            '        head = head.split("]", 1)[-1].strip()@'
+        ).replace("@", chr(10))
+        _mutant = "    head = head  # MUTANT: section prefix left on the key@".replace(
+            "@", '\\n'
+        )
+        report("required directives mutation: the anchor still exists", _anchor in _src)
+        report(
+            "required directives mutation: the mutant differs in LENGTH "
+            "(bytecode-cache safety)",
+            len(_mutant) != len(_anchor),
+        )
+        _ns: dict = {"__name__": "bsc_req_mutant", "__file__": __file__}
+        exec(compile(_src.replace(_anchor, _mutant, 1), "bsc_req_mutant", "exec"), _ns)
+        _mr = Result()
+        _mr.attach("unit_definitions", {"zc-shop.service": _with})
+        _ns["check_required_directives"](_req, _mr)
+        report(
+            "required directives mutation: with the prefix strip gutted, a CORRECTLY "
+            "wired unit reports MISSING",
+            _mr.checks[0]["ok"] is False,
         )
 
         # THE PUBLISHED PAYLOAD, which is what a remote reviewer actually fetches. The redaction
