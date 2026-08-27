@@ -1687,7 +1687,7 @@ def self_test() -> int:
         )
         _other = parse_unit_definition(
             "[Service]@ExecStart=/usr/bin/zeroclaw run@ExecStartPre=/usr/bin/true@".replace(
-                "@", '\\n'
+                "@", chr(10)
             )
         )
         _moved = parse_unit_definition(
@@ -1710,15 +1710,37 @@ def self_test() -> int:
             rr.checks[0]["ok"] is True,
         )
         rr = _req_row({"zc-shop.service": _without})
+        _absent = rr.checks[0]["detail"]
         report(
             "required directives: THE MEASURED STATE (no ExecStartPre) FAILS and says MISSING",
-            rr.checks[0]["ok"] is False and "MISSING" in rr.checks[0]["detail"],
+            rr.checks[0]["ok"] is False and "MISSING" in _absent,
+        )
+        report(
+            "required directives: ...and THAT failure is the ABSENT branch",
+            "no ExecStartPre= line at all" in _absent,
+        )
+        # THE FIXTURE HAS TO PARSE BEFORE THE ROW BELOW MEANS ANYTHING. Built with a
+        # doubled escape it arrived as one unsplittable line, so `parse_unit_definition`
+        # produced NO directive at all and the must-fail row below was satisfied through
+        # the ABSENT branch -- a green that merely duplicated `_without` and left
+        # present-but-wrong, the case this row is named for, untested.
+        report(
+            "required directives: the wrong-script fixture actually PARSES an "
+            "ExecStartPre (a collapsed newline would silently make it the absent case)",
+            [d for d in _other["directives"] if _directive_key(d) == "ExecStartPre"] != [],
         )
         rr = _req_row({"zc-shop.service": _other})
+        _wrong = rr.checks[0]["detail"]
         report(
             "required directives: an ExecStartPre naming another script FAILS "
             "(present is not the same as correct)",
             rr.checks[0]["ok"] is False,
+        )
+        report(
+            "required directives: ...and THAT failure is the WRONG-VALUE branch, "
+            "which is a different branch from the absent one above",
+            "does not mention" in _wrong
+            and "no ExecStartPre= line at all" not in _wrong,
         )
         rr = _req_row({})
         report(
@@ -1745,7 +1767,7 @@ def self_test() -> int:
             '        head = head.split("]", 1)[-1].strip()@'
         ).replace("@", chr(10))
         _mutant = "    head = head  # MUTANT: section prefix left on the key@".replace(
-            "@", '\\n'
+            "@", chr(10)
         )
         report("required directives mutation: the anchor still exists", _anchor in _src)
         report(
@@ -1753,8 +1775,31 @@ def self_test() -> int:
             "(bytecode-cache safety)",
             len(_mutant) != len(_anchor),
         )
+        _patched = _src.replace(_anchor, _mutant, 1)
+        # THE MUTANT MUST BE THE MUTATION THE COMMENT ABOVE DESCRIBES. Built with a
+        # doubled escape the replacement carried no real newline, so the `# MUTANT:`
+        # comment ran on and swallowed the `return head` beneath it: `_directive_key`
+        # then returned None for EVERY input, a broader and more destructive change
+        # than leaving the section prefix on. The row below still went red, so nothing
+        # looked wrong, and the prefix bug the control is named for stayed untested.
+        report(
+            "required directives mutation: the mutant terminates its own line "
+            "(a collapsed newline comments out the code beneath it)",
+            _mutant.endswith(chr(10)),
+        )
+        report(
+            "required directives mutation: `return head` still occupies its OWN "
+            "line after the patch, so it is a statement and not comment text",
+            "    return head" in _patched.split(chr(10)),
+        )
         _ns: dict = {"__name__": "bsc_req_mutant", "__file__": __file__}
-        exec(compile(_src.replace(_anchor, _mutant, 1), "bsc_req_mutant", "exec"), _ns)
+        exec(compile(_patched, "bsc_req_mutant", "exec"), _ns)
+        report(
+            "required directives mutation: the mutant leaves the SECTION PREFIX on the "
+            "key, which is the documented bug, rather than returning nothing at all",
+            _ns["_directive_key"]("[Service] ExecStartPre=/x")
+            == "[Service] ExecStartPre",
+        )
         _mr = Result()
         _mr.attach("unit_definitions", {"zc-shop.service": _with})
         _ns["check_required_directives"](_req, _mr)
