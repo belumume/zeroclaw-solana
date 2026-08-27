@@ -237,6 +237,33 @@ const docMutants = [
     to: "0xDEAD",
     expect: "no document publishes 0x12c",
   },
+  // THE LAST TWO BRANCHES OF THE ID CHECK, which no mutant above can reach.
+  //
+  // Every per-document mutant plants a WRONG id in ONE file, so the per-doc "which is not"
+  // failure fires and the gate short-circuits before either of these. They are only
+  // reachable when every document is consistent AND the full id is absent, so both have to
+  // edit all five at once. Measured while writing them: all five documents cite the id in
+  // full and none abbreviates it, so each mutant lands on exactly one branch.
+  {
+    name: "every document abbreviates the id and none gives it in full",
+    doc: "*",
+    from: REAL_ID,
+    // A valid prefix, comfortably over the gate's MIN of 10. Each token still satisfies
+    // programId.startsWith(tok), so nothing is reported as a wrong id and the run reaches the
+    // question this branch asks: is it auditable anywhere.
+    to: REAL_ID.slice(0, 20),
+    expect: "only ever abbreviate",
+  },
+  {
+    name: "no document cites the id at all, so the audited-program claim is unsourced",
+    doc: "*",
+    // Cut below MIN, so the scan skips every remaining token as too short to be a citation
+    // rather than reporting it as a mismatch. That is the difference between this branch and
+    // the one above: there the id is cited and truncated, here it is not cited.
+    from: REAL_ID,
+    to: REAL_ID.slice(0, 5),
+    expect: "no published document cites",
+  },
 ];
 
 function runGateWithAllDocsEdited(from, to) {
