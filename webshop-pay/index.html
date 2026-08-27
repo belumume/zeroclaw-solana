@@ -3098,6 +3098,42 @@ async function payWith(w){
     }
     tx.feePayer=payer;
     tx.recentBlockhash=(await conn.getLatestBlockhash()).blockhash;
+    // THE LAST CHECK BEFORE FUNDS MOVE. Both branches below signAndSendTransaction, which SIGNS
+    // AND BROADCASTS in one call, so this is the final instruction this page controls. Placed
+    // above the branch rather than inside either one, because a guard on one wallet shape and not
+    // the other is not a guard: it is a hole with a test in front of it.
+    //
+    // WHY IT IS NOT ENOUGH TO CHECK AT RENDER. The load-time checkAlreadyPaid() answers once, and
+    // watchForSettlement() re-asks on a timer, so what the card knows at the moment of a click is
+    // as old as the gap between two lookups. That gap is POLL_MS plus the lookup itself, and
+    // rpc() bounds each call at 6s with up to two calls per lookup, so the worst case is roughly
+    // eighteen seconds -- during which a link that has just settled is still showing a live Pay
+    // button. That is the whole double-payment window, and it sits on the one path that moves
+    // money.
+    //
+    // WHY NOT EARLIER IN THIS FUNCTION. Checking right after connect would be cheaper and would
+    // reopen most of the window, since building the transfer makes several RPC calls (getMint,
+    // two getAssociatedTokenAddress, getAccount, getLatestBlockhash) before anything is signed.
+    // The tightest available point is the one immediately before the signature is requested.
+    //
+    // FAIL-OPEN IS PRESERVED, and that is deliberate rather than incidental. checkAlreadyPaid()
+    // returns true ONLY on a positive settlement; every failure -- offline, DNS, 429, the 6s
+    // abort, malformed JSON -- collapses to null inside rpc(), reads as false here, and the
+    // payment proceeds. An unreachable endpoint must never refuse a good order, because that
+    // failure is invisible to the customer and to the shop, and refusing paying customers on an
+    // RPC blip is a worse defect than the one this line closes.
+    //
+    // THE HOLE IS NARROWED, NOT CLOSED, and the residual is worth stating plainly rather than
+    // glossing. A window remains between this answer and the broadcast: it is the WALLET UI time,
+    // however long the customer spends reading the approval prompt, which can be many seconds.
+    // No client-side check can close that -- only a server-side or on-chain uniqueness constraint
+    // would. What this buys is the difference between roughly eighteen seconds of render-time
+    // staleness and the duration of one wallet prompt.
+    //
+    // Refuses through the EXISTING refuse() path, via checkAlreadyPaid(), so the customer sees
+    // the same Paid card a reload would show. A second refusal path here would be a second card
+    // to keep in step with that one, and the two would drift.
+    if(await checkAlreadyPaid())return;
     status(T('approve','Approve the payment in your wallet…'));
     // Same split as the connect above. A legacy provider returns an object carrying a base58
     // signature string; a Wallet Standard wallet returns raw signature BYTES.
