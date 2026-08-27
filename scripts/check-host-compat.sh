@@ -150,6 +150,25 @@ selftest() {
   _st_rc  "unresolvable world member is a finding" 1
   _st_has "unresolvable member is counted" "resolved 3 of 4 world members"
   _st_has "unresolvable member is named in full" "zeroclaw:plugin/secrets@0.1.0"
+  # 2b. THE SAME MEMBER, RESOLVED. Mirror of case 2: once the resolver CAN reach a qualified
+  #     member it stops being unresolved and starts being described, and the description is where
+  #     the name used to be truncated at the last colon. The fixture declares the interface under
+  #     its qualified name, which no real .wit does -- it is the shape a WIDENED `iface_file`
+  #     produces, and widening is what this script's own fix line for case 2 recommends. Nothing
+  #     reaches this through an ordinary host today, which is why it is pinned rather than left to
+  #     be rediscovered by whoever follows that advice.
+  _st_tree "$R" "    export zeroclaw:plugin/secrets@0.1.0;
+" "alpha bravo"
+  _st_tree "$H" "    export zeroclaw:plugin/secrets@0.1.0;
+" "alpha bravo"
+  printf 'interface zeroclaw:plugin/secrets@0.1.0 {
+  get: func() -> string;
+}
+' > "$H/wit/v0/secrets.wit"
+  _st_run "$R" "$H"
+  _st_rc  "a resolved qualified member is a finding" 1
+  _st_has "a resolved qualified member is counted" "resolved 4 of 4 world members"
+  _st_has "a resolved qualified member is named in full" "exported interface(s): zeroclaw:plugin/secrets@0.1.0"
 
   # 3. REACHED ONLY THROUGH `use`. The kind is unestablished, so the reassuring import wording
   #    must not appear. This is the case that shipped "no rebuild is required today" for an
@@ -337,9 +356,22 @@ world_kind() {
 # The interface NAMES a file contributes to the world under one kind. `world_kind` collapses a
 # mixed file to its strongest kind, which is the right verdict and loses the detail a reader needs
 # to act: which interface is the break and which is merely drift.
+#
+# STRIP THE KEY, NOT EVERYTHING UP TO THE LAST COLON. An IFACES entry is `file=kind:member`, and
+# a member can itself carry colons (`zeroclaw:plugin/secrets@0.1.0`), so `${_p##*:}` printed the
+# fragment after the LAST one and named the interface something the host never wrote. That is the
+# same defect the member capture above already fixes for the unresolved path, with the same
+# consequence: a reader greps for a name that appears nowhere and concludes the tool is confused.
+#
+# It is not reachable through an ordinary host today, because `iface_file` resolves a member by
+# grepping for a bare `interface <name> {` and a qualified name never matches, so such a member
+# lands in UNRESOLVED instead and is reported in full. It becomes reachable the moment anyone
+# widens that resolver -- which is exactly what this script's own fix line tells a reader to do.
+# On every name without a colon the two forms are byte-identical, so this changes no verdict
+# reachable today and removes the trap the widening would arm.
 world_ifaces() { # $1=file basename  $2=import|export
   for _p in $IFACES; do
-    case "$_p" in "$1=$2:"*) printf ' %s' "${_p##*:}" ;; esac
+    case "$_p" in "$1=$2:"*) printf ' %s' "${_p#"$1=$2:"}" ;; esac
   done
 }
 
