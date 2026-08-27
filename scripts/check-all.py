@@ -36,7 +36,15 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MIN_GATES = 33  # below this the discovery walk is broken; see the docstring.
+MIN_GATES = 35  # below this the discovery walk is broken; see the docstring.
+# Raised from 33 to 35 on 2026-08-27, and the raise is TWO units for two separate reasons, stated
+# apart so neither hides inside the other. One unit is check-gate-wiring.py joining, which is the
+# ordinary case this rule exists for. The other is drift that was already here: discovery returned
+# 34 against a floor of 33 before that gate was written, so the constant was slack by one on
+# arrival and one more gate could have vanished unnoticed. That is the FOURTH time this number has
+# fallen behind its own rule, which is worth reading as a fact about hand-maintained constants
+# rather than about the people maintaining them. Re-derive rather than trusting this number:
+#   git ls-files 'scripts/check-*.py' | wc -l   ->  one MORE than this, check-all.py being excluded
 # Raised from 32 to 33 on 2026-08-27: check-reproduce-path-coverage landed on this branch and
 # the floor was not raised with it, leaving it slack by one against a tracked set of 34. A floor
 # slack by one detects nothing, which is this file's own stated argument, and this is the THIRD
