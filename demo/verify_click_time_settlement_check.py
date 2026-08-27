@@ -73,6 +73,16 @@ PROXY_MARKER = "var SETTLEMENT_PROXY='"
 # every case below would still pass by accident and report a guard that does not exist.
 GUARD_LINE = "if(await checkAlreadyPaid())return;"
 
+# The narration the page writes immediately before that lookup, and the reason it has to exist:
+# on the SOL branch the previous line on screen is the connect message, and this lookup can take
+# seconds (rpc() bounds each call at 6s and takes up to two per host), so without it the card
+# sits on a stale status while every other slow step in payWith() says what it is doing.
+#
+# DERIVED from app.js rather than restated here, for the reason the pins above are: a second copy
+# would drift, and the drifted copy is the one a reader trusts. Deleting the line makes the
+# derivation fail loudly rather than making this assertion vacuous.
+NARRATION_MARKER = "status(T('checkingpaid','"
+
 # A syntactically valid pubkey with no meaning. Nothing looks it up on a real network -- the
 # settlement responses are stubbed -- so it needs only to satisfy the page's own isPubkey().
 REFERENCE = "5Zzguz4NsSRFxGkHfM4KmJTNVPMJ2P3jFa2y8bTHY4kW"
@@ -176,6 +186,24 @@ WALLET_JS = """
 (() => {
   window.__zcSign = 0;
   const record = () => { window.__zcSign++; throw new Error('ZC-STUB-STOP'); };
+
+  // Every distinct status the page shows, in order. A MutationObserver rather than a poll,
+  // because the click-time narration is on screen only for the duration of one stubbed lookup
+  // -- milliseconds here -- and a poll would miss it and report a defect that is not there.
+  // The array lives on window, so it survives the refusal card replacing the element.
+  window.__zcStatus = [];
+  const seeStatus = () => {
+    const s = document.getElementById('status');
+    if (!s) return;
+    const t = (s.textContent || '').replace(/\\s+/g, ' ').trim();
+    const a = window.__zcStatus;
+    if (t && (a.length === 0 || a[a.length - 1] !== t)) a.push(t);
+  };
+  document.addEventListener('DOMContentLoaded', () => {
+    seeStatus();
+    new MutationObserver(seeStatus).observe(document.documentElement,
+      { subtree: true, childList: true, characterData: true });
+  });
   const SHAPE = '__SHAPE__', ADDR = '__PAYER__';
   if (SHAPE === 'legacy') {
     // A legacy provider hands back a PublicKey object, so build a real one from the page's own
@@ -215,6 +243,7 @@ PROBE = """() => {
     signCalls: window.__zcSign || 0,
     payable:   !!pay && pay.offsetParent !== null,
     text:      text,
+    statuses:  (window.__zcStatus || []).slice(),
   };
 }"""
 
@@ -357,6 +386,23 @@ def main() -> int:
         print(f"FAIL expected exactly 1 guard line in app.js, found {n_guard}")
         return 1
 
+    # SAME CONTROL, ON THE NARRATION. Derived from the page, so a reworded message follows and a
+    # DELETED one fails here rather than making the per-case assertion below quietly vacuous.
+    try:
+        narration = read_pin(src, NARRATION_MARKER)
+    except ValueError:
+        print(
+            f'FAIL app.js writes no status before the click-time lookup: no {NARRATION_MARKER!r}.'
+        )
+        print(
+            '     On the SOL branch the last line on screen is the connect message, so the card'
+        )
+        print(
+            '     would sit stale for the whole lookup while every other slow step narrates itself.'
+        )
+        return 1
+    print(f'narration     : {narration!r}')
+
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -412,6 +458,31 @@ def main() -> int:
                                 else "  -- a payment that should have proceeded was blocked"
                             )
                         )
+                    # The click-time lookup must be narrated, on both wallet shapes. A SOL link
+                    # is used deliberately (see AMOUNT), which is the branch where the previous
+                    # status is the connect message, so a missing narration leaves the card
+                    # claiming it is still connecting while the chain is asked.
+                    #
+                    # THE MUTANT IS EXEMPT, and not as a convenience: with the guard deleted
+                    # there is no lookup to narrate. The narration and the approve line then
+                    # execute in one synchronous tick with no await between them, so the two
+                    # writes coalesce into a single MutationObserver callback and the
+                    # intermediate text is never on screen to be observed. Measured: the mutant
+                    # records Connecting then Approve with nothing between, which is the correct
+                    # rendering of a page that asks the chain nothing.
+                    seen = r.get("statuses") or []
+                    if mutant:
+                        pass
+                    elif narration not in seen:
+                        failures.append(
+                            f"{tag}: the click-time lookup was never narrated; the card showed "
+                            f"{seen} and never {narration!r}"
+                        )
+                    elif seen.index(narration) == 0:
+                        failures.append(
+                            f"{tag}: {narration!r} was the first status shown, so it did not "
+                            "replace the earlier step's line"
+                        )
                     if not want_sign:
                         if r["payable"]:
                             failures.append(
@@ -444,8 +515,9 @@ def main() -> int:
         return 1
     print(
         f"PASS {len(CASES) * 2} case(s): the page re-checks settlement at click time on both "
-        "wallet shapes, still pays a good order, still pays when the chain cannot answer, and "
-        "the mutant without the guard signs a settled order (so this gate can fail)."
+        "wallet shapes, narrates that lookup rather than leaving the previous step's line on "
+        "screen, still pays a good order, still pays when the chain cannot answer, and the "
+        "mutant without the guard signs a settled order (so this gate can fail)."
     )
     return 0
 

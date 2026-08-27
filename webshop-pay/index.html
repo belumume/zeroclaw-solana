@@ -2424,6 +2424,7 @@ var STR={pt:{
  connecting:'Conectando a carteira…',
  loadinglibs:'Carregando as bibliotecas da Solana…',
  building:'Preparando a transferência…',
+ checkingpaid:'Conferindo se este pedido já foi pago…',
  approve:'Aprove o pagamento na sua carteira…',
  // "Enviado", not "Pago". The wallet has broadcast and nothing has confirmed yet, and this line
  // is on screen for the whole confirmation window, so calling it paid here is the same overclaim
@@ -3133,6 +3134,12 @@ async function payWith(w){
     // Refuses through the EXISTING refuse() path, via checkAlreadyPaid(), so the customer sees
     // the same Paid card a reload would show. A second refusal path here would be a second card
     // to keep in step with that one, and the two would drift.
+    // Narrate it, because this lookup is slow enough to look like a hang. rpc() bounds each call
+    // at 6s and takes up to two per host, so on a bad day the customer waits here with no new
+    // line on screen. On the SOL branch the last thing written was the connect message; on the
+    // token branch it was `building`, which by now describes a step that finished. Both read as
+    // stale, and every other slow step in this function says what it is doing.
+    status(T('checkingpaid','Checking this order has not already been paid…'));
     if(await checkAlreadyPaid())return;
     status(T('approve','Approve the payment in your wallet…'));
     // Same split as the connect above. A legacy provider returns an object carrying a base58
