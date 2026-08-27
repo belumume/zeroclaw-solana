@@ -35,6 +35,14 @@ named only inside a manually dispatched job counts as wired. Resolving that woul
 event triggers, path filters and `if:` conditions per step, which is a heavier instrument than the
 defect it would catch. The bound is real and belongs stated rather than implied.
 
+NOR DOES IT SEE MODES. Matching is on the PATH, so a gate whose `--selftest` is wired reads as
+invoked even when its main comparison runs nowhere. That is deliberate and it is load-bearing for
+two entries here: `demo/check_wit_parity.py` and `scripts/verify-output-ceiling-agreement.py` both
+have hermetic control modes that a runner can execute and main modes that need a second checkout or
+a toolchain, and wiring the half that can run is the right outcome rather than a dodge. But a
+future gate could hide a genuinely unrun main mode behind a wired selftest, and this floor would
+not notice. Whether the wired mode is the one worth running stays a judgement for review.
+
 EXIT CODES, the repo's protocol. 0 every tracked gate is invoked or declared. 1 at least one is
 neither. 2 could not check, which covers a missing workflow directory, a git failure, and a
 discovery walk returning fewer files than its floor, since a broken walk reports every gate clean
