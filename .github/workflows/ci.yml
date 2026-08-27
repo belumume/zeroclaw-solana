@@ -731,6 +731,15 @@ jobs:
       - name: the sensor reader scales correctly and refuses a malformed payload
         run: python3 scripts/read_sensor.py --selftest
 
+      # The host-compat gate's own 21-case harness. It is hermetic (generated fixture under
+      # mktemp, no repo wit, no host clone, no network), which is why it can run here rather
+      # than in the drift workflow that does the real comparison. Wired because the argument
+      # that gate makes for having a selftest applies to the selftest: run once by hand and
+      # never again, it is a hypothesis. Note check-all.py excludes that script by name, so
+      # this step is the only thing keeping the harness honest.
+      - name: the host-compat gate's controls actually gate
+        run: bash scripts/check-host-compat.sh --selftest
+
       # check-config-drift was the ONE tracked gate never shown to fail. It compares the
       # documented posture against the LIVE agent config, and no runner and no developer
       # machine has that config, so it returns 2 (cannot check) everywhere and its pass and
