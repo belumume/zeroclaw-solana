@@ -345,4 +345,11 @@ jobs:
         # Without this the fix is inert HERE, which is the only place the incident happened.
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/check-doc-links.py
+        # Exit 2 is this script's CANNOT VERIFY path (it raises, prints, and returns 2),
+        # not a finding about our docs. Its three sibling steps above already discriminate
+        # that from a real failure; this one did not, which made the one job whose whole
+        # point is telling those apart inconsistent about it.
+        run: |
+          python3 scripts/check-doc-links.py && exit 0; rc=$?
+          [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): check-doc-links.py printed CANNOT VERIFY. A third-party outage or an unreachable RPC is not a finding about our docs."; exit 0; }
+          exit "$rc"
