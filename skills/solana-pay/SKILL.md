@@ -209,16 +209,33 @@ as the rate that priced the order.
    1 USDC = 1 USD and SAY so.
 3. Build the payment URL in USDC as usual. Do NOT state the conversion in your reply yet: the
    figures you would quote are the unverified ones. Step 3b prints the published rate and date it
-   actually used, on stderr, and THAT is what you quote: "R$ X at rate Y (BCB PTAX, <date>) =
+   actually used on STDOUT, and THAT is what you quote: "R$ X at rate Y (BCB PTAX, <date>) =
    Z USDC".
 3b. **Pass the order value to `pay_link.py`, which fetches the published rate and re-derives:**
    `python3 tools/pay_link.py '<the full URL>' <lang> --brl <BRL amount> --quote '<their message>'`
    The script fetches BCB PTAX, corroborates it against the ECB, recomputes `BRL / published rate`
    at 2 decimals half-up, compares that to the `amount=` in the URL, and REFUSES to produce a link
-   if they disagree. It prints the rate and date it used on stderr; quote those, not yours.
+   if they disagree.
+
+   **WHAT IT PRINTS, and why the sink matters.** On a priced order STDOUT carries TWO lines: a
+   provenance line beginning `rate:`, then the pay link. The LAST line is always the link, on this
+   path and on the plain no-flag call alike, so take the link from the last line and quote the
+   figures from the `rate:` line. It looks like this:
+
+   ```
+   rate: R$ 2 at 5.1604 (BCB PTAX, corroborated by ECB within 0.35%, 2026-08-26) = 0.39 USDC
+   https://zeroclaw-shop-pay.pages.dev/?u=...
+   ```
+
+   Quote the rate, the source and the date from THAT line. They are the figures that actually
+   priced the link. The same line also goes to stderr for the operator's trace, which you do not
+   receive: you receive stdout and nothing else, so the `rate:` line is your only sight of the
+   published figure. Send the customer the LINK, never the `rate:` line verbatim.
+
    `--rate` is optional and is a CROSS-CHECK, never a source: the figure used is always the
-   published one, so passing your rate can only add a refusal, never relax anything. `--rate`
-   without `--brl` is refused, because there is no order value to price.
+   published one, so passing your rate can only add a refusal, never relax anything. It also tells
+   you nothing on success, so it is not a way to learn the published rate. `--rate` without
+   `--brl` is refused, because there is no order value to price.
 
    **`--quote` is REQUIRED with `--brl`** and carries the customer's or operator's message
    VERBATIM, copied rather than summarised. `--brl` must equal one `R$`/`reais` figure in that
@@ -242,8 +259,43 @@ as the rate that priced the order.
    hand the customer a link anyway: recompute and rebuild the request.
 4. Record the BRL amount, rate, and USDC amount to memory with the order; reconciliation
    reports both currencies.
-Never invent or cache a rate across orders; fetch fresh per invoice. If the rate fetch fails,
-say so and ask the operator for a rate rather than guessing.
+## A price question with no order attached
+
+"Quanto e R$ 1 em USDC?" and "what is your rate today?" are invoice questions without the invoice.
+Every rule above is written around an order, so read this section as the one that covers the case
+where there is no order yet.
+
+On 2026-08-27 a customer asked exactly that and the reply named a rate and a source date carried
+over from a previous order, presented as today's. It ran no tool at all. No link was produced so
+nobody was mispriced, and the shop still stated a provenance it had not consulted. Note which way
+that cuts: the answer with LESS behind it read as MORE authoritative, because it named the right
+source. Quoting the right provenance is not evidence that the provenance was consulted.
+
+**STATE A RATE ONLY WHEN IT CAME FROM A `rate:` LINE PRINTED IN THIS TURN.** Not from your memory
+store, not from a previous order, not from an earlier message in this conversation including one
+you wrote yourself, and not from your step-1 proposal fetch, which is the corroborator and has no
+authority to set a price. A remembered figure is stale by definition: PTAX publishes once per
+business day and nothing inside the conversation tells you whether it has moved since.
+
+So a price question with no order has exactly two honest answers, and inventing a third is the
+defect:
+
+- **PRICE IT.** If they named a value, that value is an order value. Build the request and run
+  step 3b. The `rate:` line it prints is a published figure and you may quote it.
+- **DECLINE THE NUMBER.** Otherwise say that the shop prices each order against the published BCB
+  PTAX rate at the moment of the order, and offer to do it now. In pt-BR: "Cada pedido e cotado
+  pela taxa publicada do BCB PTAX no momento do pedido. Me diz o valor e eu faco a cotacao agora."
+
+"Let me price that for you" is a better answer than a number you did not fetch, including on the
+days the number would have turned out right. The shop's whole claim is that the figure a customer
+is asked to pay is derived rather than asserted, and an asserted figure in the chat contradicts
+that claim whether or not it is correct.
+
+IF THE FETCH FAILS THERE IS NO LINK AND NO NUMBER. `pay_link.py` refuses when the sources are
+unreachable, disagree on the date, diverge past the band, or return an implausible figure, and no
+rate you or the operator supply can substitute: `--rate` is a cross-check and the published figure
+is the only one used. Say the published rate is unavailable and that the order cannot be priced
+right now. Do not fill the gap with a figure from anywhere else.
 
 ## Safety rules (these are instructions; the enforced versions live in the plugins)
 
