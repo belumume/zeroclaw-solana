@@ -47,7 +47,7 @@ one is refused in code, so "table 4, R$ 0.05" no longer produces a link, but a p
 amount still does. That band is wide on purpose, because this shop has no catalog and a narrow
 one would refuse legitimate orders. One free parameter of two is gone and the second is
 narrowed. Both are live on the node rather than pending: the running commit carries the band, and
-the node publishes that commit at `/selfcheck` so a reader can resolve it against this repo instead
+the node publishes that commit at `https://x402.perfpilot.dev/selfcheck` so a reader can resolve it against this repo instead
 of taking the claim.
 
 Built for a small operator who wants an agent touching money without handing it a signing key.
