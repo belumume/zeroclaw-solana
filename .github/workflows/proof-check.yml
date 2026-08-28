@@ -189,11 +189,15 @@ jobs:
           echo "the box self-check endpoint was unreachable on three attempts"
           exit 1
 
-      # A pull request's DISPLAYED diff is three-dot and reads as additions; merging applies the
-      # two-dot delta, which on a branch that forked before a squash merge deletes whatever landed
-      # in between. Four pull requests here have carried that. Same retry shape as the step above:
-      # 2 is transport and is retried, anything else is a real finding on the first attempt.
-      - name: no open pull request would revert work already on main
+      # Merging is a THREE-WAY merge against the merge base, so a branch being behind main
+      # deletes nothing by itself. This comment claimed the opposite until the gate below was
+      # re-keyed, and the claim was load-bearing: the gate asserted a two-dot against three-dot
+      # deletion count, which is a measure of behind-ness alone, and the four pull requests once
+      # cited here as having carried a reversion all merge clean. The gate now runs the merge for
+      # real and refuses only a genuine conflict or a rewind of work main already has; being
+      # behind is reported as a warning and does not fail this step. Same retry shape as the step
+      # above: 2 is transport and is retried, anything else is a real finding on the first attempt.
+      - name: no open pull request would conflict or rewind work already on main
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

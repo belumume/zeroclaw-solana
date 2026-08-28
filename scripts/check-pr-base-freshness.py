@@ -206,22 +206,49 @@ def rewinds(base: str, tree: str) -> tuple[list[tuple[str, str, str]], bool]:
     return found, capped
 
 
+def _base_state(r: dict) -> str:
+    """How the branch sits against the base, without letting a diverged branch read as behind."""
+    if not r["behind"]:
+        return "up to date"
+    if r.get("ahead"):
+        return f"behind {r['behind']}, ahead {r['ahead']}"
+    return f"behind {r['behind']}"
+
+
 def assess(base: str, head: str) -> dict | None:
     if run(["git", "rev-parse", "--verify", "--quiet", base + "^{commit}"])[0] != 0:
         return None
     if run(["git", "rev-parse", "--verify", "--quiet", head + "^{commit}"])[0] != 0:
         return None
     state, tree, raw = merged_tree(base, head)
-    behind = 0
+    behind, ahead = 0, 0
     if run(["git", "merge-base", "--is-ancestor", base, head])[0] != 0:
-        rc, out = run(["git", "rev-list", "--count", f"{head}..{base}"])
-        behind = int(out) if rc == 0 and out.isdigit() else 0
+        # Both sides, because "behind by N" alone reads as "only behind" and a DIVERGED branch
+        # is the commoner shape here. Left is what base has and head lacks; right is the branch's
+        # own commits.
+        rc, out = run(
+            ["git", "rev-list", "--left-right", "--count", f"{base}...{head}"]
+        )
+        parts = out.split()
+        if rc == 0 and len(parts) == 2 and all(x.isdigit() for x in parts):
+            behind, ahead = int(parts[0]), int(parts[1])
     if state == "failed":
-        return {"failed": raw, "behind": behind}
+        return {"failed": raw, "behind": behind, "ahead": ahead}
     if state == "conflict":
-        return {"conflict": True, "paths": conflicted_paths(raw), "behind": behind}
+        return {
+            "conflict": True,
+            "paths": conflicted_paths(raw),
+            "behind": behind,
+            "ahead": ahead,
+        }
     found, capped = rewinds(base, tree)
-    return {"conflict": False, "behind": behind, "rewinds": found, "capped": capped}
+    return {
+        "conflict": False,
+        "behind": behind,
+        "ahead": ahead,
+        "rewinds": found,
+        "capped": capped,
+    }
 
 
 # --------------------------------------------------------------------------- selftest plumbing
@@ -396,7 +423,7 @@ def selftest() -> int:
             continue
         silent = not r["rewinds"]
         print(
-            f"  {'SILENT ' if silent else 'FIRED  '} {head} behind by {r['behind']:>3}, "
+            f"  {'SILENT ' if silent else 'FIRED  '} {head} {_base_state(r)}, "
             f"{len(r['rewinds'])} rewind(s)  ({label})  (must be SILENT)"
         )
         ok = ok and silent
@@ -532,7 +559,7 @@ def main() -> int:
             continue
         checked += 1
         # The two signals are printed apart, because only one of them is a refusal.
-        base_state = "up to date" if r["behind"] == 0 else f"BEHIND by {r['behind']}"
+        base_state = _base_state(r)
         if r["conflict"]:
             verdict = f"CONFLICT in {len(r['paths'])} path(s)"
         elif r["rewinds"]:
@@ -540,7 +567,7 @@ def main() -> int:
         else:
             verdict = "merges clean"
         print(
-            f"  #{pr['number']:<5} {base_state:<14} {verdict:<28} {pr['headRefName']}"
+            f"  #{pr['number']:<5} {base_state:<20} {verdict:<28} {pr['headRefName']}"
         )
         if r.get("capped"):
             print(
@@ -559,9 +586,9 @@ def main() -> int:
 
     for pr, r in behind_only:
         print(
-            f"  WARNING  #{pr['number']} is {r['behind']} commit(s) behind {args.base}. It merges "
-            "clean and rewinds nothing, so this is not a refusal: it only means the green checks "
-            "on it were measured against an older main."
+            f"  WARNING  #{pr['number']} is {_base_state(r)} against {args.base}. It merges clean "
+            "and rewinds nothing, so this is not a refusal: it only means the green checks on it "
+            "were measured against an older main."
         )
 
     if not findings:

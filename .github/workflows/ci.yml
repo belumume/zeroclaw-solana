@@ -809,11 +809,12 @@ jobs:
       - name: the source-comment controls actually gate
         run: python3 scripts/check-source-comment-leaks.py --selftest
 
-      # This gate's positive control is the only thing proving it can fire: both bases it was
-      # written against are fixed now, so its real run is clean, and a detector that cannot
-      # detect returns exactly that. It lives here rather than beside the gate on the schedule
-      # because it needs the two pre-fix commits reachable, which this job's fetch-depth 0 gives
-      # and a default depth-1 checkout does not.
+      # This gate's controls are the only thing proving it can fire: on a healthy tree its real
+      # run is clean, and a detector that cannot detect returns exactly that. The selftest is
+      # hermetic and plants its own cases, so it needs no network, but it still reads real
+      # history: a fixed ancestor pair to rewind, and the two control/base-freshness-* tags whose
+      # commits must stay SILENT. That needs this job's fetch-depth 0, which a default depth-1
+      # checkout does not give.
       - name: the base-freshness control can actually fire
         run: python3 scripts/check-pr-base-freshness.py --selftest
 
