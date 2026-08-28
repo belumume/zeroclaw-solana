@@ -115,92 +115,33 @@ jobs:
         run: python -m playwright install --with-deps chromium chrome
 
       # ----------------------------------------------------------------------------
-      # THE SCOPE FLOOR.
+      # THE SCOPE FLOOR, now a gate file rather than a heredoc.
       #
-      # ci.yml invokes its gates by hardcoded name. scripts/check-all.py discovers them
-      # from `git ls-files scripts/check-*.py`. Those two disagree today:
-      # check-silent-regressions.py is discovered by check-all.py and invoked by no
-      # workflow, so it has never run on a runner. A gate added next week joins the
-      # discovery walk automatically and joins CI never.
+      # ci.yml invokes its gates by hardcoded name and scripts/check-all.py discovers them
+      # from git. Those two disagree by construction: a gate added next week joins the
+      # discovery walk automatically and joins CI never. This step makes that divergence
+      # fail loudly instead of accumulating.
       #
-      # This step makes that divergence fail loudly instead of accumulating. It does NOT
-      # run check-all.py, because check-all.py's set includes check-doc-links.py, which
-      # needs the network and is correctly kept off runners.
+      # It lived here as an inline `python - <<'PY'` block from 2026-08-19, covering
+      # scripts/check-*.py only. Two things were wrong with that. demo/ was never in scope,
+      # so demo/verify_click_time_settlement_check.py could ship on PR #142 wired into
+      # nothing and be caught only by a human reading the diff. And an inline block cannot
+      # be run locally or carry a control, so the floor itself was a check nobody had
+      # watched go red.
+      #
+      # scripts/check-gate-wiring.py is that block promoted and widened to both families.
+      # Its EXCLUDED list inherits this heredoc's entries save one, dropped because the gate it
+      # named is invoked by the live-smoke job below and the row had become a dead exclusion. No
+      # scripts/ verdict changes either way.
       # ----------------------------------------------------------------------------
-      - name: every tracked gate is either invoked by a workflow or declared network-excluded
-        run: |
-          python - <<'PY'
-          import pathlib, subprocess, sys
+      - name: every tracked gate is either invoked by a workflow or declared
+        run: python3 scripts/check-gate-wiring.py
 
-          # Declared, each with the reason it cannot run unattended and offline.
-          EXCLUDED = {
-              "check-doc-links.py":
-                  "fetches external URLs and a devnet RPC; a third-party outage must never "
-                  "turn a required gate red. Runs manually, and on THIS workflow's own "
-                  "`live smoke (never required)` job, which is scheduled and non-blocking. "
-                  "It is NOT in proof-check.yml: "
-                  "`grep -c check-doc-links .github/workflows/proof-check.yml` returns 0.",
-              "check-config-drift.py":
-                  "compares against ~/.zeroclaw/config.toml, which no runner has; it "
-                  "self-reports exit 2 (cannot check) rather than passing vacuously.",
-              "check-all.py":
-                  "the local aggregate runner, not a gate; it would pull check-doc-links.py "
-                  "onto the runner.",
-              "check-root-divergence.py":
-                  "compares the two WORKING ROOTS, and a runner clones exactly one, so it "
-                  "would SKIP on every run. A step that can only ever skip is a green check "
-                  "asserting nothing. Its control, test_check_root_divergence.py, builds its "
-                  "own synthetic pair in a temp dir and DOES run in ci.yml, so the checker's "
-                  "behaviour is verified here even though the checker cannot run here.",
-              "check-untracked-root-divergence.py":
-                  "same reason one layer down: it compares the UNTRACKED internal documents "
-                  "the two working roots share, and a runner clones one root and none of "
-                  "those gitignored documents, so it would report not-applicable on every "
-                  "run. Its control, test_check_untracked_root_divergence.py, builds its own "
-                  "synthetic pair in a temp dir and DOES run in ci.yml, with both mutation "
-                  "controls, so the checker's behaviour is verified here.",
-          }
-
-          tracked = subprocess.run(
-              ["git", "ls-files", "scripts/check-*.py"],
-              capture_output=True, text=True, check=True,
-          ).stdout.split()
-          gates = sorted(pathlib.Path(p).name for p in tracked if p.strip())
-
-          # A discovery walk that finds nothing would report a clean sweep. Floor it.
-          FLOOR = 10
-          if len(gates) < FLOOR:
-              print(f"FAIL  discovery found {len(gates)} gate(s), expected at least {FLOOR}.")
-              print("      The walk is broken, so a clean result here would mean nothing.")
-              sys.exit(2)
-
-          wf = "\n".join(
-              p.read_text(encoding="utf-8")
-              for p in sorted(pathlib.Path(".github/workflows").glob("*.yml"))
-          )
-
-          orphans = [
-              g for g in gates
-              if g not in EXCLUDED and f"scripts/{g}" not in wf
-          ]
-
-          print(f"{len(gates)} tracked gate(s); {len(EXCLUDED)} declared-excluded")
-          for g in sorted(EXCLUDED):
-              print(f"  skip  {g:<30} {EXCLUDED[g]}")
-
-          if orphans:
-              print("\nFAIL  gate(s) tracked in git but invoked by no workflow:\n")
-              for g in orphans:
-                  print(f"    scripts/{g}")
-              print(
-                  "\n  Each of these runs locally and has never run on a runner, so it "
-                  "protects\n  nothing during judging. Invoke it in a workflow, or add it "
-                  "to EXCLUDED here\n  with the reason it cannot run offline."
-              )
-              sys.exit(1)
-
-          print("\nok    every tracked gate is invoked or declared")
-          PY
+      # The floor's own controls, run here for the reason check-host-compat.sh's selftest was
+      # wired in: a control kept green by nothing is in exactly the position this gate warns
+      # about. Hermetic, and it plants a synthetic orphan that MUST fire.
+      - name: the gate-wiring floor can still fail
+        run: python3 scripts/check-gate-wiring.py --selftest
 
       # ----------------------------------------------------------------------------
       # The gate that answers the actual question: has anything that once worked stopped
@@ -265,6 +206,36 @@ jobs:
 
       - name: x402 earnings accounting
         run: python3 demo/test_x402_earnings.py
+
+      # chain_history.py prints a line that is FILMED, and three of its five figures are
+      # decided by how far the signature walk gets: a short walk does not announce itself,
+      # it prints a smaller true-looking number. These controls replace the RPC with a fake
+      # serving synthetic pages, so they need no network and cannot be reddened by a devnet
+      # rate limit. They carry three mutation controls of their own.
+      - name: the chain-history walk pages past the first page, and says when it is capped
+        run: python3 demo/test_chain_history.py
+
+      # THE THREE BELOW WERE SURFACED BY WIDENING check-gate-wiring.py's globs, and every one is
+      # a real gate with its own controls that no workflow named. They are grouped here because
+      # all three are hermetic and fast: measured 1s, 1s and under a second respectively.
+
+      # The wit-parity checker's own controls. Its MAIN mode needs a host checkout and belongs on
+      # the host-drift schedule, but --self-test is hermetic and is what proves the checker can
+      # still tell a 37-variant enum from a 38-variant one. That mismatch cost this project every
+      # plugin failing to instantiate for its whole early life.
+      - name: the wit-parity checker can still tell the enums apart
+        run: python3 demo/check_wit_parity.py --self-test
+
+      # The output-ceiling gate's controls. --selftest needs no cargo and no ledger, and says so:
+      # it runs its 35 controls against LEDGER_SHAPE when the gitignored ledger is absent, which
+      # is exactly a runner's situation. The full comparison needs cargo and stays out of here.
+      - name: the output-ceiling controls hold without a ledger or a toolchain
+        run: python3 scripts/verify-output-ceiling-agreement.py --selftest
+
+      # And the mutation control proving that gate's clone path can FAIL. A clone path that can
+      # only ever pass is worse than the honest refusal it replaced, because it carries a green.
+      - name: the output-ceiling clone-path controls are load-bearing
+        run: python3 scripts/mutation-check-output-ceiling-clone.py
 
       - name: the proof-transport predicate's controls actually gate
         run: python3 scripts/test_verify_proof_transport.py
