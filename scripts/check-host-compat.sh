@@ -16,7 +16,32 @@ set -uo pipefail
 
 # `strings X | grep -q Y` is a trap under pipefail: grep exits on the first match, strings
 # takes SIGPIPE, and the pipeline reports FAILURE on a successful match. Count instead.
+#
+# SUBSTRING matching is CORRECT for the two host-binary probes below and WRONG for the enum
+# variants, so the two matchers are separate on purpose. `wasmtime` and `wacore` are crate names
+# that legitimately appear INSIDE longer strings (paths, symbol names, panic messages), and
+# anchoring them would break a check that works. Do not "fix" this one to match the other.
 has() { [ "$(strings "$1" 2>/dev/null | grep -c -- "$2" || true)" -gt 0 ]; }
+
+# ANCHORED, because a plugin-action variant is a WHOLE NAME in the component's name section and
+# never a fragment of a longer word. `has()` read `read` out of `[method]input-stream.blocking-read`
+# and `write` out of half a dozen unrelated messages, so an unrelated binary scored as carrying
+# variants it has never heard of. MEASURED 2026-08-27 over the 38 real variants: `has()` reported 7
+# of 38 "present" in tar.exe and 5 in grep.exe. That is not a wholesale false clean -- a stale wasm
+# still fails on the rest -- but this section exists to catch ONE newly added variant, and a new
+# variant called `list`, `get`, `run` or `poll` would read as present on an artifact that predates it.
+#
+# The name section stores each variant as its own length-prefixed string, so `strings` emits it
+# either alone on a line or packed against its neighbours with a TAB between (observed: a real
+# component prints `disconnect<TAB>reconnect`). Splitting on whitespace and requiring an EXACT FIELD
+# is therefore the artifact's own form. Measured against both directions before it shipped:
+#   all 38 variants still found in all 10 built components  (no over-correction)
+#   tar.exe 7 -> 1, grep.exe 5 -> 4                          (fragments no longer count)
+# A whole-LINE match (`grep -x`) was tried first and is WRONG: it reports `disconnect` and
+# `reconnect` missing from every real component, because they share a line.
+carries_variant() {
+  [ "$(strings "$1" 2>/dev/null | tr -s ' \t' '\n' | grep -cxF -- "$2" || true)" -gt 0 ]
+}
 
 HOST="${1:-}"
 # ZC_REPO lets this run from a copy (a CRLF-stripped temp file on Windows, for instance)
@@ -64,8 +89,12 @@ fix()  { printf '        fix: %s\n' "$1"; }
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 _st_tree() { # $1=dir  $2=extra world member lines  $3=variants the fake component carries
+             # $4=OPTIONAL enum body, one `    name,` line per variant; defaults to alpha+bravo.
+             #    Parameterised so the variant-derivation cases can degrade the enum itself without
+             #    touching the cases that only care about the world.
   rm -rf "$1"; mkdir -p "$1/wit/v0" "$1/plugins/demo"
-  printf 'interface logging {\n  enum plugin-action {\n    alpha,\n    bravo,\n  }\n}\n' > "$1/wit/v0/logging.wit"
+  printf 'interface logging {\n  enum plugin-action {\n%b  }\n}\n' "${4:-    alpha,\n    bravo,\n}" \
+                                                                                         > "$1/wit/v0/logging.wit"
   printf 'interface types {\n  type json-string = string;\n}\n'                          > "$1/wit/v0/types.wit"
   printf 'interface plugin-info {\n  use types.{json-string};\n}\n'                      > "$1/wit/v0/plugin-info.wit"
   printf 'interface tool {\n  use types.{json-string};\n}\n'                             > "$1/wit/v0/tool.wit"
@@ -121,6 +150,25 @@ selftest() {
   _st_rc  "unresolvable world member is a finding" 1
   _st_has "unresolvable member is counted" "resolved 3 of 4 world members"
   _st_has "unresolvable member is named in full" "zeroclaw:plugin/secrets@0.1.0"
+  # 2b. THE SAME MEMBER, RESOLVED. Mirror of case 2: once the resolver CAN reach a qualified
+  #     member it stops being unresolved and starts being described, and the description is where
+  #     the name used to be truncated at the last colon. The fixture declares the interface under
+  #     its qualified name, which no real .wit does -- it is the shape a WIDENED `iface_file`
+  #     produces, and widening is what this script's own fix line for case 2 recommends. Nothing
+  #     reaches this through an ordinary host today, which is why it is pinned rather than left to
+  #     be rediscovered by whoever follows that advice.
+  _st_tree "$R" "    export zeroclaw:plugin/secrets@0.1.0;
+" "alpha bravo"
+  _st_tree "$H" "    export zeroclaw:plugin/secrets@0.1.0;
+" "alpha bravo"
+  printf 'interface zeroclaw:plugin/secrets@0.1.0 {
+  get: func() -> string;
+}
+' > "$H/wit/v0/secrets.wit"
+  _st_run "$R" "$H"
+  _st_rc  "a resolved qualified member is a finding" 1
+  _st_has "a resolved qualified member is counted" "resolved 4 of 4 world members"
+  _st_has "a resolved qualified member is named in full" "exported interface(s): zeroclaw:plugin/secrets@0.1.0"
 
   # 3. REACHED ONLY THROUGH `use`. The kind is unestablished, so the reassuring import wording
   #    must not appear. This is the case that shipped "no rebuild is required today" for an
@@ -170,6 +218,73 @@ selftest() {
   _st_rc  "a lost floor file is control-dead, not a finding" "$CONTROL_DEAD"
   _st_has "control-dead says nothing above is evidence" "CONTROL DEAD"
 
+  # 7. ONE FILE, BOTH KINDS. A .wit can declare several interfaces, and a world can import one of
+  #    them and export another out of that same file. The comparison loop walks FILES, so the file
+  #    got ONE verdict -- whichever kind parsed first -- and an unsatisfied EXPORT was reported as
+  #    "our WIT is behind" with "no rebuild is required today". Planted in BOTH worlds so the
+  #    ordinary byte-diff on world.wit stays quiet and the kind verdict is the only thing under test.
+  _st_tree "$R" "    import secrets;\n    export vault-export;\n" "alpha bravo"
+  _st_tree "$H" "    import secrets;\n    export vault-export;\n" "alpha bravo"
+  printf 'interface secrets {\n  get: func() -> string;\n}\ninterface vault-export {\n  dump: func() -> string;\n}\n' \
+    > "$H/wit/v0/secrets.wit"
+  _st_run "$R" "$H"
+  _st_rc    "a file carrying both kinds is a finding" 1
+  _st_has   "the export decides the verdict for a mixed file" "is EXPORTED by the host's tool-plugin world"
+  _st_has   "the mixed file names its exported interface" "exported interface(s): vault-export"
+  _st_has   "the mixed file discloses the import it also carries" "also supplies import(s): secrets"
+  _st_lacks "a mixed file never gets the no-rebuild wording" "no rebuild is required today"
+
+  # 8. A FLOOR ON THE VARIANT DERIVATION, asymmetric with the world floor until now: only the EMPTY
+  #    list was caught, so a derivation returning a HANDFUL ran the whole loop and printed a PASS
+  #    per component. An enum of one variant is not a discriminating check, and the components were
+  #    measured against a needle list that is not the enum, so this is CONTROL_DEAD, not a finding.
+  #    Degraded in BOTH trees, so the relative floor cannot fire and the absolute one is under test.
+  _st_tree "$R" "" "alpha bravo" "    alpha,\n"
+  _st_tree "$H" "" "alpha bravo" "    alpha,\n"
+  _st_run "$R" "$H"
+  _st_rc    "a collapsed variant derivation is control-dead, not a pass" "$CONTROL_DEAD"
+  _st_has   "a collapsed derivation says the parse broke" "the parse has broken"
+  _st_lacks "a collapsed derivation prints no unearned component PASS" "carries all"
+
+  # 8b. THE RELATIVE HALF of that floor, EXERCISED ALONE. Upstream flattens most of the enum onto
+  #     one line, so the capture returns three names where our vendored copy still yields eight.
+  #     THREE, not one, on purpose: the first draft of this case derived a single variant, which the
+  #     ABSOLUTE floor also catches, so it passed with the relative half deleted and proved nothing.
+  #     A case that cannot fail alone is not a case. The byte-diff fires here too and is a real
+  #     finding; CONTROL_DEAD outranks it deliberately, because a finding count printed under a
+  #     broken parse invites fixing N things and trusting the rest.
+  _st_tree "$R" "" "alpha bravo charlie" \
+    "    alpha,\n    bravo,\n    charlie,\n    delta,\n    echo,\n    foxtrot,\n    golf,\n    hotel,\n"
+  _st_tree "$H" "" "alpha bravo charlie" "    alpha,\n    bravo,\n    charlie, delta, echo, foxtrot, golf, hotel,\n"
+  _st_run "$R" "$H"
+  _st_rc  "a collapse against our vendored count is control-dead" "$CONTROL_DEAD"
+  _st_has "the relative floor reports both magnitudes" "returned 3 variant(s) against the 8 we vendor"
+
+  # 9. THE VARIANT MATCHER IS ANCHORED. `has()` is a substring match, so a component carrying
+  #    `alphabet` scored as carrying the variant `alpha`. Measured over the 38 real variants, that
+  #    read 7 of 38 as present in tar.exe. This section exists to catch ONE newly added variant, so
+  #    a new short name landing inside an unrelated string is the whole failure mode.
+  _st_tree "$R" "" "alphabet bravo"; _st_tree "$H" "" "alphabet bravo"
+  _st_run "$R" "$H"
+  _st_rc  "a variant present only as a fragment is a finding" 1
+  _st_has "the fragment-only variant is named as missing" "is MISSING: alpha"
+
+  # 9b. OVER-CORRECTION CONTROL for 9, and the reason a whole-LINE match was rejected: real
+  #     components pack neighbouring variants onto one `strings` line separated by a TAB, so an
+  #     exact-line matcher reports them missing from every plugin. A tab-separated pair must pass.
+  _st_tree "$R" "" "$(printf 'alpha\tbravo')"; _st_tree "$H" "" "$(printf 'alpha\tbravo')"
+  _st_run "$R" "$H"
+  _st_rc  "tab-packed variants still count as present" 0
+  _st_has "tab-packed variants report the newest declared" "newest declared: alpha bravo"
+
+  # 9c. THE MATCHER'S OWN CONTROL, which is what stops a future loosening from printing a full set
+  #     of unearned PASS lines. The needle is derived (longest variant, first and last character
+  #     removed), so it is a fragment of a real variant and never a variant.
+  _st_tree "$R" "" "alpha bravo"; _st_tree "$H" "" "alpha bravo"
+  _st_run "$R" "$H"
+  _st_has "the anchoring control runs and passes" "anchoring control:"
+  _st_has "the anchoring control names its derived needle" "\"lph\" is present as a fragment"
+
   # 6. The one output line a machine consumes: host-drift.yml parses it to scope its triage, and
   #    reads an empty parse as CANNOT CHECK. Reword it there and the workflow silently degrades.
   _st_tree "$R" "" "alpha bravo"; _st_tree "$H" "" "alpha bravo"
@@ -212,12 +327,52 @@ echo ""
 #    interface arrives as a finding rather than as silence.
 echo "wit/v0 tool-plugin world (the one that silently breaks registration)"
 
-# interface name -> the basename of the .wit declaring it, in the host's tree
+# file basename -> the kind the world uses it with, in the host's tree.
+#
+# ONE .wit CAN DECLARE SEVERAL INTERFACES, and a world can IMPORT one of them and EXPORT another
+# from that same file. This returned the FIRST pair it found, and the comparison loop below walks
+# FILES, so a file carrying both was reported once, under whichever kind happened to be parsed
+# first. DRIVEN 2026-08-27: a host declaring `interface secrets` and `interface vault-export` in
+# one `secrets.wit`, with `import secrets;` and `export vault-export;` in the world, printed a
+# single FAIL reading "is IMPORTED ... our WIT is behind" and "no rebuild is required today". The
+# EXPORTED half is a genuine instantiation break -- looked up ON the component and simply absent --
+# and it was invisible, reported as benign drift.
+#
+# EXPORT WINS, because the two kinds are not equal in consequence: an unsatisfied export breaks
+# registration on every plugin, an import we do not vendor only means our WIT is behind. Reporting
+# the weaker of the two is the reassuring direction, which is the one that ships.
 world_kind() {
+  _k=unknown
   for _p in $KINDMAP; do
-    case "$_p" in "$1="*) printf '%s' "${_p#*=}"; return ;; esac
+    case "$_p" in "$1="*)
+      _v="${_p#*=}"
+      [ "$_v" = export ] && { printf 'export'; return; }
+      _k="$_v" ;;
+    esac
   done
-  printf 'unknown'
+  printf '%s' "$_k"
+}
+
+# The interface NAMES a file contributes to the world under one kind. `world_kind` collapses a
+# mixed file to its strongest kind, which is the right verdict and loses the detail a reader needs
+# to act: which interface is the break and which is merely drift.
+#
+# STRIP THE KEY, NOT EVERYTHING UP TO THE LAST COLON. An IFACES entry is `file=kind:member`, and
+# a member can itself carry colons (`zeroclaw:plugin/secrets@0.1.0`), so `${_p##*:}` printed the
+# fragment after the LAST one and named the interface something the host never wrote. That is the
+# same defect the member capture above already fixes for the unresolved path, with the same
+# consequence: a reader greps for a name that appears nowhere and concludes the tool is confused.
+#
+# It is not reachable through an ordinary host today, because `iface_file` resolves a member by
+# grepping for a bare `interface <name> {` and a qualified name never matches, so such a member
+# lands in UNRESOLVED instead and is reported in full. It becomes reachable the moment anyone
+# widens that resolver -- which is exactly what this script's own fix line tells a reader to do.
+# On every name without a colon the two forms are byte-identical, so this changes no verdict
+# reachable today and removes the trap the widening would arm.
+world_ifaces() { # $1=file basename  $2=import|export
+  for _p in $IFACES; do
+    case "$_p" in "$1=$2:"*) printf ' %s' "${_p#"$1=$2:"}" ;; esac
+  done
 }
 
 iface_file() {
@@ -229,6 +384,7 @@ seed="$(grep -lE "^[[:space:]]*world[[:space:]]+tool-plugin[[:space:]]*\{" \
         "$HOST"/wit/v0/*.wit 2>/dev/null | head -1)"
 WORLD=""
 KINDMAP=""
+IFACES=""
 PARSED=0
 RESOLVED=0
 UNRESOLVED=""
@@ -250,7 +406,10 @@ if [ -n "$seed" ]; then
     if [ -n "$g" ]; then
       RESOLVED=$((RESOLVED+1))
       WORLD="$WORLD $g"
+      # EVERY pair is appended, never overwritten: `world_kind` resolves the precedence at lookup
+      # time so a file that appears twice under two kinds keeps both facts.
       KINDMAP="$KINDMAP $g=$k"
+      IFACES="$IFACES $g=$k:$m"
     else
       # A DROPPED MEMBER USED TO BE INVISIBLE. `iface_file` returns empty whenever its
       # non-recursive `$HOST/wit/v0/*.wit` grep misses -- a qualified name, an interface upstream
@@ -345,6 +504,12 @@ for f in $WORLD; do
       # The host REQUIRES this FROM the component. A plugin that does not export it cannot
       # instantiate, and nothing local can observe that.
       bad "$f is EXPORTED by the host's tool-plugin world and we do not vendor it"
+      printf '        exported interface(s):%s\n' "$(world_ifaces "$f" export)"
+      _imp="$(world_ifaces "$f" import)"
+      # Say so explicitly when one file carries both. Otherwise a reader who greps the world for
+      # this filename finds an `import` line, concludes the export verdict is wrong, and downgrades
+      # a break to drift by hand -- which is the same mistake this branch was making by itself.
+      [ -n "$_imp" ] && printf '        the SAME file also supplies import(s):%s -- the export decides the consequence\n' "$_imp"
       fix "copy $theirs into $REPO/wit/v0/$f, then rebuild every plugin"
       ;;
     import)
@@ -386,31 +551,109 @@ done
 #    artifact rather than the source.
 echo ""
 echo "built components carry the host's plugin-action variants"
-VARIANTS="$(sed -n '/enum plugin-action/,/}/p' "$HOST/wit/v0/logging.wit" 2>/dev/null \
-           | grep -oE '^[[:space:]]+[a-z][a-z0-9-]*' | tr -d ' ' | grep -v '^enum$')"
+_derive_variants() { # $1=path to a logging.wit
+  sed -n '/enum plugin-action/,/}/p' "$1" 2>/dev/null \
+    | grep -oE '^[[:space:]]+[a-z][a-z0-9-]*' | tr -d ' ' | grep -v '^enum$'
+}
+VARIANTS="$(_derive_variants "$HOST/wit/v0/logging.wit")"
+VCOUNT=$(printf '%s' "$VARIANTS" | wc -w)
+# OUR vendored copy, read ONLY as a MAGNITUDE reference and never as the scope. Deriving the scope
+# from our own tree would reproduce the exact staleness this script exists to catch, which is why
+# the world derivation reads the host; a count, though, is a positive control the host-side parse
+# has to clear, and we already carry a known-good enum to compare its SIZE against.
+OCOUNT=$(printf '%s' "$(_derive_variants "$REPO/wit/v0/logging.wit")" | wc -w)
 if [ -z "$VARIANTS" ]; then
-  # The needle list came back empty, so every `has` below would have searched for NOTHING and
+  # The needle list came back empty, so every match below would have searched for NOTHING and
   # reported every component clean. That is the uncalibrated zero, not a finding: nothing about
   # our components was measured either way.
   cant "could not read plugin-action variants from the host, so no component was measured"
   fix "check that $HOST/wit/v0/logging.wit still declares 'enum plugin-action'"
+elif [ "$VCOUNT" -lt 2 ] || { [ "$OCOUNT" -gt 0 ] && [ $((VCOUNT * 2)) -lt "$OCOUNT" ]; }; then
+  # A FLOOR ON THE DERIVATION, the same shape the world floor above uses and for the same reason.
+  # Only the EMPTY case was caught, and empty is the easy half: a derivation that returns a HANDFUL
+  # still runs the whole loop and prints a PASS per component, which is the reassuring sentence
+  # rather than the alarm. DRIVEN 2026-08-27: with the host's variants reformatted onto one line --
+  # `alpha, bravo, charlie,` -- the `^[[:space:]]+[a-z]` capture returned exactly ONE name and the
+  # section printed "PASS demo.wasm carries all 1 variants" and exited 0.
+  #
+  # CONTROL_DEAD and not FINDING, matching the world floor: the components were measured against a
+  # needle list that is not the enum, so every PASS printed here would be unearned. Nothing is wrong
+  # with the tree; the parse is wrong.
+  #
+  # TWO floors, because one of them cannot see the case that matters most.
+  #   RELATIVE  fewer than half of what our own vendored copy yields. Not a pinned number, because
+  #             a pinned one is the stale-list defect this file argues against everywhere else. It
+  #             trips on a COLLAPSE and stays quiet for ordinary churn: upstream removing a variant
+  #             leaves 37 against 38 and is caught by the byte-diff above, where it belongs.
+  #   ABSOLUTE  fewer than two, full stop. The relative floor is blind when BOTH copies parse the
+  #             same degraded way -- reformat the enum on both sides and 1 against 1 clears the
+  #             ratio -- and a one-needle search is not a discriminating check whatever it is
+  #             measured against. Not a version fact and so not a stale pin: an enum with fewer than
+  #             two variants is degenerate by definition.
+  dead "host plugin-action derivation returned $VCOUNT variant(s) against the $OCOUNT we vendor, so the parse has broken"
+  fix "check that $HOST/wit/v0/logging.wit still declares 'enum plugin-action' one variant per line"
 else
   found_any=0
+  # The LAST-DECLARED variants, derived from the enum's own order rather than listed. WIT enums are
+  # ordered and variants are appended, so the tail is the newest -- and the newest is the entire
+  # reason this section exists, since the drift that bit us three times was upstream ADDING one.
+  # Naming them in the verdict is what makes a green here readable: "carries all 38" says nothing
+  # about whether the one that matters was among them.
+  NEWEST="$(printf '%s\n' $VARIANTS | tail -3 | tr '\n' ' ')"
   for wasm in "$REPO"/plugins/*/*.wasm "$REPO"/plugins/*/target/wasm32-wasip2/release/*.wasm; do
     [ -f "$wasm" ] || continue
     found_any=1
     missing=""
     for v in $VARIANTS; do
-        has "$wasm" "$v" || missing="$missing $v"
+        carries_variant "$wasm" "$v" || missing="$missing $v"
     done
     name="$(basename "$wasm")"
     if [ -z "$missing" ]; then
-      ok "$name carries all $(echo "$VARIANTS" | wc -w) variants"
+      ok "$name carries all $VCOUNT variants (newest declared:$(printf ' %s' $NEWEST))"
     else
       bad "$name is MISSING:$missing"
+      # Which ones are missing decides how alarming this is. A component missing the NEWEST variant
+      # is the known drift shape -- built before an upstream addition -- and a rebuild fixes it. A
+      # component missing an OLD variant means something else is wrong with the artifact.
+      _mn=""
+      for v in $missing; do
+        case " $NEWEST " in *" $v "*) _mn="$_mn $v" ;; esac
+      done
+      [ -n "$_mn" ] && printf '        among them the newest declared:%s -- this is the upstream-added-a-variant shape\n' "$_mn"
       fix "rebuild it: cargo build --target wasm32-wasip2 --release"
     fi
   done
+
+  # THE MATCHER'S OWN POSITIVE CONTROL. Everything above is a list of needles and a matcher, and a
+  # matcher loose enough to say yes to anything prints a full set of PASS lines against an artifact
+  # that carries nothing. `has()` was that loose: it read `read` out of `blocking-read`, so an
+  # unrelated binary scored 7 of 38.
+  #
+  # The needle is DERIVED: the longest declared variant with its first and last character removed.
+  # That string is a substring of a real variant and is not itself a variant, so it MUST match under
+  # a substring matcher and MUST NOT match under an anchored one. If it matches here, the anchoring
+  # has been lost and every PASS above is unearned -- which is CONTROL_DEAD, not a finding about any
+  # component. Derived rather than written down so it cannot go stale when the enum changes.
+  _lv="$(printf '%s\n' $VARIANTS | awk '{ if (length($0) > length(m)) m = $0 } END { print m }')"
+  _needle="${_lv#?}"; _needle="${_needle%?}"
+  if [ "${#_needle}" -lt 3 ]; then
+    printf '  note  anchoring control skipped: longest variant "%s" is too short to derive a needle\n' "$_lv"
+  else
+    _probe=""
+    for w in "$REPO"/plugins/*/*.wasm "$REPO"/plugins/*/target/wasm32-wasip2/release/*.wasm; do
+      [ -f "$w" ] && has "$w" "$_lv" && { _probe="$w"; break; }
+    done
+    if [ -z "$_probe" ]; then
+      # Not a failure: with no component carrying the longest variant there is nothing to prove the
+      # anchoring against, and the loop above has already said so in its own terms.
+      printf '  note  anchoring control could not run: no built component carries "%s"\n' "$_lv"
+    elif carries_variant "$_probe" "$_needle"; then
+      dead "the variant matcher accepted \"$_needle\", which is a fragment of \"$_lv\" and not a variant"
+      fix "carries_variant() has lost its anchoring; every PASS above matched fragments, not names"
+    else
+      ok "anchoring control: \"$_needle\" is present as a fragment and correctly NOT counted"
+    fi
+  fi
   # Coverage, stated explicitly. Passing on 3 of 8 plugins while staying silent about the
   # other 5 would read as full confidence, which is the failure this whole script exists
   # to prevent one level up.
