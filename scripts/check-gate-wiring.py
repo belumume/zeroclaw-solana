@@ -111,9 +111,12 @@ FAMILIES: dict[str, tuple[tuple[str, ...], int]] = {
 # about EXTENSION, and that one was invisible for the same reason. Measured before widening: the
 # walk was python-only, so scripts/check-host-compat.sh and five mutation controls written in
 # shell were outside the corpus entirely. All six are real gates, all six are invoked, and the
-# floor said nothing about any of them. Widening moved the corpus 86 -> 94 and found 0 new
-# orphans, which is the expected shape for a REPORTING gap: nothing was exposed, the report was
-# simply narrower than its own summary line claimed. mutation-* rather than mutation-check-*
+# floor said nothing about any of them. Widening found NO new orphans, which is the expected
+# shape for a REPORTING gap: nothing was exposed, the report was simply narrower than its own
+# summary line claimed. No corpus totals in this comment, per the rule a few lines above: the live
+# figure is reprinted by the summary line on every run, and that is the only copy that cannot go
+# stale.
+# mutation-* rather than mutation-check-*
 # for the same reason one notch further out, since scripts/mutation-certify-x402.py is a mutation
 # control that the -check- spelling excluded by construction.
 # The demo .sh globs match nothing today and are deliberate: an empty glob costs one line and
@@ -470,7 +473,14 @@ def main() -> int:
     for path in sorted(declared_seen):
         print(f"  skip  {path}")
 
+    # BOTH FAILURE CLASSES ARE REPORTED, and the earlier shape returned on the first. Review
+    # called that a reasonable prioritisation; it costs a round trip, because a run carrying a
+    # broken pairing AND a genuine orphan printed only the pairing, and the orphan surfaced only
+    # after someone had fixed the pairing and run again. Worse than the delay, a finding list that
+    # silently stops at its first class reads as complete. Neither class is more urgent than the
+    # other and printing both costs nothing.
     harness_problems = verify_harness(strip_comments(wf), tracked_set)
+
     if harness_problems:
         print("\nFAIL  declared harness coverage that does not hold:\n")
         for problem in harness_problems:
@@ -479,7 +489,6 @@ def main() -> int:
             "\n  A declared pairing is re-derived every run precisely so it cannot rot into a\n"
             "  silencer. Fix the wiring, or remove the entry and let the gate be reported."
         )
-        return 1
 
     if orphans:
         print("\nFAIL  gate(s) tracked in git but invoked by no workflow:\n")
@@ -490,6 +499,8 @@ def main() -> int:
             "  deleting what it checks would be reported clean. Invoke it in a workflow, or\n"
             "  add it to EXCLUDED in this file with the reason it is not wired."
         )
+
+    if harness_problems or orphans:
         return 1
 
     print(f"\nok    all {scanned_total} tracked gate(s) invoked or declared")
