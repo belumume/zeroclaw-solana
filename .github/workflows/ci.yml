@@ -831,6 +831,18 @@ jobs:
       - name: the rate-agreement gate can still fail
         run: python3 scripts/check-pay-link-rate-agreement.py --selftest
 
+      # SKILL.md tells the model to quote the rate and date pay_link.py used. The model receives
+      # the command's STDOUT and nothing else, so an instruction naming any other sink is not a
+      # weak instruction, it is an impossible one, and the model complies by quoting the only rate
+      # it holds: the unverified proposal figure the same document forbids it from reporting. That
+      # fired on 2026-08-27. test_pay_link.py pins the SCRIPT and cannot see the DOCUMENT drifting
+      # back, so this gate names both artifacts and compares the emitted line to the published one.
+      - name: the documented rate sink is the sink the script prints to
+        run: python3 scripts/check-rate-provenance-channel.py
+
+      - name: the provenance-channel gate can still fail
+        run: python3 scripts/check-rate-provenance-channel.py --selftest
+
       # The demo video is frozen and submitted, so its claims cannot be corrected and the claims
       # map is the only remaining way to make them checkable. That makes the MAP judge-facing: a
       # claim pointing at a renamed script reads as a verification route and is a dead end, which
