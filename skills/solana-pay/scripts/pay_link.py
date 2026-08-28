@@ -669,12 +669,33 @@ if brl_arg is not None:
             f"No link was produced. The customer would have been asked to pay the wrong "
             f"figure. Recompute the conversion and rebuild the request."
         )
-    # State the provenance on stderr so the operator sees which rate priced the order without
-    # it contaminating stdout, which is the link and nothing else.
-    print(
-        f"rate: R$ {brl} at {rate} ({provenance}, {rate_date}) = {expected} USDC",
-        file=sys.stderr,
+    # THE PROVENANCE GOES TO BOTH SINKS, because they have different readers and only one of
+    # them is the operator.
+    #
+    # stderr is the OPERATOR's trace. It is where the echoed quote above already goes, and the
+    # daemon captures it, so an operator can check which published figure priced an order.
+    #
+    # stdout is the MODEL's only channel. The host's shell tool returns the command's stdout and
+    # nothing else, so a rate printed solely to stderr is not merely inconvenient for the model,
+    # it is unreachable. SKILL.md instructs the model to quote the rate and date this script
+    # actually used, and an instruction to quote a value the model cannot receive is not a weak
+    # instruction, it is an impossible one: the model complies by quoting the only rate it does
+    # hold, which is the unverified proposal figure the same SOP forbids it from reporting. That
+    # fired on 2026-08-27, and the reply named the ECB and the ECB's date while a BCB PTAX rate
+    # for a different date had priced the link. Nobody was mispriced, because both figures round
+    # to the same cent, and the shop still told a customer a provenance it had not used.
+    #
+    # ONE STRING, TWO SINKS, so the operator's trace and the model's copy cannot drift into
+    # disagreeing about which rate priced an order.
+    #
+    # THE LINK STAYS LAST ON STDOUT. The provenance is emitted before it, so "the last line of
+    # stdout is the pay link" holds on this path exactly as it already holds on the no-flag path,
+    # and a caller that reads only the final line is unaffected by this line existing.
+    rate_line = (
+        f"rate: R$ {brl} at {rate} ({provenance}, {rate_date}) = {expected} USDC"
     )
+    print(rate_line, file=sys.stderr)
+    print(rate_line)
 
 encoded = base64.urlsafe_b64encode(url.encode()).decode()
 print(f"{PAGE}?u={encoded}" + (f"&lang={lang}" if lang else ""))
