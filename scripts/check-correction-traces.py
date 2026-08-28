@@ -103,6 +103,10 @@ JUDGE_FACING = [
     # A document is in scope because a reader can WALK to it, never because of where it sits.
     "docs/AUDIT.md",
     "docs/transcripts/injection-battery.md",
+    # TESTING.md links to this one, and TESTING.md is in this list, so a reader walking from a judge
+    # surface reaches it in one hop. It documents an install that overwrites a live systemd drop-in
+    # gating the shop's start, which is the kind of prose whose accuracy has consequences.
+    "docs/POSTURE-GUARD-WIRING.md",
     "skills/solana-pay/SKILL.md",
 ]
 
