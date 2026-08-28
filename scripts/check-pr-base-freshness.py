@@ -546,7 +546,7 @@ def main() -> int:
             print(
                 f"         note: rewind scan capped at {MAX_PATHS} paths; this scan is partial"
             )
-        if r["conflict"] or r["rewinds"]:
+        if r["conflict"] or r.get("rewinds"):
             findings.append((pr, r))
         elif r["behind"]:
             behind_only.append((pr, r))
@@ -575,7 +575,7 @@ def main() -> int:
             print("    the three-way merge CONFLICTS in:")
             for path in r["paths"][:10]:
                 print(f"      {path}")
-        for path, main_blob, merged_blob in r["rewinds"][:10]:
+        for path, main_blob, merged_blob in r.get("rewinds", [])[:10]:
             print(
                 f"    {path} would be set back to {merged_blob[:8]}, a version main's history "
                 f"already superseded (main has {main_blob[:8]})"
