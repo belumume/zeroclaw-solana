@@ -136,8 +136,13 @@ def main() -> int:
         print(f"CANNOT CHECK: no {index}")
         return CANNOT_CHECK
 
-    # The page's own module graph, minus the document. Derived, so a member added to the
-    # deploy set later is asked about here without anyone remembering to add it.
+    # The page's module graph INTERSECTED WITH the deploy set, minus the document. Derived, so a
+    # member added to the deploy set later is asked about here without anyone remembering to add it.
+    #
+    # The intersection is deliberate AND it is COUPLED, which is the part a later reader cannot see
+    # from here: unserved_refs() in the required job already refuses any deploy whose page
+    # references something outside SERVE, so by the time this runs, a page ref outside SERVE should
+    # not exist. Decouple those two gates and this one narrows silently rather than failing.
     html = index.read_text(encoding="utf-8")
     served = {dp._as_served(n) for n in dp.SERVE}
     refs = sorted({dp._as_served(r) for r in dp.self_contained(html)} & served)
