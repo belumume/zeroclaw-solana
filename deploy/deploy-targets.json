@@ -62,6 +62,13 @@
       "why": "THE CHECKER ITSELF, and the literal ExecStart target of zc-selfcheck.service (`%h/.zeroclaw/bin/box_selfcheck.py`). It was absent from this map until 2026-08-16, which made it the one file on the box that could drift with nothing able to report it: the deployer does not copy what the map does not list, and the manifest check cannot compare a file that is not in `files`, so the drift detector was the single artifact exempt from drift detection. Adding it here closes both halves at once -- sync_workspace places it, and its hash lands in the manifest, so a stale checker running against a fresh manifest now reports ITSELF as differing. Measured at the time: the live box served a verdict whose mint-prohibition wording (`unexpected address` for a state target, and a detail line with no finding count) belongs to a box_selfcheck that predates the denylist rewrite, while every one of the 19 files it compared reported match. The checker was four commits stale and its own output was the only evidence. THE MIRROR CASE IS MEASURED AND IT MEANS THIS ENTRY CANNOT SHIP ALONE. A FRESH checker against a STALE manifest reports itself as differing just as loudly as the stale-checker case above, because the pin is on CONTENT and the comparison is symmetric. Installing only this file on a box whose SHOP-INVARIANTS.json was generated at an older commit turns `manifest` red with `bin/box_selfcheck.py: <new> != <old>`, the oneshot unit exits 1 because a DRIFTED verdict is a non-zero exit, and the gate then publishes ok:false on the public /selfcheck route. Measured 2026-08-20 against DEPLOYED_SHA a0a7c2c994ab: 7 checks all green before, 8 checks with `manifest` red after, and reinstalling the previous copy restored the green. There is no single-file remedy, because SHOP-INVARIANTS.json is gitignored and make_invariants.py derives it from `git ls-files` at ONE commit, so a hand-edited hash would only make the manifest lie about which commit it represents. This entry therefore deploys as part of a full tree sync that regenerates the manifest at the same commit. Being caught is the property the entry was added for, so a red here is the check working rather than a reason to loosen it."
     },
     {
+      "src": "scripts",
+      "dst": "bin",
+      "include": "whatsapp_posture_guard.sh",
+      "flatten": true,
+      "why": "The WhatsApp start gate, and the entry that brings it under drift detection at all. The copy that has been running lives at ~/whatsapp_posture_guard.sh -- OUTSIDE ZEROCLAW_HOME, which is the root every dst here resolves against, so no entry could reach it and nothing hashed it. That left two copies of one safety check, this repo's tracked scripts/whatsapp_posture_guard.sh and the box's, never compared against each other: the same two-copies shape this file already documents for pay_link.py, on a script whose whole job is refusing a fail-open config. Placing it at bin/ puts its hash in the manifest, so an edit to the deployed guard now reports as drift. EXPECT THIS TO READ MISSING ON THE FIRST RUN, because nothing has ever placed a file at that path; per the note above, a dst nobody has confirmed failing loud is the safe direction and the first run is how it gets confirmed. Scoped to the one filename because scripts/ also tracks test_whatsapp_posture_guard.sh, which is a CI control and has no business on the box. DO NOT DEPLOY THIS WITHOUT DIFFING THE TWO COPIES FIRST: a sync overwrites the box copy with this one, and if they differ, the difference is a finding to read rather than a file to clobber."
+    },
+    {
       "src": "demo",
       "dst": "agents/demo/workspace/tools",
       "include": "confirm_settlements.py",
@@ -70,10 +77,63 @@
     }
   ],
 
+  "_units_doc": [
+    "SHOULD THE UNIT FILES THEMSELVES COME UNDER THE DRIFT GATE? Decided 2026-08-27, after a",
+    "grep of the bare zc-shop.service file read ZERO ExecStartPre lines against a merged unit",
+    "that carries one from a drop-in. The answer is YES at the DIRECTIVE level and NO at the",
+    "distinction is the whole decision rather than a hedge.",
+    "",
+    "THE CASE FOR BYTE-LEVEL GATING, which is the obvious move and is what `map` already does",
+    "for every other artifact. A unit file is executable configuration on a box that takes",
+    "money; an edit to zc-shop.service is at least as consequential as an edit to a skill, and",
+    "skills are hashed. zc-qr.service and zc-tunnel.service are not even NAMED anywhere in this",
+    "file, so nothing notices if either changes or disappears, and nothing asserts that",
+    "zc-shop's own ExecStartPre is still there.",
+    "",
+    "WHY IT IS REFUSED ANYWAY, on two grounds that are mechanical rather than aesthetic.",
+    "",
+    "FIRST, THE SCHEMA CANNOT EXPRESS IT. Every `dst` here resolves against ZEROCLAW_HOME.",
+    "Units live in ~/.config/systemd/user, which is not under that root, so a unit entry in",
+    "`map` is not merely unconventional, it has nowhere to point.",
+    "",
+    "SECOND, AND THE REASON THAT WOULD SURVIVE FIXING THE FIRST: a byte comparison needs a",
+    "tracked copy to compare against, and no tracked copy of zc-shop.service exists. Writing",
+    "one from inference and hashing it would make the manifest assert a fiction, and the",
+    "manifest is the artifact whose whole value is that it does not. The consequence is already",
+    "measured in this repo: deploy/x402-feed-gate.service was committed as a proposal with an",
+    "ExecStart pointing at a binary that does not exist, and installing it verbatim would have",
+    "failed 203/EXEC on every start. A guessed unit is worse than no unit, because someone will",
+    "eventually cp it. It would also be red forever until someone reconciled it, and this file",
+    "already records what a permanent red does: `a red that never changes reads as a known",
+    "issue`, which is how the mint scan sat broken while reporting.",
+    "",
+    "WHAT SHIPS INSTEAD: `require_directives` above, asserted by box_selfcheck against the",
+    "definition it ALREADY collects from `systemctl cat`. It needs no tracked unit file, it",
+    "cannot assert a fiction because it only ever states a positive requirement, it survives a",
+    "unit being legitimately reorganised, and it goes red on the one thing that matters. It also",
+    "reaches drop-ins for free, since `systemctl cat` merges them.",
+    "",
+    "AND THE GUARD SCRIPT ITSELF IS NOW BYTE-GATED, which is the half that was genuinely",
+    "missing. Its `map` entry above hashes it. So the split is: the SCRIPT is content and gets a",
+    "hash; the UNIT is a declaration and gets an assertion.",
+    "",
+    "zc-qr.service AND zc-tunnel.service ARE DELIBERATELY STILL ABSENT FROM `units`. Adding",
+    "them is one line each and it was not done, because `units` means MUST BE ALIVE and neither",
+    "has been observed. If zc-qr is a oneshot that ran once to link a session, listing it",
+    "manufactures a permanent red on a healthy box, which is the failure this file already warns",
+    "about twice. The honest sequence is to read their type and state off the box first, then",
+    "add them with the verdict their type deserves. Until then their absence is a KNOWN gap",
+    "stated here rather than an oversight, and it is the one thing on this list still owed."
+  ],
+
   "units": [
     {
       "unit": "zc-shop.service",
-      "why": "The agent daemon. Nothing else on this list matters if it is down."
+      "why": "The agent daemon. Nothing else on this list matters if it is down.",
+      "require_directives": {
+        "ExecStartPre": "whatsapp_posture_guard.sh"
+      },
+      "why_require_directives": "WHAT THIS ROW ASSERTS AND WHY NOTHING ELSE DOES. zc-shop.service takes its ExecStartPre from a systemd drop-in at ~/.config/systemd/user/zc-shop.service.d/10-posture-guard.conf, so grepping the bare unit file reads ZERO in both the wired and the unwired world and cannot answer the question; `systemctl --user cat` merges drop-ins and is the surface that can. Read that way on 2026-08-27 the box reports ExecStartPre 1 and ExecStart 1. The liveness row above cannot see this either -- a shop with no pre-check running is ACTIVE, so it is green -- and check_unit_definitions already COLLECTS the merged definition and only PUBLISHES it, so the directive has been sitting in the /selfcheck payload with nothing reading the value back. This field is the assertion, and it is what makes losing the guard loud. The value is a SUBSTRING matched against the joined directive values rather than a full path, so relocating the script or adding arguments does not turn it red while deleting the drop-in does. Pulling deploy/zc-shop.service.d/ under pressure is the correct move at the wrong moment, and this ensures the next hourly selfcheck says so out loud instead of the guard quietly staying gone."
     },
     {
       "unit": "zc-feed.timer",

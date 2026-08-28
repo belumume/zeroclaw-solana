@@ -224,6 +224,13 @@ key on that prefix, and this one needs the public internet and a live host.
 
 The runtime check that gates startup is `scripts/whatsapp_posture_guard.sh`, which runs as
 `ExecStartPre` and refuses to start the shop when the WhatsApp group posture is fail-open.
+The unit file is the wrong surface to grep for that. `ExecStartPre` appears zero times in
+`zc-shop.service`, with `ExecStart` at one as the positive control proving the unit was
+readable, because systemd merges `<unit>.d/*.conf` drop-ins and the directive is supplied by
+`~/.config/systemd/user/zc-shop.service.d/10-posture-guard.conf`. Read the merged unit with
+`systemctl --user cat zc-shop.service`, which is the command that merges them.
+[docs/POSTURE-GUARD-WIRING.md](docs/POSTURE-GUARD-WIRING.md) carries this repo's tracked copy
+of that drop-in, the two-way proof, and the one-line escape hatch.
 It exists as a start gate rather than a comment because on this host build an empty
 `allowed_groups` means permit-all rather than permit-none, and the live config neutralises
 that with a dummy JID matching no real group. That dummy looks like junk, so the realistic
@@ -231,7 +238,8 @@ failure is somebody tidying it away and silently reopening every group the accou
 to. This project has already had that incident once. The guard fails closed, since a shop
 that will not boot is recoverable and a shop that answers a school group is not, and it was
 observed both refusing and passing rather than only refusing: flipping the policy open made
-the daemon refuse to start, and reverting started it immediately. Its controls are
+the daemon refuse to start, and reverting started it immediately, recorded in
+`docs/transcripts/whatsapp-allowlist-gate.md`. Its controls are
 `scripts/test_whatsapp_posture_guard.sh`, in both directions, because only-must-refuse is
 satisfied by a guard that refuses everything and only-must-pass by one that refuses nothing.
 
