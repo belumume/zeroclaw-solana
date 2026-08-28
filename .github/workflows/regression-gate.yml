@@ -363,3 +363,18 @@ jobs:
           python3 scripts/check-doc-links.py && exit 0; rc=$?
           [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): check-doc-links.py printed CANNOT VERIFY. A third-party outage or an unreachable RPC is not a finding about our docs."; exit 0; }
           exit "$rc"
+
+      # THE ONE CHECK POINTED AT THE DEPLOYMENT RATHER THAN AT THE REPO. Every other pay-page
+      # check under demo/ serves webshop-pay/ over loopback, so it asks whether the REPO is
+      # correct. The desktop wallet path was dead on the live origin for twelve days with all
+      # of them green, because the missing file was present on disk and absent from the upload.
+      #
+      # Exit 3 is deliberate and is NOT warned below: it means the positive control stopped
+      # firing, so the probe can no longer tell a served asset from the fallback. That is a
+      # defect in this repo rather than an outage, and it must stay red.
+      - name: the live origin serves every asset the pay page imports
+        if: always()
+        run: |
+          python3 demo/verify_origin_serves_deploy_set.py && exit 0; rc=$?
+          [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): verify_origin_serves_deploy_set.py could not reach the origin. Not a finding about the page."; exit 0; }
+          exit "$rc"

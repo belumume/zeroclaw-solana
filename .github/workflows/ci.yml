@@ -519,6 +519,18 @@ jobs:
       - name: the pay-page deployer's staging and ref checks can fail
         run: python3 scripts/deploy-pay-page.py --selftest
 
+      # The LIVE half of the same claim, classifier only. The probe itself reaches a third
+      # party and therefore lives in regression-gate.yml's `live smoke (never required)` job;
+      # what runs here is its verdict logic, driven on synthetic responses with no network.
+      #
+      # It earns a required slot because the shape it decides is the one every existing check
+      # got wrong: on this origin an absent asset answers 200 with the page, so status is
+      # useless and only the content type discriminates. A classifier that stops telling those
+      # apart would make the live probe green on a dead pay path, which is the state that
+      # already shipped for twelve days.
+      - name: the origin checker can tell a served asset from the SPA fallback
+        run: python3 demo/verify_origin_serves_deploy_set.py --selftest
+
       # The compliance ledger claims slop-cleanliness across the judge-facing documents, and until
       # now the only checker for it lived in .tools/, which .gitignore ignores wholesale. A clone
       # received the claim and no way to check it, and nothing here ran it: this file gated rustfmt
