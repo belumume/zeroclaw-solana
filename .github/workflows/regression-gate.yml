@@ -258,6 +258,24 @@ jobs:
       - name: the proof-transport predicate's controls actually gate
         run: python3 scripts/test_verify_proof_transport.py
 
+      # The registry plugin carries a COPY of the response-path sanitizer, because a plugin
+      # is built from its own directory alone and cannot name a path dependency outside it.
+      # That copy is the one a stranger installs, so a fix landing here and not there leaves
+      # a security control looking present while it is stale. This step is the hermetic half:
+      # it asks only whether CANONICAL has moved since the copy was generated from it, which
+      # needs no network and is the direction that goes wrong on its own over time. A hand
+      # edit made to the published copy is the other direction, needs to read it, and is in
+      # live-smoke below.
+      - name: the published copy of the sanitizer still matches canonical
+        run: python3 scripts/check-vendored-sanitize-agreement.py
+
+      # The accepted difference between the two copies is one doc paragraph, so a gate that
+      # cannot tell that paragraph from a logic change would be silenced on its first false
+      # alarm. This drives both directions and must stay green for the step above to mean
+      # anything.
+      - name: the sanitizer-agreement gate can still tell a logic change from a doc reword
+        run: python3 scripts/check-vendored-sanitize-agreement.py --selftest
+
   # ------------------------------------------------------------------------------
   # NOT PART OF THE REQUIRED GATE.
   #
@@ -351,6 +369,18 @@ jobs:
         run: |
           python3 scripts/check-doc-links.py && exit 0; rc=$?
           [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): check-doc-links.py printed CANNOT VERIFY. A third-party outage or an unreachable RPC is not a finding about our docs."; exit 0; }
+          exit "$rc"
+
+      # The half the hermetic job structurally cannot see: a hand edit made directly to the
+      # published copy of the sanitizer. Reading it means reaching a branch on another
+      # repository, so an unreachable host stays a warning rather than a merge blocker. That
+      # branch also disappears when the submission merges, and an unreadable copy is exit 2
+      # here rather than a false clean.
+      - name: the published sanitizer copy has not been hand-edited
+        if: always()
+        run: |
+          python3 scripts/check-vendored-sanitize-agreement.py --live && exit 0; rc=$?
+          [ "$rc" = 2 ] && { echo "::warning::CANNOT CHECK (exit 2): check-vendored-sanitize-agreement.py could not read the published copy. Not a finding about the vendored sanitizer."; exit 0; }
           exit "$rc"
 
       # THE ONE CHECK POINTED AT THE DEPLOYMENT RATHER THAN AT THE REPO. Every other pay-page

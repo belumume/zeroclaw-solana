@@ -36,7 +36,10 @@ import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MIN_GATES = 35  # below this the discovery walk is broken; see the docstring.
+MIN_GATES = 36  # below this the discovery walk is broken; see the docstring.
+# Raised from 35 to 36 on 2026-08-28 when check-vendored-sanitize-agreement joined, per the
+# rule this file states below: the floor is one BELOW the tracked count, and a floor slack by
+# one detects nothing.
 # Raised from 33 to 35 on 2026-08-27, and the raise is TWO units for two separate reasons, stated
 # apart so neither hides inside the other. One unit is check-gate-wiring.py joining, which is the
 # ordinary case this rule exists for. The other is drift that was already here: discovery returned
