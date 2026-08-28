@@ -37,6 +37,14 @@ removes a file produces exactly that, so flagging it is noise on every deletion.
 version of it is not silent anyway -- a branch deleting a file main modified after the fork
 CONFLICTS, which the first outcome above already catches.
 
+KNOWN GAP, named so it does not read as an oversight later. Everything here runs --no-renames, so
+a branch that RENAMES a path while also rewinding its content produces a delete plus an add rather
+than a modify, and the rewind filter skips both halves. That combination merges clean and this
+gate stays silent on it. It is left open on purpose: the failure this gate exists for is a stale
+copy carried in by accident, and a rename paired with a revert is a deliberate shape rather than
+an accidental one, so buying it would cost rename detection and a second class of false positive
+in exchange for closing an evasion nobody has hit.
+
 THE FIX when REWIND or CONFLICT fires. Merge `origin/main` INTO the branch, which makes main an
 ancestor, surfaces any conflict as a conflict, and removes the hazard by construction:
 
@@ -272,7 +280,8 @@ def _plant(base: str, path: str, blob: str | None, message: str) -> str | None:
         if run(["git", "read-tree", base], env)[0] != 0:
             return None
         if blob is None:
-            run(["git", "update-index", "--force-remove", path], env)
+            if run(["git", "update-index", "--force-remove", path], env)[0]:
+                return None
         elif run(
             ["git", "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}"],
             env,
