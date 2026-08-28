@@ -64,6 +64,8 @@ Run: python3 scripts/check-gate-wiring.py [--selftest]
 
 from __future__ import annotations
 
+import contextlib
+import io
 import pathlib
 import subprocess
 import sys
@@ -91,7 +93,7 @@ FAMILIES: dict[str, tuple[tuple[str, ...], int]] = {
             "scripts/test_*.py",
             "scripts/test_*.sh",
         ),
-        40,
+        60,
     ),
     # verify* catches both spellings the repo uses, verify_foo.py and verify-foo.py.
     "demo": (
@@ -122,6 +124,21 @@ FAMILIES: dict[str, tuple[tuple[str, ...], int]] = {
 # The demo .sh globs match nothing today and are deliberate: an empty glob costs one line and
 # closes the extension gap for that family before it opens, and the family floor still trips if
 # the walk as a whole breaks.
+#
+# THE SCRIPTS FLOOR MOVED 40 -> 60 WITH THE WIDENING, and leaving it would have weakened a
+# protection that already existed. Measured: the scripts walk is 77 across eight globs, of which
+# check-*.py and check-*.sh are 37. Deleting that pair left exactly 40, and `40 < floor` is False
+# at the boundary, so 37 gates would have left the corpus in silence. The same deletion tripped
+# CANNOT CHECK before the widening. Raising the numerator without raising the denominator is how a
+# floor stops being one. A control below proves 60 actually trips on that deletion, because an
+# unproven threshold is a number rather than a bar.
+#
+# WHAT A FLOOR STILL CANNOT DO, since 60 is not magic. It catches a walk that collapses and it
+# catches the deletion of a LARGE convention. Deleting both halves of a small one, verify*.{py,sh}
+# at five, leaves 72 and trips nothing. The per-glob pairing control below catches deleting either
+# half alone; deleting both halves of a small convention is the residual, and it is named here
+# rather than implied. The demo floor is unchanged at 10: that walk is 17 and its largest pair is
+# 12, so a pair deletion leaves 5 and already trips.
 # THE GLOB LIST IS THE WHOLE CLAIM, and the first version of this file got it wrong in a way worth
 # recording, because the failure is this gate's own subject matter. It globbed `scripts/check-*.py`
 # and `demo/{verify*,test_*}.py`, which are the conventions its author happened to notice, and
@@ -248,12 +265,27 @@ EXCLUDED: dict[str, str] = {
 # Any leg failing is a FINDING, exit 1, not a skip. That is the whole difference from EXCLUDED:
 # this state can go red.
 #
-# HONEST CEILING, stated because the leg is weaker than it looks. "The harness still names the
-# gate" is a staleness tripwire against a rename or a repoint. It is NOT proof that the harness
-# still DRIVES the gate, and it can be satisfied by a docstring, for the same reason the inference
-# above is unsound. What rules out fiction at declaration time is the reason text, which must name
-# the mechanism; what this catches afterwards is the pairing decaying. Proving the drive would
-# mean running the harness, which is a heavier instrument than this floor.
+# HONEST CEILING, and both legs are weaker than they look.
+#
+# THE NAMES-THE-GATE LEG is a staleness tripwire against a rename or a repoint. It is NOT proof
+# that the harness still DRIVES the gate: it can be satisfied by a docstring, for the same reason
+# the inference above is unsound. Worse than that, and worth stating plainly because this repo's
+# naming convention nearly guarantees it, the leg tests whether the gate's STEM appears anywhere in
+# the harness, and for three of the four pairings the harness's own FILENAME contains that stem.
+# A harness gutted of its drive but keeping its name and its header comment still passes.
+# demo-preflight escapes only by an accident of hyphen against underscore. So the leg catches a
+# repoint and a rename and essentially nothing else.
+#
+# THE IS-INVOKED LEG inherits the whole INVOKED state's bound: matching is a substring test over
+# the workflow corpus, per corpus rather than per job, so a harness named only inside a step that
+# can never run, under `if: false` or behind a paths filter that never matches, verifies silently.
+# Neither shape exists in this repo today, and both were driven to confirm the gap is real rather
+# than theoretical.
+#
+# What rules out fiction at declaration time is the reason text, which must name the mechanism and
+# is length-checked at 60 rather than EXCLUDED's 40, because a reason here has to say HOW the
+# harness drives the gate while an exclusion only has to say why nothing runs it. Proving the drive
+# would mean running the harness, which is a heavier instrument than this floor.
 HARNESS_COVERED: dict[str, tuple[str, str]] = {
     "demo/pre_export_gate.py": (
         "demo/test_pre_export_gate.py",
@@ -503,7 +535,9 @@ def main() -> int:
     if harness_problems or orphans:
         return 1
 
-    print(f"\nok    all {scanned_total} tracked gate(s) invoked or declared")
+    print(
+        f"\nok    all {scanned_total} tracked gate(s) invoked, harness-covered, or declared"
+    )
     return 0
 
 
@@ -541,7 +575,7 @@ def selftest() -> int:
             True,
         )
         check(
-            f"the live tree has every {family} gate invoked or declared",
+            f"the live tree has every {family} gate invoked, harness-covered, or declared",
             audit(wf, paths or []),
             [],
         )
@@ -805,23 +839,65 @@ def selftest() -> int:
     # EVERY DECLARED PAIRING CARRIES A REASON THAT NAMES THE MECHANISM. The reason is what rules
     # out fiction at declaration time, since the mechanical legs cannot prove the harness DRIVES
     # the gate. An entry with a thin reason is an assertion wearing a declaration's clothes.
+    # ALL SIX LEGS, not one. The earlier fixture passed an empty tracked set, so both planted
+    # pairings short-circuited on the untracked-gate branch and the control drove a single leg
+    # while its name claimed it drove every one. The tracked set is a parameter, so it can name a
+    # path that does not exist on disk, which is what reaches the unreadable branch.
+    all_legs = legs(
+        verify_harness(
+            "jobs:\n  x:\n    steps:\n"
+            "      - run: python3 demo/pre_export_gate.py\n"
+            "      - run: python3 demo/test_pre_export_gate.py\n"
+            "      - run: python3 no/such/harness.py\n",
+            {
+                "demo/pre_export_gate.py",
+                "demo/test_pre_export_gate.py",
+                "scripts/check-all.py",
+                "scripts/demo-preflight.py",
+                "scripts/replay_allowance_probe.py",
+                "no/such/harness.py",
+            },
+            {
+                # redundant: the gate is wired directly, and the harness names it
+                "demo/pre_export_gate.py": ("demo/test_pre_export_gate.py", "planted"),
+                # gate-untracked
+                "demo/verify_nothing_names_this.py": (
+                    "demo/test_pre_export_gate.py",
+                    "planted",
+                ),
+                # harness-untracked
+                "scripts/demo-preflight.py": ("scripts/test_absent.py", "planted"),
+                # harness-unwired AND stale-pairing, from one unwired unrelated harness
+                "scripts/replay_allowance_probe.py": (
+                    "scripts/check-all.py",
+                    "planted",
+                ),
+            },
+        )
+    ) + legs(
+        # harness-unreadable: tracked by the fixture, absent from disk, and wired
+        verify_harness(
+            "jobs:\n  x:\n    steps:\n      - run: python3 no/such/harness.py\n",
+            {"demo/pre_export_gate.py", "no/such/harness.py"},
+            {"demo/pre_export_gate.py": ("no/such/harness.py", "planted")},
+        )
+    )
     check(
-        "every leg the verifier can emit is tagged, so no control passes on an unread message",
-        [
-            t
-            for t in legs(
-                verify_harness(
-                    "jobs: {}",
-                    set(),
-                    {
-                        "a/b.py": ("c/d.py", "planted"),
-                        "demo/pre_export_gate.py": ("x/y.sh", "p"),
-                    },
-                )
-            )
-            if t.startswith("UNTAGGED")
-        ],
+        "no leg the verifier emits goes untagged, so no control passes on an unread message",
+        [t for t in all_legs if t.startswith("UNTAGGED")],
         [],
+    )
+    check(
+        "the tagger fixture drives every leg the verifier can emit",
+        sorted(set(all_legs)),
+        [
+            "gate-untracked",
+            "harness-unreadable",
+            "harness-untracked",
+            "harness-unwired",
+            "redundant",
+            "stale-pairing",
+        ],
     )
     check(
         "no HARNESS_COVERED entry has a thin reason",
@@ -834,6 +910,106 @@ def selftest() -> int:
         "no path is both EXCLUDED and HARNESS_COVERED",
         sorted(set(EXCLUDED) & set(HARNESS_COVERED)),
         [],
+    )
+
+    # F1, AND IT IS THE ONE THE REST OF THIS SUITE COULD NOT SEE. Every control above calls
+    # verify_harness DIRECTLY, so all of them keep passing while main() consults it never.
+    # Measured before this control existed: replacing main()'s call with an empty list left the
+    # suite at 27 of 27 and main at rc 0, which means the entire third state could be deleted from
+    # production with everything green. The PR's whole argument is that this state can go red, and
+    # nothing demonstrated that the PROGRAM can, only that the FUNCTION can. These two drive
+    # main() itself, through the module-level map production actually reads.
+    print("\nmain() end to end, through the map production reads:")
+
+    def main_run(
+        mapping: dict[str, tuple[str, str]] | None = None,
+        drop_excluded: str | None = None,
+    ) -> tuple[int, str]:
+        """Drive main() through the module-level maps production reads, and capture both.
+
+        Swapping the globals rather than passing arguments is deliberate: main() reads them, so a
+        control that took a parameter would exercise a path production does not have.
+        """
+        saved_h, saved_e = dict(HARNESS_COVERED), dict(EXCLUDED)
+        if mapping is not None:
+            HARNESS_COVERED.clear()
+            HARNESS_COVERED.update(mapping)
+        if drop_excluded is not None:
+            EXCLUDED.pop(drop_excluded, None)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                rc = main()
+            return rc, buf.getvalue()
+        finally:
+            HARNESS_COVERED.clear()
+            HARNESS_COVERED.update(saved_h)
+            EXCLUDED.clear()
+            EXCLUDED.update(saved_e)
+
+    def main_rc(mapping: dict[str, tuple[str, str]] | None) -> int:
+        return main_run(mapping)[0]
+
+    check("main() returns 0 on the live tree", main_rc(None), 0)
+    check(
+        "main() itself returns 1 when a declared pairing has decayed",
+        main_rc(
+            {
+                "demo/pre_export_gate.py": (
+                    "scripts/check-all.py",
+                    "planted: a harness no workflow invokes, which does not name this gate.",
+                )
+            }
+        ),
+        1,
+    )
+
+    # BOTH FAILURE CLASSES IN ONE RUN. Restoring the early return after the harness block left the
+    # whole suite green, because every other control drives one class at a time. Plant both at
+    # once: a decayed pairing, and an orphan made by dropping a declared gate's exclusion. A run
+    # that stops at the first class reads as a complete finding list, so the report is the thing
+    # under test here rather than the exit code, which was right either way.
+    both_rc, both_out = main_run(
+        {
+            "demo/pre_export_gate.py": (
+                "scripts/check-all.py",
+                "planted: an unwired harness that does not name this gate.",
+            )
+        },
+        drop_excluded="scripts/check-all.py",
+    )
+    check("a run carrying both failure classes exits 1", both_rc, 1)
+    check(
+        "and reports BOTH, rather than stopping at the first",
+        sorted(
+            tag
+            for tag, needle in (
+                ("harness", "declared harness coverage that does not hold"),
+                ("orphans", "tracked in git but invoked by no workflow"),
+            )
+            if needle in both_out
+        ),
+        ["harness", "orphans"],
+    )
+
+    # THE FLOOR IS A NUMBER UNTIL SOMETHING TRIPS IT. This drives the real walk minus the largest
+    # convention pair and requires the family to fall under its floor, which is what makes 60 a
+    # bar rather than a constant nobody has tested.
+    print("\nthe floor still bites after the widening:")
+    scripts_globs, scripts_floor = FAMILIES["scripts"]
+    without_check = tuple(
+        g for g in scripts_globs if not g.startswith("scripts/check-")
+    )
+    remaining = git_ls(without_check) or []
+    check(
+        "dropping the largest scripts convention pair falls under the floor",
+        len(remaining) < scripts_floor,
+        True,
+    )
+    check(
+        "and the full walk clears it, so the floor is not simply unreachable",
+        len(git_ls(scripts_globs) or []) >= scripts_floor,
+        True,
     )
 
     print(f"\n{cases - len(failures)} of {cases} checks passed")
