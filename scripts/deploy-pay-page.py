@@ -206,6 +206,13 @@ def resolve_ref(ref: str, repo: Path | None = None) -> str:
 def materialise(ref: str, dest: Path, repo: Path | None = None) -> Path:
     """Write the ref's SRC_SUBTREE into `dest`, as the blob bytes git holds.
 
+    `ref` is any commit-ish, and deliberately not narrowed to a sha even though the
+    production caller always passes one: the selftest addresses its fixtures by branch
+    name, and a parameter renamed to `sha` would be claiming something the signature
+    does not enforce. What matters is at the CALL SITE, where main() passes the commit
+    resolve_ref() already printed, so the tree staged cannot be a different tip from the
+    one the operator was told about.
+
     Addressed by OBJECT ID rather than through the `<ref>:<path>` form. Two reasons,
     and only the first is portability: MSYS rewrites that colon form when the ref
     contains a slash and the path begins with a dot, and it fails as a stopped clock --
