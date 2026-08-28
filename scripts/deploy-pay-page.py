@@ -8,6 +8,13 @@ the operator's username and Windows home path, because a ruff cache records the
 absolute path of every file it linted. A deploy of the directory as-is would have
 put those on a public origin.
 
+The bytes themselves come from a GIT REF (`--ref`, default `origin/main`), never
+from the working tree, because a tree is not a version: it can sit behind the branch,
+carry another session's half-finished edit, or hold CRLF where the commit holds LF.
+Measured here -- a tree two commits behind was missing 7 lines of the pay page's
+click-time settlement re-check, and deploying from it in place would have reverted a
+money-path control on a live page while the origin still answered 200.
+
 So the upload set is DERIVED rather than assumed: index.html is self-contained
 (its styles and scripts are inlined by build.py), which this script re-checks
 rather than trusting, and `_headers` is Cloudflare's own config file. Nothing else
@@ -19,8 +26,9 @@ scan runs over the STAGED set, not over a list of files this script expects to
 find, so a file added to the deploy directory later cannot ride along unscanned.
 
 Usage:
-  python scripts/deploy-pay-page.py            # stage + gate, print what would ship
-  python scripts/deploy-pay-page.py --publish  # ...then upload it
+  python scripts/deploy-pay-page.py                    # stage + gate origin/main, dry run
+  python scripts/deploy-pay-page.py --ref HEAD         # ...from a local commit instead
+  python scripts/deploy-pay-page.py --publish          # ...then upload it
   python scripts/deploy-pay-page.py --selftest
 """
 
@@ -112,6 +120,143 @@ def identifiers() -> tuple[bytes, ...]:
     }
     # Longest first, so a finding names the most specific pattern that matched.
     return tuple(sorted(pats, key=len, reverse=True))
+
+
+# The bytes this script publishes come from a GIT REF, never from the working tree.
+#
+# `wrangler pages deploy` reads a directory, so the obvious source is `webshop-pay/`
+# as it sits on disk -- and that is whatever state the tree happens to hold. A tree is
+# not a version. It can sit behind the branch, carry another session's half-finished
+# edit, or hold a file checked out with the platform's line endings, and none of those
+# announce themselves at deploy time. Measured on this repo: a tree two commits behind
+# was missing exactly 7 lines of the pay page's click-time settlement re-check, 607
+# bytes, on a page that takes mainnet payments. Deploying from it in place would have
+# reverted a money-path control, silently, and the origin would still have answered 200.
+#
+# So the source is named and resolved: `--ref`, defaulting to the branch the origin is
+# supposed to be serving. The subtree is materialised out of git's object store and the
+# deploy set is staged from THAT. Two properties follow that the tree cannot offer.
+#
+# BYTES, not text. Blobs are handed over exactly as git stores them, which is what a
+# clone receives and what `.gitattributes` (`* text=auto eol=lf`) says this repo means.
+# A tree checked out on Windows is CRLF, so an in-place deploy publishes a file that
+# differs from the committed one on every line while every diff-free check agrees.
+#
+# TRACKED CONTENT ONLY. A ref carries no ignored files, so the ruff cache the docstring
+# above describes cannot be in the materialised tree at all. That does NOT retire the
+# identifier scan or the explicit payload: an ignored cache is one way a stray file
+# arrives and a committed one is another, and the scan runs over the STAGED set either
+# way. It removes a class; it is not a reason to start copying directories.
+#
+# There is deliberately NO working-tree escape hatch. A local commit is a ref, so
+# `--ref HEAD` covers iterating without pushing, and uncommitted bytes have no business
+# on a live payment page. Adding the hatch back is how the defect returns.
+DEFAULT_REF = "origin/main"
+SRC_SUBTREE = "webshop-pay"
+
+
+def _git(
+    args: list[str], repo: Path | None = None, exe: str = "git"
+) -> subprocess.CompletedProcess:
+    """Run git in `repo`, returning stdout as BYTES.
+
+    Never `text=True`. Blob content is the thing being published, and text mode would
+    apply universal-newline translation on the way in -- handing the origin CRLF for a
+    repository whose `.gitattributes` says `eol=lf`. It would also decode with the
+    locale codec, which is cp1252 on this machine and cannot round-trip a UTF-8 page.
+
+    `repo` is injectable so the selftest can drive these against a throwaway repository
+    it builds itself. Asserting against this checkout would make the cases depend on
+    what someone last fetched, which is the class of thing they exist to rule out.
+    """
+    try:
+        return subprocess.run(
+            [exe, "-C", str(repo or REPO), *args], capture_output=True
+        )
+    except (FileNotFoundError, NotADirectoryError) as e:
+        # An unresolvable executable RAISES rather than returning non-zero, so without
+        # this the one case where git is absent escapes both refusal paths below and
+        # arrives as a stack trace naming `git`, which reads as a defect in this script
+        # rather than as a missing tool. Funnelled into the failed result the callers
+        # already refuse on, so there is one refusal path and not two.
+        #
+        # `exe` exists so that branch can be DRIVEN. Without it the guard is unreachable
+        # from any fixture -- `git -C <a file>` makes git itself exit non-zero, so the
+        # obvious case never gets here, and a first attempt shipped exactly that: a case
+        # named for this guard that stayed green with the guard deleted.
+        return subprocess.CompletedProcess(
+            args=args, returncode=127, stdout=b"", stderr=str(e).encode()
+        )
+
+
+def resolve_ref(ref: str, repo: Path | None = None) -> str:
+    """The commit `ref` names, or REFUSE. Never a fallback to anything else."""
+    p = _git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], repo)
+    if p.returncode != 0 or not p.stdout.strip():
+        sys.exit(
+            f"REFUSED: {ref!r} does not resolve to a commit in {repo or REPO}. "
+            "Nothing was staged or uploaded.\n"
+            "  A remote-tracking ref goes stale until you fetch:  git fetch origin\n"
+            "  To publish a commit that is only local, name it:   --ref HEAD"
+        )
+    return p.stdout.decode().strip()
+
+
+def materialise(ref: str, dest: Path, repo: Path | None = None) -> Path:
+    """Write the ref's SRC_SUBTREE into `dest`, as the blob bytes git holds.
+
+    Addressed by OBJECT ID rather than through the `<ref>:<path>` form. Two reasons,
+    and only the first is portability: MSYS rewrites that colon form when the ref
+    contains a slash and the path begins with a dot, and it fails as a stopped clock --
+    zero bytes, exit 0 -- which would read here as an empty page rather than an error.
+    The second is that a sha names one object and cannot be re-resolved into a
+    different one halfway through by anything else touching the repository.
+    """
+    p = _git(["ls-tree", "-r", "-z", ref, "--", f"{SRC_SUBTREE}/"], repo)
+    if p.returncode != 0:
+        sys.exit(
+            f"REFUSED: could not list {SRC_SUBTREE}/ at {ref}: "
+            f"{p.stderr.decode('utf-8', 'replace').strip()}\n"
+            "Nothing was staged or uploaded."
+        )
+
+    entries: list[tuple[str, str]] = []
+    for rec in p.stdout.split(b"\0"):
+        if not rec:
+            continue
+        meta, _, path = rec.partition(b"\t")
+        parts = meta.split()
+        # Only blobs carry bytes. A gitlink (a submodule commit) is listed here and has
+        # nothing to serve, and skipping it silently is right -- but it must be skipped
+        # by TYPE rather than by hoping the tree has none.
+        if len(parts) < 3 or parts[1] != b"blob":
+            continue
+        entries.append((parts[2].decode(), path.decode("utf-8", "surrogateescape")))
+
+    if not entries:
+        sys.exit(
+            f"REFUSED: {ref} carries no files under {SRC_SUBTREE}/. Nothing was "
+            "staged or uploaded."
+        )
+
+    prefix = f"{SRC_SUBTREE}/"
+    for sha, path in entries:
+        blob = _git(["cat-file", "blob", sha], repo)
+        if blob.returncode != 0:
+            # A shallow or partial clone lists a tree whose objects it does not hold,
+            # so this is reachable on a perfectly healthy-looking checkout. Refusing is
+            # the whole point: a deploy that quietly skipped the object it could not
+            # fetch is exactly the missing-module failure this deploy set exists to stop.
+            sys.exit(
+                f"REFUSED: {ref} names {path} as blob {sha[:12]} and git cannot produce "
+                f"it: {blob.stderr.decode('utf-8', 'replace').strip()}\n"
+                "A shallow or partial clone carries the tree without the objects. "
+                "Nothing was staged or uploaded."
+            )
+        target = dest / path[len(prefix) :]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(blob.stdout)
+    return dest
 
 
 def staged_files(src: Path) -> list[Path]:
@@ -228,6 +373,14 @@ def stage(src: Path, dest: Path) -> list[Path]:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--ref",
+        default=DEFAULT_REF,
+        help=(
+            "the commit-ish whose bytes get published (default: %(default)s). "
+            "The working tree is never a source; use --ref HEAD for a local commit."
+        ),
+    )
     ap.add_argument("--publish", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
@@ -235,23 +388,42 @@ def main(argv: list[str]) -> int:
     if args.selftest:
         return selftest()
 
-    # The artifact must be reproducible from its sources before it is published,
-    # or the thing on the origin is not the thing in the repo.
-    check = subprocess.run(
-        [sys.executable, str(SRC_DIR / "build.py"), "--check"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if check.returncode != 0:
-        sys.stderr.write(check.stdout + check.stderr)
-        sys.exit("REFUSED: index.html does not match its sources. Run build.py first.")
-    print(f"  build --check ok: {check.stdout.strip()}")
+    # Resolve the source BEFORE anything else, so a stale or misspelled ref fails
+    # here rather than after a reassuring wall of staging output.
+    sha = resolve_ref(args.ref)
+    print(f"  source: {args.ref} = {sha[:12]}  (working tree is not read)")
 
     with tempfile.TemporaryDirectory(prefix="paypage-") as tmp:
-        dest = Path(tmp)
-        files = stage(SRC_DIR, dest)
+        tmpd = Path(tmp)
+        src = materialise(args.ref, tmpd / "src")
+        dest = tmpd / "out"
+
+        # The artifact must be reproducible from its sources before it is published,
+        # or the thing on the origin is not the thing in the repo. Run against the
+        # MATERIALISED tree, so what is checked is the ref's index.html against the
+        # ref's own sources -- the working tree's build.py could be a different one.
+        builder = src / "build.py"
+        if not builder.is_file():
+            sys.exit(
+                f"REFUSED: {args.ref} carries no {SRC_SUBTREE}/build.py, so the page "
+                "cannot be checked against its sources. Nothing was uploaded."
+            )
+        check = subprocess.run(
+            [sys.executable, str(builder), "--check"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if check.returncode != 0:
+            sys.stderr.write(check.stdout + check.stderr)
+            sys.exit(
+                f"REFUSED: index.html at {args.ref} does not match its sources there. "
+                "Nothing was uploaded."
+            )
+        print(f"  build --check ok: {check.stdout.strip()}")
+
+        files = stage(src, dest)
 
         findings = scan(files, root=dest)
         if findings:
@@ -576,6 +748,215 @@ def selftest() -> int:
             "control: that page really does reach for the same-origin module",
             "/vendor/solana-bundle.js" in self_contained(html),
         )
+
+        # 9. WHERE THE BYTES COME FROM. Every case above is about WHAT gets staged;
+        # these are about WHICH VERSION of it, which is the half that nearly reverted a
+        # money-path control on a live page.
+        #
+        # A REAL repository, not a stub. The claim under test is "the script asks git
+        # and uses git's answer", and a fake that returns whatever it was handed would
+        # pass whether or not the script asks git at all -- so the fixture has to be
+        # something git actually reads. Hermetic all the same: `git init` under the temp
+        # directory, no network, no remote, nothing outside `root`.
+        def _g(*args: str, cwd: Path) -> subprocess.CompletedProcess:
+            r = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True)
+            if r.returncode != 0:
+                raise RuntimeError(
+                    f"fixture setup: git {args[0]} -> {r.returncode}: "
+                    f"{r.stderr.decode('utf-8', 'replace').strip()}"
+                )
+            return r
+
+        fixture = root / "fixture"
+        (fixture / SRC_SUBTREE).mkdir(parents=True)
+        _g("init", "-q", "-b", "main", ".", cwd=fixture)
+        # Local config only. A committer identity is required or `commit` refuses, and
+        # writing it globally would edit the machine running the suite.
+        _g("config", "user.email", "selftest@invalid", cwd=fixture)
+        _g("config", "user.name", "selftest", cwd=fixture)
+        # An explicit .gitattributes, so the fixture pins the LF claim rather than
+        # inheriting whatever autocrlf the running machine happens to have set.
+        (fixture / ".gitattributes").write_bytes(b"* text=auto eol=lf\n")
+
+        def _fixture_commit(marker: bytes, msg: str) -> str:
+            for name in SERVE:
+                f = fixture / SRC_SUBTREE / name
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_bytes(b"/* " + name.encode() + b" */\n")
+            # LF in the committed blob, deliberately. The whole point of reading git is
+            # that what ships is this, and not a checkout translated on the way to disk.
+            (fixture / SRC_SUBTREE / "index.html").write_bytes(
+                b"<html>\n<!-- " + marker + b" -->\n</html>\n"
+            )
+            _g("add", "-A", cwd=fixture)
+            _g("commit", "-q", "-m", msg, cwd=fixture)
+            return _g("rev-parse", "HEAD", cwd=fixture).stdout.decode().strip()
+
+        old_sha = _fixture_commit(b"OLDCONTENT", "old")
+        _fixture_commit(b"NEWCONTENT", "new")
+
+        # THE STATE THAT CAUSED THIS. The working tree is put BEHIND the branch, then
+        # dirtied on top -- two commits behind with an uncommitted edit, which is what a
+        # shared checkout looks like on an ordinary afternoon. `main` still names the tip.
+        _g("checkout", "-q", "--detach", old_sha, cwd=fixture)
+        (fixture / SRC_SUBTREE / "index.html").write_bytes(b"<html>DIRTYCONTENT</html>")
+
+        # THE HEADLINE CONTROL. Three markers exist and only one may ship. Asserting the
+        # tip's presence alone would pass for a script that read the tree and happened to
+        # find the same string, so the two that must be ABSENT are the load-bearing half.
+        got = materialise("main", root / "mat", repo=fixture)
+        staged = (got / "index.html").read_bytes()
+        case(
+            "the deploy set is the REF's bytes, not the working tree's",
+            b"NEWCONTENT" in staged
+            and b"OLDCONTENT" not in staged
+            and b"DIRTYCONTENT" not in staged,
+        )
+        # And the tree really is the other thing, so the case above is a statement about
+        # the script rather than about a fixture where every version happens to match.
+        case(
+            "control: that working tree really does hold different bytes",
+            b"DIRTYCONTENT" in (fixture / SRC_SUBTREE / "index.html").read_bytes(),
+        )
+        # The line-ending half, which no diff-shaped check can see: a tree checked out on
+        # Windows is CRLF and the committed blob is LF, so an in-place deploy publishes a
+        # file differing from the commit on every line while every text comparison agrees.
+        case(
+            "materialised bytes carry the blob's LF, not the platform's CRLF",
+            b"\r\n" not in staged and b"\n" in staged,
+        )
+        # End to end through the real staging path, against the ref rather than a
+        # directory someone assembled. Anything short of this leaves the join between
+        # materialise() and stage() untested.
+        out9 = stage(got, root / "out9")
+        case(
+            "stage runs on the materialised ref and carries the whole deploy set",
+            sorted(str(p.relative_to(root / "out9")).replace("\\", "/") for p in out9)
+            == sorted(SERVE)
+            and b"NEWCONTENT" in (root / "out9" / "index.html").read_bytes(),
+        )
+
+        # REFUSE, three ways, because "cannot produce the ref's bytes" must never
+        # degrade into publishing something else. Each is driven, not asserted.
+        try:
+            resolve_ref("no/such/ref/anywhere", repo=fixture)
+            case("resolve_ref refuses a ref that does not resolve", False)
+        except SystemExit:
+            case("resolve_ref refuses a ref that does not resolve", True)
+        # The over-correction control: a resolvable ref must still resolve. A refusal
+        # path that fires on everything is not a gate, it is an outage.
+        case(
+            "control: resolve_ref still returns the commit for a ref that exists",
+            resolve_ref("main", repo=fixture) != old_sha
+            and len(resolve_ref("main", repo=fixture)) == 40,
+        )
+
+        # A ref whose subtree is absent entirely. Reached here through the FIRST commit
+        # of a second fixture, because an empty result and a failed command are different
+        # refusals and only one of them is this one.
+        bare = root / "bare"
+        bare.mkdir()
+        _g("init", "-q", "-b", "main", ".", cwd=bare)
+        _g("config", "user.email", "selftest@invalid", cwd=bare)
+        _g("config", "user.name", "selftest", cwd=bare)
+        (bare / "readme.md").write_bytes(b"no pay page here\n")
+        _g("add", "-A", cwd=bare)
+        _g("commit", "-q", "-m", "no subtree", cwd=bare)
+        try:
+            materialise("main", root / "mat2", repo=bare)
+            case("materialise refuses a ref carrying no pay page", False)
+        except SystemExit:
+            case("materialise refuses a ref carrying no pay page", True)
+
+        # A ref whose tree LISTS a blob the object store does not hold. That is what a
+        # shallow or partial clone looks like from inside, and it is the refusal most
+        # likely to matter on someone else's machine, so it is driven rather than
+        # asserted: one loose object is deleted, which no fixture can fake by other means
+        # offline. Without this the branch is unreachable from the suite -- a mutant that
+        # deleted the refusal outright left every case green.
+        gone = root / "gone"
+        (gone / SRC_SUBTREE).mkdir(parents=True)
+        _g("init", "-q", "-b", "main", ".", cwd=gone)
+        _g("config", "user.email", "selftest@invalid", cwd=gone)
+        _g("config", "user.name", "selftest", cwd=gone)
+        (gone / ".gitattributes").write_bytes(b"* text=auto eol=lf\n")
+        for name in SERVE:
+            f = gone / SRC_SUBTREE / name
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(b"/* " + name.encode() + b" */\n")
+        _g("add", "-A", cwd=gone)
+        _g("commit", "-q", "-m", "complete", cwd=gone)
+        blob_sha = (
+            _g("rev-parse", f"main:{SRC_SUBTREE}/index.html", cwd=gone)
+            .stdout.decode()
+            .strip()
+        )
+        loose = gone / ".git" / "objects" / blob_sha[:2] / blob_sha[2:]
+        # Loose objects are written read-only, and unlink() on a read-only file raises
+        # on Windows rather than removing it.
+        loose.chmod(0o600)
+        loose.unlink()
+        # THE CONTROL, and it is what makes the refusal below attributable: the tree still
+        # lists the entry, so this is a missing OBJECT and not a missing entry. Those are
+        # different refusals and only one of them is under test here.
+        listed = _g("ls-tree", "-r", "-z", "main", "--", f"{SRC_SUBTREE}/", cwd=gone)
+        case(
+            "control: the tree still lists the blob whose object was removed",
+            listed.returncode == 0 and b"index.html" in listed.stdout,
+        )
+        try:
+            materialise("main", root / "mat4", repo=gone)
+            case("materialise refuses a blob git cannot produce", False)
+        except SystemExit:
+            case("materialise refuses a blob git cannot produce", True)
+
+        # A repo path git cannot read. Named for what it proves -- resolve_ref refuses on
+        # git's own non-zero exit -- and NOT for the raise-guard below, which it does not
+        # reach: git exits non-zero here rather than Python raising.
+        notrepo = root / "notrepo.txt"
+        notrepo.write_bytes(b"not a directory\n")
+        try:
+            resolve_ref("main", repo=notrepo)
+            case("a repo path git cannot read is refused, not part-shipped", False)
+        except SystemExit:
+            case("a repo path git cannot read is refused, not part-shipped", True)
+
+        # THE RAISE-GUARD, driven. An unresolvable executable is the one case that raises
+        # out of subprocess instead of returning, and a fixture cannot uninstall git, so
+        # the name is injected. Asserted on the RESULT rather than on "did not raise",
+        # because a guard that swallowed the failure into a zero exit would also not raise.
+        try:
+            probe = _git(["rev-parse", "HEAD"], repo=root, exe="git-not-installed-zzz")
+            case(
+                "an unresolvable git refuses through the normal path, it does not raise",
+                probe.returncode != 0 and not probe.stdout,
+            )
+        except OSError:
+            case(
+                "an unresolvable git refuses through the normal path, it does not raise",
+                False,
+            )
+
+        # A ref that carries the subtree but not every deploy-set member. Distinct from
+        # the case above and from case 7: this one goes through git, so it proves the
+        # missing-member refusal survives the new source rather than only holding for a
+        # directory the caller assembled by hand.
+        partial = root / "partial"
+        (partial / SRC_SUBTREE).mkdir(parents=True)
+        _g("init", "-q", "-b", "main", ".", cwd=partial)
+        _g("config", "user.email", "selftest@invalid", cwd=partial)
+        _g("config", "user.name", "selftest", cwd=partial)
+        (partial / SRC_SUBTREE / "index.html").write_bytes(b"<html></html>\n")
+        _g("add", "-A", cwd=partial)
+        _g("commit", "-q", "-m", "index only", cwd=partial)
+        mat3 = materialise("main", root / "mat3", repo=partial)
+        try:
+            staged_files(mat3)
+            case(
+                "a ref missing a deploy-set member is refused, not part-shipped", False
+            )
+        except SystemExit:
+            case("a ref missing a deploy-set member is refused, not part-shipped", True)
 
     passed = sum(1 for _, ok in cases if ok)
     print(f"\n  {passed}/{len(cases)}")
