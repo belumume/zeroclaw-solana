@@ -60,7 +60,10 @@ HONEST CEILING, so a green run is never read as more than it is:
     REDUCTION to the base58 codec, documented in its own header, so a byte comparison is
     structurally the wrong instrument for it and none is attempted. A weaker property, that
     every retained item matches canonical, is real and is not built here.
-  - It cannot tell a good replacement paragraph from a bad one. That stays a human call.
+  - It cannot tell a good replacement paragraph from a bad one. That stays a human call. The
+    anchor is positional, so a paragraph inserted upstream between the replaced one and the
+    heading retargets it; both pins move in that case and the selftest pins it, but the human
+    reading the verdict is the one who has to notice WHICH paragraph is now being replaced.
   - The published copy's own provenance note claims the sanitizer is verbatim. It is not, by
     the four lines above. That is a finding for whoever owns the registry submission, and it
     is deliberately NOT gated here: keying a check on another repository's prose is how a gate
@@ -183,9 +186,12 @@ def offline_verdict(canonical_text):
         if code == OK:
             code = FINDING
         notes += [
-            "DOC REWORD: the canonical paragraph this transform replaces was reworded.",
-            "The published copy is NOT stale for this reason alone. Re-read whether the",
-            "accepted replacement still restates the new wording fairly, then re-pin.",
+            "DOC REWORD: the paragraph this transform replaces is not the one it was",
+            "pinned to. The published copy is NOT stale for this reason alone.",
+            "Before re-pinning, establish WHICH paragraph the anchor now targets. A new",
+            "paragraph inserted upstream between the old one and the heading moves the",
+            "anchor onto the new one, and the replacement would then stand in for the",
+            "wrong paragraph. Then re-read whether it still restates that paragraph fairly.",
             f"  expected {PIN_CANON_REGION_SHA}",
             f"  derived  {got_region}",
         ]
@@ -282,6 +288,22 @@ def _mutate_doc_region(canonical_text):
     return "\n".join(lines)
 
 
+def _insert_paragraph_before_anchor(canonical_text):
+    """A NEW doc paragraph lands between the replaced one and the heading, upstream.
+
+    The anchor is positional, so it follows the insertion onto the new paragraph. Both pins
+    move, which is why this is doubly detected rather than silent, and it is pinned here so a
+    later narrowing of the anchor cannot quietly lose the case.
+    """
+    lines = norm(canonical_text).split("\n")
+    _, end = locate_region(lines)
+    inserted = [
+        "//!",
+        "//! A paragraph added upstream, between the old one and the heading.",
+    ]
+    return "\n".join(lines[:end] + inserted + lines[end:])
+
+
 def _remove_anchor(canonical_text):
     return norm(canonical_text).replace(ANCHOR, "//! # Rationale")
 
@@ -350,6 +372,23 @@ def selftest():
             "missing anchor says the transform could not be derived",
             any("CANNOT DERIVE" in n for n in notes),
             "missing anchor says the transform could not be derived",
+        )
+    )
+
+    # 4b. An upstream INSERTION moves the anchor onto a paragraph the replacement was never
+    #     written for. BOTH pins must move: the region pin because the targeted paragraph is a
+    #     different one, and the published pin because the paragraph the replacement stands in
+    #     for now survives into the derived copy. Either alone would be enough to catch it;
+    #     requiring both is what stops a future anchor change making this silent.
+    inserted = _insert_paragraph_before_anchor(canonical)
+    code, notes = offline_verdict(inserted)
+    case("inserted upstream paragraph fires", code, FINDING)
+    cases.append(
+        (
+            "inserted upstream paragraph moves BOTH pins",
+            any(n.startswith("STALE:") for n in notes)
+            and any(n.startswith("DOC REWORD:") for n in notes),
+            "inserted upstream paragraph moves BOTH pins",
         )
     )
 
