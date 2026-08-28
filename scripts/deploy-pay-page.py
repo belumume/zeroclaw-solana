@@ -35,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -231,6 +232,17 @@ def materialise(ref: str, dest: Path, repo: Path | None = None) -> Path:
         # by TYPE rather than by hoping the tree has none.
         if len(parts) < 3 or parts[1] != b"blob":
             continue
+        # MODE as well as type, because a SYMLINK is also type blob: its content is the
+        # link target, so filtering on type alone would write the string "../secrets"
+        # into a served file and call it the asset. Refusing rather than skipping, since
+        # a symlink appearing under a deploy root is a question for a human and a skip
+        # would answer it by shipping an incomplete set.
+        if parts[0] not in (b"100644", b"100755"):
+            sys.exit(
+                f"REFUSED: {ref} carries {path.decode('utf-8', 'replace')} with mode "
+                f"{parts[0].decode()}, which is not a regular file. A symlink's content "
+                "is its target, not the asset. Nothing was staged or uploaded."
+            )
         entries.append((parts[2].decode(), path.decode("utf-8", "surrogateescape")))
 
     if not entries:
@@ -392,10 +404,15 @@ def main(argv: list[str]) -> int:
     # here rather than after a reassuring wall of staging output.
     sha = resolve_ref(args.ref)
     print(f"  source: {args.ref} = {sha[:12]}  (working tree is not read)")
+    # Everything below is addressed by the RESOLVED COMMIT rather than by the name.
+    # A branch is a moving target -- origin/main most of all -- so re-resolving it a
+    # second time inside materialise() could stage a tree that is not the commit this
+    # line just printed, and the result would be internally consistent and pass every
+    # gate while contradicting the only thing telling the operator what shipped.
 
     with tempfile.TemporaryDirectory(prefix="paypage-") as tmp:
         tmpd = Path(tmp)
-        src = materialise(args.ref, tmpd / "src")
+        src = materialise(sha, tmpd / "src")
         dest = tmpd / "out"
 
         # The artifact must be reproducible from its sources before it is published,
@@ -758,8 +775,15 @@ def selftest() -> int:
         # pass whether or not the script asks git at all -- so the fixture has to be
         # something git actually reads. Hermetic all the same: `git init` under the temp
         # directory, no network, no remote, nothing outside `root`.
-        def _g(*args: str, cwd: Path) -> subprocess.CompletedProcess:
-            r = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True)
+        def _g(
+            *args: str, cwd: Path, env: dict[str, str] | None = None
+        ) -> subprocess.CompletedProcess:
+            r = subprocess.run(
+                ["git", *args],
+                cwd=str(cwd),
+                capture_output=True,
+                env=({**os.environ, **env} if env else None),
+            )
             if r.returncode != 0:
                 raise RuntimeError(
                     f"fixture setup: git {args[0]} -> {r.returncode}: "
@@ -909,6 +933,120 @@ def selftest() -> int:
             case("materialise refuses a blob git cannot produce", False)
         except SystemExit:
             case("materialise refuses a blob git cannot produce", True)
+
+        # A RESOLVED COMMIT PINS THE CONTENT while the name it came from moves. This is
+        # the production path's invariant: resolve_ref() prints a commit and everything
+        # after is addressed by that id, so what ships is what was printed.
+        pinned = resolve_ref("main", repo=fixture)
+        # -f because the fixture tree was deliberately dirtied above; this is a
+        # throwaway repository and the dirt has already served its case.
+        _g("checkout", "-q", "-f", "main", cwd=fixture)
+        (fixture / SRC_SUBTREE / "index.html").write_bytes(
+            b"<html>\n<!-- MOVEDCONTENT -->\n</html>\n"
+        )
+        _g("add", "-A", cwd=fixture)
+        _g("commit", "-q", "-m", "moved", cwd=fixture)
+        by_id = (
+            materialise(pinned, root / "mat5", repo=fixture) / "index.html"
+        ).read_bytes()
+        case(
+            "a resolved commit pins the content even after the branch moves",
+            b"NEWCONTENT" in by_id and b"MOVEDCONTENT" not in by_id,
+        )
+        # THE CONTROL, and it is what makes the case above mean anything: the NAME really
+        # did move, so the pinned read is a statement about addressing and not about a
+        # fixture where both happen to be the same commit.
+        by_name = (
+            materialise("main", root / "mat6", repo=fixture) / "index.html"
+        ).read_bytes()
+        case(
+            "control: the branch name really does now resolve to the newer commit",
+            b"MOVEDCONTENT" in by_name,
+        )
+
+        # A SYMLINK is type blob with mode 120000, so a type-only filter would have
+        # written its target string as the asset. Built with plumbing rather than with a
+        # real symlink, because Windows checkouts do not create them by default and the
+        # case must run everywhere the suite does.
+        link_blob = (
+            subprocess.run(
+                ["git", "hash-object", "-w", "--stdin"],
+                cwd=str(fixture),
+                input=b"../../../etc/passwd",
+                capture_output=True,
+            )
+            .stdout.decode()
+            .strip()
+        )
+        idx = root / "linkindex"
+        env_idx = {"GIT_INDEX_FILE": str(idx)}
+        _g("read-tree", "main", cwd=fixture, env=env_idx)
+        _g(
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"120000,{link_blob},{SRC_SUBTREE}/evil.js",
+            cwd=fixture,
+            env=env_idx,
+        )
+        link_tree = _g("write-tree", cwd=fixture, env=env_idx).stdout.decode().strip()
+        link_commit = (
+            subprocess.run(
+                ["git", "commit-tree", link_tree, "-p", "main", "-m", "link"],
+                cwd=str(fixture),
+                capture_output=True,
+                env={
+                    **os.environ,
+                    "GIT_AUTHOR_NAME": "selftest",
+                    "GIT_AUTHOR_EMAIL": "selftest@invalid",
+                    "GIT_COMMITTER_NAME": "selftest",
+                    "GIT_COMMITTER_EMAIL": "selftest@invalid",
+                },
+            )
+            .stdout.decode()
+            .strip()
+        )
+        # The control first: the entry really is in that tree with mode 120000, so the
+        # refusal below is about the mode and not about a tree that never got it.
+        planted = _g("ls-tree", "-r", link_commit, "--", f"{SRC_SUBTREE}/", cwd=fixture)
+        case(
+            "control: the planted tree really carries a mode-120000 entry",
+            b"120000" in planted.stdout and b"evil.js" in planted.stdout,
+        )
+        try:
+            materialise(link_commit, root / "mat7", repo=fixture)
+            case("materialise refuses a tree entry that is not a regular file", False)
+        except SystemExit:
+            case("materialise refuses a tree entry that is not a regular file", True)
+
+        # THE CALL SITE, pinned at the source level and labelled as such. The case above
+        # proves materialise() pins content when handed a commit id; it cannot prove
+        # main() hands it one, and main() has no seam a fixture can drive -- it shells
+        # out to build.py and wants a real deploy set. Reverting the wiring is exactly
+        # the defect a review caught here, and a property with no test on its call site
+        # is a property that regresses quietly.
+        own_src = Path(__file__).read_text(encoding="utf-8")
+        # The forbidden form is BUILT rather than written, because a literal copy of it
+        # in this file would be found by the very scan below and the case would fail on
+        # its own control text. Same reason the fake home above is joined at runtime.
+        good = "materialise(" + "sha,"
+        bad = "materialise(" + "args.ref"
+        wiring = [
+            ln.strip()
+            for ln in own_src.splitlines()
+            if "materialise(" in ln and "def materialise" not in ln and "tmpd" in ln
+        ]
+        case(
+            "main() materialises the RESOLVED COMMIT, not the ref name",
+            len(wiring) == 1 and good in wiring[0] and bad not in wiring[0],
+        )
+        # The control, because a check that can only ever pass has not been shown to be
+        # capable of anything else: the same predicate rejects the shape it forbids.
+        planted_call = "        src = " + bad + ', tmpd / "src")'
+        case(
+            "control: that same predicate rejects the ref-name form",
+            good not in planted_call and bad in planted_call,
+        )
 
         # A repo path git cannot read. Named for what it proves -- resolve_ref refuses on
         # git's own non-zero exit -- and NOT for the raise-guard below, which it does not
