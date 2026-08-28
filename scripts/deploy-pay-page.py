@@ -25,23 +25,54 @@ Every staged file is then scanned for identifiers before anything is uploaded. T
 scan runs over the STAGED set, not over a list of files this script expects to
 find, so a file added to the deploy directory later cannot ride along unscanned.
 
+TWO TRANSPORTS, one staging path. `--publish` shells out to wrangler, which needs
+CLOUDFLARE_API_TOKEN: an account-scoped, long-lived credential that can publish this
+page, and therefore one that can publish a page with a different MERCHANT constant and
+take payments directly. `--jwt-file` uses the direct-upload API with a short-lived,
+project-scoped, upload-only JWT instead, which is strictly less privilege for the same
+result. Everything above the transport -- the ref, the build check, the deploy set, the
+identifier scan -- is identical either way, and deliberately so: a second transport must
+not become a second set of gates that drift apart.
+
+WHAT --jwt-file CANNOT DO, stated here rather than discovered. Minting that JWT is a call
+to an ACCOUNT-scoped endpoint, and so is creating the deployment that publishes the
+uploaded assets. This script has no account credential and is not given one -- that is the
+point of the flag. So the tokenless flow has three actors and this script is the middle
+one:
+
+  1. an operator or agent with account access mints the JWT   (not this script)
+  2. this script stages, gates, hashes and UPLOADS the assets  (--jwt-file)
+  3. the same operator or agent creates the deployment         (not this script)
+
+It is TOKENLESS. It is not one command, and anyone told otherwise will be surprised at
+step 3, which is why --jwt-file refuses to run without --plan-out: step 3 needs the
+manifest this script computes AND the Pages special files it deliberately keeps out of
+that manifest, and handing over only half of that is how the header rules get dropped.
+
 Usage:
   python scripts/deploy-pay-page.py                    # stage + gate origin/main, dry run
   python scripts/deploy-pay-page.py --ref HEAD         # ...from a local commit instead
-  python scripts/deploy-pay-page.py --publish          # ...then upload it
+  python scripts/deploy-pay-page.py --publish          # ...then upload it via wrangler
+  python scripts/deploy-pay-page.py --jwt-file J --plan-out P   # ...or tokenless, step 2
   python scripts/deploy-pay-page.py --selftest
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parent.parent
 SRC_DIR = REPO / "webshop-pay"
@@ -390,6 +421,503 @@ def stage(src: Path, dest: Path) -> list[Path]:
     return out
 
 
+# ===========================================================================
+# BLAKE3, in the standard library only.
+#
+# Cloudflare addresses a Pages asset by a BLAKE3 content key, and nothing in the
+# standard library computes BLAKE3 -- hashlib has blake2b and blake2s, which are a
+# different algorithm despite the name. So this is a transcription of the BLAKE3
+# reference implementation (the `reference_impl` published with the BLAKE3
+# specification by O'Connor, Aumasson, Neves and Wilcox-O'Hearn, released into the
+# public domain under CC0). Only the fixed-size 32-byte hash is implemented: no keyed
+# mode, no key derivation, no extendable output, because the key is a 32-hex-character
+# prefix of a plain hash and the rest would be untested code.
+#
+# WHY NOT `pip install blake3`, which is faster, maintained, and what this repo already
+# does for `cryptography` in three other scripts. Because of WHERE THE FAILURE IS. A
+# wrong key produces a manifest naming a blob the CDN was never given under that name,
+# and WHETHER THAT FAILS LOUDLY IS NOT ESTABLISHED. Two searches of Cloudflare's API
+# reference, the Pages direct-upload guide and wrangler's own source found nothing
+# stating that the server recomputes the hash, and nothing stating that it does not.
+# What is known: the upload payload carries no extension, so the server cannot
+# reproduce the key from the payload alone, which points at the blob simply being
+# stored under whatever key the client sent. If that is right the failure is SILENT --
+# one file 404s behind a 200 from the SPA fallback while every call reports success,
+# the same shape that left this page's own module absent for twelve days.
+#
+# The argument for pinning the derivation does not rest on that being resolved, which
+# is why the uncertainty is recorded rather than resolved. If the server validates, a
+# wrong key fails at deploy time and costs an afternoon. If it does not, a wrong key
+# ships a broken payment page that reports success. One of those is survivable and the
+# other is not, and nobody can currently say which one is live, so the derivation is
+# treated as if the unsurvivable case were true.
+#
+# The only defence against a silent hash is a test, and the test has to RUN. This
+# script's --selftest is already a required CI step, and a third-party import would make
+# the hash cases either skip on the runner or add a pip step to a job that has none.
+# Stdlib-only means the vectors below run on every CI run, on a fresh clone, with no
+# setup, which is the same standard the rest of this repo's reproducibility claim is
+# held to. The cost is speed, and it was measured rather than assumed: 2.9 seconds for
+# 760 KB, against a deploy set of two hashed assets. That is nothing on an operation
+# that runs by hand a few times a month.
+#
+# VERIFIED, not asserted. Beyond the two published vectors pinned in the selftest, this
+# implementation was cross-checked against the C `blake3` library on 84 inputs spanning
+# every block and chunk boundary (0, 1, 63, 64, 65, 1023, 1024, 1025, 2047, 2048, 2049,
+# 4096, 16384, 16385 ...) plus 60 random sizes: 0 mismatches. That cross-check needs a
+# library CI does not have, so it is not a case here; the fixed vectors are, and they
+# are what a reader can re-run.
+# ===========================================================================
+
+_B3_IV = (
+    0x6A09E667,
+    0xBB67AE85,
+    0x3C6EF372,
+    0xA54FF53A,
+    0x510E527F,
+    0x9B05688C,
+    0x1F83D9AB,
+    0x5BE0CD19,
+)
+_B3_PERM = (2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8)
+_B3_CHUNK_START, _B3_CHUNK_END, _B3_PARENT, _B3_ROOT = 1, 2, 4, 8
+_B3_MASK = 0xFFFFFFFF
+
+
+def _b3_rotr(x: int, n: int) -> int:
+    return ((x >> n) | (x << (32 - n))) & _B3_MASK
+
+
+def _b3_g(s: list[int], a: int, b: int, c: int, d: int, mx: int, my: int) -> None:
+    s[a] = (s[a] + s[b] + mx) & _B3_MASK
+    s[d] = _b3_rotr(s[d] ^ s[a], 16)
+    s[c] = (s[c] + s[d]) & _B3_MASK
+    s[b] = _b3_rotr(s[b] ^ s[c], 12)
+    s[a] = (s[a] + s[b] + my) & _B3_MASK
+    s[d] = _b3_rotr(s[d] ^ s[a], 8)
+    s[c] = (s[c] + s[d]) & _B3_MASK
+    s[b] = _b3_rotr(s[b] ^ s[c], 7)
+
+
+def _b3_round(s: list[int], m: tuple[int, ...] | list[int]) -> None:
+    _b3_g(s, 0, 4, 8, 12, m[0], m[1])
+    _b3_g(s, 1, 5, 9, 13, m[2], m[3])
+    _b3_g(s, 2, 6, 10, 14, m[4], m[5])
+    _b3_g(s, 3, 7, 11, 15, m[6], m[7])
+    _b3_g(s, 0, 5, 10, 15, m[8], m[9])
+    _b3_g(s, 1, 6, 11, 12, m[10], m[11])
+    _b3_g(s, 2, 7, 8, 13, m[12], m[13])
+    _b3_g(s, 3, 4, 9, 14, m[14], m[15])
+
+
+def _b3_compress(
+    cv: list[int] | tuple[int, ...],
+    block: tuple[int, ...] | list[int],
+    counter: int,
+    block_len: int,
+    flags: int,
+) -> list[int]:
+    s = [
+        cv[0], cv[1], cv[2], cv[3], cv[4], cv[5], cv[6], cv[7],
+        _B3_IV[0], _B3_IV[1], _B3_IV[2], _B3_IV[3],
+        counter & _B3_MASK, (counter >> 32) & _B3_MASK, block_len, flags,
+    ]  # fmt: skip
+    m = list(block)
+    for _ in range(6):
+        _b3_round(s, m)
+        m = [m[i] for i in _B3_PERM]
+    _b3_round(s, m)
+    for i in range(8):
+        s[i] ^= s[i + 8]
+        s[i + 8] ^= cv[i]
+    return s
+
+
+def _b3_words(block: bytes) -> tuple[int, ...]:
+    """A 64-byte block as 16 little-endian words, zero-padded if short."""
+    return struct.unpack("<16I", block + b"\0" * (64 - len(block)))
+
+
+class _B3Output:
+    """A node whose ROOT flag is not decided yet.
+
+    BLAKE3's root flag belongs to the LAST compression of the whole tree, which is not
+    known until the input ends -- a one-chunk input roots at that chunk, a longer one
+    roots at the final parent. Deferring it is what the reference implementation does
+    and the reason this is a class rather than a running accumulator.
+    """
+
+    __slots__ = ("block", "block_len", "counter", "cv", "flags")
+
+    def __init__(self, cv, block, counter, block_len, flags):
+        self.cv, self.block, self.counter = cv, block, counter
+        self.block_len, self.flags = block_len, flags
+
+    def chaining_value(self) -> list[int]:
+        return _b3_compress(
+            self.cv, self.block, self.counter, self.block_len, self.flags
+        )[:8]
+
+    def root_bytes(self) -> bytes:
+        s = _b3_compress(
+            self.cv, self.block, self.counter, self.block_len, self.flags | _B3_ROOT
+        )
+        return struct.pack("<8I", *s[:8])
+
+
+def blake3_32(data: bytes) -> bytes:
+    """The 32-byte BLAKE3 hash of `data`."""
+    stack: list[list[int]] = []
+    chunk_counter = 0
+    pos = 0
+    n = len(data)
+    out: _B3Output | None = None
+    while True:
+        chunk = data[pos : pos + 1024]
+        pos += 1024
+        cv: list[int] | tuple[int, ...] = _B3_IV
+        # `or [b""]` is the empty-input case and is load-bearing: a zero-length input
+        # still compresses one empty block, and without it the loop below would produce
+        # no output node at all.
+        blocks = [chunk[i : i + 64] for i in range(0, len(chunk), 64)] or [b""]
+        node = None
+        for j, blk in enumerate(blocks):
+            flags = _B3_CHUNK_START if j == 0 else 0
+            if j == len(blocks) - 1:
+                node = _B3Output(
+                    cv, _b3_words(blk), chunk_counter, len(blk), flags | _B3_CHUNK_END
+                )
+            else:
+                cv = _b3_compress(cv, _b3_words(blk), chunk_counter, 64, flags)[:8]
+        assert node is not None
+        if pos >= n:
+            out = node
+            break
+        # Merge into the subtree stack: one merge per trailing zero bit of the count,
+        # which is what keeps the tree balanced without holding every chaining value.
+        merged = node.chaining_value()
+        total = chunk_counter + 1
+        while total & 1 == 0:
+            merged = _B3Output(
+                _B3_IV, stack.pop() + merged, 0, 64, _B3_PARENT
+            ).chaining_value()
+            total >>= 1
+        stack.append(merged)
+        chunk_counter += 1
+    while stack:
+        out = _B3Output(_B3_IV, stack.pop() + out.chaining_value(), 0, 64, _B3_PARENT)
+    return out.root_bytes()
+
+
+# ===========================================================================
+# The Pages direct-upload transport.
+# ===========================================================================
+
+# The asset endpoints are account-agnostic: they authorise on the project-scoped JWT
+# alone, which is exactly why this leg needs no account credential.
+ASSETS_API = "https://api.cloudflare.com/client/v4/pages/assets"
+
+# Bounded rather than tuned. The deploy set is a handful of files, so batching is not
+# what makes this work; the bound exists so a future SERVE cannot post an unbounded body.
+UPLOAD_ATTEMPTS = 3
+UPLOAD_BATCH_FILES = 50
+UPLOAD_BATCH_BYTES = 8 * 1024 * 1024
+
+# Files Pages consumes as CONFIGURATION rather than serving. They must not appear in the
+# asset manifest, and the reason is measured on the live origin rather than assumed:
+# `GET /_headers` returns 118,115 bytes of `text/html` -- the SPA fallback, byte-identical
+# to what a nonsense path returns -- while every response on that origin carries the
+# `Cache-Control: no-store, max-age=0` that `_headers` declares. So the file is in force
+# and is not an asset.
+#
+# THIS IS THE HALF A MANIFEST-ONLY DEPLOY DROPS, silently. `no-store` on this page is not
+# decoration: the page's own source records four payments lost in one evening to customers
+# reloading a stale tab. A deployment created from the manifest alone would publish a
+# cacheable payment page and report success, so these files are separated here and handed
+# to step 3 explicitly rather than left for someone to remember.
+PAGES_SPECIAL = (
+    "_headers",
+    "_redirects",
+    "_routes.json",
+    "_worker.js",
+    ".assetsignore",
+)
+
+# DENY BY DEFAULT, and no octet-stream fallback. A content type is what the browser acts
+# on -- a module served as octet-stream does not execute -- so guessing wrong is a live
+# defect, not a cosmetic one. Each entry below is the type the live origin actually
+# returns today for that extension, so a direct upload reproduces the wrangler deploy
+# rather than quietly re-typing it. A member of SERVE with an extension not listed here
+# REFUSES, which forces the question to be answered once, by a person, in this table.
+CONTENT_TYPES = {
+    "html": "text/html",
+    "js": "application/javascript",
+    "css": "text/css",
+    "json": "application/json",
+    "svg": "image/svg+xml",
+    "png": "image/png",
+    "ico": "image/x-icon",
+    "txt": "text/plain",
+    "woff2": "font/woff2",
+}
+
+
+def bare_extension(served_path: str) -> str:
+    """The extension with no dot, empty when the basename carries none.
+
+    Wrangler derives the key's extension with Node's `path.extname(p).substring(1)`,
+    so `index.html` gives `html`, `_headers` gives the empty string, and a dotfile like
+    `.gitignore` also gives the empty string because Node treats a leading dot as the
+    name rather than a separator. `PurePosixPath.suffix` agrees on all three, and the
+    slice reproduces `substring(1)` exactly -- `".js"[1:]` is `js` and `""[1:]` is `""`.
+    """
+    return PurePosixPath(served_path).suffix[1:]
+
+
+def content_type(served_path: str) -> str:
+    ext = bare_extension(served_path)
+    try:
+        return CONTENT_TYPES[ext]
+    except KeyError:
+        sys.exit(
+            f"REFUSED: no content type declared for {served_path!r} (extension "
+            f"{ext or '<none>'!r}). Add it to CONTENT_TYPES with the type the origin "
+            "should serve. Nothing was uploaded."
+        )
+
+
+def asset_key(data: bytes, served_path: str) -> str:
+    """Cloudflare's content key for one asset: 32 hex characters.
+
+    The contract is wrangler's, and every part of it matters. The hash covers the
+    BASE64 TEXT rather than the raw bytes, with the bare extension CONCATENATED onto it,
+    and the digest is truncated to 32 characters rather than used whole. Each of the
+    three has its own case in the selftest, and each was confirmed by breaking it and
+    watching the suite go red, because a derivation nobody has watched fail is a guess.
+
+    The extension is taken from the SERVED PATH, which for every member of SERVE is also
+    its on-disk relative path, so the two cannot disagree here. They can in general --
+    a deploy set that renamed a file on the way up would have two candidate extensions
+    and only one of them is the one wrangler hashes -- which is why this takes the path
+    explicitly rather than reaching for a Path object it was handed.
+    """
+    b64 = base64.b64encode(data).decode("ascii")
+    return blake3_32((b64 + bare_extension(served_path)).encode("utf-8")).hex()[:32]
+
+
+def _post_json(url: str, jwt: str, payload: dict) -> dict:
+    """POST JSON with the upload JWT, returning the API's `result`.
+
+    Never echoes the request headers or the token in any error path: this runs in a
+    transcript, and a short-lived credential printed into one outlives the call.
+    """
+    body = json.dumps(payload).encode("utf-8")
+    last = ""
+    for attempt in range(1, UPLOAD_ATTEMPTS + 1):
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {jwt}",
+                "Content-Type": "application/json",
+                "User-Agent": "zeroclaw-pages-direct-upload",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                code, raw = r.status, r.read()
+        except urllib.error.HTTPError as e:
+            # A 4xx here IS the answer for a rejected batch, and the body carries the
+            # reason. The bare urlopen form raises it away, so it is read explicitly.
+            code, raw = e.code, e.read()
+        except urllib.error.URLError as e:
+            last = f"transport: {e.reason}"
+            if attempt < UPLOAD_ATTEMPTS:
+                time.sleep(2 * attempt)
+                continue
+            sys.exit(f"REFUSED: {url} unreachable after {attempt} attempts ({last}).")
+
+        text = raw.decode("utf-8", "replace")
+        # Retried, then allowed to fall through on the last attempt so the refusal below
+        # reports the real status and body rather than a generic give-up message.
+        if code in (429, 500, 502, 503, 504) and attempt < UPLOAD_ATTEMPTS:
+            time.sleep(2 * attempt)
+            continue
+        try:
+            doc = json.loads(text)
+        except json.JSONDecodeError:
+            sys.exit(f"REFUSED: {url} returned HTTP {code} and not JSON: {text[:400]}")
+        if code != 200 or not doc.get("success"):
+            sys.exit(
+                f"REFUSED: {url} returned HTTP {code}: "
+                f"{json.dumps(doc.get('errors') or doc)[:400]}\n"
+                "An expired or wrong-project upload JWT looks exactly like this. "
+                "Nothing further was uploaded."
+            )
+        return doc.get("result")
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def check_missing(jwt: str, keys: list[str], post=_post_json) -> list[str]:
+    """Which of `keys` the CDN does not already hold.
+
+    `post` is injectable for the same reason `_git` takes `repo`: the cases below have
+    to drive this without a network, and a stub standing in for the whole function would
+    prove nothing about the request this actually builds.
+    """
+    result = post(f"{ASSETS_API}/check-missing", jwt, {"hashes": keys})
+    # A NON-LIST IS REFUSED RATHER THAN COERCED, and the difference is the whole file.
+    # `list(result or [])` reads as defensive and is the opposite: a null result would
+    # become "nothing is missing", so nothing would be uploaded, the upsert and the
+    # deployment would both report success, and every asset would 404 behind the SPA
+    # fallback. An empty list is a real answer and passes here; anything else is not an
+    # answer and must not be read as one.
+    if not isinstance(result, list):
+        sys.exit(
+            f"REFUSED: check-missing returned {type(result).__name__}, not a list of "
+            "hashes. Treating that as 'nothing missing' would upload nothing and "
+            "publish a page whose assets are absent. Nothing was uploaded."
+        )
+    return list(result)
+
+
+def upload_assets(jwt: str, items: list[dict], post=_post_json) -> int:
+    """Upload asset payloads in bounded batches. Returns the number sent."""
+    sent = 0
+    batch: list[dict] = []
+    size = 0
+    for item in items:
+        item_size = len(item["value"])
+        if batch and (
+            len(batch) >= UPLOAD_BATCH_FILES or size + item_size > UPLOAD_BATCH_BYTES
+        ):
+            post(f"{ASSETS_API}/upload", jwt, batch)
+            sent += len(batch)
+            batch, size = [], 0
+        batch.append(item)
+        size += item_size
+    if batch:
+        post(f"{ASSETS_API}/upload", jwt, batch)
+        sent += len(batch)
+    return sent
+
+
+def upsert_hashes(jwt: str, keys: list[str], post=_post_json) -> None:
+    post(f"{ASSETS_API}/upsert-hashes", jwt, {"hashes": keys})
+
+
+def upload_payload(data: bytes, served_path: str) -> dict:
+    """One asset in the shape the upload endpoint takes."""
+    return {
+        "key": asset_key(data, served_path),
+        "value": base64.b64encode(data).decode("ascii"),
+        "metadata": {"contentType": content_type(served_path)},
+        "base64": True,
+    }
+
+
+def deployment_plan(dest: Path, serve: tuple[str, ...] = SERVE) -> dict:
+    """Split the staged set into manifest assets and Pages configuration files.
+
+    The manifest maps the SERVED path -- LEADING SLASH -- to the asset key. That slash
+    is wrangler's behaviour, not the API reference's: the published curl example writes
+    bare keys (`{"index.html": "abc123"}`) while wrangler emits `/${fileName}`. The two
+    primary sources disagree, and wrangler wins, because the example is illustrative
+    rather than real -- its "hashes" are six characters where a key is thirty-two. The
+    same example is the reason this is written down: copying its shape would produce a
+    manifest that is wrong in a way no local check could see.
+
+    Special files get their text carried instead of a key, because they are
+    configuration and a key would be meaningless: nothing fetches them.
+    """
+    manifest: dict[str, str] = {}
+    assets: list[dict] = []
+    special: dict[str, str] = {}
+    for name in serve:
+        data = (dest / name).read_bytes()
+        if PurePosixPath(name).name in PAGES_SPECIAL:
+            special[name] = data.decode("utf-8")
+            continue
+        payload = upload_payload(data, name)
+        manifest["/" + name] = payload["key"]
+        assets.append(payload)
+    return {"manifest": manifest, "assets": assets, "special": special}
+
+
+def publish_direct(jwt: str, dest: Path, plan_out: Path, post=_post_json) -> int:
+    """Upload the staged assets with a project-scoped JWT, then hand over step 3."""
+    plan = deployment_plan(dest)
+    keys = [a["key"] for a in plan["assets"]]
+
+    # Made writable BEFORE anything is uploaded. The plan is written last on purpose --
+    # it must exist only if the upload succeeded, or someone could deploy a manifest
+    # whose assets are not there -- so the one failure that ordering allows is a bad
+    # path discovered after the upload, and that is cheap to rule out here.
+    plan_out.parent.mkdir(parents=True, exist_ok=True)
+
+    for served, key in sorted(plan["manifest"].items()):
+        print(f"    {served:28} {key}")
+    for name in sorted(plan["special"]):
+        print(f"    {name:28} (Pages config, kept OUT of the manifest)")
+
+    missing = set(check_missing(jwt, keys, post=post))
+    todo = [a for a in plan["assets"] if a["key"] in missing]
+    print(f"  {len(missing)} of {len(keys)} asset(s) not already on the CDN")
+    if todo:
+        print(f"  uploading {len(todo)} asset(s) ...")
+        sent = upload_assets(jwt, todo, post=post)
+        print(f"  uploaded {sent}.")
+    upsert_hashes(jwt, keys, post=post)
+    print("  upserted.")
+
+    plan_out.write_text(
+        json.dumps(
+            {"manifest": plan["manifest"], "special": plan["special"]},
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    print(
+        f"\n  assets uploaded. Wrote step 3's input to {plan_out}.\n"
+        "  THE DEPLOYMENT IS NOT CREATED YET. Uploaded assets are not a deployment,\n"
+        "  and nothing is live until an account-scoped caller posts one:\n"
+        f"    POST /accounts/<id>/pages/projects/{PROJECT}/deployments\n"
+        "    multipart/form-data, field `manifest` = the manifest object from that file\n"
+        "  The entries under `special` are Pages CONFIGURATION, not assets, and they\n"
+        "  are deliberately absent from that manifest. They still have to reach the\n"
+        "  deployment: dropping them publishes a CACHEABLE payment page, and this page\n"
+        "  has already lost payments to a stale tab once. The exact form field for them\n"
+        "  is NOT settled here -- the raw HTTP flow is undocumented and only wrangler's\n"
+        "  source describes it -- so confirm it before posting, and afterwards confirm\n"
+        "  the rule is in force by reading a response header from the live origin:\n"
+        f"    {LIVE_URL}\n"
+        "  Verify the deploy from that origin's CONTENT and headers, never from an\n"
+        "  exit code: on this host an absent asset answers 200 with the page."
+    )
+    return 0
+
+
+def read_jwt(path: Path) -> str:
+    """The upload token, from a file rather than a flag.
+
+    A credential passed in argv is visible to every process on the machine and is
+    recorded verbatim in this project's own session transcripts. A file is not.
+    """
+    if not path.is_file():
+        sys.exit(f"REFUSED: no upload token at {path}. Nothing was uploaded.")
+    token = path.read_text(encoding="utf-8").strip()
+    # Shape only. Whether it is valid, unexpired and scoped to this project is the
+    # API's answer, and _post_json says so when it is not.
+    if token.count(".") != 2 or not all(token.split(".")):
+        sys.exit(
+            f"REFUSED: {path} does not hold a JWT (expected three dot-separated "
+            "segments). Nothing was uploaded."
+        )
+    return token
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -401,11 +929,48 @@ def main(argv: list[str]) -> int:
         ),
     )
     ap.add_argument("--publish", action="store_true")
+    ap.add_argument(
+        "--jwt-file",
+        type=Path,
+        default=None,
+        help=(
+            "path to a file holding a project-scoped Pages upload JWT. Uploads the "
+            "staged assets directly, with no account credential. Requires --plan-out, "
+            "and does NOT create the deployment; see this file's header."
+        ),
+    )
+    ap.add_argument(
+        "--plan-out",
+        type=Path,
+        default=None,
+        help="where to write step 3's input: the manifest and the Pages config files.",
+    )
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args(argv)
 
     if args.selftest:
         return selftest()
+
+    # Refused BEFORE anything is staged, so a missing flag costs a message rather than a
+    # half-finished upload. Two transports for one artifact is a hazard worth naming:
+    # they carry different credentials, and running both would publish twice.
+    if args.publish and args.jwt_file:
+        sys.exit(
+            "REFUSED: --publish (wrangler, account token) and --jwt-file (direct "
+            "upload, project token) are two transports for the same deploy. Pick one."
+        )
+    if args.jwt_file and args.plan_out is None:
+        sys.exit(
+            "REFUSED: --jwt-file needs --plan-out. This script uploads assets and "
+            "cannot create the deployment, so the manifest it computes and the Pages "
+            "config files it keeps out of that manifest have to be handed over. "
+            "Without them the deployment step drops the header rules silently."
+        )
+    if args.plan_out is not None and args.jwt_file is None:
+        sys.exit("REFUSED: --plan-out only has a meaning alongside --jwt-file.")
+    # Read before staging too: an unreadable or malformed token should not cost a
+    # materialise, a build check and a scan first.
+    jwt = read_jwt(args.jwt_file) if args.jwt_file else None
 
     # Resolve the source BEFORE anything else, so a stale or misspelled ref fails
     # here rather than after a reassuring wall of staging output.
@@ -464,8 +1029,15 @@ def main(argv: list[str]) -> int:
             rel = str(p.relative_to(dest)).replace("\\", "/")
             print(f"    {rel:26} {p.stat().st_size:>8} B")
 
+        if jwt is not None:
+            print(f"\n  uploading to {PROJECT} with a project-scoped upload token ...")
+            return publish_direct(jwt, dest, args.plan_out)
+
         if not args.publish:
-            print("\n  dry run. Re-run with --publish to upload.")
+            print(
+                "\n  dry run. Re-run with --publish to upload via wrangler, or with "
+                "--jwt-file/--plan-out to upload with a project-scoped token."
+            )
             return 0
 
         print(f"\n  uploading to {PROJECT} ...")
@@ -1102,6 +1674,248 @@ def selftest() -> int:
             )
         except SystemExit:
             case("a ref missing a deploy-set member is refused, not part-shipped", True)
+
+        # ---------------------------------------------------------------
+        # The direct-upload transport.
+        # ---------------------------------------------------------------
+
+        # BLAKE3 against the PUBLISHED vectors, not against another implementation of
+        # this repo's own. The inputs are the specification's own construction, a
+        # repeating 0..250 byte pattern, and the lengths are chosen for the tree rather
+        # than for coverage theatre: 0 is the empty-block path, 1 a partial block, 1023
+        # a partial chunk, 1024 exactly one chunk, 2048 two chunks and therefore the
+        # first parent merge, 3072 three chunks and therefore an UNBALANCED merge, which
+        # is the only case that exercises the subtree stack unwinding more than once.
+        # These same values were additionally cross-checked against the C `blake3`
+        # library on 84 inputs with 0 mismatches; that library is not on a CI runner, so
+        # the vectors are what is pinned.
+        b3_vectors = {
+            0: "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+            1: "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213",
+            1023: "10108970eeda3eb932baac1428c7a2163b0e924c9a9e25b35bba72b28f70bd11",
+            1024: "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7",
+            2048: "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a",
+            3072: "b98cb0ff3623be03326b373de6b9095218513e64f1ee2edd2525c7ad1e5cffd2",
+        }
+        for n, want in b3_vectors.items():
+            got = blake3_32(bytes(i % 251 for i in range(n))).hex()
+            case(f"blake3 matches the published vector at len {n}", got == want)
+
+        # bare_extension() reproduces Node's path.extname(...).substring(1), which is
+        # what wrangler feeds the hash. Each row is a shape the deploy set really has or
+        # could grow, and the dotfile row is the one a naive rsplit(".") gets wrong.
+        for path, want_ext in (
+            ("index.html", "html"),
+            ("vendor/solana-bundle.js", "js"),
+            ("_headers", ""),
+            (".gitignore", ""),
+            ("a.tar.gz", "gz"),
+        ):
+            case(
+                f"bare_extension({path!r}) is {want_ext!r}",
+                bare_extension(path) == want_ext,
+            )
+
+        # THE KEY ITSELF, pinned to literals rather than recomputed from the formula.
+        # A case that rebuilds the expression it is checking passes for any expression.
+        case(
+            "asset_key pins the documented derivation for an extension",
+            asset_key(b"hello", "a.js") == "46d49df6b69d8c4431d2d5f02ae3e4a9",
+        )
+        case(
+            "asset_key pins the derivation when the name carries no extension",
+            asset_key(b"hello", "noext") == "324ea05bea4d7f75b8d9ed695e65b2ca",
+        )
+        # THE DISCRIMINATING PAIR. Same bytes, different extension, and the keys must
+        # differ -- this is the case that goes red if the extension stops reaching the
+        # hash, which is the mutation this derivation is most likely to suffer.
+        case(
+            "the extension reaches the hash: same bytes, different extension, "
+            "different key",
+            asset_key(b"hello", "a.js") != asset_key(b"hello", "a.css"),
+        )
+        # And the base64 step is load-bearing too: hashing the RAW bytes gives a
+        # different answer, so a version that skipped the encode would not match.
+        case(
+            "the hash covers the base64 TEXT, not the raw bytes",
+            asset_key(b"hello", "a.js") != blake3_32(b"hello" + b"js").hex()[:32],
+        )
+        case(
+            "an asset key is 32 hex characters",
+            len(asset_key(b"hello", "a.js")) == 32
+            and all(c in "0123456789abcdef" for c in asset_key(b"hello", "a.js")),
+        )
+
+        # Content types are DECLARED, never guessed. The .js row is the type the live
+        # origin returns today, so a direct upload reproduces the wrangler deploy.
+        case(
+            "content_type(index.html) is text/html",
+            content_type("i.html") == "text/html",
+        )
+        case(
+            "content_type for the module matches what the origin serves",
+            content_type("vendor/solana-bundle.js") == "application/javascript",
+        )
+        try:
+            content_type("mystery.zzz")
+            case("an undeclared extension is refused, not defaulted", False)
+        except SystemExit:
+            case("an undeclared extension is refused, not defaulted", True)
+
+        # THE SPECIAL-FILE SPLIT, which is the half a manifest-only deploy drops.
+        staged_dir = serve_set(root / "staged")
+        plan = deployment_plan(staged_dir)
+        case(
+            "_headers is carried as Pages config, not as a manifest asset",
+            "_headers" in plan["special"] and "/_headers" not in plan["manifest"],
+        )
+        case(
+            "the real assets ARE in the manifest, keyed by served path",
+            plan["manifest"].keys() == {"/index.html", "/vendor/solana-bundle.js"},
+        )
+        case(
+            "every manifest key is an absolute served path",
+            all(k.startswith("/") for k in plan["manifest"]),
+        )
+        case(
+            "no upload payload is built for a config file",
+            len(plan["assets"]) == len(plan["manifest"]),
+        )
+        # The control that makes the split evidence rather than an assertion: the same
+        # plan builder, over the same directory, told nothing is special. It must not
+        # quietly succeed. Without the split it REFUSES -- because `_headers` carries no
+        # extension and CONTENT_TYPES declares none, so the deny-by-default table catches
+        # it a second time. That is the honest result and it is better than the one this
+        # control was written expecting: the two defences are independent, so deleting
+        # either one alone still cannot put a config file on the CDN as an asset.
+        saved_special = PAGES_SPECIAL
+        try:
+            globals()["PAGES_SPECIAL"] = ()
+            deployment_plan(staged_dir)
+            case(
+                "control: with no special list, the plan does not quietly succeed",
+                False,
+            )
+        except SystemExit:
+            case(
+                "control: with no special list, the plan does not quietly succeed", True
+            )
+        finally:
+            globals()["PAGES_SPECIAL"] = saved_special
+
+        # The upload payload's shape, and that it round-trips.
+        payload = upload_payload(b"\x00\x01binary\xff", "vendor/solana-bundle.js")
+        case(
+            "an upload payload carries key, base64 value, content type and the flag",
+            payload["base64"] is True
+            and payload["metadata"]["contentType"] == "application/javascript"
+            and base64.b64decode(payload["value"]) == b"\x00\x01binary\xff",
+        )
+
+        # The three asset calls, driven with NO NETWORK. `post` is injected for the same
+        # reason `_git` takes `repo`: a stub replacing the whole function would pass
+        # whether or not these built the request they claim to.
+        calls: list[tuple[str, object]] = []
+
+        def fake_post(url, jwt, body):
+            calls.append((url, body))
+            return list(body["hashes"]) if url.endswith("check-missing") else {}
+
+        missing = check_missing("a.b.c", ["k1", "k2"], post=fake_post)
+        case(
+            "check_missing posts the hash list to the check-missing endpoint",
+            missing == ["k1", "k2"]
+            and calls[0][0] == f"{ASSETS_API}/check-missing"
+            and calls[0][1] == {"hashes": ["k1", "k2"]},
+        )
+        # A check-missing answer that is not a list must REFUSE, because coercing it to
+        # an empty list would mean "nothing to upload" and would publish a page with no
+        # assets while every call reported success.
+        try:
+            check_missing("a.b.c", ["k1"], post=lambda *_: None)
+            case("a non-list check-missing result is refused, not coerced", False)
+        except SystemExit:
+            case("a non-list check-missing result is refused, not coerced", True)
+        # ...and the control: an EMPTY list is a real answer and must pass.
+        case(
+            "control: an empty check-missing result is accepted as 'nothing missing'",
+            check_missing("a.b.c", ["k1"], post=lambda *_: []) == [],
+        )
+
+        calls.clear()
+        upsert_hashes("a.b.c", ["k1"], post=fake_post)
+        case(
+            "upsert_hashes posts to the upsert endpoint",
+            calls == [(f"{ASSETS_API}/upsert-hashes", {"hashes": ["k1"]})],
+        )
+
+        # Batching, both bounds, because a bound nobody has crossed is a constant.
+        calls.clear()
+        many = [
+            {"key": f"k{i}", "value": "A" * 10} for i in range(UPLOAD_BATCH_FILES + 5)
+        ]
+        sent = upload_assets("a.b.c", many, post=fake_post)
+        case(
+            "upload_assets splits on the file bound and sends every item",
+            sent == len(many) and len(calls) == 2,
+        )
+        calls.clear()
+        big = [{"key": "a", "value": "A" * (UPLOAD_BATCH_BYTES // 2 + 1)}] * 2
+        upload_assets("a.b.c", big, post=fake_post)
+        case("upload_assets splits on the byte bound", len(calls) == 2)
+
+        # END TO END with no network: the whole transport, and the artifact it must
+        # leave behind for the step it cannot perform.
+        calls.clear()
+        plan_out = root / "plan" / "deployment.json"
+        rc_direct = publish_direct("a.b.c", staged_dir, plan_out, post=fake_post)
+        urls = [u for u, _ in calls]
+        case(
+            "publish_direct checks, uploads, then upserts, in that order",
+            rc_direct == 0
+            and [u.rsplit("/", 1)[-1] for u in urls]
+            == ["check-missing", "upload", "upsert-hashes"],
+        )
+        written = json.loads(plan_out.read_text(encoding="utf-8"))
+        case(
+            "publish_direct hands step 3 BOTH the manifest and the config files",
+            written["manifest"].keys() == {"/index.html", "/vendor/solana-bundle.js"}
+            and "_headers" in written["special"],
+        )
+
+        # The token is read from a file, and its shape is refused rather than sent.
+        try:
+            read_jwt(root / "no-such-token")
+            case("a missing token file is refused", False)
+        except SystemExit:
+            case("a missing token file is refused", True)
+        notjwt = root / "notjwt.txt"
+        notjwt.write_text("this-is-not-a-jwt", encoding="utf-8")
+        try:
+            read_jwt(notjwt)
+            case("a value that is not JWT-shaped is refused", False)
+        except SystemExit:
+            case("a value that is not JWT-shaped is refused", True)
+        okjwt = root / "ok.jwt"
+        okjwt.write_text("  aaa.bbb.ccc\n", encoding="utf-8")
+        case(
+            "a JWT-shaped token is accepted and stripped",
+            read_jwt(okjwt) == "aaa.bbb.ccc",
+        )
+
+        # The flag guards, which run BEFORE anything is staged. Driven through main()
+        # so the ordering is the real one: each of these must cost a message, not a
+        # materialise, a build check and a scan.
+        for argv_, why in (
+            (["--publish", "--jwt-file", "x"], "two transports at once is refused"),
+            (["--jwt-file", "x"], "--jwt-file without --plan-out is refused"),
+            (["--plan-out", "p"], "--plan-out without --jwt-file is refused"),
+        ):
+            try:
+                main(argv_)
+                case(why, False)
+            except SystemExit as e:
+                case(why, e.code not in (0, None))
 
     passed = sum(1 for _, ok in cases if ok)
     print(f"\n  {passed}/{len(cases)}")
