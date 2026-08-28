@@ -845,14 +845,15 @@ def check_required_directives(inv: dict, r: Result) -> None:
     `check_services` owns LIVENESS and is structurally blind here: a shop running with no
     pre-check at all is ACTIVE, so it is green. `check_unit_definitions` owns PUBLICATION and
     stops at publishing -- it has collected `ExecStartPre` into the /selfcheck payload since it
-    was written, and nothing ever read the value back. So the fact that zc-shop.service carried
-    ZERO `ExecStartPre` lines was sitting in a published document for anyone to grep, with two
-    green checks either side of it and a durable record asserting the opposite.
+    was written, and nothing ever read the value back. So whether zc-shop.service still declares
+    its start gate has been sitting in a published document for anyone to grep, with two green
+    checks either side of it and nothing turning red if the answer changed.
 
-    MEASURED 2026-08-27: `ExecStartPre` count 0 in zc-shop.service, `ExecStart` count 1 as the
-    positive control proving the unit was readable. The guard script existed, was executable,
-    and PASSED when run by hand -- which is precisely why nobody noticed. A script that agrees
-    with the current config looks exactly like a gate, and this one had never refused a start.
+    THE SURFACE MATTERS MORE THAN THE COUNT. `systemctl cat` merges `<unit>.d/*.conf` drop-ins,
+    and zc-shop.service takes its `ExecStartPre` from one, so the bare unit file reads 0 whether
+    or not the guard is wired and only the merged definition tells the two apart. Measured
+    2026-08-27, the merged unit carries `ExecStartPre` 1 and `ExecStart` 1. This row reads that
+    merged definition, which is what `check_unit_definitions` already collects.
 
     SUBSTRING, NOT EQUALITY, and the choice is deliberate in both directions. A full-path pin
     goes red when the script is relocated or gains an argument, which punishes a correct change
@@ -1670,9 +1671,9 @@ def self_test() -> int:
         # ------------------------------------------------------------------------------
         # REQUIRED DIRECTIVES, both directions. Only-must-fail is satisfied by a check that
         # refuses everything, which would wedge the box; only-must-pass by one that refuses
-        # nothing, which is the fail-open this row exists to close. Case 1 is the MEASURED
-        # 2026-08-27 state: zc-shop.service with no ExecStartPre at all, while the guard
-        # script sat on the box executable and passing when run by hand.
+        # nothing, which is the fail-open this row exists to close. The `_without` fixture is
+        # the state this row exists to catch: a merged zc-shop.service definition carrying no
+        # ExecStartPre at all, which is what deleting the drop-in leaves behind.
         _req = {
             "required_directives": {
                 "zc-shop.service": {"ExecStartPre": "whatsapp_posture_guard.sh"}
@@ -1712,7 +1713,7 @@ def self_test() -> int:
         rr = _req_row({"zc-shop.service": _without})
         _absent = rr.checks[0]["detail"]
         report(
-            "required directives: THE MEASURED STATE (no ExecStartPre) FAILS and says MISSING",
+            "required directives: a unit with NO ExecStartPre FAILS and says MISSING",
             rr.checks[0]["ok"] is False and "MISSING" in _absent,
         )
         report(

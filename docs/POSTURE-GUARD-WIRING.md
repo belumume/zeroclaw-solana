@@ -1,38 +1,47 @@
-# Wiring the WhatsApp posture guard so it can actually refuse a start
+# Moving the WhatsApp posture guard under the deploy root so drift covers it
 
-**DO NOT RUN ANY OF THIS BEFORE THE LIVE DEMO.** An `ExecStartPre` that fails blocks the start
-of `zc-shop.service`. Wiring an unproven-in-that-position check into the one unit a live demo
-depends on is the wrong trade hours beforehand, and the WhatsApp session behind it has already
-been lost to a two-hour outage once.
+**THE INSTALL BELOW REPLACES A LIVE START GATE, so read the preconditions before running any
+of it.** `~/.config/systemd/user/zc-shop.service.d/10-posture-guard.conf` already exists on the
+box and already supplies the `ExecStartPre`. The file shipped here carries that same name, so
+installing it does not add a gate, it repoints the existing one at a different path. An
+`ExecStartPre` whose target is absent fails 203/EXEC and blocks the start of
+`zc-shop.service`, and the WhatsApp session behind that service has been lost to a two-hour
+outage once.
 
-## What was measured, and what was false
+## What is wired, and what is not
 
-Measured on the box 2026-08-27: `ExecStartPre` appears **zero** times in `zc-shop.service`, with
-`ExecStart` at **1** as the positive control proving the unit file was readable and greppable.
+`ExecStartPre` appears **zero** times in `zc-shop.service` itself, with `ExecStart` at **1** as
+the positive control proving the unit file was readable and greppable. That measurement settles
+nothing about the start path: systemd merges `<unit>.d/*.conf` drop-ins from separate files, so
+the bare unit reads zero whether or not a guard is wired. The merged unit is the surface that
+answers the question.
 
-Two durable records asserted the opposite. `TESTING.md` said the guard "runs as `ExecStartPre`
-and refuses to start the shop", and the handoff said the guard "gates boot on it". Both have
-been corrected at source.
+    systemctl --user cat zc-shop.service
 
-What is true: `~/whatsapp_posture_guard.sh` exists, is executable, and passes when run by hand.
-That is the trap rather than the reassurance. A script that agrees with the current config is
-indistinguishable from a gate, and this one had never refused a start in its life. The scenario
-it exists for is a config edit that opens `group_policy` or empties `allowed_groups`, and the
-precedent is real: a roughly 30-person group-spam incident is what caused the posture to be
-installed. The daemon also rewrites `config.toml` on some paths, so the config changing
-underneath is not hypothetical.
+Read that way on 2026-08-27 the box carries `ExecStartPre` at 1 and `ExecStart` at 1, supplied
+by a 72-byte `~/.config/systemd/user/zc-shop.service.d/10-posture-guard.conf` dated 2026-07-27
+that names `/bin/bash` and the home-directory copy at `~/whatsapp_posture_guard.sh`. The guard
+has been observed refusing a start from that position and passing on the revert, recorded in
+`docs/transcripts/whatsapp-allowlist-gate.md`. The scenario it exists for is a config edit that
+opens `group_policy` or empties `allowed_groups`, and the precedent is real: a roughly
+30-person group-spam incident is what caused the posture to be installed. The daemon also
+rewrites `config.toml` on some paths, so the config changing underneath is not hypothetical.
 
-**The guard is not lost and does not need reconstructing.** This repo has tracked it at
+**What is NOT covered is the deployed copy of the script.** It runs from
+`~/whatsapp_posture_guard.sh`, outside `ZEROCLAW_HOME`, which is the root every `dst` in
+`deploy/deploy-targets.json` resolves against. No map entry can reach it, so nothing hashes it
+and nothing would report it being edited. This repo has tracked the script at
 `scripts/whatsapp_posture_guard.sh` since 2026-07-27, with two-way controls beside it at
-`scripts/test_whatsapp_posture_guard.sh` that CI already runs. What was never true is that
-anything invoked it at boot, or that the repo copy and the box copy had ever been compared.
+`scripts/test_whatsapp_posture_guard.sh` that CI already runs, and the two copies have never
+been compared against each other. Closing that is what this change is for.
 
 ## What ships with this document
 
-- `deploy/zc-shop.service.d/10-posture-guard.conf`, a systemd **drop-in** rather than an edit to
-  the unit. The live unit has never been read into this repo, so there is no tracked copy to
-  edit and no honest way to ship a replacement. A drop-in asserts exactly one line and is
-  removed by deleting one directory.
+- `deploy/zc-shop.service.d/10-posture-guard.conf`, a tracked copy of the drop-in already
+  running on the box, repointed at the deployed path. The live unit has never been read into
+  this repo, so there is no tracked copy to edit and no honest way to ship a replacement of the
+  unit itself. A drop-in asserts exactly one line and is reviewable in full. It carries the
+  name the live one already has, so installing it is an overwrite rather than an addition.
 - A `map` entry in `deploy/deploy-targets.json` placing the guard at
   `~/.zeroclaw/bin/whatsapp_posture_guard.sh` so its hash lands in the generated manifest. Until
   now the running copy sat at `~/whatsapp_posture_guard.sh`, outside `ZEROCLAW_HOME`, where no
@@ -77,20 +86,26 @@ Only when all four hold does the drop-in get installed.
 
 ## Install
 
+**Back up the live drop-in first. The `install` below overwrites it.**
+
+    cp ~/.config/systemd/user/zc-shop.service.d/10-posture-guard.conf ~/10-posture-guard.conf.bak
     install -d ~/.config/systemd/user/zc-shop.service.d
     install -m644 REPO/deploy/zc-shop.service.d/10-posture-guard.conf ~/.config/systemd/user/zc-shop.service.d/10-posture-guard.conf
     systemctl --user daemon-reload
     systemctl --user cat zc-shop.service | grep -n ExecStartPre
 
 A copied unit fragment is inert until the reload, so the reload is not optional. That `grep` is
-the confirmation that systemd merged the drop-in, not merely that a file was copied.
+the confirmation that systemd merged the drop-in, not merely that a file was copied, and after
+this step it has to name the deployed path rather than the home-directory one.
 
 ## The two-way proof
 
-**This is the point of the whole task.** An `ExecStartPre` that has never refused is the same
-unproven script in a new location. One direction alone proves nothing: only-must-pass is
-satisfied by a guard that refuses nothing, which is the fail-open being closed; only-must-refuse
-is satisfied by a guard that refuses everything, which just wedges the shop.
+**Re-run this after the overwrite, because the path changed.** The refusal on record was
+produced by a drop-in naming `~/whatsapp_posture_guard.sh`; the one installed above names
+`%h/.zeroclaw/bin/whatsapp_posture_guard.sh`, and a gate is only as good as the argv it
+actually runs. One direction alone proves nothing: only-must-pass is satisfied by a guard that
+refuses nothing, which is the fail-open this gate exists to close; only-must-refuse is
+satisfied by a guard that refuses everything, which just wedges the shop.
 
 ### Direction A: with a good config the unit starts and the guard says so
 
@@ -100,7 +115,7 @@ is satisfied by a guard that refuses everything, which just wedges the shop.
 
 Direction A passes when `is-active` reports `active` **and** that count is at least 1. The count
 matters more than the status: an active shop with no pass line in the boot output is a shop
-whose start path never ran the guard, which is the exact state being fixed. Note `grep -c`
+whose start path did not run the guard, which is what the overwrite could break. Note `grep -c`
 prints `0` and exits 1 on no match, so read the printed number rather than the exit code.
 
 ### Direction B: with a deliberately opened policy the start is REFUSED
@@ -174,12 +189,17 @@ the shop is still gated on a config file that has been deleted.
 
 ## The escape hatch: one line, no editor, no repo checkout on the box
 
-If the guard misbehaves at the worst possible moment, this removes everything this document
-added and returns the shop to exactly its pre-wiring behaviour. It touches only the drop-in
-directory. `zc-shop.service` itself is never modified by any step here, which is the whole
-reason this is a drop-in.
+If the guard misbehaves at the worst possible moment, this restores the drop-in the box was
+already running and starts the shop under it. `zc-shop.service` itself is never modified by any
+step here, which is the whole reason this is a drop-in.
 
-    rm -rf ~/.config/systemd/user/zc-shop.service.d && systemctl --user daemon-reload && systemctl --user reset-failed zc-shop.service && systemctl --user restart zc-shop.service
+    cp ~/10-posture-guard.conf.bak ~/.config/systemd/user/zc-shop.service.d/10-posture-guard.conf && rm -f ~/.config/systemd/user/zc-shop.service.d/99-proof-badconfig.conf && systemctl --user daemon-reload && systemctl --user reset-failed zc-shop.service && systemctl --user restart zc-shop.service
+
+**Do not reach for `rm -rf ~/.config/systemd/user/zc-shop.service.d` instead.** That directory
+is not something this document created. It holds the drop-in that has been gating the shop's
+start since 2026-07-27, so removing it does not undo an install, it deletes the guard and
+starts a shop with no pre-check at all. Restoring from the backup taken in the install step is
+the only form of this that ends with a gate still in place.
 
 Then confirm, because an exit code reports that commands ran and not that the shop is serving:
 
@@ -187,14 +207,16 @@ Then confirm, because an exit code reports that commands ran and not that the sh
 
 **Do not reach for `ExecStartPre=-` instead.** A leading dash makes a non-zero exit non-fatal,
 so the guard would run, print its refusal, and the shop would start anyway. That restores the
-exact fail-open the guard exists to remove, while looking wired. Removing the drop-in is visible
+exact fail-open the guard exists to remove, while looking wired. Deleting the guard is visible
 to the `required-directives` row in the next hourly selfcheck; defanging it in place is not.
 
-**Using the escape hatch is not silent, and that is deliberate.** With `require_directives` in
-place, the next `zc-selfcheck` run reports `required-directives` red with
+**Removing the guard entirely is not silent, and that is deliberate.** With
+`require_directives` in place, a `zc-selfcheck` run against a unit whose merged definition
+carries no `ExecStartPre` reports `required-directives` red with
 `zc-shop.service: no ExecStartPre= line at all`, and that verdict is published at `/selfcheck`.
-Pulling the guard under pressure is the correct move at the wrong moment; the assertion is what
-stops it quietly becoming permanent.
+Restoring the backed-up drop-in leaves the row green, because the assertion is a substring on
+the script's filename rather than on a full path. That is the point of keying it that way: the
+shop keeps a gate and the row keeps meaning something.
 
 ## Verifying the wiring later without opening a shell
 
@@ -205,16 +227,17 @@ values withheld, into the verdict served at `/selfcheck`. So the question "did t
     curl -s https://x402.perfpilot.dev/selfcheck | python3 -m json.tool
 
 Read the `required-directives` check and the `zc-shop.service` entry under `unit_definitions`.
-This route was deliberately not fetched while preparing this change, because the box was frozen
-for the demo, but it is the intended instrument afterwards and it needs no session on the node.
+That entry comes from `systemctl --user cat`, so it already carries whatever the drop-ins merge
+in, and the whole question is answerable without a session on the node.
 
 ## What could not be established without the box
 
 Stated rather than filled in.
 
 - **The live `zc-shop.service` content.** Never read into this repo. Whether it sets
-  `Restart=always`, what its `ExecStart` is, and whether it already carries a `.d` directory are
-  all unknown. The drop-in is additive precisely so none of those need to be known.
+  `Restart=always` and what its `ExecStart` is are both unknown. It does carry a `.d`
+  directory with `10-posture-guard.conf` in it, which is why the file shipped here lands as an
+  overwrite rather than as an addition.
 - **Whether the box copy and the repo copy of the guard are byte-identical.** Precondition 1
   exists because this is unknown, and the answer decides whether step 2 is a no-op or a
   reconciliation.

@@ -78,17 +78,17 @@
   ],
 
   "_units_doc": [
-    "SHOULD THE UNIT FILES THEMSELVES COME UNDER THE DRIFT GATE? Decided 2026-08-27, after",
-    "`ExecStartPre` was measured absent from zc-shop.service while two durable records said it",
-    "was there. The answer is YES at the DIRECTIVE level and NO at the BYTE level, and the",
+    "SHOULD THE UNIT FILES THEMSELVES COME UNDER THE DRIFT GATE? Decided 2026-08-27, after a",
+    "grep of the bare zc-shop.service file read ZERO ExecStartPre lines against a merged unit",
+    "that carries one from a drop-in. The answer is YES at the DIRECTIVE level and NO at the",
     "distinction is the whole decision rather than a hedge.",
     "",
     "THE CASE FOR BYTE-LEVEL GATING, which is the obvious move and is what `map` already does",
     "for every other artifact. A unit file is executable configuration on a box that takes",
     "money; an edit to zc-shop.service is at least as consequential as an edit to a skill, and",
     "skills are hashed. zc-qr.service and zc-tunnel.service are not even NAMED anywhere in this",
-    "file, so nothing notices if either changes or disappears, and zc-shop's own missing",
-    "ExecStartPre went unnoticed until somebody grepped for it by hand.",
+    "file, so nothing notices if either changes or disappears, and nothing asserts that",
+    "zc-shop's own ExecStartPre is still there.",
     "",
     "WHY IT IS REFUSED ANYWAY, on two grounds that are mechanical rather than aesthetic.",
     "",
@@ -133,7 +133,7 @@
       "require_directives": {
         "ExecStartPre": "whatsapp_posture_guard.sh"
       },
-      "why_require_directives": "MEASURED ON THE BOX 2026-08-27: `ExecStartPre` appeared ZERO times in this unit, with `ExecStart` at 1 as the positive control proving the file was readable and greppable. TESTING.md and the durable handoff both asserted the guard `runs as ExecStartPre` and gates boot. It did not. The guard existed, was executable and passed when run by hand, which is the whole trap: a script that agrees with the current config is indistinguishable from a gate, and this one had never refused a start in its life. The liveness row above cannot see this -- a shop with no pre-check running is ACTIVE, so it is green -- and check_unit_definitions already COLLECTS ExecStartPre and only PUBLISHES it, so the fact was sitting in the /selfcheck payload with nothing asserting on it. This field is the assertion. The value is a SUBSTRING matched against the joined directive values rather than a full path, so relocating the script or adding arguments does not turn it red while removing it does. It is what makes the drop-in`s escape hatch safe to use: pulling deploy/zc-shop.service.d/ under pressure is the correct move at the wrong moment, and this ensures the next hourly selfcheck says so out loud instead of the guard quietly staying gone."
+      "why_require_directives": "WHAT THIS ROW ASSERTS AND WHY NOTHING ELSE DOES. zc-shop.service takes its ExecStartPre from a systemd drop-in at ~/.config/systemd/user/zc-shop.service.d/10-posture-guard.conf, so grepping the bare unit file reads ZERO in both the wired and the unwired world and cannot answer the question; `systemctl --user cat` merges drop-ins and is the surface that can. Read that way on 2026-08-27 the box reports ExecStartPre 1 and ExecStart 1. The liveness row above cannot see this either -- a shop with no pre-check running is ACTIVE, so it is green -- and check_unit_definitions already COLLECTS the merged definition and only PUBLISHES it, so the directive has been sitting in the /selfcheck payload with nothing reading the value back. This field is the assertion, and it is what makes losing the guard loud. The value is a SUBSTRING matched against the joined directive values rather than a full path, so relocating the script or adding arguments does not turn it red while deleting the drop-in does. Pulling deploy/zc-shop.service.d/ under pressure is the correct move at the wrong moment, and this ensures the next hourly selfcheck says so out loud instead of the guard quietly staying gone."
     },
     {
       "unit": "zc-feed.timer",
