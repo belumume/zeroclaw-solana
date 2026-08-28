@@ -504,6 +504,21 @@ jobs:
       - name: the pay-page gate's controls actually gate
         run: python3 scripts/test_check_build_py.py
 
+      # THE DEPLOYER'S OWN 36-CASE HARNESS, which until now ran only when somebody typed it.
+      # That is the position the host-compat gate was in, and the argument is the same: a
+      # check nobody has watched fail is a hypothesis, and one that runs by hand once is a
+      # hypothesis with a single observation. It matters more here than for most, because
+      # this script decides what reaches a public origin, and its two failure directions are
+      # opposite and both silent -- it can ship a file that should not be there, which is why
+      # the identifier scan exists, or omit one the page needs, which is what a customer meets
+      # as a dead pay button while the origin still answers 200 through the SPA fallback.
+      #
+      # Hermetic: every fixture is built under a temp directory from a SYNTHETIC identity, and
+      # the only repo file it opens is the tracked page it asserts is fully served. It writes
+      # nothing to webshop-pay/ and needs no network, no wrangler and no credential.
+      - name: the pay-page deployer's staging and ref checks can fail
+        run: python3 scripts/deploy-pay-page.py --selftest
+
       # The compliance ledger claims slop-cleanliness across the judge-facing documents, and until
       # now the only checker for it lived in .tools/, which .gitignore ignores wholesale. A clone
       # received the claim and no way to check it, and nothing here ran it: this file gated rustfmt

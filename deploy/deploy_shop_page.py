@@ -46,11 +46,23 @@ VAULT = "Personal"
 PROJECT = "zeroclaw-shop-pay"
 
 SRC = Path(__file__).resolve().parent.parent / "webshop-pay"
+# NOT THE DEPLOY SET. This script cannot deploy -- see _refuse_if_superseded below -- and
+# these two lists are inert. The live set is SERVE in scripts/deploy-pay-page.py, which is
+# the only list a reader should act on and the only one a deploy reads.
+#
+# They are kept because the reason underneath them is worth keeping and lives nowhere else,
+# and because a reader who finds this file first must be told which list is authoritative.
+# Two payload lists with no such marker is how one of them drifts from what the page needs
+# while the other stays right, and only the live one matters when that happens.
 PAYLOAD = ["index.html", "_headers"]
-# Directories copied whole. `vendor/` holds the bundled Solana libraries the pay path
-# imports at click time. They used to come from esm.sh, which meant one click fanned out
-# into 18+ third-party requests and any shield or blocker turned a healthy page into
-# "o pagamento nao foi concluido". Same-origin removes the whole class.
+# `vendor/` holds the bundled Solana libraries the pay path imports at click time. They used
+# to come from esm.sh, which meant one click fanned out into 18+ third-party requests and any
+# shield or blocker turned a healthy page into "o pagamento nao foi concluido". Same-origin
+# removes the whole class, which is why the page cannot be served without it.
+#
+# The live set names that bundle AS A FILE rather than copying this directory whole: a
+# directory copy ships whatever lands in it next, which is the shape this repo already had
+# to clean up once when a ruff cache reached a public origin.
 PAYLOAD_DIRS = ["vendor"]
 
 
