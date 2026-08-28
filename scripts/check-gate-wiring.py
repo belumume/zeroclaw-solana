@@ -118,9 +118,10 @@ FAMILIES: dict[str, tuple[tuple[str, ...], int]] = {
 # summary line claimed. No corpus totals in this comment, per the rule a few lines above: the live
 # figure is reprinted by the summary line on every run, and that is the only copy that cannot go
 # stale.
-# mutation-* rather than mutation-check-*
-# for the same reason one notch further out, since scripts/mutation-certify-x402.py is a mutation
-# control that the -check- spelling excluded by construction.
+#
+# mutation-* REPLACES mutation-check-* for the same reason one notch further out: the -check-
+# spelling excluded scripts/mutation-certify-x402.py by construction, and it is a mutation control
+# like the rest of them.
 # The demo .sh globs match nothing today and are deliberate: an empty glob costs one line and
 # closes the extension gap for that family before it opens, and the family floor still trips if
 # the walk as a whole breaks.
