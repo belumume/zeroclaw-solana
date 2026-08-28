@@ -504,7 +504,7 @@ jobs:
       - name: the pay-page gate's controls actually gate
         run: python3 scripts/test_check_build_py.py
 
-      # THE DEPLOYER'S OWN 36-CASE HARNESS, which until now ran only when somebody typed it.
+      # THE DEPLOYER'S OWN HARNESS, which until now ran only when somebody typed it.
       # That is the position the host-compat gate was in, and the argument is the same: a
       # check nobody has watched fail is a hypothesis, and one that runs by hand once is a
       # hypothesis with a single observation. It matters more here than for most, because
@@ -516,6 +516,14 @@ jobs:
       # Hermetic: every fixture is built under a temp directory from a SYNTHETIC identity, and
       # the only repo file it opens is the tracked page it asserts is fully served. It writes
       # nothing to webshop-pay/ and needs no network, no wrangler and no credential.
+      #
+      # It DOES shell out to git, and deliberately: since the deployer publishes the bytes of a
+      # git ref rather than of the working tree, the cases that pin that have to be driven
+      # against something git really reads. They `git init` a throwaway repository under the
+      # same temp directory, commit twice, leave its tree behind the tip and dirty on top, and
+      # assert the tip's bytes are what gets staged. A stub standing in for git would pass
+      # whether or not the script consulted git at all. Nothing outside the temp directory is
+      # written, and no remote is configured, so this stays offline.
       - name: the pay-page deployer's staging and ref checks can fail
         run: python3 scripts/deploy-pay-page.py --selftest
 
