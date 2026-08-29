@@ -61,6 +61,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import http.client
+import http.server
 import json
 import os
 import re
@@ -69,6 +71,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -622,6 +625,13 @@ ASSETS_API = "https://api.cloudflare.com/client/v4/pages/assets"
 UPLOAD_ATTEMPTS = 3
 UPLOAD_BATCH_FILES = 50
 UPLOAD_BATCH_BYTES = 8 * 1024 * 1024
+# Cloudflare refuses a single asset above 25 MB, so a file over it can never be
+# uploaded and must be refused here rather than posted and rejected with a live
+# credential already spent on the batches before it.
+MAX_ASSET_BYTES = 25 * 1024 * 1024
+# Seconds per retry, multiplied by the attempt number. A module constant rather than
+# a literal so the cases can drive the retry ladder without sleeping through it.
+RETRY_BACKOFF = 2.0
 
 # Files Pages consumes as CONFIGURATION rather than serving. They must not appear in the
 # asset manifest, and the reason is measured on the live origin rather than assumed:
@@ -731,10 +741,19 @@ def _post_json(url: str, jwt: str, payload: dict) -> dict:
             # A 4xx here IS the answer for a rejected batch, and the body carries the
             # reason. The bare urlopen form raises it away, so it is read explicitly.
             code, raw = e.code, e.read()
-        except urllib.error.URLError as e:
-            last = f"transport: {e.reason}"
+        except (OSError, http.client.HTTPException) as e:
+            # OSError RATHER THAN URLError, and the difference is a whole class of
+            # failure. URLError catches a connection that never opened. A read timeout
+            # or a server hanging up mid-response is raised by http.client as a bare
+            # TimeoutError, ConnectionResetError or RemoteDisconnected, and only the
+            # first of those is ever wrapped -- so the narrower clause let the commonest
+            # network failure on a slow upload escape as a traceback with no retry and
+            # no refusal. URLError subclasses OSError, so this is strictly wider and the
+            # HTTPError clause above still takes precedence. HTTPException is not an
+            # OSError at all and is named separately for that reason.
+            last = f"{type(e).__name__}: {e}"
             if attempt < UPLOAD_ATTEMPTS:
-                time.sleep(2 * attempt)
+                time.sleep(RETRY_BACKOFF * attempt)
                 continue
             sys.exit(f"REFUSED: {url} unreachable after {attempt} attempts ({last}).")
 
@@ -742,7 +761,7 @@ def _post_json(url: str, jwt: str, payload: dict) -> dict:
         # Retried, then allowed to fall through on the last attempt so the refusal below
         # reports the real status and body rather than a generic give-up message.
         if code in (429, 500, 502, 503, 504) and attempt < UPLOAD_ATTEMPTS:
-            time.sleep(2 * attempt)
+            time.sleep(RETRY_BACKOFF * attempt)
             continue
         try:
             doc = json.loads(text)
@@ -779,11 +798,44 @@ def check_missing(jwt: str, keys: list[str], post=_post_json) -> list[str]:
             "hashes. Treating that as 'nothing missing' would upload nothing and "
             "publish a page whose assets are absent. Nothing was uploaded."
         )
+    # THE TYPE CHECK ALONE LEFT THE HOLE IT WAS WRITTEN TO CLOSE. A list of the wrong
+    # THING passes isinstance and then matches none of our keys, so `todo` comes out
+    # empty, nothing is uploaded, the upsert and the plan write both succeed, and the
+    # run exits 0 having published a manifest whose assets were never sent. That is the
+    # same outcome as the null case, reached through a value the guard admits.
+    #
+    # So the membership is checked, not just the container: every element must be one of
+    # the keys we asked about. That subsumes the element type, since a non-string cannot
+    # be in a set of strings, and it also catches a reply about somebody else's project.
+    asked = set(keys)
+    foreign = [r for r in result if not isinstance(r, str) or r not in asked]
+    if foreign:
+        sys.exit(
+            f"REFUSED: check-missing returned {len(foreign)} entr(ies) that are not "
+            f"among the {len(keys)} key(s) it was asked about, first {foreign[0]!r}. "
+            "Reading that as 'nothing missing' would upload nothing and publish a page "
+            "whose assets are absent. Nothing was uploaded."
+        )
     return list(result)
 
 
 def upload_assets(jwt: str, items: list[dict], post=_post_json) -> int:
     """Upload asset payloads in bounded batches. Returns the number sent."""
+    # A BATCH BOUND DOES NOT BOUND ONE ITEM. The batching below only decides where a
+    # batch ENDS, so a single asset larger than the whole budget would be posted alone
+    # and unbounded, which made the bound's own rationale false for exactly the input it
+    # names. Checked in a PRE-PASS rather than inside the loop, so the refusal's claim
+    # that nothing was uploaded is true: an in-loop check would already have flushed
+    # every earlier batch before reaching the oversized item, and would then say
+    # otherwise while a live credential had been spent.
+    for item in items:
+        if len(item["value"]) > MAX_ASSET_BYTES:
+            sys.exit(
+                f"REFUSED: {item['key']} is {len(item['value'])} bytes base64-encoded, "
+                f"over the {MAX_ASSET_BYTES} byte per-asset ceiling Cloudflare enforces. "
+                "Nothing was uploaded."
+            )
+
     sent = 0
     batch: list[dict] = []
     size = 0
@@ -836,7 +888,15 @@ def deployment_plan(dest: Path, serve: tuple[str, ...] = SERVE) -> dict:
     special: dict[str, str] = {}
     for name in serve:
         data = (dest / name).read_bytes()
-        if PurePosixPath(name).name in PAGES_SPECIAL:
+        # ROOT ONLY, and the slash is the whole condition. Pages treats these names as
+        # configuration at the DEPLOY ROOT and nowhere else, so matching the basename at
+        # any depth would route a genuine asset such as `vendor/_routes.json` into the
+        # config half: never hashed, never uploaded, absent from the manifest, and served
+        # to the page as the SPA fallback. That is the twelve-day outage this deploy set
+        # exists to prevent, arriving through the classifier instead. It cannot fire on
+        # today's SERVE, and the condition is one comparison, so the cheap thing is to be
+        # right about Cloudflare rather than accidentally right about this deploy set.
+        if "/" not in name and name in PAGES_SPECIAL:
             special[name] = data.decode("utf-8")
             continue
         payload = upload_payload(data, name)
@@ -845,16 +905,63 @@ def deployment_plan(dest: Path, serve: tuple[str, ...] = SERVE) -> dict:
     return {"manifest": manifest, "assets": assets, "special": special}
 
 
-def publish_direct(jwt: str, dest: Path, plan_out: Path, post=_post_json) -> int:
-    """Upload the staged assets with a project-scoped JWT, then hand over step 3."""
+def prepare_plan_path(plan_out: Path) -> None:
+    """Clear and prove the plan path BEFORE a credential is spent.
+
+    THE ORDERING ARGUMENT WAS RIGHT ABOUT ONE RUN AND WRONG ABOUT THE FILE. Writing the
+    plan last does guarantee it is not written by a run that failed. It says nothing
+    about a plan left by an EARLIER run, because the artifact outlives the run that made
+    it: the previous file simply stays there, byte-identical, with nothing in it to say
+    which commit it describes. Step 3 is a separate actor whose only input is that file,
+    and the earlier run already uploaded and upserted its assets, so every key in the
+    stale manifest still resolves and the deployment succeeds -- publishing the earlier
+    commit's page. Measured on a copy: run 1 wrote a manifest, run 2 for different bytes
+    exited on a refusal, and the file afterwards was byte-identical to run 1's.
+
+    That is this file's own headline defect reached through the handoff instead of
+    through the source, so the plan is REMOVED here, before the first upload. A failed
+    run then leaves no artifact at all, which is the property step 3 needs: it cannot
+    read a plan from a run that did not finish, because there is not one.
+
+    Removing it also proves the path is writable, which the previous parent-only mkdir
+    did not. An existing DIRECTORY at plan_out passed that mkdir and then raised an
+    uncaught PermissionError from the final write, after all three uploads had run --
+    on Windows a directory opened for write reports Errno 13, so the traceback read as
+    an access-control problem rather than as a wrong argument. Reproduced, and now a
+    named refusal that costs nothing because it happens before the first post.
+    """
+    if plan_out.exists() and not plan_out.is_file():
+        sys.exit(
+            f"REFUSED: --plan-out {plan_out} exists and is not a regular file. "
+            "Nothing was uploaded."
+        )
+    try:
+        plan_out.parent.mkdir(parents=True, exist_ok=True)
+        # Touch and remove: proves writability at this exact path, and clears any
+        # earlier run's plan in the same motion.
+        with open(plan_out, "w", encoding="utf-8"):
+            pass
+        plan_out.unlink()
+    except OSError as e:
+        sys.exit(
+            f"REFUSED: cannot write --plan-out {plan_out} ({type(e).__name__}: {e}). "
+            "Nothing was uploaded."
+        )
+
+
+def publish_direct(
+    jwt: str, dest: Path, plan_out: Path, ref: str, sha: str, post=_post_json
+) -> int:
+    """Upload the staged assets with a project-scoped JWT, then hand over step 3.
+
+    `ref` and `sha` are REQUIRED rather than defaulted, because they are what makes the
+    written plan self-describing. A default would let a caller omit provenance silently,
+    which is the property being added.
+    """
     plan = deployment_plan(dest)
     keys = [a["key"] for a in plan["assets"]]
 
-    # Made writable BEFORE anything is uploaded. The plan is written last on purpose --
-    # it must exist only if the upload succeeded, or someone could deploy a manifest
-    # whose assets are not there -- so the one failure that ordering allows is a bad
-    # path discovered after the upload, and that is cheap to rule out here.
-    plan_out.parent.mkdir(parents=True, exist_ok=True)
+    prepare_plan_path(plan_out)
 
     for served, key in sorted(plan["manifest"].items()):
         print(f"    {served:28} {key}")
@@ -871,16 +978,35 @@ def publish_direct(jwt: str, dest: Path, plan_out: Path, post=_post_json) -> int
     upsert_hashes(jwt, keys, post=post)
     print("  upserted.")
 
-    plan_out.write_text(
-        json.dumps(
-            {"manifest": plan["manifest"], "special": plan["special"]},
-            indent=2,
-            sort_keys=True,
-        ),
-        encoding="utf-8",
+    # STAMPED, so the plan says what it describes. Clearing the path up front means a
+    # failed run leaves nothing, which handles the case this file can control. It cannot
+    # control a plan that was copied, renamed, or is simply older than the operator
+    # remembers, and for those the only defence is that step 3 can CHECK. A manifest on
+    # its own is unfalsifiable; one carrying the ref, the resolved commit and the project
+    # can be compared against what the deploy was supposed to be.
+    #
+    # WRITTEN ATOMICALLY, via a sibling temp file and os.replace. A crash partway through
+    # a direct write leaves a truncated plan, and while a truncated JSON usually fails to
+    # parse, "usually" is not a property to hand a payment page. replace() is atomic on
+    # the same filesystem, so the plan either exists complete or does not exist.
+    document = {
+        "project": PROJECT,
+        "ref": ref,
+        "sha": sha,
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "manifest": plan["manifest"],
+        "special": plan["special"],
+    }
+    tmp_plan = plan_out.with_name(plan_out.name + ".partial")
+    tmp_plan.write_text(
+        json.dumps(document, indent=2, sort_keys=True), encoding="utf-8"
     )
+    os.replace(tmp_plan, plan_out)
     print(
         f"\n  assets uploaded. Wrote step 3's input to {plan_out}.\n"
+        f"  It describes {ref} = {sha[:12]}. Step 3 must refuse a plan whose sha is not\n"
+        "  the commit it was asked to deploy: a manifest alone cannot be checked, and a\n"
+        "  stale one publishes an earlier page while every call reports success.\n"
         "  THE DEPLOYMENT IS NOT CREATED YET. Uploaded assets are not a deployment,\n"
         "  and nothing is live until an account-scoped caller posts one:\n"
         f"    POST /accounts/<id>/pages/projects/{PROJECT}/deployments\n"
@@ -1031,7 +1157,7 @@ def main(argv: list[str]) -> int:
 
         if jwt is not None:
             print(f"\n  uploading to {PROJECT} with a project-scoped upload token ...")
-            return publish_direct(jwt, dest, args.plan_out)
+            return publish_direct(jwt, dest, args.plan_out, args.ref, sha)
 
         if not args.publish:
             print(
@@ -1764,22 +1890,67 @@ def selftest() -> int:
 
         # THE SPECIAL-FILE SPLIT, which is the half a manifest-only deploy drops.
         staged_dir = serve_set(root / "staged")
-        plan = deployment_plan(staged_dir)
+        # DERIVED FROM SERVE, not hand-listed. The fixture six lines up is derived and
+        # these expectations were not, so a SERVE that grew one member would fail these
+        # cases for a reason that has nothing to do with the split they name.
+        want_config = {n for n in SERVE if "/" not in n and n in PAGES_SPECIAL}
+        want_manifest = {"/" + n for n in SERVE if n not in want_config}
+        # WRAPPED, because content_type() REFUSES on an undeclared extension and a
+        # refusal here is a SystemExit that unwinds the whole selftest. A SERVE member
+        # with a new extension would then abort the required CI step partway, dropping
+        # every later case AND the denominator, and the run would report nothing rather
+        # than a failure. A refusal is a failing case, not an exit.
+        try:
+            plan = deployment_plan(staged_dir)
+        except SystemExit as e:
+            plan = {"manifest": {}, "assets": [], "special": {}}
+            case(f"deployment_plan refused the live SERVE: {e}", False)
         case(
             "_headers is carried as Pages config, not as a manifest asset",
             "_headers" in plan["special"] and "/_headers" not in plan["manifest"],
         )
         case(
             "the real assets ARE in the manifest, keyed by served path",
-            plan["manifest"].keys() == {"/index.html", "/vendor/solana-bundle.js"},
+            plan["manifest"].keys() == want_manifest,
+        )
+        case(
+            "the config half is exactly SERVE's root-level Pages files",
+            plan["special"].keys() == want_config,
         )
         case(
             "every manifest key is an absolute served path",
             all(k.startswith("/") for k in plan["manifest"]),
         )
+        # NOT len(assets) == len(manifest), which held for every possible input because
+        # both are appended in the same branch. The real property is that the two agree
+        # ENTRY BY ENTRY: every asset's key is the one the manifest publishes for its
+        # path. That also catches a manifest-key collision, which the length form only
+        # caught by accident.
         case(
-            "no upload payload is built for a config file",
-            len(plan["assets"]) == len(plan["manifest"]),
+            "every asset's key is the one the manifest publishes for that path",
+            sorted(plan["manifest"].values())
+            == sorted(a["key"] for a in plan["assets"])
+            and len(plan["manifest"]) == len(plan["assets"]),
+        )
+        # ROOT-ONLY classification, driven on a synthetic SERVE rather than the live one,
+        # since today's cannot express the case. A config NAME in a subdirectory is a
+        # genuine asset and must be hashed and manifested.
+        sub = root / "subdir-serve"
+        for n in ("index.html", "_headers", "vendor/_routes.json"):
+            f = sub / n
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("{}", encoding="utf-8")
+        subplan = deployment_plan(
+            sub, serve=("index.html", "_headers", "vendor/_routes.json")
+        )
+        case(
+            "a Pages config NAME in a subdirectory stays an asset",
+            "/vendor/_routes.json" in subplan["manifest"]
+            and "vendor/_routes.json" not in subplan["special"],
+        )
+        case(
+            "control: the same name at the ROOT is still config",
+            "_headers" in subplan["special"],
         )
         # The control that makes the split evidence rather than an assertion: the same
         # plan builder, over the same directory, told nothing is special. It must not
@@ -1841,6 +2012,24 @@ def selftest() -> int:
             "control: an empty check-missing result is accepted as 'nothing missing'",
             check_missing("a.b.c", ["k1"], post=lambda *_: []) == [],
         )
+        # A LIST OF THE WRONG THING passes isinstance and then matches none of our keys,
+        # so it reaches the same "nothing to upload" outcome the type check exists to
+        # prevent. Both shapes must refuse: a non-string element, and a well-formed key
+        # we never asked about.
+        try:
+            check_missing("a.b.c", ["k1"], post=lambda *_: [1, 2, 3])
+            case("a check-missing list of non-strings is refused", False)
+        except SystemExit:
+            case("a check-missing list of non-strings is refused", True)
+        try:
+            check_missing("a.b.c", ["k1"], post=lambda *_: ["k1", "not-ours"])
+            case("a check-missing reply naming a key we did not send is refused", False)
+        except SystemExit:
+            case("a check-missing reply naming a key we did not send is refused", True)
+        case(
+            "control: a reply naming a subset of our own keys still passes",
+            check_missing("a.b.c", ["k1", "k2"], post=lambda *_: ["k2"]) == ["k2"],
+        )
 
         calls.clear()
         upsert_hashes("a.b.c", ["k1"], post=fake_post)
@@ -1864,11 +2053,37 @@ def selftest() -> int:
         upload_assets("a.b.c", big, post=fake_post)
         case("upload_assets splits on the byte bound", len(calls) == 2)
 
+        # A SINGLE asset over the per-asset ceiling is refused before any batch goes out,
+        # which the batch bound alone did not do.
+        calls.clear()
+        try:
+            upload_assets(
+                "a.b.c",
+                [{"key": "big", "value": "A" * (MAX_ASSET_BYTES + 1)}],
+                post=fake_post,
+            )
+            case("a single oversized asset is refused, not posted", False)
+        except SystemExit:
+            case(
+                "a single oversized asset is refused, not posted",
+                calls == [],
+            )
+        # The control: one byte under the ceiling still goes.
+        calls.clear()
+        upload_assets(
+            "a.b.c",
+            [{"key": "ok", "value": "A" * (MAX_ASSET_BYTES - 1)}],
+            post=fake_post,
+        )
+        case("control: an asset just under the ceiling is posted", len(calls) == 1)
+
         # END TO END with no network: the whole transport, and the artifact it must
         # leave behind for the step it cannot perform.
         calls.clear()
         plan_out = root / "plan" / "deployment.json"
-        rc_direct = publish_direct("a.b.c", staged_dir, plan_out, post=fake_post)
+        rc_direct = publish_direct(
+            "a.b.c", staged_dir, plan_out, "origin/main", "d" * 40, post=fake_post
+        )
         urls = [u for u, _ in calls]
         case(
             "publish_direct checks, uploads, then upserts, in that order",
@@ -1876,12 +2091,311 @@ def selftest() -> int:
             and [u.rsplit("/", 1)[-1] for u in urls]
             == ["check-missing", "upload", "upsert-hashes"],
         )
+        # THE PAYLOADS, not just the order. Asserting the sequence of endpoints says
+        # nothing about what was sent to them, and an upload of the wrong bytes under the
+        # right key is exactly the failure the manifest cannot show.
+        by_endpoint = {u.rsplit("/", 1)[-1]: b for u, b in calls}
+        want_keys = sorted(plan["manifest"].values())
+        case(
+            "the upload body carries every manifest asset, keyed and base64-encoded",
+            sorted(i["key"] for i in by_endpoint["upload"]) == want_keys
+            and all(i["base64"] is True for i in by_endpoint["upload"])
+            and all(i["metadata"]["contentType"] for i in by_endpoint["upload"]),
+        )
+        case(
+            "check-missing and upsert-hashes are asked about exactly those keys",
+            sorted(by_endpoint["check-missing"]["hashes"]) == want_keys
+            and sorted(by_endpoint["upsert-hashes"]["hashes"]) == want_keys,
+        )
         written = json.loads(plan_out.read_text(encoding="utf-8"))
         case(
             "publish_direct hands step 3 BOTH the manifest and the config files",
-            written["manifest"].keys() == {"/index.html", "/vendor/solana-bundle.js"}
-            and "_headers" in written["special"],
+            written["manifest"].keys() == want_manifest
+            and written["special"].keys() == want_config,
         )
+        # PROVENANCE, which is what lets step 3 refuse a plan for the wrong commit.
+        case(
+            "the plan says which ref, which commit and which project it describes",
+            written["sha"] == "d" * 40
+            and written["ref"] == "origin/main"
+            and written["project"] == PROJECT
+            and written["generated_at"].endswith("Z"),
+        )
+        # No partial file is left beside it.
+        case(
+            "the atomic write leaves no .partial behind",
+            not plan_out.with_name(plan_out.name + ".partial").exists(),
+        )
+        # THE ATOMICITY ITSELF, which "no .partial remains" does not test: that assertion
+        # holds just as well for a plain in-place write, and a mutation control proved it
+        # by staying green with os.replace swapped for one. The property that actually
+        # distinguishes them is that the FINAL path is only ever created by the replace
+        # step, so a run that dies before it leaves no plan at all rather than a
+        # half-written one. Driven by making the replace fail.
+        atomic_out = root / "atomic" / "deployment.json"
+
+        def boom(*_a, **_k):
+            raise OSError("simulated crash between write and replace")
+
+        saved_replace = os.replace
+        try:
+            os.replace = boom
+            try:
+                publish_direct(
+                    "a.b.c",
+                    staged_dir,
+                    atomic_out,
+                    "origin/main",
+                    "f" * 40,
+                    post=fake_post,
+                )
+            except OSError:
+                pass
+        finally:
+            os.replace = saved_replace
+        case(
+            "a crash before the replace leaves no plan at the final path",
+            not atomic_out.exists(),
+        )
+
+        # THE BLOCKER'S REGRESSION CASE. A run that FAILS must leave no plan, so step 3
+        # cannot read one from a run that did not finish. Before the fix the previous
+        # run's file survived byte-identical with nothing in it to say so.
+        def dead_post(url, jwt, body):
+            raise SystemExit("REFUSED: simulated expired token")
+
+        stale = root / "stale" / "deployment.json"
+        publish_direct(
+            "a.b.c", staged_dir, stale, "origin/main", "a" * 40, post=fake_post
+        )
+        first_plan = stale.read_bytes()
+        try:
+            publish_direct(
+                "a.b.c", staged_dir, stale, "origin/main", "b" * 40, post=dead_post
+            )
+        except SystemExit:
+            pass
+        case(
+            "a failed run leaves NO plan for step 3 to publish from",
+            not stale.exists(),
+        )
+        # The control: without a failure the plan IS written, and rewritten with the new
+        # commit. Without this the case above would pass for a publish_direct that never
+        # wrote a plan at all.
+        publish_direct(
+            "a.b.c", staged_dir, stale, "origin/main", "c" * 40, post=fake_post
+        )
+        case(
+            "control: a successful run writes the plan, stamped with the new commit",
+            stale.exists()
+            and json.loads(stale.read_text(encoding="utf-8"))["sha"] == "c" * 40
+            and stale.read_bytes() != first_plan,
+        )
+
+        # An unwritable plan path is refused BEFORE the credential is spent. The
+        # reproduced case is a path that already exists as a directory, which the
+        # parent-only mkdir passed and the final write then died on.
+        calls.clear()
+        asdir = root / "plan-is-a-directory"
+        asdir.mkdir()
+        try:
+            publish_direct(
+                "a.b.c", staged_dir, asdir, "origin/main", "e" * 40, post=fake_post
+            )
+            case("a plan path that is a directory is refused before uploading", False)
+            refusal = ""
+        except SystemExit as e:
+            refusal = str(e)
+            case(
+                "a plan path that is a directory is refused before uploading",
+                calls == [],
+            )
+        except OSError:
+            refusal = ""
+            case("a plan path that is a directory is refused before uploading", False)
+        # ASSERTED ON THE MESSAGE, and the mutation control is why. The touch-probe below
+        # the type check ALSO refuses a directory, by failing to open it, so a case that
+        # only asserts "it refused" stays green with the type check deleted -- which it
+        # did. The type check earns its place by saying WHAT is wrong instead of
+        # reporting Errno 13, and that is the part a case has to pin.
+        case(
+            "...and the refusal names the cause rather than reporting an errno",
+            "not a regular file" in refusal,
+        )
+
+        # ---------------------------------------------------------------
+        # _post_json against a REAL SERVER.
+        #
+        # Every case above injects `post=`, which is right for testing the callers and
+        # meant the function that actually talks to Cloudflare had ZERO cases: the only
+        # code that turns an API failure into a refusal was the only code never run. That
+        # gap is why a suite of 93 green cases missed a transport clause that let the
+        # commonest network failure escape as a traceback. So these drive the real
+        # urllib path over a loopback HTTP server, with no injection at all.
+        # ---------------------------------------------------------------
+
+        def local_api(responses):
+            """Serve `responses` in order. A None body drops the connection instead."""
+            seen: list[tuple[str, str, bytes]] = []
+            remaining = list(responses)
+
+            class H(http.server.BaseHTTPRequestHandler):
+                protocol_version = "HTTP/1.1"
+
+                def do_POST(self):  # noqa: N802
+                    n = int(self.headers.get("Content-Length", "0"))
+                    raw = self.rfile.read(n)
+                    seen.append((self.path, self.headers.get("Authorization", ""), raw))
+                    status, body = (
+                        remaining.pop(0)
+                        if remaining
+                        else (200, b'{"success":true,"result":[]}')
+                    )
+                    if body is None:
+                        self.close_connection = True
+                        return
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+                def log_message(self, *a):  # keep the suite's output readable
+                    pass
+
+            srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            return f"http://127.0.0.1:{srv.server_address[1]}", seen, srv
+
+        def stop(s):
+            """shutdown() ends serve_forever; server_close() releases the socket.
+
+            Both, because shutdown alone leaves the listening socket open for the
+            life of the process and this block opens one per case.
+            """
+            s.shutdown()
+            s.server_close()
+
+        # JOINED at runtime, not written as a JWT-shaped literal: this exists only
+        # to be asserted ABSENT from the refusal text, and a constant that looks
+        # like a token is the shape every secret scanner is right to flag.
+        fake_token = ".".join(("notarealheader", "notarealbody", "notarealsig"))
+        saved_backoff = RETRY_BACKOFF
+        globals()["RETRY_BACKOFF"] = 0.0  # the ladder is under test, not the clock
+        try:
+            url, seen, srv = local_api([(200, b'{"success":true,"result":["k1"]}')])
+            got = _post_json(f"{url}/check-missing", fake_token, {"hashes": ["k1"]})
+            case("_post_json returns the API result on a 200", got == ["k1"])
+            case(
+                "_post_json sends the bearer token and the JSON body it was given",
+                seen[0][1] == f"Bearer {fake_token}"
+                and json.loads(seen[0][2]) == {"hashes": ["k1"]},
+            )
+            stop(srv)
+
+            # The REAL Cloudflare refusal shape, measured live against the endpoint.
+            url, seen, srv = local_api(
+                [
+                    (
+                        403,
+                        b'{"success":false,"errors":[{"code":8000013,'
+                        b'"message":"Authorization failed"}]}',
+                    )
+                ]
+            )
+            try:
+                _post_json(f"{url}/upload", fake_token, {"hashes": []})
+                case("_post_json refuses a 403 rather than returning", False)
+                msg = ""
+            except SystemExit as e:
+                msg = str(e)
+                case("_post_json refuses a 403 rather than returning", True)
+            case(
+                "_post_json's refusal quotes the API error",
+                "8000013" in msg and "Authorization failed" in msg,
+            )
+            # THE LEAK CHECK. This runs in a transcript and the token outlives the call.
+            case(
+                "_post_json never prints the token in a refusal", fake_token not in msg
+            )
+            stop(srv)
+
+            # The retry ladder, driven rather than asserted: two 500s then a 200.
+            url, seen, srv = local_api(
+                [
+                    (500, b'{"success":false}'),
+                    (500, b'{"success":false}'),
+                    (200, b'{"success":true,"result":[]}'),
+                ]
+            )
+            got = _post_json(f"{url}/check-missing", fake_token, {"hashes": []})
+            case(
+                "_post_json retries a 5xx and succeeds on the third attempt",
+                got == [] and len(seen) == 3,
+            )
+            stop(srv)
+
+            # A 5xx that never clears must refuse, not retry forever.
+            url, seen, srv = local_api([(503, b'{"success":false}')] * UPLOAD_ATTEMPTS)
+            try:
+                _post_json(f"{url}/check-missing", fake_token, {"hashes": []})
+                case("_post_json gives up on a persistent 5xx", False)
+            except SystemExit:
+                case(
+                    "_post_json gives up on a persistent 5xx",
+                    len(seen) == UPLOAD_ATTEMPTS,
+                )
+            stop(srv)
+
+            # A 200 carrying success:false is a refusal, not a result.
+            url, seen, srv = local_api([(200, b'{"success":false,"errors":[]}')])
+            try:
+                _post_json(f"{url}/upload", fake_token, {})
+                case("_post_json refuses a 200 whose success flag is false", False)
+            except SystemExit:
+                case("_post_json refuses a 200 whose success flag is false", True)
+            stop(srv)
+
+            # A body that is not JSON at all, which is what a proxy error page looks like.
+            url, seen, srv = local_api([(200, b"<html>not json</html>")])
+            try:
+                _post_json(f"{url}/upload", fake_token, {})
+                case("_post_json refuses a non-JSON body", False)
+            except SystemExit:
+                case("_post_json refuses a non-JSON body", True)
+            stop(srv)
+
+            # THE CLAUSE THAT WAS MISSING. The server accepts the request and hangs up
+            # without answering, which is a dropped connection mid-response. urllib
+            # raises RemoteDisconnected, which is NOT a URLError, so the narrower clause
+            # let it escape as a traceback with no retry and no refusal.
+            url, seen, srv = local_api([(0, None)] * UPLOAD_ATTEMPTS)
+            try:
+                _post_json(f"{url}/upload", fake_token, {})
+                case("a dropped connection refuses instead of raising", False)
+            except SystemExit as e:
+                case(
+                    "a dropped connection refuses instead of raising",
+                    "unreachable" in str(e),
+                )
+            except Exception as e:
+                case(
+                    f"a dropped connection refuses instead of raising (got {type(e).__name__})",
+                    False,
+                )
+            stop(srv)
+
+            # And a host nothing listens on, which is the URLError half the old clause
+            # did cover. Kept so the widening is shown not to have lost it.
+            try:
+                _post_json("http://127.0.0.1:9/upload", fake_token, {})
+                case("a refused connection refuses instead of raising", False)
+            except SystemExit:
+                case("a refused connection refuses instead of raising", True)
+            except Exception:
+                case("a refused connection refuses instead of raising", False)
+        finally:
+            globals()["RETRY_BACKOFF"] = saved_backoff
 
         # The token is read from a file, and its shape is refused rather than sent.
         try:
@@ -1896,6 +2410,19 @@ def selftest() -> int:
             case("a value that is not JWT-shaped is refused", False)
         except SystemExit:
             case("a value that is not JWT-shaped is refused", True)
+        # The EMPTY-SEGMENT branch, which the dot count alone lets through: "..", "a..b"
+        # and ".b.c" all have exactly two dots and none is a token.
+        for bad in ("..", "a..c", ".b.c", "a.b."):
+            blank = (
+                root / f"blank-{len(bad)}-{bad.count('.')}-{bad.strip('.') or 'x'}.jwt"
+            )
+            blank.write_text(bad, encoding="utf-8")
+            try:
+                read_jwt(blank)
+                case(f"a token with an empty segment ({bad!r}) is refused", False)
+            except SystemExit:
+                case(f"a token with an empty segment ({bad!r}) is refused", True)
+
         okjwt = root / "ok.jwt"
         okjwt.write_text("  aaa.bbb.ccc\n", encoding="utf-8")
         case(
@@ -1906,16 +2433,34 @@ def selftest() -> int:
         # The flag guards, which run BEFORE anything is staged. Driven through main()
         # so the ordering is the real one: each of these must cost a message, not a
         # materialise, a build check and a scan.
-        for argv_, why in (
-            (["--publish", "--jwt-file", "x"], "two transports at once is refused"),
-            (["--jwt-file", "x"], "--jwt-file without --plan-out is refused"),
-            (["--plan-out", "p"], "--plan-out without --jwt-file is refused"),
+        # ASSERTED ON THE MESSAGE, one fragment per guard, because "it exited non-zero"
+        # does not distinguish WHICH guard fired. Measured: with the exit-code-only form,
+        # neutering guard 1 or guard 2 left the suite fully green, because a later guard
+        # or read_jwt refused the same argv for a different reason and the case could not
+        # tell. Two of the three were therefore tested by nothing. The third was genuinely
+        # covered, so neither "all three are vacuous" nor "none of them is" was true.
+        for argv_, why, fragment in (
+            (
+                ["--publish", "--jwt-file", "x"],
+                "two transports at once is refused",
+                "two transports",
+            ),
+            (
+                ["--jwt-file", "x"],
+                "--jwt-file without --plan-out is refused",
+                "needs --plan-out",
+            ),
+            (
+                ["--plan-out", "p"],
+                "--plan-out without --jwt-file is refused",
+                "only has a meaning alongside",
+            ),
         ):
             try:
                 main(argv_)
                 case(why, False)
             except SystemExit as e:
-                case(why, e.code not in (0, None))
+                case(why, e.code not in (0, None) and fragment in str(e))
 
     passed = sum(1 for _, ok in cases if ok)
     print(f"\n  {passed}/{len(cases)}")
