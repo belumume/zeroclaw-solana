@@ -1025,6 +1025,18 @@ def publish_direct(
     return 0
 
 
+def group_or_world_readable(mode: int) -> bool:
+    """True when a POSIX mode lets anyone but the owner read the file.
+
+    A PURE PREDICATE ON THE MODE, deliberately, rather than a function that stats the
+    path. The stat is one line and is platform-dependent; the decision is neither, so
+    keeping them apart is what lets the decision be tested on a machine that cannot
+    produce the modes in question. A check whose logic only runs where it cannot be
+    exercised is a check nobody has watched work.
+    """
+    return bool(mode & 0o077)
+
+
 def read_jwt(path: Path) -> str:
     """The upload token, from a file rather than a flag.
 
@@ -1033,7 +1045,34 @@ def read_jwt(path: Path) -> str:
     """
     if not path.is_file():
         sys.exit(f"REFUSED: no upload token at {path}. Nothing was uploaded.")
-    token = path.read_text(encoding="utf-8").strip()
+
+    # WARNED, NOT REFUSED, and POSIX only. ssh refuses a group-readable private key and
+    # is right to; this token is upload-only, scoped to one project and lives about half
+    # an hour, so refusing would break a legitimate runner whose umask sets group-read to
+    # buy very little. A line the operator can act on is the proportionate answer.
+    #
+    # INERT ON WINDOWS, said out loud because a silent skip reads as a clean result. The
+    # stat mode there is synthesised from the read-only attribute and says nothing about
+    # the ACL that actually governs access, so the check would be answering a question it
+    # cannot see. The predicate above is still tested on every platform.
+    if os.name != "nt" and group_or_world_readable(path.stat().st_mode):
+        print(
+            f"  WARNING: {path} is readable beyond its owner "
+            f"({oct(path.stat().st_mode & 0o777)}). chmod 600 it.",
+            file=sys.stderr,
+        )
+
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+    except UnicodeDecodeError:
+        # Every other exit from this function is a quoted REFUSED line, and a wrong
+        # --jwt-file (a binary, a keypair, an image) would otherwise be the one path that
+        # ends in a traceback -- which reads as a defect in this script rather than as a
+        # wrong argument.
+        sys.exit(
+            f"REFUSED: {path} is not valid UTF-8 text, so it does not hold a token. "
+            "Nothing was uploaded."
+        )
     # Shape only. Whether it is valid, unexpired and scoped to this project is the
     # API's answer, and _post_json says so when it is not.
     if token.count(".") != 2 or not all(token.split(".")):
@@ -2422,6 +2461,39 @@ def selftest() -> int:
                 case(f"a token with an empty segment ({bad!r}) is refused", False)
             except SystemExit:
                 case(f"a token with an empty segment ({bad!r}) is refused", True)
+
+        # A file that is not UTF-8 at all, which is what pointing --jwt-file at a binary
+        # or a keypair looks like. It must refuse like every other path in the function
+        # rather than ending in a decode traceback.
+        notutf8 = root / "notutf8.jwt"
+        notutf8.write_bytes(b"\xff\xfe\x00binary\x80\x81")
+        try:
+            read_jwt(notutf8)
+            case("a token file that is not UTF-8 is refused, not decoded", False)
+        except SystemExit as e:
+            case(
+                "a token file that is not UTF-8 is refused, not decoded",
+                "not valid UTF-8" in str(e),
+            )
+        except UnicodeDecodeError:
+            case("a token file that is not UTF-8 is refused, not decoded", False)
+
+        # The permission predicate, driven on SYNTHETIC modes. The stat that feeds it is
+        # POSIX-only and this machine is not, so testing the decision through a real file
+        # would be testing nothing here -- the logic is separated precisely so it can be
+        # exercised anywhere.
+        for mode, want, why in (
+            (0o600, False, "owner-only is fine"),
+            (0o400, False, "owner read-only is fine"),
+            (0o640, True, "group-readable is not"),
+            (0o604, True, "world-readable is not"),
+            (0o644, True, "the common default is not"),
+            (0o660, True, "group-writable is not"),
+        ):
+            case(
+                f"group_or_world_readable({oct(mode)}) is {want}: {why}",
+                group_or_world_readable(mode) is want,
+            )
 
         okjwt = root / "ok.jwt"
         okjwt.write_text("  aaa.bbb.ccc\n", encoding="utf-8")
