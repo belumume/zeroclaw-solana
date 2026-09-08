@@ -135,6 +135,15 @@ def main():
     ap.add_argument("--bundle", default="docs/proof-bundle/mainnet-transactions.json")
     ap.add_argument("--rpc", default=None)
     ap.add_argument(
+        "--amount",
+        type=int,
+        default=None,
+        help="also simulate this amount, in base units. Added so a JUDGE can name a number "
+        "live and watch the program classify it. Purely additive: it appends one row and "
+        "cannot change the four the boundary proof is built from, nor the PASS assertion, "
+        "because refusals and accepts only ever increment. Simulated, never broadcast.",
+    )
+    ap.add_argument(
         "--signature",
         default=None,
         help="which refused capture to replay, when a bundle records more than one "
@@ -243,6 +252,18 @@ def main():
         print("bundle to see both sides of the boundary.")
         print()
         probes += [(1, "one base unit")]
+
+    # A judge's number goes LAST, so the four rows above it are always the same four and the
+    # boundary reads identically whether or not anyone asked for one. u64 is the wire type;
+    # anything outside it cannot be packed, so refuse with a sentence rather than a traceback
+    # in front of an audience.
+    if args.amount is not None:
+        if not (0 <= args.amount < 2**64):
+            raise SystemExit(
+                f"--amount {args.amount} is outside the u64 range the instruction encodes "
+                "(0 to 18446744073709551615). Nothing was sent."
+            )
+        probes.append((args.amount, "asked for live"))
 
     refusals = accepts = 0
     print(f"{'amount':>12}  {'simulated result':<18} note")

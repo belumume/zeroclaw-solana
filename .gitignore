@@ -196,3 +196,8 @@ OPERATOR-INBOX.md
 # Dated live captures written by scripts/demo-preflight.py. Runtime artifacts with a
 # timestamp in the name: re-derivable by running the script, never tracked.
 preflight-captures/
+
+# Playwright MCP scratch. Recreated on every browser run, so ignoring it is the only
+# durable fix; a delete lasts until the next session drives a browser. It sat UN-IGNORED
+# in the repo root where any `git add -A` from a concurrent session would have swept it in.
+.playwright-mcp/
