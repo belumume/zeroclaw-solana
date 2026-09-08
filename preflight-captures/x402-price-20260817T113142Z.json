@@ -1,0 +1,54 @@
+{
+  "captured_at_utc": "2026-08-17T11:31:42Z",
+  "label": "CAPTURE, not a live fetch. Taken 2026-08-17 11:31 UTC.",
+  "url": "https://x402.perfpilot.dev/price",
+  "method": "GET",
+  "http_status": 402,
+  "content_type": "application/json",
+  "body_bytes": 985,
+  "body": {
+    "x402Version": 2,
+    "error": "payment required to read this feed",
+    "resource": {
+      "url": "https://x402.perfpilot.dev/reading",
+      "description": "One device-signed reading from a ZeroClaw DePIN feed on Solana",
+      "mimeType": "application/json",
+      "serviceName": "ZeroClaw DePIN feed",
+      "tags": [
+        "depin",
+        "solana",
+        "oracle",
+        "telemetry"
+      ]
+    },
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "payTo": "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ",
+        "amount": "1000000",
+        "maxTimeoutSeconds": 60,
+        "extra": {
+          "memo": "x402-18cc944cb5a5a728-c"
+        },
+        "description": "one feed reading"
+      },
+      {
+        "scheme": "exact",
+        "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "payTo": "C331X4YCHCdcESexRTKSjE5etjsWyWJLK73Z18ZWiLHJ",
+        "amount": "5000000",
+        "maxTimeoutSeconds": 60,
+        "extra": {
+          "memo": "x402-18cc944cb5a5a728-c"
+        },
+        "description": "day pass: unlimited reads this UTC day"
+      }
+    ],
+    "extra": {
+      "memo": "x402-18cc944cb5a5a728-c"
+    }
+  }
+}
