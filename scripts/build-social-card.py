@@ -322,9 +322,7 @@ def render(out_path):
         x += d.textlength(txt, font=f_head)
 
     # body
-    body_size = fitted(
-        52, BODY_TEXT, lambda c: bold_path if c == TEXT else reg_path
-    )
+    body_size = fitted(52, BODY_TEXT, lambda c: bold_path if c == TEXT else reg_path)
     f_body = f(reg_path, body_size)
     f_body_b = f(bold_path, body_size)
     y = 630
