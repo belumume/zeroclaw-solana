@@ -1,0 +1,67 @@
+name: social-card-refresh
+
+# The og:image's figures are measured from chain and decay, and ci.yml's freshness gate fails once
+# the card is older than 60 days. That gate did its job on 2026-11-01 and then turned main red for
+# a cosmetic artifact until someone re-ran the generator by hand. The gate is right to exist; what
+# was missing was anything that does the refresh it asks for.
+#
+# This does it, on the 1st of every month, so the card is never more than about 31 days old and the
+# 60-day gate only fires if this job itself has been failing for a month. It runs the same
+# `--refresh` a person would: the positive control, the full signature walk and every refusal in
+# build-social-card.py still apply, so a failed RPC read fails THIS job loudly and commits nothing,
+# rather than stamping a short count with today's date.
+#
+# Separate from ci.yml on purpose, like host-drift.yml: a red here means devnet RPC or the runner
+# moved, not that the code broke.
+
+# Write, because the job commits the regenerated PNG. Declared here so the grant is reviewable; the
+# third-party actions are checkout and setup-python, both pinned by SHA.
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: "17 6 1 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: social-card-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: re-measure and re-render the social card
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Pillow and the font the renderer resolves on Linux
+        run: |
+          python -m pip install --quiet Pillow==12.3.0
+          test -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf || sudo apt-get install -y -qq fonts-dejavu-core
+
+      - name: re-measure from chain and render
+        run: python scripts/build-social-card.py --refresh
+
+      - name: commit the regenerated card, check it, then push
+        run: |
+          git add docs/assets/social-preview.png
+          if git diff --cached --quiet; then
+            echo "card unchanged byte for byte; nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Refresh the social card's on-chain figures"
+          # The gate reads the card's age from git, so it can only pass AFTER the commit. Run it
+          # here, before the push, so a card that would still fail never reaches main.
+          python scripts/check-social-card-freshness.py
+          python scripts/check-social-card-freshness.py --selftest
+          git push origin HEAD:main

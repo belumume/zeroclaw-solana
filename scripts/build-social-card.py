@@ -57,10 +57,10 @@ PURPLE = (
 # Pinned figures. --refresh overwrites these from chain. Keep the date beside them: a count with no
 # date is the whole defect this generator exists to close.
 FIGURES = {
-    "publishes": "1,661",
+    "publishes": "7,105",
     "failed": "0",
-    "span": "23 days",
-    "stamp": "figures verified 2026-08-17",
+    "span": "100 days",
+    "stamp": "figures verified 2026-11-02",
 }
 
 RPC = "https://api.devnet.solana.com"
@@ -279,6 +279,24 @@ def render(out_path):
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
+    # FIT, NOT TRUST. The sizes below were set against Segoe UI, and the face is resolved per
+    # platform. DejaVu, which every Linux runner resolves, is wide enough that the 116 px headline
+    # ran off the right edge and the card was saved with "WhatsApp and" clipped to "WhatsApp an",
+    # which nothing here noticed. Each block of lines now steps down until its widest line fits
+    # inside the margins, so a wider face renders smaller rather than cut off. On Segoe UI every
+    # block already fits, so the nominal size is kept and nothing moves.
+    def fitted(nominal, lines, path_for):
+        size = nominal
+        while size > 12:
+            widest = max(
+                sum(d.textlength(t, font=f(path_for(c), size)) for t, c in line)
+                for line in lines
+            )
+            if widest <= W - 2 * MARGIN:
+                return size
+            size -= 2
+        return size
+
     d.rectangle([0, 0, W, RULE_H], fill=GREEN)
 
     # wordmark
@@ -291,7 +309,10 @@ def render(out_path):
     gradient_text(img, d, (x, 152), "Solana", f_mark, PURPLE, GREEN)
 
     # headline, two lines, accent inline
-    f_head = f(bold_path, 116)
+    head_size = fitted(
+        116, [[(HEADLINE[0][0], None)], HEADLINE[1:]], lambda c: bold_path
+    )
+    f_head = f(bold_path, head_size)
     y = 330
     d.text((MARGIN, y), HEADLINE[0][0], font=f_head, fill=TEXT)
     y += 132
@@ -301,8 +322,11 @@ def render(out_path):
         x += d.textlength(txt, font=f_head)
 
     # body
-    f_body = f(reg_path, 52)
-    f_body_b = f(bold_path, 52)
+    body_size = fitted(
+        52, BODY_TEXT, lambda c: bold_path if c == TEXT else reg_path
+    )
+    f_body = f(reg_path, body_size)
+    f_body_b = f(bold_path, body_size)
     y = 630
     for line in BODY_TEXT:
         x = MARGIN
