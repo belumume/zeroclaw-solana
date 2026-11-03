@@ -1,0 +1,104 @@
+name: social-card-refresh
+
+# The og:image's figures are measured from chain and decay, and ci.yml's freshness gate fails once
+# the card is older than 60 days. That gate did its job on 2026-11-01 and then turned main red for
+# a cosmetic artifact until someone re-ran the generator by hand. The gate is right to exist; what
+# was missing was anything that does the refresh it asks for.
+#
+# This does it, on the 1st of every month, so the card is never more than about 31 days old and the
+# 60-day gate only fires if this job itself has been failing for a month. It runs the same
+# `--refresh` a person would: the positive control, the full signature walk and every refusal in
+# build-social-card.py still apply, so a failed RPC read fails THIS job loudly and commits nothing,
+# rather than stamping a short count with today's date.
+#
+# Separate from ci.yml on purpose, like host-drift.yml: a red here means devnet RPC or the runner
+# moved, not that the code broke.
+
+# contents: write, because the job commits the regenerated PNG. actions: write, because main's
+# branch protection requires the `hermetic regression gate` check on the exact commit being pushed,
+# and a push made with GITHUB_TOKEN triggers no workflow, so the job has to dispatch that gate on
+# its own commit and wait for it. Declared here so the grant is reviewable; the third-party
+# actions are checkout and setup-python, both pinned by SHA.
+permissions:
+  contents: write
+  actions: write
+
+on:
+  schedule:
+    - cron: "17 6 1 * *"
+  workflow_dispatch:
+
+concurrency:
+  group: social-card-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: re-measure and re-render the social card
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Pillow and the font the renderer resolves on Linux
+        run: |
+          python -m pip install --quiet Pillow==12.3.0
+          test -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf || sudo apt-get install -y -qq fonts-dejavu-core
+
+      - name: re-measure from chain and render
+        run: python scripts/build-social-card.py --refresh
+
+      - name: commit the regenerated card and check it
+        id: commit
+        run: |
+          git add docs/assets/social-preview.png
+          if git diff --cached --quiet; then
+            echo "card unchanged byte for byte; nothing to commit"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Refresh the social card's on-chain figures"
+          # The gate reads the card's age from git, so it can only pass AFTER the commit. Run it
+          # here, before anything is pushed, so a card that would still fail never leaves the job.
+          python scripts/check-social-card-freshness.py
+          python scripts/check-social-card-freshness.py --selftest
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Main requires `hermetic regression gate` on the commit itself, so pushing straight there is
+      # refused (GH006). Stage the commit on a branch, dispatch the gate on it (a workflow_dispatch
+      # made with GITHUB_TOKEN does start a run, unlike a push), wait for that run, and only then
+      # fast-forward main to the same commit. If main moved meanwhile the final push is refused as
+      # non-fast-forward and this job fails, which is visible and retried next month or by hand.
+      - name: run main's required gate on the commit, then fast-forward main
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.commit.outputs.sha }}
+          STAGE: auto/social-card-refresh
+        run: |
+          set -euo pipefail
+          git push --force origin "HEAD:refs/heads/$STAGE"
+          gh workflow run regression-gate.yml --ref "$STAGE"
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --workflow regression-gate.yml --branch "$STAGE" --commit "$SHA" \
+              --event workflow_dispatch --json databaseId --jq '.[0].databaseId // empty')
+            [ -n "$run_id" ] && break
+            sleep 10
+          done
+          if [ -z "$run_id" ]; then
+            echo "the dispatched regression gate never appeared for $SHA" >&2
+            exit 1
+          fi
+          gh run watch "$run_id" --exit-status --interval 30
+          git push origin "HEAD:main"
+          git push origin --delete "$STAGE"

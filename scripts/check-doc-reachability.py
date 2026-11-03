@@ -42,6 +42,7 @@ MIN_DOCS = 10  # a walk finding fewer than this is broken, not clean
 ACCEPTED = {
     "docs/upstream/whatsapp-policy-fail-open.md": "a filed upstream report; its canonical home is the GitHub issue, which the write-up links",
     "wit/VERSIONING.md": "reference for anyone editing the vendored WIT; reached from that directory, not from prose",
+    "CLAUDE.md": "rules read automatically by AI coding sessions working in this repo; not reader-facing prose",
 }
 
 
