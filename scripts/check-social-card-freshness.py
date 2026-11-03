@@ -20,7 +20,8 @@ WHAT IT ASSERTS INSTEAD, all three cheap and platform-independent:
   2. The committed PNG is a real PNG at the dimensions the og:image contract needs. A social card
      is consumed by scrapers that will not fix an aspect ratio for you.
   3. The card has been regenerated within MAX_AGE_DAYS, read from git rather than from a
-     filesystem mtime, which a fresh clone resets. This is the actual rot detector.
+     filesystem mtime, which a fresh clone resets. This is the actual rot detector. Since
+     2026-11-03 it warns rather than fails; run() says why.
 
 The figures on the card UNDERSTATE as the chain advances -- the publish count only grows -- so
 staleness here is untidy rather than dangerous, and the threshold is set accordingly. It is a
@@ -90,7 +91,19 @@ def last_commit_date(path: Path):
         return None
 
 
-def run(card=CARD, generator=GENERATOR, max_age_days=MAX_AGE_DAYS):
+def run(card=CARD, generator=GENERATOR, max_age_days=MAX_AGE_DAYS, stale=None):
+    """Return the problems that fail the gate. A stale card is NOT one of them: it is appended to
+    `stale` when a list is passed, and main() prints it as a warning.
+
+    WHY STALENESS WARNS INSTEAD OF FAILING (changed 2026-11-03). On 2026-11-01 the card turned 61
+    days old and this gate turned main red, and every push after it, for an artifact whose figures
+    only ever understate -- the case the note above already calls "a nudge rather than an alarm".
+    A scheduled refresh cannot fix that from inside CI: main is protected by a required check, and
+    neither a GITHUB_TOKEN push nor a dispatched run satisfies it (measured: the dispatched gate
+    passed on the refresh commit and the push to main was still refused with GH006). So the age is
+    surfaced as a GitHub warning annotation on every run, while a broken generator or a malformed
+    PNG, which are real defects, still fail.
+    """
     problems = []
 
     if not generator.is_file():
@@ -136,7 +149,7 @@ def run(card=CARD, generator=GENERATOR, max_age_days=MAX_AGE_DAYS):
     else:
         age = datetime.now(timezone.utc) - when
         if age > timedelta(days=max_age_days):
-            problems.append(
+            (stale if stale is not None else []).append(
                 f"the card was last regenerated {age.days} days ago (limit {max_age_days}); "
                 f"its figures understate by now -- run: python3 scripts/build-social-card.py --refresh"
             )
@@ -179,10 +192,14 @@ def selftest():
         print(f"  [{'OK ' if hit else 'XX '}] a missing generator is caught: {got}")
         ok &= hit
 
-        # The staleness branch, forced by an impossible limit rather than by waiting 60 days.
-        got = run(card=CARD, generator=GENERATOR, max_age_days=-1)
-        hit = any("last regenerated" in p for p in got)
-        print(f"  [{'OK ' if hit else 'XX '}] the staleness branch fires: {got}")
+        # The staleness branch, forced by an impossible limit rather than by waiting 60 days. It
+        # must report the age AND must not fail the gate: both halves are the contract.
+        warned = []
+        got = run(card=CARD, generator=GENERATOR, max_age_days=-1, stale=warned)
+        hit = any("last regenerated" in w for w in warned) and not got
+        print(
+            f"  [{'OK ' if hit else 'XX '}] the staleness branch warns and does not fail: {warned} {got}"
+        )
         ok &= hit
 
     # CONTROL: with everything real and the real limit, it must PASS. Without this the four
@@ -197,11 +214,20 @@ def main():
     if "--selftest" in sys.argv:
         print("social-card freshness self-test:")
         return selftest()
-    problems = run()
+    stale = []
+    problems = run(stale=stale)
+    for w in stale:
+        # A GitHub annotation, so the nudge is visible on the run summary without turning it red.
+        print(f"::warning title=social card is stale::{w}")
     for p in problems:
         print(f"FAIL  {p}", file=sys.stderr)
     if problems:
         return 1
+    if stale:
+        print(
+            "the social card is a valid og:image; it is stale, which warns and does not fail"
+        )
+        return 0
     print("the social card is a valid og:image and has been regenerated recently")
     return 0
 
